@@ -1,0 +1,66 @@
+# Console: Calendar — the pair to ops/flows/cal-phone.txt (parity is a rule
+# here, conventions.md 11). The page is a real calendar UI in the manner of
+# Google Calendar, plus a way of seeing the anytime tasks.
+#   make browse FLOW=ops/flows/cal.txt
+# So the pictures are the four modes (Week, Day, Month, Schedule) and the
+# detail panel a click opens — the one that has to keep the full text and the
+# composer, so acting on an item never loses its text.
+#
+# Each mode is deep-linked rather than clicked: the mode is remembered in
+# localStorage between runs, so a walk that opened on whatever was last used
+# would photograph a different page every time. No semicolons anywhere in this
+# file, comments included — the walker splits every line on the semicolon
+# before it drops the comments.
+goto #/calendar/week
+wait 2000
+# The week grid: the rail (mini month, the calendars, the goals, Anytime), the
+# all-day band, and the 24h columns with the red now-line on today.
+shot calendar-week
+goto #/calendar/day
+wait 1500
+shot calendar-day
+goto #/calendar/month
+wait 1500
+shot calendar-month
+# Schedule is the agenda list exactly as it was — nothing in it was
+# replaced, only joined by the grid.
+goto #/calendar/schedule
+wait 1500
+shot calendar-schedule
+text .cal-main
+# The panel, opened on the first event of the week rather than by a click: a
+# synthetic click has to land on a block whose position depends on what is
+# actually on the calendar that week.
+goto #/calendar/week
+wait 2000
+eval (calOpen(document.querySelector('.cal-ev').dataset.id),'opened')
+wait 1000
+shot calendar-panel
+text .cal-panel
+# The homework panel: the blue chip opens to Did it / Skip and no
+# composer — a completion, not a conversation. Found by its lane colour, since
+# the item's id changes down the daily chain; a week without one just says so.
+eval ((e = document.querySelector('.cal-ev[style*="#039be5"]')) ? (calOpen(e.dataset.id), 'opened homework') : 'no homework this week')
+wait 1000
+shot calendar-homework
+text .cal-panel
+#
+# --- the scroll is yours, not the page's ---
+# Clicking an event must not snap the grid back to the default hour.
+# A click redraws the whole page (calOpen -> calRedraw -> innerHTML), so the
+# grid's scrollTop is carried across by hand, keyed by mode+range — on the same
+# range your position wins, on a NEW range the opening hour does. These are
+# assertions, not pictures: an eval that throws fails the walk.
+eval (document.querySelector("#cal-scroll").scrollTop = 0, "scrolled to midnight")
+wait 400
+eval (calClose(), "closed")
+wait 800
+eval document.querySelector("#cal-scroll").scrollTop === 0 ? "kept through a close" : (() => { throw new Error("snapped to " + document.querySelector("#cal-scroll").scrollTop) })()
+eval (calOpen(document.querySelector(".cal-ev.block").dataset.id), "opened")
+wait 800
+eval document.querySelector("#cal-scroll").scrollTop === 0 ? "kept through a click" : (() => { throw new Error("snapped to " + document.querySelector("#cal-scroll").scrollTop) })()
+# The other half: a week not yet seen still opens on its earliest event
+# rather than inheriting the position left on the week before.
+eval (calGo(1), "next week")
+wait 1500
+eval document.querySelector("#cal-scroll").scrollTop > 0 ? "a new range opens on its own hour" : (() => { throw new Error("a new range opened at midnight") })()

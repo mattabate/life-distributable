@@ -1,0 +1,37 @@
+{
+  "id": "ask-00000001",
+  "created_at": "2026-09-28T06:55:28.585228Z",
+  "updated_at": "2026-09-28T06:55:28.59094Z",
+  "thread_id": "split-my-brokerage-cash-sensibly-00000002",
+  "thread_title": "Split my brokerage cash sensibly",
+  "title": "Move $2k to Broker B?",
+  "detail": "Cash is idle",
+  "kind": "decision",
+  "class": "unblock",
+  "surface": "any",
+  "state": "done",
+  "check_hint": "",
+  "resolved_at": "2026-09-28T06:55:28.59094Z",
+  "resolved_by": "owner",
+  "resolution": "Check again",
+  "thread_running": true,
+  "outcomes": [
+    {
+      "value": "done",
+      "label": "Decided"
+    },
+    {
+      "value": "wont",
+      "label": "Not deciding"
+    },
+    {
+      "value": "",
+      "label": "Reply"
+    }
+  ],
+  "verb": "decide",
+  "open": false,
+  "closed": true,
+  "lane": "mine",
+  "window": "now"
+}

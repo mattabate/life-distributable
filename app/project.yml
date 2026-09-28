@@ -1,0 +1,128 @@
+# xcodegen spec — `make app-project` regenerates Life.xcodeproj. Edit this,
+# never the .pbxproj.
+#
+# Identity (LIFE_BUNDLE_ID, LIFE_APP_GROUP, DEVELOPMENT_TEAM) is NOT set here:
+# it comes from Identity.xcconfig (safe defaults) + the optional, git-ignored
+# local.xcconfig setup writes. Never set those three below — a project-level
+# setting would override the xcconfig and hide the local values.
+name: Life
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "26.0"
+  xcodeVersion: "26.0"
+configFiles:
+  Debug: Identity.xcconfig
+  Release: Identity.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+    # ops scripts override to 1.0.<git commit count>: OTA (itms-services) installs
+    # are a silent no-op when the version equals the installed one and refused
+    # when lower, so the visible version must climb with every build.
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Life:
+    type: application
+    platform: iOS
+    # xcodegen has no `resources:` key; an asset catalog listed under sources
+    # lands in Copy Bundle Resources — the app icon lives in
+    # Life/Resources/Assets.xcassets.
+    sources: [Life/Sources, Life/Resources]
+    info:
+      path: Life/Info.plist
+      properties:
+        CFBundleDisplayName: life
+        # Build number = git commit count, passed by the install/OTA scripts
+        # as CURRENT_PROJECT_VERSION, so every install is distinguishable
+        # (Settings → Build, and the OTA install page).
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        LifeAppGroup: $(LIFE_APP_GROUP)
+        UILaunchScreen: {}
+        NSCameraUsageDescription: Photos you take here are saved to your own hub.
+        NSPhotoLibraryUsageDescription: Pick photos for a session, and let the app offer to delete app screenshots once they are sent (iOS asks you each time).
+        # THIS file is the Info.plist, not app/Life/Info.plist — `xcodegen
+        # generate` rewrites that one from here, so a key added there is
+        # silently dropped at the next generate.
+        NSFaceIDUsageDescription: Face ID unlocks the decider code that approves a gated action (money, delete, contact, share, commit), so you never type it. The code stays in this phone's Keychain.
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+        CFBundleURLTypes:
+          - CFBundleURLSchemes: [life]
+            CFBundleURLName: $(LIFE_BUNDLE_ID)
+        # audio: a card's push wakes the app and the app speaks the line
+        # (Speak.swift announce), so it must be allowed to play from the
+        # background.
+        UIBackgroundModes: [remote-notification, audio]
+    entitlements:
+      path: Life/Life.entitlements
+      properties:
+        # APNs — needs a paid Apple Developer team.
+        aps-environment: development
+        # Shared with LifeShare (below): the share extension writes a file
+        # into the group's Inbox/, the app attaches it (Snap.swift SharedInbox).
+        com.apple.security.application-groups: [$(LIFE_APP_GROUP)]
+    dependencies:
+      - target: LifeShare
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(LIFE_BUNDLE_ID)
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: false
+  # "Share → Life" from any app: a PDF, a picture. The extension only files
+  # the item into the app group; the app does the rest (new session with it
+  # attached, uploaded as an observation blob).
+  LifeShare:
+    type: app-extension
+    platform: iOS
+    sources: [LifeShare]
+    info:
+      path: LifeShare/Info.plist
+      properties:
+        CFBundleDisplayName: Life
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        LifeAppGroup: $(LIFE_APP_GROUP)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsFileWithMaxCount: 6
+              NSExtensionActivationSupportsImageWithMaxCount: 6
+    entitlements:
+      path: LifeShare/LifeShare.entitlements
+      properties:
+        com.apple.security.application-groups: [$(LIFE_APP_GROUP)]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(LIFE_BUNDLE_ID).share
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: false
+  # Unit tests: one decode test per hub response type, from hand-written JSON
+  # that mirrors shared/api.md and from shared/fixtures. `make app-test` — not
+  # in `make check`, since it needs a booted simulator.
+  LifeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [LifeTests]
+    dependencies: [{target: Life}]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+  # UI driver: ONE test that replays a step list given in the environment, so
+  # a session can tap through a flow and look at every step. `make app-ui
+  # STEPS='…'`, never `make app-test` — a UI test needs a booted simulator.
+  LifeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [LifeUITests]
+    dependencies: [{target: Life}]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true

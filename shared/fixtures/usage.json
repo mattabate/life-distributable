@@ -1,0 +1,13 @@
+{
+  "on": false,
+  "last_sent": "",
+  "install_id": "0123456789abcdef0123456789abcdef",
+  "payload": {
+    "active_days": 1,
+    "goals": 1,
+    "pages": 6,
+    "sessions_started": 2,
+    "token_bucket": "unknown",
+    "version": "0.1.0"
+  }
+}

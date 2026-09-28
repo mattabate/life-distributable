@@ -1,0 +1,92 @@
+{
+  "recs": [
+    {
+      "id": "rec-00000001",
+      "created_at": "2026-09-28T06:55:28.600858Z",
+      "updated_at": "2026-09-28T06:55:28.60155Z",
+      "title": "Cancel the gym",
+      "source": "owner",
+      "domain": "money",
+      "kind": "stop",
+      "cost_cents": 4000,
+      "cost_period": "monthly",
+      "effort": "low",
+      "confidence": 50,
+      "review_on": "2026-10-28",
+      "status": "accepted",
+      "decided_at": "2026-09-28T06:55:28.60155Z",
+      "decided_by": "owner",
+      "decision_note": "yes",
+      "outcomes": [
+        {
+          "value": "accepted",
+          "label": "Accept",
+          "hint": "recorded as accepted; the session carries it out with your note"
+        },
+        {
+          "value": "declined",
+          "label": "Decline",
+          "hint": "recorded as declined; your reason goes to the session"
+        },
+        {
+          "value": "",
+          "label": "Reply",
+          "hint": "the rec stays open — your words go to the session"
+        }
+      ],
+      "open": false,
+      "closed": true,
+      "lane": "recs",
+      "window": "soon",
+      "cost_label": "$40/mo",
+      "dates_label": "review Oct 28"
+    },
+    {
+      "id": "rec-00000002",
+      "created_at": "2026-09-28T06:55:28.60014Z",
+      "updated_at": "2026-09-28T06:55:28.60014Z",
+      "title": "Try Semantic Scholar's API key",
+      "detail": "free tier",
+      "goal_id": "get-smarter",
+      "thread_id": "split-my-brokerage-cash-sensibly-00000003",
+      "source": "claude:thread:split-my-brokerage-cash-sensibly-00000003",
+      "domain": "audience",
+      "kind": "try",
+      "cost_cents": 1100,
+      "cost_period": "monthly",
+      "effort": "low",
+      "confidence": 70,
+      "because": "rate limits",
+      "expect": "fewer 429s",
+      "act_by": "2026-10-05",
+      "review_on": "2026-10-28",
+      "status": "proposed",
+      "model": "claude-opus-5",
+      "thread_running": true,
+      "outcomes": [
+        {
+          "value": "accepted",
+          "label": "Accept",
+          "hint": "recorded as accepted; the session carries it out with your note"
+        },
+        {
+          "value": "declined",
+          "label": "Decline",
+          "hint": "recorded as declined; your reason goes to the session"
+        },
+        {
+          "value": "",
+          "label": "Reply",
+          "hint": "the rec stays open — your words go to the session"
+        }
+      ],
+      "open": true,
+      "closed": false,
+      "lane": "recs",
+      "window": "soon",
+      "cost_label": "$11/mo",
+      "days_left": 7,
+      "dates_label": "act by Oct 5 (7d) · review Oct 28"
+    }
+  ]
+}

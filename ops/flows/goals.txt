@@ -1,0 +1,16 @@
+# Console: Goals — the list (no New goal form), one goal's head panel (name,
+# statement, active switch, Edit), the edit form in place, parallel to
+# ops/flows/goals-phone.txt (parity, conventions.md 11).
+#   make browse FLOW=ops/flows/goals.txt
+goto #/goals
+wait 1500
+shot goals-console
+click text=Make more art
+wait 1000
+shot goal-detail-console
+click text=Edit
+wait 300
+shot goal-edit-console
+click text=Cancel
+wait 800
+shot goal-detail-after-cancel

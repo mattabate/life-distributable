@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-09-28T02:55:28.60339-04:00",
+  "days": 30,
+  "window_hours": 720,
+  "total_usd": 0,
+  "today_usd": 0,
+  "messages": 0,
+  "unknown_models": [],
+  "by_day": [],
+  "history": [],
+  "by_project": [],
+  "by_model": [],
+  "palette": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "by_trigger": [],
+  "jobs": [
+    {
+      "key": "sweep",
+      "usd": 0.5,
+      "messages": 1,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0
+    }
+  ],
+  "sessions": []
+}

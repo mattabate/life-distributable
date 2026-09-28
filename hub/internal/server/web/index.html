@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>life</title>
+<link rel="stylesheet" href="/static/app.css">
+<!-- The studio layout (skin.css header). -->
+<link rel="stylesheet" href="/static/skin.css">
+<script src="/static/skin.js"></script>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🌱</text></svg>">
+</head>
+<body>
+<nav id="nav">
+  <div class="brand">life <span id="build"></span></div>
+  <!-- One row, always (app.js navFit): the tabs that do not fit fold, from
+       the right, into More — the phone's bar, measured instead of fixed. -->
+  <div class="tabs" id="navtabs">
+    <a href="#/sessions" data-tab="sessions">Sessions <span class="badge" id="badge-sessions"></span></a>
+    <a href="#/recs" data-tab="recs">Recs <span class="badge" id="badge-recs"></span></a>
+    <a href="#/calendar" data-tab="calendar">Calendar <span class="badge" id="badge-calendar"></span></a>
+    <a href="#/spend" data-tab="spend">Spend</a>
+    <a href="#/goals" data-tab="goals">Goals</a>
+    <a href="#/sources" data-tab="sources">Sources</a>
+  </div>
+  <div class="more">
+    <button class="navmore" id="navmore" onclick="navMoreToggle(event)" hidden
+            title="The tabs that do not fit this window"><span class="label">More</span><span class="badge" id="badge-more"></span><span class="caret">▾</span></button>
+    <div class="navmenu" id="navmenu" hidden></div>
+  </div>
+  <button class="navnew" id="navnew" onclick="startSessionHere()"
+          title="Start a session from wherever you are — it attaches a picture of this page">+ New<span class="long"> session</span></button>
+  <div id="conn" class="conn" title="hub connection"></div>
+</nav>
+<main id="view"></main>
+<div id="toast"></div>
+<!-- Plain scripts, one global scope, in this order: helpers, one file per
+     page (each attaches views.<name>), then the router that dispatches on
+     them. No modules and no build step (app.js header). -->
+<script src="/static/ui.js"></script>
+<script src="/static/tip.js"></script>
+<script src="/static/places.js"></script>
+<script src="/static/composer.js"></script>
+<!-- asks.js is NOT a page any more (2026-09-02): the Your turn page was
+     deleted and its stack lives at the top of Sessions. What is left is the
+     handlers every ask/approval button on every surface calls. -->
+<script src="/static/views/asks.js"></script>
+<script src="/static/views/threads.js"></script>
+<script src="/static/views/calgrid.js"></script>
+<script src="/static/views/calendar.js"></script>
+<script src="/static/views/spend.js"></script>
+<script src="/static/views/goals.js"></script>
+<script src="/static/views/recs.js"></script>
+<script src="/static/views/sources.js"></script>
+<script src="/static/views/runs.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

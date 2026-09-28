@@ -1,0 +1,328 @@
+{
+  "from": "2026-09-28",
+  "to": "2026-11-27",
+  "today": "2026-09-28",
+  "anytime": [
+    {
+      "id": "cal-00000001",
+      "day": "2026-09-28",
+      "at": "02:55",
+      "kind": "owner",
+      "title": "Buy a fern",
+      "state": "scheduled",
+      "soon": true,
+      "window": "soon",
+      "actor": "owner",
+      "ref": "cal:cal-00000001",
+      "lane": "mine",
+      "open": true,
+      "mark": "todo",
+      "item": true,
+      "move": "item",
+      "kind_label": "anytime",
+      "outcomes": [
+        {
+          "value": "done",
+          "label": "Done"
+        },
+        {
+          "value": "wont",
+          "label": "Won't do"
+        },
+        {
+          "value": "",
+          "label": "Reply"
+        }
+      ]
+    },
+    {
+      "id": "ask:ask-00000002",
+      "day": "",
+      "kind": "ask",
+      "ask_kind": "physical",
+      "title": "Water the fern",
+      "state": "open",
+      "goal_id": "get-smarter",
+      "thread_id": "water-the-plants-00000003",
+      "ask_id": "ask-00000002",
+      "window": "now",
+      "actor": "claude:thread:water-the-plants-00000003",
+      "ref": "ask:ask-00000002",
+      "thread_title": "Water the plants",
+      "live": [
+        {
+          "word": "speaking",
+          "tone": "speaking"
+        },
+        {
+          "word": "running",
+          "tone": "running"
+        }
+      ],
+      "lane": "mine",
+      "open": true,
+      "mark": "todo",
+      "why": "This row has no date of its own — it sits on the day it is due for review.",
+      "kind_label": "ask"
+    },
+    {
+      "id": "ask:ask-00000004",
+      "day": "",
+      "kind": "ask",
+      "ask_kind": "read",
+      "title": "Read this",
+      "detail": "a finding",
+      "state": "open",
+      "thread_id": "split-my-brokerage-cash-sensibly-00000005",
+      "ask_id": "ask-00000004",
+      "window": "now",
+      "actor": "claude:thread:split-my-brokerage-cash-sensibly-00000005",
+      "ref": "ask:ask-00000004",
+      "thread_title": "Split my brokerage cash sensibly",
+      "live": [
+        {
+          "word": "running",
+          "tone": "running"
+        }
+      ],
+      "lane": "mine",
+      "open": true,
+      "mark": "todo",
+      "why": "This row has no date of its own — it sits on the day it is due for review.",
+      "kind_label": "ask"
+    }
+  ],
+  "overdue": [
+    {
+      "id": "cal-00000006",
+      "day": "2026-09-26",
+      "kind": "owner",
+      "title": "Renew parking",
+      "state": "scheduled",
+      "thread_id": "split-my-brokerage-cash-sensibly-00000005",
+      "overdue": true,
+      "due": "by",
+      "window": "by",
+      "actor": "owner",
+      "ref": "cal:cal-00000006",
+      "live": [
+        {
+          "word": "running",
+          "tone": "running"
+        }
+      ],
+      "lane": "mine",
+      "open": true,
+      "mark": "todo",
+      "item": true,
+      "move": "item",
+      "kind_label": "your step",
+      "outcomes": [
+        {
+          "value": "done",
+          "label": "Done"
+        },
+        {
+          "value": "wont",
+          "label": "Won't do"
+        },
+        {
+          "value": "",
+          "label": "Reply"
+        }
+      ]
+    }
+  ],
+  "due": [
+    {
+      "id": "cal-00000007",
+      "day": "2026-09-28",
+      "at": "09:00",
+      "kind": "owner",
+      "title": "Water the plants",
+      "detail": "all of them",
+      "state": "scheduled",
+      "goal_id": "get-smarter",
+      "thread_id": "water-the-plants-00000003",
+      "repeat": "weekly",
+      "due": "on",
+      "window": "on",
+      "actor": "owner",
+      "ref": "cal:cal-00000007",
+      "live": [
+        {
+          "word": "speaking",
+          "tone": "speaking"
+        },
+        {
+          "word": "running",
+          "tone": "running"
+        }
+      ],
+      "lane": "mine",
+      "open": true,
+      "mark": "todo",
+      "item": true,
+      "move": "item",
+      "kind_label": "your step",
+      "outcomes": [
+        {
+          "value": "done",
+          "label": "Done"
+        },
+        {
+          "value": "wont",
+          "label": "Won't do"
+        },
+        {
+          "value": "",
+          "label": "Reply"
+        }
+      ]
+    }
+  ],
+  "soon": [],
+  "days": [
+    {
+      "day": "2026-09-28",
+      "entries": [
+        {
+          "id": "cal-00000001",
+          "day": "2026-09-28",
+          "at": "02:55",
+          "kind": "owner",
+          "title": "Buy a fern",
+          "state": "scheduled",
+          "soon": true,
+          "window": "soon",
+          "actor": "owner",
+          "ref": "cal:cal-00000001",
+          "lane": "mine",
+          "open": true,
+          "mark": "todo",
+          "item": true,
+          "move": "item",
+          "kind_label": "anytime",
+          "outcomes": [
+            {
+              "value": "done",
+              "label": "Done"
+            },
+            {
+              "value": "wont",
+              "label": "Won't do"
+            },
+            {
+              "value": "",
+              "label": "Reply"
+            }
+          ]
+        },
+        {
+          "id": "cal-00000007",
+          "day": "2026-09-28",
+          "at": "09:00",
+          "kind": "owner",
+          "title": "Water the plants",
+          "detail": "all of them",
+          "state": "scheduled",
+          "goal_id": "get-smarter",
+          "thread_id": "water-the-plants-00000003",
+          "repeat": "weekly",
+          "due": "on",
+          "window": "on",
+          "actor": "owner",
+          "ref": "cal:cal-00000007",
+          "thread_title": "Water the plants",
+          "live": [
+            {
+              "word": "speaking",
+              "tone": "speaking"
+            },
+            {
+              "word": "running",
+              "tone": "running"
+            }
+          ],
+          "lane": "mine",
+          "open": true,
+          "mark": "todo",
+          "item": true,
+          "move": "item",
+          "kind_label": "your step",
+          "outcomes": [
+            {
+              "value": "done",
+              "label": "Done"
+            },
+            {
+              "value": "wont",
+              "label": "Won't do"
+            },
+            {
+              "value": "",
+              "label": "Reply"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "day": "2026-09-29",
+      "entries": [
+        {
+          "id": "cal-00000008",
+          "day": "2026-09-29",
+          "at": "10:00",
+          "kind": "agent",
+          "title": "Re-check cash",
+          "state": "scheduled",
+          "thread_id": "split-my-brokerage-cash-sensibly-00000005",
+          "window": "on",
+          "actor": "owner",
+          "ref": "cal:cal-00000008",
+          "thread_title": "Split my brokerage cash sensibly",
+          "live": [
+            {
+              "word": "running",
+              "tone": "running"
+            }
+          ],
+          "lane": "scheduled",
+          "open": true,
+          "item": true,
+          "move": "item",
+          "kind_label": "one-off run"
+        }
+      ]
+    },
+    {
+      "day": "2026-10-01",
+      "entries": [
+        {
+          "id": "prompt:p-00000009",
+          "day": "2026-10-01",
+          "at": "09:00",
+          "kind": "run",
+          "title": "Split my brokerage cash sensibly",
+          "detail": "Check again",
+          "state": "scheduled",
+          "thread_id": "split-my-brokerage-cash-sensibly-00000005",
+          "actor": "owner",
+          "ref": "thread:split-my-brokerage-cash-sensibly-00000005",
+          "thread_title": "Split my brokerage cash sensibly",
+          "live": [
+            {
+              "word": "running",
+              "tone": "running"
+            }
+          ],
+          "lane": "agents",
+          "open": true,
+          "why": "A one-shot wake, or a cadence the calendar cannot rewrite (every@…). Change it in the session.",
+          "kind_label": "recurring run"
+        }
+      ]
+    }
+  ]
+}

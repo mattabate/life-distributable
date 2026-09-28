@@ -1,0 +1,18 @@
+{
+  "_": "Which bare hub ids in a card's text come out as links (rec-caa3e181, 2026-09-20). Each row: [text, [ids linked, in order]]. Read by the console (web/test/ui.test.js, mdInline) and the phone (RefTests.swift, linkRefs).",
+  "links": [
+    ["Decide rec-120a5f85", ["rec-120a5f85"]],
+    ["Close ask-955bfb8e, then cal-53e0.", ["ask-955bfb8e", "cal-53e0"]],
+    ["approve 20260907-053232-0a1b2c3d today", ["20260907-053232-0a1b2c3d"]],
+    ["**rec-120a5f85** (ask-955bfb8e)", ["rec-120a5f85", "ask-955bfb8e"]],
+    ["ref rec:rec-34a2a000", ["rec-34a2a000"]],
+    ["see `rec-120a5f85`", ["rec-120a5f85"]],
+    ["run `lifectl rec rec-caa3e181 link cal-352bb953`", []],
+    ["[the rec](https://hub.test/#/recs/rec-120a5f85)", []],
+    ["[rec-120a5f85](https://hub.test/a) and rec-34a2a000", ["rec-34a2a000"]],
+    ["https://hub.test/#/recs/rec-120a5f85 and cal-352bb953", ["cal-352bb953"]],
+    ["session carry-out-rec-caa3e181-accepted-56a2fed3", []],
+    ["rec-added, ask-12345, cal-123456789, p-0a1b2c3d", []],
+    ["ops/rec-120a5f85.md", []]
+  ]
+}

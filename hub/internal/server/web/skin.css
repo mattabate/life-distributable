@@ -1,0 +1,162 @@
+/* The "studio" layout — the console's look. Loaded on every page after
+   app.css (index.html; skin.js takes the emojis out) and only restyles:
+   every element, word and button the console draws is still drawn.
+
+   The palette is app.css's own, untouched (light blue and white, waiting
+   orange, speaking green); this is layout only:
+   - the chat is a transcript, not a text thread: the owner's words a soft
+     grey block on the right, everything the session did down the left;
+   - a session card reads top-down as name, state, then its open cards;
+   - buttons, pills and chips share one set of shapes (8px corners, one
+     height per size), and hover is a fill, never a blue outline;
+   - the bar's tabs keep the filled blue shape.
+   Still full-width to the walls (app.css). */
+:root { --col: 52px; --radius: 8px; }
+
+body { -webkit-font-smoothing: antialiased; }
+
+/* ---- controls: one shape ---- */
+button, .btn { border-radius: var(--radius); border-color: var(--line-strong); font-weight: 500;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .04); line-height: 1.3; }
+button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--code); }
+button.primary, a.btn.primary { box-shadow: none; font-weight: 600; }
+button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+button.sm, .btn.sm { padding: 5px 11px; font-size: 13px; }
+button.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 8%, var(--panel)); }
+
+/* pills: a small squared chip, sentence case — the state in its colour
+   (running blue, waiting orange, speaking green), the model a grey cell */
+.pill { border-radius: 6px; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600;
+  padding: 2px 8px; gap: 6px; line-height: 1.35; }
+.dot { width: 6px; height: 6px; }
+
+/* ---- the bar ---- */
+#nav { height: 52px; padding: 0 16px; gap: 0 2px; }
+#nav .brand { font-size: 17px; font-weight: 750; letter-spacing: -.03em; margin-right: 20px; }
+/* the tabs stay the filled blue shape — only the corners join the one shape */
+#nav .tabs a, #nav .navmore { border-radius: var(--radius); font-weight: 500; }
+#nav .tabs a.on, #nav .navmore.on { font-weight: 600; }
+.badge { font-size: 10.5px; line-height: 16px; min-width: 16px; padding: 0 5px; margin-left: 6px; text-align: center; border-radius: 8px; }
+#nav .navmic, #nav .navnew { padding: 6px 13px; font-size: 13.5px; font-weight: 550; border-radius: var(--radius); }
+#nav .navmic.on { box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent); }
+
+/* ---- the sessions column ---- */
+.pane.list { background: var(--bg); padding: 14px 12px; }
+h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px 10px; }
+.pane.list h3 ~ h3 { margin-top: 24px; }
+/* a session card, top-down: its name, its state, what it is doing, then its
+   open cards — the pills moved up under the name, so the first two lines
+   answer "which one, and is it moving" before any card text */
+.card.sess { display: flex; flex-direction: column; padding: 12px 14px; margin-bottom: 8px; border-radius: 10px;
+  box-shadow: none; transition: border-color .12s, box-shadow .12s; }
+.card.sess:hover { border-color: var(--line-strong); box-shadow: 0 2px 8px rgba(0, 0, 0, .05); }
+.card.sess.on { border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+.sess-t { order: 0; font-size: 14.5px; font-weight: 600; line-height: 1.35; }
+.sess-t.unread { font-weight: 700; }
+.sess-foot { order: 1; margin-top: 7px; gap: 5px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.card.sess > .small.trunc[style] { order: 2; margin-top: 8px !important; color: var(--muted) !important; font-size: 12.5px; }
+.card.sess > .small.trunc[style]::before { content: ''; display: inline-block; width: 6px; height: 6px; margin: 0 7px 1px 1px;
+  border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.card.sess > .ask.mini, .card.sess > .more-cards { order: 3; }
+/* its open cards: rows under a hairline, a tint rail each — not boxes in a box */
+.card.sess > .ask.mini { margin: 10px -14px 0; padding: 9px 14px 9px 13px; border: 0; border-radius: 0;
+  border-top: 1px solid var(--line); border-left: 3px solid var(--tint); background: transparent; }
+.card.sess > .ask.mini + .ask.mini { margin-top: 0; }
+.card.sess > .ask.mini:last-of-type { margin-bottom: -12px; border-radius: 0 0 0 9px; }
+.card.sess > .ask.mini:hover { background: color-mix(in srgb, var(--tint) 6%, var(--panel)); }
+.ask.mini .t { font-size: 13px; font-weight: 550; }
+.ask.mini .verb { font-size: 10px; letter-spacing: .06em; padding: 1px 6px; border-radius: 5px;
+  background: color-mix(in srgb, var(--tint) 12%, transparent); }
+.all-link { margin: 14px 0 6px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); color: var(--fg); font-weight: 550; font-size: 13.5px; }
+.all-link:hover, .all-link.on { border-color: var(--line-strong); border-style: solid; background: var(--panel); }
+
+/* ---- the chat head: ONE row ----
+   Left to right on one 52px line, the same height as the nav: ←, the name,
+   its state, the model in its grey cell as on the session cards — and what
+   it cost on the right, quiet numbers against the wall. Every control one
+   30px height, the pills sized to the text beside them. */
+.chat-head { height: 52px; min-height: 0; padding: 0 var(--gutter); gap: 8px; }
+.chat-head > .grow { display: flex; align-items: center; gap: 6px; margin-left: 4px; }
+.chat-head > .grow > .trunc:first-child { flex: 0 1 auto; min-width: 0; margin-right: 6px; }
+.chat-head .trunc strong { font-size: 15px; font-weight: 650; letter-spacing: -.012em; }
+.chat-head #chat-pills { display: inline-flex; gap: 4px; }
+.chat-head #chat-pills:empty { display: none; }
+.chat-head .head-id .pill { margin: 0; height: 20px; padding: 0 7px; font-size: 11.5px; line-height: 20px; flex: 0 0 auto; }
+/* the live pills are the controls: hovered, "running" reads Stop and
+   "speaking" Stop speaking, in red, the same size — nothing jumps */
+.chat-head .pill-act { font: inherit; font-size: 11.5px; font-weight: 600; border: 0; box-shadow: none; cursor: pointer;
+  display: inline-grid; grid-auto-flow: column; align-items: center; gap: 6px; }
+.chat-head .pill-act .w, .chat-head .pill-act .h { grid-row: 1; grid-column: 2; text-align: left; }
+.chat-head .pill-act .h { visibility: hidden; }
+.chat-head .pill-act:hover, .chat-head .pill-act:focus-visible {
+  background: color-mix(in srgb, var(--red) 12%, var(--panel)); color: var(--red); }
+.chat-head .pill-act:hover .w, .chat-head .pill-act:focus-visible .w { visibility: hidden; }
+.chat-head .pill-act:hover .h, .chat-head .pill-act:focus-visible .h { visibility: visible; }
+.chat-head .pill-act:hover .dot, .chat-head .pill-act:focus-visible .dot { background: var(--red); animation: none; border-radius: 1px; }
+.chat-head .head-meta { flex: 0 1 auto; min-width: 0; margin: 0 4px 0 12px; font-size: 12.5px; line-height: 20px;
+  font-variant-numeric: tabular-nums; text-align: right; }
+.chat-head > button, .chat-head > .btn { height: 30px; padding: 0 12px; align-items: center;
+  justify-content: center; font-size: 13px; flex: 0 0 auto; }
+.chat-head > button:not(.narrow-only), .chat-head > .btn { display: inline-flex; }
+.chat-head > a.btn:first-child, .chat-head > button.narrow-only { width: 30px; padding: 0; color: var(--muted); }
+.chat-head > a.btn:first-child:hover { color: var(--fg); }
+.chat-head input[type=text] { height: 30px; padding: 0 10px; border-radius: var(--radius); }
+
+/* ---- the chat: the owner's words on the right, the session's work on the left ----
+   The owner's message a soft grey block on the right, dark text — a quote of
+   what they said, not a blue phone bubble — and everything the session did
+   (runs, the end line, its cards) running full width down the left, where
+   the reading happens. The block keeps only its time; "sent by you" is
+   dropped (skin.js marks it), any other sender still shows. */
+.msgs { padding: 24px calc(var(--gutter) + 8px) 18px var(--gutter); background: var(--panel); }
+.hello-line { font-size: 26px; font-weight: 650; letter-spacing: -.025em; }
+.msg { margin-bottom: 18px; }
+.msg.owner { justify-content: flex-end; margin: 26px 0 16px; }
+.msg.owner .bubble { display: flex; flex-direction: column; max-width: min(680px, 78%);
+  padding: 11px 16px; background: var(--code); color: var(--fg); border: 0; border-radius: 16px; }
+.msg.owner.has-long .bubble { max-width: min(860px, 88%); }
+.msg.owner .bubble a, .msg.owner .bubble .re a { color: var(--accent); }
+.msg.owner .bubble code { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.msg.owner .bubble .body.long::after { background: linear-gradient(to bottom, transparent, var(--code)); }
+.msg .bubble .body { font-size: 15px; line-height: 1.6; }
+/* the foot: just the time, small, in the block's lower right */
+.msg.owner .bubble .meta { justify-content: flex-end; margin-top: 4px; opacity: 1; color: var(--muted);
+  font-size: 11px; gap: 8px; }
+.msg.owner .bubble .meta .by { margin-left: 0; order: -1; }
+.msg.owner .bubble .meta .by.me { display: none; }
+/* "↩ Read it · <card>": a quiet quote line at the top of the block */
+.msg .bubble .re, .msg.owner .bubble .re { color: var(--muted); opacity: 1; font-style: normal; font-size: 13px;
+  margin: 0 0 5px; padding-left: 9px; border-left: 2px solid var(--line-strong); }
+.msg.system .bubble { border-radius: 10px; }
+.bubble .fold, .ask .fold { border-radius: 6px; }
+.att img { border-radius: 10px; max-height: 180px; }
+/* the session's side: flush left, one column */
+.activity { margin: 0 0 10px; max-width: 760px; }
+.run > summary { padding: 3px 8px 3px 6px; border-radius: 6px; margin-left: -6px; }
+.run > summary::before { opacity: .55; }
+.msg.end { margin: 0 0 8px; }
+.msg.end .end-line { padding: 2px 0; font-size: 11.5px; }
+.msgs > .ask, .msgs > details.ask { margin: 6px 0 18px; max-width: 860px; }
+
+/* ---- the one card: white, a hairline, a tint rail, the verb as a chip ---- */
+.ask { border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+  box-shadow: inset 3px 0 0 var(--tint), 0 1px 2px rgba(0, 0, 0, .04); padding: 12px 16px 13px 18px; }
+.ask.answered, .ask.err-card { box-shadow: inset 3px 0 0 var(--line-strong); }
+.ask .card-h { margin-bottom: 8px; }
+.ask .card-h .verb { font-size: 10.5px; padding: 2px 7px; border-radius: 5px;
+  background: color-mix(in srgb, var(--tint) 11%, transparent); }
+.ask.answered .card-h .verb { background: var(--code); }
+.ask .said { font-size: 15px; line-height: 1.6; margin-bottom: 8px; }
+.ask .acts { margin-top: 12px; gap: 8px; }
+.ask .acts button, .ask .acts .btn { padding: 6px 14px; font-size: 13.5px; }
+.ask.folded { border-color: var(--line); box-shadow: none; background: transparent; padding: 7px 14px; border-radius: 8px; }
+.ask.folded[open] { background: var(--panel); }
+
+/* ---- the composer: to the walls, the same shapes ---- */
+.composer textarea { font-size: 15px; line-height: 1.55; }
+.composer .bar { background: var(--panel); }
+.composer .bar select, .composer .bar input[type=datetime-local] { border-radius: var(--radius); padding: 5px 9px; }
+.composer .bar button.sm { padding: 5px 12px; }
+.composer .bar .acts button { padding: 6px 16px; }

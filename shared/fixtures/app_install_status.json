@@ -1,0 +1,12 @@
+{
+  "log_at": "2026-09-28T06:55:28Z",
+  "ota": null,
+  "running": false,
+  "tail": [
+    "▶ archiving 1.0.100 (team TEAMID0000)…",
+    "▶ exporting ad-hoc .ipa…",
+    "✔ published 1.0.100 (100) ad-hoc, profile → 2027-01-01, aps=production",
+    "  open on the phone: https://my-mac.example.ts.net:8443/ota/0000/install.html",
+    "exit=0"
+  ]
+}

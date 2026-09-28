@@ -1,0 +1,42 @@
+{
+  "groups": [
+    {
+      "id": "health",
+      "title": "Health",
+      "blurb": "Apple Health syncs itself from the phone.",
+      "sources": [
+        {
+          "id": "health",
+          "title": "Apple Health",
+          "from": "The app reads HealthKit whenever it is open (Sources › Apple Health) — everything Health already holds on the first sync, then the last few days on every launch",
+          "storage": "observations table in data/life.db (SQLite, append-only): one row per metric per day (steps, distance, energy, exercise, heart rate, resting HR, HRV, VO2max, weight, body fat), one per night of sleep, one per workout",
+          "status": "live",
+          "last": "2026-09-28T06:55:28.576273Z",
+          "total": 3,
+          "kinds": [
+            {
+              "kind": "steps",
+              "n": 3,
+              "first": "2026-09-26T06:55:28.576273Z",
+              "last": "2026-09-28T06:55:28.576273Z",
+              "note": "one row per day — the day's total"
+            }
+          ],
+          "accounts": [
+            {
+              "label": "iPhone (Life app)",
+              "via": "phone",
+              "last": "2026-09-28T06:55:28.576273Z"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phone",
+      "title": "From the phone",
+      "blurb": "What you send the app directly.",
+      "sources": []
+    }
+  ]
+}
