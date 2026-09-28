@@ -1,0 +1,9 @@
+# Console: Recommendations — track record, list, and one rec's detail page.
+#   make browse FLOW=ops/flows/recs.txt
+# Steps: ops/browse.js (header). Pictures land in ops/logs/web/browse/.
+goto #/recs
+shot recs
+click text=Track record
+shot recs-record
+click text=details ›
+shot rec-detail

@@ -1,0 +1,32 @@
+{
+  "_comment": "ops/py.sh setup.py hub writes ops/hub.json (git-ignored) from this file. claude_bin must be an absolute path (`which claude`): launchd has no nvm PATH. cert/key files are what `tailscale cert` writes (ops/renew-cert.sh). The apns_* keys are optional (paid Apple Developer team; ops/py.sh setup.py apns); apns_bundle_id = LIFE_BUNDLE_ID in app/local.xcconfig.",
+  "owner_name": "<your first name>",
+  "listen_addr": "<tailscale-ip>:8443",
+  "public_host": "<mac-name>.<tailnet>.ts.net:8443",
+  "cert_file": "~/life/ops/secrets/<mac-name>.<tailnet>.ts.net.crt",
+  "key_file": "~/life/ops/secrets/<mac-name>.<tailnet>.ts.net.key",
+  "token_file": "~/life/ops/secrets/hub.token",
+  "claude_projects_dir": "~/.claude/projects",
+  "jobs_dir": "~/life/data/jobs",
+  "projects_root": "~/life/projects",
+  "tmux_prefix": "life",
+  "schedule_path": "~/life/ops/schedule.json",
+  "db_path": "~/life/data/life.db",
+  "blob_dir": "~/life/data/blobs",
+  "apns_key_file": "",
+  "apns_key_id": "<APNs key id, 10 chars>",
+  "apns_team_id": "<Apple team id, 10 chars>",
+  "apns_bundle_id": "com.<github-user>.life",
+  "apns_production": false,
+  "claude_bin": "</absolute/path/to/claude>",
+  "auto_compact_window": 200000,
+  "usage_opt_in": false,
+  "usage_host": "https://us.i.posthog.com",
+  "usage_token": "phc_qRvXx8ciuvFtsSqF2C4widbHcKrQsu7YeWi9PmAg7xXc",
+  "projects": [
+    {
+      "name": "life",
+      "dir": "~/life"
+    }
+  ]
+}

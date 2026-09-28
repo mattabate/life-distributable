@@ -1,0 +1,526 @@
+# Hub API contract (v1)
+
+Single source of truth for hub routes. `hub/internal/server` has a test that
+fails if this list and the registered routes drift. The response shapes
+are pinned by real hub output: `TestFixtures` writes every GET the app
+decodes to `shared/fixtures/` (`make generate` rewrites them) and the app's
+`FixtureDecodeTests` fail on a key no Swift type reads.
+
+Base: `https://<public_host>` (ops/hub.json, e.g. `my-mac.example.ts.net:8443`)
+Auth: `Authorization: Bearer <ops/secrets/hub.token>` on everything except
+`/healthz` and `/`. The dashboard sets a `life_token` cookie from `/?token=`.
+Errors: `{"error": "..."}` with a 4xx/5xx status.
+**Caching (speed phase, 2026-08-26):** every 200 JSON GET carries an `ETag` (a hash of the body); send it back as `If-None-Match` and an unchanged answer is a bodiless 304. Pair with `GET /api/v1/changes` to learn *when* to re-fetch. Responses over ~1.4 KB are gzipped for a client that accepts it.
+
+### GET /healthz
+→ `{"ok": true, "time": RFC3339}`. Unauthenticated (used by launchd/uptime checks).
+
+### GET /
+Spend + sessions dashboard (HTML). First visit: `/?token=<token>` sets cookie.
+
+### GET /api/v1/projects
+→ `[{"name", "dir"}]` — ops/hub.json projects ∪ subdirs of projects_root.
+
+### GET /api/v1/spend/summary
+Query: `days` (default 30, max 3650), or `hours` (wins over `days`; lines up with the
+`five_hour` plan meter). Both surfaces' Spend page asks `days=30` and draws only `history`
+and `unknown_models` — the range picker and its tiles went on 2026-09-25.
+→ `{generated_at, days, window_hours, total_usd, today_usd, messages, unknown_models[],
+   by_day[Bucket], history[Bucket], by_project[Bucket], by_model[Bucket], by_trigger[Bucket],
+   jobs[Bucket], palette[], sessions[Session]}`
+`by_day` and `history` buckets carry `models[Bucket]` — that day's dollars split by model,
+dearest first (2026-09-17: the day chart is a stacked bar, the split is its tooltip).
+`history` is every day since the first transcript, oldest first, whatever the window
+(2026-09-22: the day chart is all-time). `palette` is the
+colour-slot order for that stack: `palette[i]` is the model key drawn in series colour i
+(console `--s1…--s8`, phone `MixSeries`), `""` for an unused slot; a slot belongs to the
+MODEL (spend/summary.go `palette`), never to its rank, so changing the range never repaints
+a bar; it covers every model in `history`. Models past the eight draw grey.
+`by_trigger` / `jobs` (2026-08-26) are the hub's own split of the same window, from what its
+runs reported: thread turns keyed by what woke them (`message` = the owner, `checkin` = schedule,
+`decision` = an approval; `messages` = turns, in-flight turns counted at their live estimate)
+and scheduled-job runs keyed by job name (`messages` = runs). Both are subsets of `total_usd`
+— "what do the check-ins cost?" as a number.
+`days` is 0 for an `hours` window; `window_hours` always states the window, and
+`by_day` holds at most one bucket inside a sub-day window.
+Bucket: `{key, usd, messages, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, models[Bucket]?}`
+Session: `{session_id, project, cwd, start, end, usd, messages, models[]}`
+USD is API-equivalent cost computed from local transcripts (hub/internal/spend/pricing.go).
+
+### GET /api/v1/spend/quota
+Plan-limit meter: what `/usage` in the Claude Code CLI shows, joined with local usage.
+Hub reads the OAuth token from the Keychain item "Claude Code-credentials" (never stored) and
+calls Anthropic's `GET /api/oauth/usage`; cached 60s.
+→ `{generated_at, fetched_at, available, error?, windows[Window], extra?}`
+Window: `{key, label, note, utilization (percent), resets_at, starts_at, spent_usd, messages,
+   headroom_usd, by_model[Bucket], scope_model?, burn_pct_per_hour, full_at}` — `label` names the
+   scope and the length (`All models · 7 days`, `Fable · 7 days`) and `note` says whose spend
+   fills it, so two same-length bars are not read as one inside the other; spent/by_model
+   are local list-price $ inside [starts_at, now]; headroom_usd = spent*(100-util)/util
+   (0 if unknown). Keys: `five_hour`, `seven_day`, plus one per model-scoped limit, whether
+   Anthropic reports it as a top-level bucket (`seven_day_opus`) or inside `limits[]`
+   (`kind:weekly_scoped`) — those get `scope_model` (family, e.g. `fable`) and count only that
+   family's local spend. `burn_pct_per_hour` = fill rate from the last 45 min of local spend
+   (falls back to the window average); `full_at` = projected 100% at that rate, **null** when the
+   meter is full, idle, or more than a month out.
+   Every time field here (`resets_at`, `starts_at`, `full_at`, `full_at_typical`) is **null when
+   unknown**, never Go's year-1 zero: Anthropic sends `resets_at:null` for a scoped bucket it is
+   not currently metering, and the console rendered that zero in Eastern time as "resets Dec 31
+   7:03 PM" — a limit that appeared to reset four months out. With no
+   `resets_at` there is no window start either, so `spent_usd`/`by_model` fall back to a trailing
+   window of the bucket's own length and both surfaces say the reset is unknown.
+   Three paces, in decreasing order of how much they are guessing:
+   `measured_delta_pct` / `measured_span_hours` / `measured_pct_per_hour` — Anthropic's own
+   percentage now minus its own percentage up to 8h ago, from readings the hub stores every
+   10 min (obs `spend`/`quota`); all zero until ≥20 min of history exists for this generation
+   of the window. `typical_pct_per_hour` + `full_at_typical` — the same $→% rate as
+   `burn_pct_per_hour` but over the trailing 24h, so a lull does not forecast "never fills";
+   both zero for a locked or idle meter. Locked families are excluded from every shared-meter
+   pace: they cannot spend again until they reset.
+   `tone` / `outlook` / `foot` — the words and colour both surfaces print verbatim (2026-09-14):
+   `tone` `bad` (≥100%) | `warn` (≥85% or over by reset) | `""`; `outlook` `locked` |
+   `over by reset` (meter ahead of `elapsed_pct`, 2026-09-27) | `≈N% by reset` (the window's
+   average pace to the reset) | `idle`; `foot` is the clock only
+   (2026-09-25): `4 d 2 h left · 41% of the week gone · resets Sep 30 12:00 AM` (Eastern), or
+   `reset time unknown`. `elapsed_pct` — share of the window's clock that has run, 0..100 (0
+   when the reset is unknown); both surfaces draw it as a tick on the bar, so the bar's fill
+   against the tick is "35% of the budget, 65% of the week". Dollars and the measured delta
+   no longer print under the bar; they stay in the JSON for the chat facts.
+`available=false` + `error` when the Keychain/token/endpoint is unreachable — app shows the reason.
+`next_model` / `next_reason`: the rung a new session would start on and why it is not the top one.
+The fable day cap (see `/spend/budget`) outranks the plan meters here: past it `next_model` is the
+rung below fable and the reason is "fable $N of $250 today — back at midnight ET".
+
+### GET /api/v1/spend/model
+The model ladder at the top of the Spend page.
+→ `{default_model, explicit, starts_on, reason, options[], rungs[]}` — `default_model` is what a NEW
+session is pinned to, `options` is the whole ladder top first (fable, opus, sonnet), and `rungs` is
+`[{model, open, why}]` in the same order: `open:false` when a session could not start there now,
+`why` the one bucket that shuts it ("Fable · 7 days at 92% (cutoff 82%), resets in 2d") or the fable
+day cap. The surfaces strike a closed rung through and only let you pin an open one.
+`starts_on`/`reason` are what the picker would actually hand a session right now, walked from the
+PINNED rung (`default_model`) rather than from the top of the ladder — the ladder only ever steps
+down from what the owner pinned, so `starts_on != default_model` means a bucket really did override
+their choice, and `reason` is empty otherwise. (`/spend/quota`'s `next_model`/`next_reason` answer the
+different question of what an unpinned session would get, so the surfaces must not show them under
+a set toggle — that read as "the ladder is handing them fable 5 instead".)
+Never set (`explicit:false`) → `default_model` mirrors `starts_on` and nothing is written until
+the owner taps.
+
+### PUT /api/v1/spend/model
+`{default_model}` — one of `options`, or `""` to hand the choice back to `model_policy`.
+Same body back. The value is stamped into `threads.model_class` at CREATE and never re-read for
+that thread: a conversation keeps its model for life, so the prompt cache survives (no switching in the
+middle of a chat). Flipping it
+steers the next new session only; running and existing sessions are untouched.
+
+### GET /api/v1/spend/budget
+The day's spend guards (2026-08-26, `ops/hub.json model_policy`; both numbers are the owner's knobs).
+The hub's own spend for the current Eastern day — finished thread turns, in-flight turns at their
+live estimate, scheduled-job runs.
+→ `{day, budget_usd, spent_usd, percent, level, unattended, thread_cap_usd, fable_cap_usd,
+fable_spent_usd, fable_floor, locked_at, cleared_at, note}`
+**The fable day cap** (`fable_daily_usd`, $250) is the guard in force: `fable_spent_usd` is what
+fable earned today (from `thread_runs.model`), and once it passes the cap `fable_floor` names the
+rung every new process starts on instead (`claude-opus-5-5`, read off the ladder) until midnight ET,
+when fable is available again. Nothing pauses: the day stays usable, just on the cheaper rung.
+**The points ladder below is off** (`daily_budget_usd: 0` → `level: off`, `unattended: true`); it
+is one number away from being back.
+`level`: `off` (no budget) · `ok` · `warn` (≥80%, one FYI) · `refuse` (≥100%: unattended wakes —
+check-ins, jobs, calendar agent items — are skipped/held until midnight ET; the owner's messages and
+approvals always run) · `locked` (≥120%: the same pause, one more FYI — the day blew through) · `cleared`
+(the owner lifted today's pause). `unattended` is the one bit the wakers read. `thread_cap_usd`: a
+single thread's check-ins stop for the day once it has spent this much (the owner's messages to it
+still run). `note` explains the current level in a sentence.
+
+### POST /api/v1/spend/budget/clear
+Lift today's pause (and a lock): `level=cleared` for the rest of the Eastern day whenever spend
+is past the budget; the meter keeps counting. Under budget nothing is paused, so the level stays
+`ok`/`warn` and only `cleared_at` records the call. → State (as GET). 409 when no budget guard
+is configured.
+
+### GET /api/v1/usage
+The opt-in weekly heartbeat (hub/internal/usage). → `{on, last_sent, install_id, payload}` —
+`payload` is exactly what a send carries: `{version, active_days, sessions_started, goals, pages,
+token_bucket}`, counts only. Off unless the owner said yes at setup (`usage_opt_in`).
+
+### PUT /api/v1/usage
+Body `{"on": true|false}` — the Settings switch. → State (as GET). 400 without `on`.
+
+### GET /api/v1/sessions
+→ `[{name, kind: "remote-control"|"job", project, created, attached}]` — hub-owned tmux sessions only.
+
+### POST /api/v1/sessions
+Body `{"project"}` → 201 (created) or 200 (already running) with Session.
+Starts `claude remote-control --name life/<project>` in tmux `life-rc-<project>`.
+
+### DELETE /api/v1/sessions/{name}
+→ 204. Only names prefixed `life-` are accepted.
+
+## Actions — the approval queue (DESIGN.md "Operating model")
+
+Action: `{id, created_at, updated_at, project, kind, title, detail, gated, exec_type, exec_payload, state, decided_at?, decided_via?, result?, error?, thread_id?, note?}`
+`thread_id` = the session that proposed it (lifectl fills it from `$LIFE_THREAD_ID`, which every thread run exports). When the owner decides, the hub posts the decision into that thread as an `owner` message of kind `decision` ("Approved: <title>" + the owner's `note`), which resumes the agent — so approving is how a proposing session gets told to go ahead, and the owner can keep replying in the thread.
+kind ∈ `money|delete|contact|share|commit|other` — the first five are ALWAYS gated.
+exec_type ∈ `none|shell{cmd,dir?}|claude{project,prompt}` (nothing here can contact anyone; contacting other people is kind=contact via a future connector).
+state: `proposed → approved|denied → running → done|failed`. Ungated actions are auto-approved and run at once.
+A gated proposal sends the owner one NEEDS YOU push; approval and completion are events on the action, never a second ping. The push SPEAKS a sentence, as a card's does (`notify/voice.go`): the proposer's `say`, or — when it wrote none — `Hey, I need your approval. <title>.` (`actions.spokenApproval`; "Please approve: <title>" stays as the written alert and as the fallback for a notifier with no card lane). What was spoken is stored on the row and returned as **`said`**, drawn under the detail on both surfaces exactly as an ask's is. `said` means SPOKEN: it is written on the push path only, so an ungated action (no push) is empty.
+
+### GET /api/v1/actions
+Query: `state` (`open` = proposed|approved|running, or an exact state), `thread` (optional: only that session's proposals — a chat reads its own cards instead of filtering the whole queue), `limit` (≤500). Newest first.
+
+### POST /api/v1/actions
+Body: `{project?, kind, title, detail?, gated?, exec_type?, exec_payload?, thread_id?, run_id?, message_id?, source?, say?}` → 201 Action. `say` is the one sentence the push speaks (`lifectl propose --say`, `lifectl relay --say`), ≤400 characters after cleaning, and comes back as `said` once it has been spoken. `gated:false` cannot un-gate a gated kind. `run_id`/`message_id` are the backlink to the run and reply that proposed it (as on an ask; `lifectl propose` fills `run_id` from `$LIFE_RUN_ID`; a scheduled job fills it with its `GET /runs/{id}` id); `source` is who proposed — `claude:thread:<id>` | `claude:job:<name>` | `lifectl` | `app` — and defaults to `claude:thread:<thread_id>` when a thread is given.
+
+`exec_type`: `none` (the proposing session carries it out on approval) | `shell` `{cmd, dir?}` | `claude` `{project, prompt}` | `relay` `{to, text}` — one session handing another a task or a fact (`lifectl relay <session-id> "text"`). A relay needs `thread_id` (the sender), a `to` that is another live session (400 for itself, an unknown or archived one, empty text, or text over 4000 characters) and is **always gated**, whatever `kind` and `gated` say. Its card is written by the hub, not the proposer: `title` = `Send to the session “<target title>”`, `detail` = the exact words, then `Why: <the proposer's detail>`. On approval the hub delivers the words into `to` as a `relay` message (role `system`, author `claude:thread:<sender>`, under a frame saying they are that agent's words passed on with the owner's approval, not the owner's own) — steering it if it is working, waking it with full memory if not — and records a `prompts` row; `result` names both. A bare Approve does not wake the sender (it has nothing to do); a note or a Deny does. This is the only way an agent's words reach another session: `POST /prompts` from `claude:thread:<id>` to another session is still a 400. Every turn also opens with an `[Other sessions live right now …]` block — id, working | waiting on you, title, newest first, at most 12 — so sessions know what is in hand elsewhere without anyone being woken.
+
+### GET /api/v1/actions/{id}
+→ Action + `events: [{id, action_id, ts, event, actor?, note?}]`, oldest first — the audit trail: `proposed` (actor = source), `approved`/`denied` (actor = `decided_via`, note = the owner's note; `auto` for an ungated kind), `ran`/`failed` (actor `hub`, note = result or error). Only this read carries it; the list and the board return the bare Action.
+
+**Header `X-Life-Decider` (approve/deny only).** The second credential. The hub token is on the hub host's disk where every session reads it, so on its own it must not decide anything. The phone keeps the code in the Keychain and sends it on every request; the console keeps it in `localStorage`. The hub stores only its SHA-256 (`ops/secrets/decider.hash`, armed by the tty-only `ops/decider-set.sh`) — while no hash exists the header is not required. A missing or wrong code is a **403** and an audit event (`refused`), never a silent no-op.
+
+### POST /api/v1/actions/{id}/approve
+Query `via` (default `app`). Optional body `{message?}` = the owner's note to the proposing session. Needs `X-Life-Decider` when armed. → 200 Action (now approved/running). 403 without a valid code. 409 if not in `proposed`. The hub relays the decision into the proposing session as a prompt. Since 2026-09-17 both surfaces decide the other way round — an `action:<id>` reply on `POST /prompts` with outcome `approved|denied`, the note being the message — and this route serves a proposal with no session (a scheduled job's) and `lifectl`.
+
+### POST /api/v1/actions/{id}/deny
+Optional body `{message?}` as above, same 403. → 200 Action (denied). 409 if not in `proposed`.
+
+### POST /api/v1/actions/{id}/dismiss
+The silent close every card has. Query `via` (default `app`). The proposal leaves the board, nothing runs, the session is not told — so no `X-Life-Decider`; the trail records `dismissed`. → 200 Action (`dismissed`). 409 if not in `proposed`. Both chats fold it to one grey line with Reopen, like a dismissed ask.
+
+### POST /api/v1/actions/{id}/reopen
+Undoes a dismiss: → 200 Action (`proposed` again, trail `reopened`). 409 if not `dismissed`.
+
+Every Action carries `outcomes: [{value, label, hint?}]` — the buttons on its card, worded once in `store/close.go` like an ask's: `approved` Approve, `denied` Deny, and for a session's proposal `""` Reply (a job's has no session to talk to). A Rec carries the same shape (`accepted` Accept, `declined` Decline, `""` Reply). `hint` (2026-09-26) is what the pick does in a few words — the console's button tooltip and the chat bar's line under the chips — so neither client keeps its own table.
+
+Every Ask, Action and Rec row also carries where it stands with the owner (`store/close.go` AskStanding / ActionStanding / RecStanding — review-primitives step 7; the clients' own state lists are deleted):
+- `open` bool — the owner's move: their buttons show (an ask `open`; a proposal `proposed`; a rec `proposed`).
+- `closed` bool — finished: ✓/✕, no buttons. An `answered` ask is neither open nor closed (the owner's words went in, the card waits on its session), and so is a `deferred` rec (parked: it keeps its buttons, off the open list).
+- `folded` string, omitted when empty — a silent close drawn as one grey line with Reopen: `dismissed` (a dismissed ask or proposal; a rec `expired` with the note `dismissed`), or `read` (a read ask closed with its own button, resolution "Read it").
+- `lane` string — whose colour: `mine` | `chores` (a step of a dated item no session is behind, 2026-09-27) | `homework` (a practice ask) | `recs` (every rec) | `agents` (a closed row an agent, the hub or the gate closed).
+- `window` string (2026-09-27, the `items` table) — when it is owed: `now` (an ask, a proposal) | `on` (its day only) | `by` (owed until its day, overdue after) | `soon` (no day: an undated to-do, every rec). A calendar item carries it too, and so does every agenda entry that is an item (omitted on a run or a job).
+
+**One items table** (2026-09-27, inner design step 9): asks, calendar items, recs and action proposals are rows of ONE `items` table + `item_events` (src `ask`|`cal`|`rec`|`action`, the object's own id). Every route above and below answers as before; a rec's scoring ledger stays in `recs` and an action's run record in `actions`, keyed by the same id. A fired calendar step IS its card — no second ask is minted (`ask_id` is the item's own id). Recs are pull-only: the recs package cannot push or raise a card (`TestRecsCannotPush`).
+
+### GET /api/v1/decider
+Is the code this surface holds the right one? Reads `X-Life-Decider` like approve does but decides nothing. → 200 `{armed, sent, ok}`; `ok` is true when the code verifies **or** no code is armed. Lets a surface check itself before an approval fails on it.
+
+## Scheduler (ops/schedule.json)
+
+JobSpec: `{name, project, when, prompt, timeout?, enabled?}`; `when` ∈ `daily@HH:MM | weekly@Mon HH:MM | every@6h | manual`.
+Jobs run headless Claude in the project dir; the wrapped prompt forces a JSON result `{summary, findings[], needs_you[]}`.
+**One clock (2026-08-28):** the scheduler has no ticker. A job's cadence is a standing prompt row (`author: hub`, `target: job:<name>`, `repeat: <when>`) that the hub reconciles from the table at boot and on reload — one queued row per enabled clock job, none for `manual`/disabled/removed ones; an unchanged cadence keeps its `not_before`, a changed one counts from the job's last run. The threads clock (`DuePrompts`, once a minute) fires it like any other prompt: a child row (`parent` = the standing row's id) is written and the job runs with that child's id on its run row (`prompt_id`); a gated job (`gate` shut) or one still running is **held** — nothing written, asked again next tick; a budget-refused one records a skipped run and a `failed` child; the standing row then advances to its next occurrence. `POST /schedule/{job}/run` still runs a job at once, ungated, with no `prompt_id`.
+Routing: findings → `POST /actions` (gate applies); needs_you → an ask (kind `other`) on the idle `hub` thread, so it lands on Your turn; summary → the run record only (`GET /runs`). A failed run is a run row with `ok:false` + `error`; nothing pings.
+
+### GET /api/v1/schedule
+→ Table `{jobs[], default_tools[], prompt_tools[]}`.
+
+### POST /api/v1/schedule/reload
+Re-reads ops/schedule.json → Table. 400 on a bad table (old one stays).
+
+### POST /api/v1/schedule/{job}/run
+Fires the job now → 202 `{job, status:"started"}`. 404 unknown job.
+
+### GET /api/v1/runs
+Query `job`, `limit`. → `[{id, job, started_at, finished_at?, ok?, summary?, output?, error?, cost_usd, session_id?, prompt_id?}]` newest first. `prompt_id` names the wake (child prompt row) a scheduled run answered; absent for `lifectl job run` and runs before 2026-08-28.
+
+### GET /api/v1/runs/{id}
+→ the Run above + `text` (the prose the model wrote before its JSON envelope, if any), `findings: [{kind, title, detail, exec_type, exec_payload}]`, `needs_you: [string]` (both `[]` when the output did not parse). A proposal from a scheduled job has no session; its `run_id` is this id, and both surfaces open the card on this read. 404 for an unknown id.
+
+## Status & goals
+
+### GET /api/v1/status
+→ `{ok, time, uptime_s, pending_actions, jobs, app_installed?, app_profile_expires?, app_profile_days_left?, clock: [ClockTask]}`
+
+ClockTask: `{name, every, next_due, last_start?, last_end?, running, last_error?, runs, errors, syncer?}` —
+`syncer` marks a task registered with `clock.Sync` (it pulls from outside; each run lands in `sync_runs`) —
+one row per housekeeping loop on the hub's one ticker (`internal/clock`, 2026-08-28):
+`prompts` (the wake, 1m), `calendar` (asks + nags, 1m), `install` (1m), `quota`
+(10m), `recs` (6h), `finance`/`audience`/`mail`/`prices` (6h), `statements`
+(24h). `every` is human ("1m", "6h"); `last_error` is the last run's error and
+is cleared by the next success; `errors` counts failed runs since boot. A task
+never overlaps itself: still running when due → skipped, due again on the
+first tick after it finishes. Both Settings screens print the table.
+
+Goal: `{id (slug of title), created_at, updated_at, title, statement, horizon: month|quarter|year|ongoing, cadence: daily|weekly|monthly, status: active|paused|done, sources, last_reviewed_at?, note_count, digest?, digest_at?, emblem: {symbol: health|money|agent|market|audience|learn|art|goal, hue: 0..359}}`
+
+`emblem` is the goal's face on a page (so a card is never blank): derived from the goal's name on every
+read (`goals.EmblemFor`), never stored or editable. Both surfaces draw the same
+symbol (console: inline SVG; phone: the matching SF Symbol) in the same hue, a
+whole degree; `goal` is the fallback target with a hue hashed from the id.
+Note: `{id, goal_id, created_at, author: owner|claude:<job>, kind: note|review|suggestion|metric, text, by (the author in printable words: the session's title, "You", else the author without `claude:`), thread_id? (the writing session, while it exists)}` — append-only.
+
+`digest` is the goal's CURRENT STATE in flat prose (what is true, what is open,
+next checkpoint) — what a session reads instead of the note history. It is
+rewritten in place, not appended; `digest_at` dates the summary, not the goal,
+so a stale digest reads as stale. Notes remain the append-only history.
+
+### GET /api/v1/goals
+Query `status`. → `[Goal]`, active first. `digest` is omitted from the list
+(it is the first call of every session and must stay small); read one goal for it.
+
+### POST /api/v1/goals
+Body Goal fields (title required) → 201 Goal. 400 on duplicate slug.
+
+### GET /api/v1/goals/{id}
+→ Goal.
+
+### PATCH /api/v1/goals/{id}
+Body `{field: value}` for title|statement|horizon|cadence|status|sources|digest → Goal.
+Setting `digest` stamps `digest_at`.
+
+### GET /api/v1/goals/{id}/notes
+Query `limit`, `since=digest` (only decision/context/intent notes newer than the goal's `digest_at` — what the digest does not know yet). → `[Note]` newest first. Note = `{id, goal_id, created_at, author, kind, text, by, thread_id?}`: `by` is who wrote it in words — the session's title for a `claude:thread:<id>` author (`thread_id` set when that session still exists, so a page links it), "You" for `owner`, else the author minus its `claude:` prefix. Both surfaces print `by` and the date and never `author` or `kind` (the kind is a session's filing word, not the reader's).
+
+### POST /api/v1/goals/{id}/notes
+Body `{author?, kind?, text}` → 201 Note. kind=review stamps `last_reviewed_at`.
+
+## Observations (append-only) & blobs
+
+Observation: `{id, source, kind, ts, tz, payload (JSON), blob_ref?, ingested_at, schema_version, uniq_key?}`. Never updated or deleted.
+
+### GET /api/v1/observations
+Query `source`, `kind`, `account` (exact `payload.account` — one finance account's rows, e.g. `?source=simplefin&kind=transaction&account=CHECKING (1234)`; the account page's Transactions list on both surfaces), `since`, `until` (RFC3339; anything else is a 400), `limit` (≤1000). Newest first. `after_id` (2026-09-26) pages forward instead: only rows with a larger `id`, oldest first (`after_id=0` starts at the beginning of the window) — keep the last `id` you saw and ask again; nothing is missed or read twice, which paging by `ts` could not promise.
+
+Every write — these POSTs, the mic, the syncers — goes through one `obs.Ingest` (`internal/obs/ingest.go`): one transaction per call, `tz` stored as an IANA name (abbreviations, `UTC` and empty become `America/New_York`; a region name like `Europe/Paris` is kept), a `blob_ref` must name a stored blob (store it first: multipart below, or `POST /blobs`), and what a kind registers (revisable, hooks such as the workouts rebuild) happens on every path. A future writer keys its rows `<device>:<seq>` under its own source (a desktop recorder, not built: `car/speech|screen|click|marker`).
+
+### POST /api/v1/observations
+JSON body `{source, kind, ts?, tz?, payload?}` → 201, or `multipart/form-data` with those fields plus `file` (photo) → blob stored content-addressed at `sha256/xx/<hash>.<ext>`, `blob_bytes` and `filename` merged into payload.
+
+### POST /api/v1/observations/batch
+JSON body `{source?, items:[{source?, kind, ts?, tz?, payload?, uniq_key?}]}` (≤2000 items; `source` at the top level is the default for items that omit it) → 201 `{inserted, skipped}`. `uniq_key` is the row's identity inside `(source, kind)` — e.g. `steps:2026-08-20`, a HealthKit sample UUID: re-sending a key the store already has is skipped, never duplicated, so a connector can re-read a window for late-arriving data. Rows without a key are always inserted (the table stays append-only either way). One invalid item fails the whole batch.
+
+### POST /api/v1/voice
+JSON body `{thread_id?, secs}` → `{speaking:[key…]}`. The phone's Play button (`Speaker.toggle`) says its line is being heard for `secs` (≤300) and posts `secs: 0` when it stops or is cut off. The session (`thread_id`; none = a card outside a session) is marked in `threads.Voice`, so its Sessions row leads with the "speaking" pill, and every push waits while anything is heard: one voice at a time. A push held past 45 minutes goes out anyway.
+
+### POST /api/v1/voice/hush
+`{card}` → 204. Drops that card's queued spoken line and leaves the card open: dismissing the audio is not dismissing the card. An ask whose line is queued carries `waiting_to_speak: true`; its Play button reads "Waiting to speak", and a double tap sends this.
+
+### GET /api/v1/observations/counts
+→ `[{source, kind, n, first, last}]` — what data the hub has.
+
+### GET /api/v1/sources
+→ `{groups:[{id, title, blurb, note?, sources:[{id, title, from, storage, status: connected|failing|live|manual, last?, error?, last_ok?, failing_since?, fails?, total, kinds:[{kind, n, first, last, note?}], accounts:[{label, via?, detail?, url?, n?, last?}]}]}]}` — the data-source inventory for the Sources page: "what am I connected to right now". A static catalog (`health` — Apple Health from the phone; `phone` — the Life app itself) joined with live obs counts; any source with rows that the catalog does not name is listed under `other` (the hub's own `spend` rows are hidden). A source whose clock syncer records runs in `sync_runs` (one row per run, written by one hook in main.go) is `connected` or `failing` by its newest run, and a failing one carries `error` (what the upstream said), `last_ok` (the last run that worked) and `failing_since`/`fails` (the current streak — how old the numbers under it are). A run skipped for want of a credential is not recorded. Ordering: groups keep menu order, `sources` are alphabetical by title, and `accounts` are alphabetical by label UNLESS one of them carries `n` — where a count is shown the order is biggest-first, which is a real order. `n` counts rows, not things: a kind's `note` says what one row is (a snapshot of everything vs. one row per item), because a snapshot count reads as an item count otherwise.
+
+### GET /api/v1/blobs/{ref...}
+Serves a stored blob (immutable, cacheable).
+
+### POST /api/v1/blobs
+Query `ext` (letters/digits, ≤8: `png`, `jpg`, `m4a`); raw body (≤64 MB) → 201 `{ref, bytes}`. Blob first, then refs: store the file, then send the rows that name it as `blob_ref`. Content-addressed, so the same bytes twice are one blob.
+
+## Threads — the app's main object
+
+Thread: `{id, created_at, updated_at, title, project, goal_id?, model_class ("" = auto by goal/policy | judgment | build | a model id: the rung its wakes start on), activity? (first line of what a running session is doing now), status: idle|running|needs_you|done|archived, claude_session_id?, schedule, schedule_prompt, last_run_at?, next_run_at? (derived: next scheduled wake; absent if unscheduled/archived), unread, cost_usd, cost_by_model? (GET one thread only), tokens, tokens_in, tokens_out, tokens_cache_read, tokens_cache_write, last_message?, last_message_at?, last_message_kind? (kind of that message; `error` = the turn died, so a list must not print it as the session's answer), needs_you, speaking? (true while this session's card is being spoken into the owner's headphones — the board's "speaking" pill), waiting_to_speak? (true while its card's line is queued and not heard yet — behind a replay or another card; the board's "waiting to speak" pill), model? (GET list and one thread only: the model id the session is running on — its live run's `--model`, else the newest run that named one; absent when it never ran with an explicit model. Both surfaces print it short on the session card, "fable 5"), model_label? (that id as both surfaces print it: "fable 5.1"), schedule_label? ("weekly Sun 17:30"), pill ({word, tone}: the status capsule — "running"/running, "your turn"/needs, "done"/done, "idle"/idle — drawn when the board has no `pills` for the session)}` — the labels and `pill` ride GET list and one thread only (2026-09-14, `threads/labels.go`), so the console and the phone print the same words.`
+Message: `{id, thread_id, ts, role: owner|claude|system, kind: message|update|needs_you|error|checkin|decision, text, cost_usd, tokens, tokens_in, tokens_out, tokens_cache_read, tokens_cache_write, attachments: [blob_ref], run_id?, queued, steered, in_reply_to?, outcome?, replies?: [{ref, outcome?, label}]}` — `replies` (2026-09-17) lists every card the message answered (see POST /prompts), first = `in_reply_to`/`outcome`, absent on a plain message; each reply's `label` (2026-09-26) is the verdict word the "↩ <label> · <card>" line prints, from the hub's one table (`store/close.go` `ReplyLabel`: an ask's own button word, a rec's Accepted/Declined/Later/Replied, a calendar step's Did it/Won't do/About, else Done/Won't do/Approved/Denied/Replied) — never posted; `in_reply_to`/`outcome` (2026-08-28) are copied from the prompt that delivered an owner message (see Prompts), so a surface can show the pick under the owner's words (console: "↩ Read it · <card>", the card's own label) — otherwise nothing on screen says the pick went into the prompt.
+**Cost** (dollars are the headline, not tokens): `cost_usd` is dollars, and it moves while a session works — settled turns carry the CLI's own `total_cost_usd` (already priced at whichever model ran the turn), and the turn **in flight** is estimated by pricing each streamed message's usage at the model named on that message (`internal/spend` rates), so a chat that switched models mid-run is billed at both rates rather than one blended one. The estimate is replaced, never added to, when the turn settles. `cost_by_model` — `[{model, cost_usd}]`, dearest first, empty models meaning the run took the CLI default — is returned by `GET /api/v1/threads/{id}` only; it comes from `thread_runs`, so it is exact for settled work.
+
+**Tokens**: `tokens` is the sum of all four buckets — on a resumed chat cache reads are ~99% of it, so a total without them reads an order of magnitude low. Settled per turn from that turn's `usage` on the result line (the Message figures); a thread's total also carries the turn **in flight**, summed live off the streamed assistant messages, so a running session's number climbs while it works. The live share slightly under-counts output tokens until the turn settles. Chats that predate the counters were back-filled once from the run logs on disk, thread totals only — their old messages read 0.
+Event: `{id, thread_id, run_id, ts, kind: thinking|text|tool_use|tool_result, title, body, summary}` — one streamed step of a turn (claude runs with `--output-format stream-json`; the hub tails the output every poll). `title` is a scannable one-liner for tool calls ("Bash · lifectl goals"), `summary` the same call in plain English ("List goals", "Read hub/internal/server/server.go", "Search for \"steer\" in hub/") — from the tool's own description when it has one (Bash), a template otherwise, and a Haiku one-liner filled in a few seconds later for a shell command without a description (re-fetch such events with `ids`); `body` the input / result text (≤4000 chars). The final reply is stored as a Message, not duplicated as a text event. `run_id` on Messages and Events is really a *turn* id: it links the message that started a turn (owner/checkin/decision) and the reply it produced to the events between them.
+**Runner (2026-08-21):** one claude process per thread (tmux, `--input-format stream-json`, stdin fed from a file the hub appends to via `lifectl feed`), kept alive ~15 min after its last turn. **Messaging a working session:** `POST …/messages` always succeeds — the message is written to claude's stdin at once. While a turn is in flight claude picks it up at its next tool boundary (*mid-turn steering*; the message is stored with `steered=true` and prefixed so the agent knows it arrived mid-work); between turns it starts the next turn in the same process; with no live process a new one starts with `--resume`. `queued=true` only appears while a pre-runner one-shot run is still in flight. Turn ids of one process are `<run>`, `<run>-t2`, …
+Attachments are photos the owner sent with a message: the app first uploads each as an `app/photo` observation (multipart `POST /observations`, payload `{via:"session", thread_id?}`), then passes the returned `blob_ref`s. The hub appends the blob file paths to the prompt so Claude reads the images natively; the app renders them via `GET /blobs/{ref}`.
+Each owner message or scheduled check-in resumes the same Claude Code conversation (`--resume`). **Board rule:** a session surfaces to the owner only when it elects to, by raising an **ask** (below). `status=needs_you` is derived: a non-running thread has it iff it has active asks; `needs_you` on the Thread is that count. A run that raised asks (or failed — that raises an `error` ask, after the hub has retried a transient API failure twice on its own) stores its reply with kind `needs_you`, bumps `unread` and notifies the owner. Any other reply finishes quietly: status=done (or idle if scheduled), no unread, no notification. Fallback: `NEEDS YOU:` lines in a reply whose run raised no asks are turned into asks so nothing is lost. The app's Sessions board lists asks + proposed actions; sessions live under "All sessions".
+
+### GET /api/v1/threads
+Query `archived=1` to include archived. Newest **message** first — the `ts` of the last message on the thread, whoever wrote it (the owner, the agent, a calendar item, the hub), so the list reads as the order things were said; `updated_at` is NOT the sort key (ask closures, status flips and cost settlements bump it too), and only a thread with no message yet falls back to it. Both surfaces keep this order as given. `last_message` is a preview here (a few lines, "…"-ended); `GET /threads/{id}` carries the whole text.
+
+### POST /api/v1/threads
+Body `{prompt, title?, project?=life, goal_id?, schedule?, schedule_prompt?, attachments?: [blob_ref], via?}` → 201 Thread (status running). `prompt` may be empty if `attachments` is not (title becomes "Photo <date>"). 400 on an unknown blob ref. `via: "console"` (the web console sends it) makes the session's copy of the message end with a one-line stamp — the time and the `ops/py.sh trail.py at HH:MM` / `motion --at HH:MM` commands that read the console's own log (`console/trail`, `console/motion` observations) for that minute; the log itself is never put in the prompt. Any other value is stored as "".
+
+### GET /api/v1/threads/{id}
+### PATCH /api/v1/threads/{id}
+Body `{title|schedule|schedule_prompt|goal_id|model_class|status(idle|done|archived)}`. `model_class` (2026-08-26): which rung this thread's wakes start on — `auto` (= "", the goal's class from `ops/hub.json model_policy`, else the default class), a class name (`judgment` = the ladder's top rung, `build` = opus) or a model id; 400 on an unknown class. A change to `schedule`/`schedule_prompt` (also `POST /threads` with a schedule) appends a `system` message of kind `schedule` to the conversation ("Checks back daily at 09:00 · next … \n\n<instructions>", or "Standing instructions cleared…") — the app shows it as a green card so the owner sees when and why an agent will wake. `status=archived` behaves like POST …/archive (kills + clears schedule). `status=idle` on an archived thread un-archives it (conversation resumes).
+**One clock (2026-08-28):** a session's schedule IS its standing prompt row (`author: hub`, `target: <id>`, `repeat: <schedule>`, `text: <schedule_prompt>`); `schedule`, `schedule_prompt` and `next_run_at` on the Thread are read off that row (`next_run_at` = its `not_before`: the time the clock will actually fire, so a wake held while the session works shows as already due). Setting `schedule` cancels the old row and queues a new one (`every@` counts from `last_run_at`); `""`/`off`/`manual` cancels it; 400 on a cadence that is not `daily@HH:MM | weekly@Mon HH:MM | every@<duration>`. `POST /prompts/{id}/cancel` on the standing row is the same as `schedule: ""` (and posts the same card). Archiving cancels every queued prompt aimed at the session.
+
+### GET /api/v1/threads/{id}/messages
+Query `limit`. Chronological. An owner/system row carries `author` (`owner` | `hub` | `claude:thread:<id>`, copied from the prompt that delivered it; rows older than the column read by role) and, for a session author, `author_title`; both surfaces print "sent by …" in the bubble's lower-right corner, a session as a link to it.
+
+### POST /api/v1/threads/{id}/messages
+Body `{text, attachments?: [blob_ref], via?}` (text and/or attachments) → 202 Thread. While running the message is queued (see above), not rejected. 409 if archived. `via: "console"` as on POST /threads: the message carries the trail stamp for its minute.
+
+### GET /api/v1/threads/{id}/events
+Query `since` (event id, default 0), `before` (event id, default none) and `limit` (default 500, max 2000). Chronological events of all the thread's runs with id > since and id < before. `since=0` alone = the NEWEST `limit` events; `before=<oldest held>` = the page before those (walk back to the start of a long run); `since=<newest held>` = what came after — poll with it for a live view. A client keeps every event it has loaded and only extends the window either way; it never re-reads "the newest N", because that window moves with every step and the block above a steering message would count down as the block below it counts up. `ids=1,2,3` instead returns exactly those events (to pick up a `summary` that was filled in later).
+
+### GET /api/v1/threads/{id}/steps
+→ `[{message_id, run_id, tools, thoughts, steps, first_id, last_id, segments?: [{ref?, tools, thoughts, steps, first_id, last_id}]}]`, one row per message that opened or steered a run, in chat order. The COUNTS a run block prints, computed in SQL from `thread_events` — a turn regularly runs into the hundreds of tool calls (the longest so far is 1,131 events), so a surface that counts what it has fetched is one page size away from being wrong. The split at a steering message is the hub's: a steered message shares its `run_id` with the message that started the turn and takes the events stamped between it and the next starter; the first starter also takes anything earlier. `first_id`/`last_id` bound the block, so drawing its steps is one ranged read — `events?since=<first_id - 1>&before=<last_id + 1>` — however long the run is. Zero counts for a starter whose run has not produced a step yet.
+
+**`segments`** (2026-08-28) = that block CUT at the cards the agent raised while it ran, so both surfaces draw fold · card · fold instead of hanging every card off the wrap-up reply — you can answer mid-chain while the agent keeps working. Absent when the run raised no card (one fold, as before). One segment per card plus a tail: `ref` is `ask:<id>`/`action:<id>`, the card drawn AFTER those steps, and `""`/absent on the tail — the steps since the last card, still growing while the run works. The segments tile the block exactly (same total, contiguous `first_id`…`last_id`), and each is opened by the same ranged read as a whole block. Cards are placed by their `created_at` inside the run that raised them (a card's `run_id` is the process's, a starter's is the turn's — `<run>`, `<run>-t2`, …); a card raised outside any run is placed by `message_id`, as before, and a superseded ask cuts nothing. A card a client does not draw (a dismissed ask leaves the transcript) is folded into the next segment client-side, so the counts still add up.
+
+### GET /api/v1/changes
+The change feed (speed phase, 2026-08-26): one parked request instead of polling every screen. Query `since` (the `version` from an earlier answer; absent = answer at once), `wait` (seconds to hold the request, default 25, max 30), `thread` (narrow the message/event/summary/cost part to one chat). → `{version, changed}`; the hub answers the moment the version differs from `since` (`changed:true`) or when `wait` runs out (`changed:false`, same version). The version is opaque — compare, never parse — and moves on any message, thread update, status flip or unread change, ask or action transition, calendar/rec/goal edit. Streamed steps move only the **thread** scope (each event, filled-in tool summary, and the exact cost in flight); the global scope instead ticks at most every 15 s while any turn is in flight, so a running session's row still updates without the root loop re-fetching every screen once a second (2026-09-14). The app: `refresh → changes(since) → refresh…`, with every refresh an `If-None-Match` GET, so a quiet minute costs two ~200-byte round trips.
+
+### POST /api/v1/threads/{id}/checkin
+Run the scheduled prompt now → 202.
+
+### POST /api/v1/threads/{id}/stop
+Kill the thread's claude process mid-turn (tmux session). Thread → idle with a system `error` message "Stopped by you."; the Claude conversation is kept and the next message resumes it. 200 Thread; 409 if not running.
+
+### POST /api/v1/threads/{id}/archive
+End the session: kill any running run, clear the schedule (so it is never woken again), status → archived, hidden from the default list. Conversation kept; resumable after un-archiving. Allowed in any status. 200 Thread.
+
+### POST /api/v1/threads/{id}/read
+Clear unread → 204.
+
+## Asks — what agents need from the owner (docs/ASKS.md)
+
+Ask: `{id (ask-xxxx), created_at, updated_at, thread_id, thread_title?, run_id?, message_id? (the reply it was raised in — the app scrolls there), goal_id?, title, detail, kind: decision|access|physical|read|install|error|other, class: unblock|read|install|practice|step, surface: mobile|web|any, state: open|answered|done|dismissed|superseded, check_hint, said? (the sentence this card's push SPOKE, word for word — the raising session's `--say`, else the hub's fallback; written on the push path only, so it is absent on a card that never pushed; both surfaces draw it under the detail behind a speaker rule, never as the first line), resolved_at?, resolved_by? (owner|verifier|claude:thread:<id>), resolution?, superseded_by?, thread_running, cal_id?, cal_day?, outcomes: [{value: ""|done|wont, label}], verb}` — `verb` (2026-09-26) is the kind's one word, the card's caption on both surfaces (`store.AskVerb`: read · install · decide · grant · do · restart, "for you" for an unknown kind)
+
+**`outcomes`** (2026-08-28) = the ways THIS card can be answered, in the order to offer them, the first being the default; `value` is the prompts `outcome` the pick posts (`""` = words only, the card stays open). Computed from `kind` in one table (`store/close.go` `AskOutcomes`) so both surfaces draw the same chips and a wording change is one edit: `read` → **Read it** (done) and nothing else; `decision` → Reply · **Decided** · Not deciding; `access` → Reply · **Granted** · Won't grant; `physical`/`other` → Reply · **I did this** · Won't do; `install` → Reply · **Installed** · Won't install; `error` → `[]` (Restart, not Respond). ("Reply", 2026-09-18, was "Replying": one wording across ask, proposal and rec cards — the same `{value, label}` shape rides on every Action and Rec, see `POST /actions/{id}/dismiss`.) The words differ because the act differs, and the wrong word makes the reader doubt whether the card needed them at all. A `read` card is the one kind with a single outcome and no Dismiss: **Read it** closes it and wakes nothing, Reply is the composer, and answering it either way closes it — see *A read card* in `docs/ASKS.md`. Telemetry is free: `prompts.outcome` joined to the ask's `kind` is how the owner answers each kind of card, no extra table and no per-card model call. `install` is the app-update card: both surfaces draw it teal with the title, the detail and ONE Install button (no Respond row); the hub retags any "Install app build N" title to it whatever kind the session sent (`AddAskOn`) and its surface is always `mobile` — the phone is the thing being updated.
+
+**`class`** (2026-09-12) = WHY the owner is asked, where `kind` is how they answer. `unblock` — a session is stopped on the owner (a missing billing account; every `decision`/`access`/`physical`/`error`/`other` ask a session raises); `read` and `install` — copies of the kind, named so the board can count them apart; `practice` — a repeating step of the owner's the calendar minted from a `homework` item (a daily practice round); `step` — a dated step of the owner's the calendar minted from an `owner` item (book the dentist). Set at insert: a session's ask takes `ClassFor(kind)`, the calendar's `fire` sets `practice`/`step` (an item that dates a session's own ask — `ask_kind` set — keeps the kind's class). The stored column is what the split rests on: without it a fired homework, a reminder and an agent stopped on a billing account all wore the same red "for you" pill. Only an `unblock`/`read`/`install` ask **blocks** its session: a `practice` or `step` never sets `needs_you`, is never a session's "for you", and is listed on the board only under `calendar`. `lifectl ask add` cannot set it; it is the calendar's to give.
+
+**`thread_running`** (2026-08-27) = the session that raised this is running right now, on this ask or on anything else. It says whether the owner NEEDS to answer yet. Both surfaces wear it on the card and the bundle heading, the console sinks a running session's bundle under the idle ones, and a reply to a running session is a steer (read at its next step), not a wake. The owner MAY always answer: see **Raised mid-chain** below.
+
+**`cal_id`/`cal_day`** (2026-08-25) = the calendar item that minted this ask, and the day it was dated for. Set by a sub-select on `cal_items.ask_id`, never stored on the ask. It is the line between the two ways a session reaches the owner: a **schedule** is a session that wakes on a cadence and lands under "Checking in later"; a **calendar item** is one dated thing that fires once. So both surfaces group calendar-raised asks apart from session asks, badge them with their date, and drop the owning session's title and running cost — a reminder to buy a tranche is not a session reporting in, even though a session owns the thread it hangs off.
+
+**Raised mid-chain** (2026-08-28, replacing `held`). A card reaches the owner the MOMENT the agent raises it — the push goes out at `AddAsk` (never for `read`, which is blue on both surfaces and waits to be looked at), the count moves, both boards draw it, and both chats draw it inline at the step it was raised at (`steps.segments`) — never held for the wrap-up message. Answering while the session runs is a **steer**: the prompt is handed to the live process at its next tool boundary (`steered=1`), so the agent gets the answer and keeps working. There is no `held` field, and nothing on either surface is hidden because a session is busy.
+
+Two things stay turn-end business: the session keeps `status=running` (`settleStatus` turns it into `needs_you` if the turn ends with the card still open), and `message_id` is linked at `finishTurn` for anything the segments do not place. `finishTurn` does not push — one card, one buzz, at the moment it is raised.
+
+The earlier rule (2026-08-22 to 2026-08-28) held a running session's non-`read` cards off the phone so answering could not talk over the agent mid-work; it exists in the history because the steering path made the premise wrong.
+
+**The console counts everything, and holds nothing back** (two working threads that raised six cards count six, each to reply to or dismiss). It is where a running session gets steered — the composer says "Steer it while it works" — so every active ask is answerable there. One number, `asks.length + proposed actions`, on:
+
+- **both** nav badges. Sessions and Your turn print the same figure by design; sessions *working* is what the pulsing "Working" group in the list is for, and counting it in the badge read as one more notification.
+- the **Your-turn page**, as approvals then one heading per session over its own stack — "all six in the Your Turn section, but separated into three" — every card carrying Open-and-reply / Done / Dismiss.
+- the **sessions list**, whose "Your turn" group is the sessions those asks belong to, headed `N in M sessions` with each card's own share on it (`3 for you`). A session whose every open card is a `read` sits in the same group, wearing a blue "N to read" pill (and its chat head a blue "to read" pill rather than the red "your turn"); there is no separate "To read" heading — one list of sessions calling for attention. The heading's cards add up to the badge.
+
+Nothing on either surface builds a list from `thread.status`; a thread carries status, an ask carries the work, and the two drifting is what once put a card in the console's YOUR TURN group that no count agreed with and no button could clear.
+**Surface** (2026-08-24) = where the ask gets done: `mobile` (the phone is the tool — install a build, tap an itms-services link, grant a permission), `web` (the computer is — paste a key, run an OAuth flow, drop a file, read a console page), `any` (a decision, an answer, a real-world step; the default). Since 2026-09-23 it is a hint on the card, not a filter: both surfaces count and draw every ask (the phone's folded "N waiting on the laptop" row is gone); the phone still never draws a console route as a link button. Set explicitly (`lifectl ask add --surface web`) or inferred at insert from the text (`threads.InferSurface`: an itms-services link or "install app build" → mobile; a `:8443/#/` console route, "on the Mac", "web console", "api key", "oauth" → web; an `access` ask carrying a link → web). Unsure is always `any` — hiding an ask is the expensive mistake.
+Lifecycle: an agent raises one mid-run (`lifectl ask add`, run id from `$LIFE_RUN_ID`); at run end the hub sets `message_id`. An owner message in the thread moves every open ask there to `answered` — except read cards and the owner's own dated work (class `step`/`practice`), which only a reply through their card answers; `answered` is off the board and lasts one turn: a good turn that ends without closing the ask sets it `open` again (2026-09-20) — unless the message carries `in_reply_to: ask:<id>` (see Prompts), then only that ask; the next run's prompt starts with an "[Open asks…]" block and the agent closes them (`done`/`dismissed`). The owner can resolve from the app: `done` and `dismissed` by them each queue a prompt referencing that ask (`outcome` `done`/`wont`), so the session is woken and told exactly which one — and, since 2026-08-27, a dismissal reaches the agent instead of being only recorded. Re-raising a same-titled active ask on a thread supersedes the old one. `PATCH /threads/{id} {status:done}` on a needs_you thread dismisses its active asks ("clear from board"). Rows are never deleted; `ask_events` logs every transition.
+
+### GET /api/v1/board
+Query `surface=web|mobile` (default `web`). The ONE definition of "your turn", built by the hub (`internal/attention`) since 2026-08-26 so the console and the phone draw the same numbers instead of each computing their own. Returns `{surface, count, working, calendar: [Ask], sessions: [{id, title, n, first, running, actions: [Action], asks: [Ask], steps: [Ask]}], for_you: {thread_id: n}, reads: {thread_id: n}, installs: {thread_id: n}, first: {thread_id: ask-or-action id}, todo: {thread_id: title of that first card}, detail: {thread_id: body of that first card, ≤400 chars}, badges: {your_turn, calendar, recs}}`. `todo` is the one line a session card prints under its name in place of the last reply — the card that needs the owner, never a description. `detail` is that card's body, clamped to three lines under it: the Your turn page was deleted and this is the one thing it showed that a session row did not. `reads` is how many of `for_you` are `read` asks: equal to `for_you` means that session only asks the owner to read, and both surfaces draw the row blue ("N to read"), never red. `installs` (2026-09-12) is the same for `install` asks: equal to `for_you` means the row only asks the owner to install a build, drawn teal ("N to install") — a real ask beside it wins, red.
+- **The owner's own work is the calendar's, not a session's turn** (2026-09-12). An ask of class `practice` or `step` (see Ask `class`) is listed under `calendar` and nowhere else: not in `count`, not in any session's `for_you`/`first`/`todo`, no bundle under `sessions`. Sessions is where something is BLOCKED on the owner; the Calendar tab and its badge count these.
+- **…but a listed session's row draws what its chat draws** (2026-09-20). A bundle carries `steps`: the `practice`/`step` asks whose thread is that session — still uncounted, never what lists a session or the card its row opens on. `open` is per listed session `for_you` + its steps: every open card the chat draws. Both surfaces draw the first two cards of a row as cells (the phone since 2026-09-23) and say "and N more" for the rest of `open`.
+- `count` is what the tab and the page header print; `badges` are the three red ovals (`your_turn` == `count`; `calendar` = open `owner` items whose day has come (scheduled or fired — a step listed under Today counts before 08:00 fires it); `recs` = undecided recs — a count, never pushed). Sessions carries no number.
+- `calendar`: asks a calendar item minted (`cal_id` set), listed on their own with their date. `sessions`: one bundle per session, approvals' sessions first then the asks' in first-ask order; `first` is the card its heading opens on (approval, else first ask); id `""` = "Proposed by a scheduled job".
+- Neither surface holds anything back since 2026-08-28: a running session's cards are counted and drawn like any other, its bundle just sinks under the sessions that have stopped. `working` = how many of `count` came from a session still running (the pulsing group's share), not a set of hidden items.
+- **One board for both surfaces** (2026-09-23): every active ask and every proposal, approvals first then asks in the order raised; `for_you` is every item per thread. `surface` only echoes the query. (Until then `mobile` folded `surface=web` asks into an uncounted `laptop` list and sank crashed runs, and `web` put `web` asks first — the "waiting on the laptop" concept, since removed.)
+- **An answered ask is on neither board** (2026-09-20): it is the agent's move, so it leaves `count`, `for_you`, `pills`, `sessions` (asks and `steps`), `calendar`, `open` and `first`; its chat still draws it as "waiting on agent".
+- **The Sessions page's groups** (2026-09-14): `headings: [{key, label, count, n, show}]`, always `your_turn · working` in that order (`to_read` existed 2026-09-13 → 09-17; reads and installs now file under `your_turn`, told apart by their pill; `recent` went 2026-09-20 — an ended session with no card open is on neither surface's Sessions list, only under All sessions: the phone's `AllThreadsView`, the console's `#/sessions/all`), `n` sessions under each, `show` how many to draw (0 = all), `count` the words after the label — cards, not sessions ("3 in 2 sessions · 1 working", "1 · 1 for you"). `section: {thread_id: key}` files each session under one (absent = not on the page; the ladder is running → working, any card → your_turn). `pills: {thread_id: [{word, tone}]}` are the capsules a card wears, for running sessions and sessions with cards only — "speaking"/speaking first when that session's card is being said into the owner's headphones right now, else "waiting to speak"/waiting (amber, still) while its line is queued for its turn (green, pulsing on both surfaces; the hub marks the session for as long as the line takes to say, and the change-feed version moves as it starts and ends — 2026-09-25), then "running", then ONE PILL PER CLASS of open card in the order the owner works them: "N for you"/needs (decisions, access, steps, approvals), "N to read"/read, "N to install"/install, each only when its count is >0 (a read beside a build wears "1 to read" + "1 to install", never "2 for you"); other sessions wear their thread `pill`. `first`/`todo`/`detail` name the card in that same order (approval, else blocking ask, else read, else install; first raised among equals), and an install card carries no `detail` — its title is the whole instruction. Both surfaces render these as given.
+
+## Prompts (the one inbound lane, 2026-08-27)
+
+A reply references the thing it answers; a prompt can be sent to a session now, at a time or on a cadence; an agent can queue a message to itself for later. Everything said TO a session is a `prompts` row: `{id (p-xxxxxxxx), created_at, author, target, not_before?, in_reply_to?, outcome?, text, attachments?, title?, goal_id?, repeat?, parent?, state: queued|delivered|cancelled|failed, delivered_at?, delivered_thread?, error?}`.
+- `author` — `owner` | `hub` | `claude:thread:<id>`. An agent may target only ITSELF or a new session; the insert refuses anything else, so agents never talk to each other.
+- `target` — a session id, `new`, `new-or:<id>` (relay into that session if it still exists, else start one), or `job:<name>` (a scheduled job; only the hub writes these, from ops/schedule.json).
+- `not_before` — when it may be delivered; empty = now. A future one waits for the hub's one clock (`DuePrompts`, once a minute), which fires every kind of wake: the owner's "reply at a specific time", an agent asking itself to check back, a scheduled session's check-in, a job's run.
+- `repeat` (one clock, 2026-08-28) — a clock cadence (`daily@HH:MM | weekly@Mon HH:MM | every@<duration>`) makes the row **standing**: it is never delivered itself. When its `not_before` passes the clock writes a one-shot child (`parent` = the standing row's id, same text/target; an empty text on a session means the default check-in) and delivers that, then moves the standing row's `not_before` to the next occurrence — one child per occurrence, a missed stretch (hub down) fires once. A standing row aimed at a session that is still running is held (asked again next tick, not dropped); one whose session is archived is cancelled; one the budget guard refuses gets a `failed` child ("skipped by the hub: …") and a system line in the conversation, and still advances. `GET /prompts?state=queued` is therefore every future wake the hub holds, of every kind. 400 on a stride cadence (`every2d` etc. belong to calendar items) or on an agent/owner writing a `job:` target.
+- `in_reply_to` — the typed pointer to what it answers, same vocabulary as a calendar entry's `ref`: `ask:<id>` | `action:<id>` | `rec:<id>` | `cal:<id>` | `message:<id>`. `outcome` — `done` | `wont` (about an ask, or about a `cal:` item — the owner's answer to one of their own steps, which closes the item and its ask) | `approved` | `denied` (about a proposal) | `accepted` | `declined` | `deferred` (about a rec — the rec itself is decided by `POST /recs/{id}/decide`, which queues this prompt), or empty for words only.
+Delivery writes an ordinary `thread_messages` row carrying `in_reply_to` + `outcome`, and the bracketed framing the model reads is rendered **from the referenced row at wake time** (`threads.refHeader`) — so the hub never composes a sentence and then re-reads it to work out what the owner meant, and a response about one ask says nothing about any other. Historical `decision` rows with no reference still get the generic header. A message whose text merely *starts* with `Re ask-xxxx "…":` is still parsed for its reference (`threads.ReplyRef`) — older app builds compose that prefix, and their replies must keep landing on the right card.
+
+**The surfaces (phase 3, 2026-08-27).** One control, **Respond**, on every card, on both the phone (`RespondSheet.swift`) and the console (`openRespond`, views/asks.js) — not separate Reply / Done / Dismiss buttons. It carries the three parts of one act and posts ONE prompt: an outcome (`done` | `wont` | none), the owner's words, and a destination (this session or a new one; now, in an hour, tomorrow 09:00, or a picked time). The outcome closes the card at `POST` time even when the words are aimed at tomorrow, so the board is never waiting on a delivery. The composer on both surfaces has the same send-to/when, and a session lists its queued prompts — its own future — instead of one "next run" line. Swipe Done/Dismiss on the phone stays as the fast to-do gesture and still goes through `POST /asks/{id}/resolve`, which queues the same referenced prompt. On the console (2026-08-28) Respond is not a dialog: it **arms the session's own composer** (`armReply`, views/threads.js) — one short strip above the box names the card and carries its `outcomes` chips (the hub's words, default lit); words, files (Attach / paste / drop — shown above the strip), send-to and when are the composer's; from the Your-turn stack it first opens the session at that card, so a reply can carry files the normal way. The stack's one-tap close reads **Read it** on a `read` card and Done elsewhere; both post `done`. A `read` card's own pair is **Read it · Reply** everywhere (2026-08-29) and neither its close nor its wordless reply wakes the session.
+
+### GET /api/v1/prompts
+Query `state` (`queued`|`delivered`|`cancelled`|`failed`; empty = all), `thread` (targeted at or delivered to it — a session's own future), `limit` (100). Newest first.
+
+### POST /api/v1/prompts
+Body `{author?=owner, target|new, text, in_reply_to?, outcome?, replies?: [{ref, outcome?}], title?, goal_id?, attachments?, at?|in?|on?+at_time?}` → 201 Prompt. `replies` (2026-09-17) answers SEVERAL cards with one message — a read card and a rec on the same send; each entry is closed by its own rule (a read closes, `done`/`wont` claims the ask or `cal:` step, `accepted`/`declined` records the rec's verdict on the ledger — the same write as `POST /recs/{id}/decide`, skipped when that already ran), `in_reply_to`/`outcome` are set to the first entry, and the session's frame names every card. An `action:<id>` entry with outcome `approved`/`denied` DECIDES that proposal (2026-09-17, the approval card's buttons arm the composer like every other card's): it needs `X-Life-Decider` exactly as `POST /actions/{id}/approve` does — a missing or wrong code is a 403 with a `refused` audit event and nothing is queued — query `via` (default `app`) is the surface on the row, the message is the note, the prompt itself is the relay (no second one), and a proposal already in that state is left alone. An `action:` entry with no outcome is words to the session; the proposal stays open. A wordless send is cancelled only when every card was a read. Time: `in` a duration (`30m`, `2h`), `on` a day `YYYY-MM-DD` with `at_time` (or `at`) `HH:MM` (Eastern, default 09:00), or `at` alone as RFC3339. None = deliver now. 400 on an unknown reference type, an outcome that does not match what it references, an agent targeting another session, or a target session that is gone when `new` was not allowed.
+
+### POST /api/v1/prompts/{id}/cancel
+→ 200 Prompt. 400 if it is not still `queued`.
+
+### GET /api/v1/asks
+Query `state` (default `active` = open+answered; `all`; or one state), `thread`, `limit`. Oldest first. No per-ask web page (removed 2026-09-15): the chat card shows the whole detail.
+
+### POST /api/v1/asks
+Body `{thread_id, title, detail?, kind?=other, surface?, check?, run_id?, say?}` → 201 Ask. 400 on bad kind / unknown thread. `say` (`lifectl ask add --say`) is the sentence the push SPEAKS in place of "To read — title" (≤400 chars, else the label form goes out); it is said, never stored. `surface` omitted or unrecognised = inferred from the text. `run_id` omitted (lifectl reads it from `LIFE_RUN_ID`) = **the thread's run in flight**, so a card raised mid-turn is still cut into that turn's tool chain (`/threads/{id}/steps` segments) and linked to its reply at turn end; only a card raised while the session is idle keeps none.
+
+### GET /api/v1/asks/{id}
+
+### POST /api/v1/asks/{id}/resolve
+Body `{state: done|dismissed|open, by?=owner, note?}` → 200 Ask. 409 if superseded / bad state. `by: app` = the app's optimistic close (Install tap): recorded, no thread relay, verified by the hub via the device build report (see POST /devices).
+
+### POST /api/v1/asks/{id}/retry
+Restart the session an `error` card came from → 200 Thread. No body. Puts the failed turn's own messages (the owner's, or the scheduled check-in) back on the queue — a turn with none gets a `[restart]` system line instead — launches a fresh process, and closes the card (`done` by `app`, "restarted the session"). 409 if the ask is not kind `error`, already closed, or its session is running again.
+
+### POST /api/v1/asks/{id}/surface
+Body `{surface: mobile|web|any}` → 200 Ask. Moves a card between surfaces — the escape hatch for a bad inference, and how an agent hands its own card to the laptop after the fact (`lifectl ask <id> surface web`). An unrecognised value re-infers rather than failing. 404 on unknown ask.
+
+### POST /api/v1/asks/{id}/kind
+Body `{kind: decision|access|physical|read|install|other}` → 200 Ask. Retags a card's answer vocabulary (`lifectl ask <id> kind physical`) — the escape hatch for an ask filed under the wrong kind, since the chips follow the kind (2026-09-07: a "move your DNS, 8 steps" card offered **Granted / Won't grant** because its session filed it as `access`; the act was the owner doing the steps, so `physical` — **I did this**). `error` cards keep their kind, and nothing retags to `error` — Restart hangs off it. 409 on a bad value or an error card, 404 wrapped in the same 409 on unknown ask.
+
+## Calendar (plan layer, 2026-08-23)
+
+Everything that should happen on a date lives in `cal_items`: the owner's own dated steps, their homework from Learn, one-shot agent runs, reminders. Item: `{id (cal-xxxx), created_at, updated_at, title, detail, kind: owner|homework|agent|note, day (YYYY-MM-DD local), at (HH:MM, or "" = all day for owner|homework|note — the ask is raised 08:00; **an `agent` item always has a minute** since 2026-09-13: sent without one, or edited to one — an all-day drop, a Google event made all-day, an `owner` item retagged `agent` — the hub stamps 08:00, or the next free half-hour past the other open agent runs that day, and requeues the wake; the rows from before were stamped the same way at boot — an agent run is never "all day"), repeat: ""|daily|weekly|monthly|yearly|`every<N>d` (a fixed N-day stride, 1..365, e.g. `every2d`), goal_id?, thread_id?, source (owner|claude:thread:<id>|job:<name>), state: scheduled|fired|done|dismissed, nag_min, nag_count, last_nag_at?, fired_at?, ask_id?, ask_kind?, check_hint?, surface?, say?, due?: on|by (see Due window), prompt_id?, prev_id?, resolved_at?, resolved_by?, resolution?, soon?}`. Ids (`cal-`, `ask-`, `rec-`) are the prefix plus 8 hex chars since 2026-08-26 (4 hex before; both forms stay valid).
+**`homework` is a step of the OWNER'S from Learn (2026-09-11)** — a daily practice round, say — and the hub treats it as `owner` in the lane sense (counts in `overdue` / the tab badge, mirrors to the "Life — me" Google calendar) but **it is a practice, not a task** (it needs a reminder, not a session, and a missed day is not owed twice): it fires a `physical` ask of class `practice` **on the hub's `calendar` thread whatever `thread_id` says** (no host session ever wakes or pays for it), `nag_min` is forced to 0 on add and on a PATCH that changes the kind (the fire-time push is the one reminder), the ask never sets its session's `needs_you` and never counts on the board (see GET /board), and when the next occurrence fires the earlier open one — same title, case-insensitive, or its `prev_id` — closes as `dismissed` / `resolved_by: hub` / `resolution: missed` with its ask (`missPrevious`), so there is only ever the latest one to do. The close is a completion: `by=owner` closes it with no note (see resolve) and the hub closes it itself by `source` when the evidence lands (`CloseBySource`). The kind exists so both surfaces draw it in its own light-blue **Homework** lane instead of the red "My tasks" one, with **Did it** / **Skip** on the row. Any later homework is the same shape: kind `homework`, a `source` naming what proves it done, the tick as the fallback. Firing (hub tick, every minute): `owner` (and `homework`) → a `physical` ask on `thread_id` (or the hub's `calendar` thread) — it shows on the board and pushes like any ask; while the ask stays open the hub pushes "Did this get done?" every `nag_min` (default 360, 08:00–22:00, max 6) → state `fired`, then `done`/`dismissed` when the ask closes (by the owner — with words, see resolve — the agent, or the verifier). `note` → a `read` ask → `done`. `repeat` spawns the next occurrence when an item fires or is closed early (`prev_id` links them). Rows are never deleted.
+**One clock (2026-08-28).** An `agent` item's wake is a prompt row: `POST` queues one (`prompt_id`; author `hub`, target `new-or:<thread_id>` or `new`, `in_reply_to: cal:<id>`, `not_before` = the item's fire time, text = title + detail), so the same minute tick that wakes every session (`GET /prompts?state=queued` lists it) wakes the item; the daily budget guard holds it (kind `cal`) rather than skipping it. The item turns `done` ("agent run started", `thread_id` = the session that took it) **when the prompt is delivered**, never before; `PATCH` of day/at/title/detail cancels the wake and queues a new one, `resolve` done/dismissed cancels it, reopen queues a fresh one. Agent items from before the clock get their row on the hub's first tick.
+**A soon item is a to-do of the owner's with no due day (2026-09-21)** — something to do any time, never overdue, tied to no session: "please do this soon". It is a `kind: owner` item whose `day` is `""`; the Item and its Entry carry `soon: true`. It never fires, never nags (`nag_min` 0), never counts in `overdue`, the due count or the tab badge, raises no ask, **and belongs to no session**: `thread_id` is always empty — `source` keeps who filed it. It keeps the moment it was made: its Entry's `day`/`at` are the local minute it was ADDED while open (both surfaces print "added Sep 20") and the minute it was closed once closed (the usual did row), so it also sits in that day's `days` cell and the Google mirror keeps its event there. Only a plain `owner` item can be soon — no `at`, no `repeat`, not `homework`/`agent`/`note`. Made by `POST` with `soon: true` and no `day`, or by `PATCH {day: ""}` on an open dated step (below); a `day` given later makes it a dated step again.
+
+### GET /api/v1/calendar
+Query `from`, `to` (YYYY-MM-DD, default today → +60 days) → `{from, to, today, anytime: [Entry], overdue: [Entry], due: [Entry], soon: [Entry], days: [{day, entries: [Entry]}]}`. Entry: `{id, day, at?, kind: owner|homework|agent|note|run|job|ask|action|rec, ask_kind?, title, detail?, state, goal_id?, thread_id?, thread_title?, live?: [{word, tone}], ask_id?, repeat?, overdue?, due?: on|by, tick?, soon?, actor?, ref?, did?, verb?, lane, closed?, item?, move?, why?, kind_label, outcomes?: [{value, label, hint?}]}`. `outcomes` (2026-09-26) are the row's answers, stamped once for both surfaces from `store/close.go` on an open row the owner can close: a tick (`tick`, or homework) Did it `done` · Skip `wont` · Send `""`; the owner's own step (`owner`) Done · Won't do · Reply; a proposed action Approve · Deny (· Reply with a session). Absent = the row has no answer buttons. `live` (2026-09-26) is what the row's session is doing RIGHT NOW, in the board's own capsules and order — "speaking"/speaking, else "waiting to speak"/waiting; then "running"/running — stamped at read time on every row with a `thread_id` and absent on a quiet session (a row never says "idle"); both surfaces draw it beside the row's session link, so the step you just answered from says its session is on it instead of falling silent. No card counts — the calendar row IS the card. **Stamped by the hub, drawn by both surfaces** (2026-09-14 parity pass — each client used to derive these and they drifted): `lane` = `mine | homework | scheduled | agents | recs` (the colour and the switch; rules in `docs/design/calendar.md`), `closed` = draw ✓/✕ and muted (a look, never a filter), `open` (2026-09-26, bool, omitted when false: the owner's still to resolve — a pending item or ask, state scheduled/fired/open/answered; NOT `!closed`, a proposed action or a deferred rec is neither), `mark` (2026-09-26, `store.CalMark`) = the row's glyph: `wont` (✕ + the strike: dismissed, declined, denied, failed, expired) | `done` (✓) | `todo` (○, an open row of the owner's lanes) | absent (none) — neither client keeps a list of refusal states, `item` = a `cal_items` row (closes via `/calendar/{id}/resolve`; a closed one always offers Reopen, nothing else does), `move` = `item` (PATCH day/at) | `run` (rewrite the thread's daily@/weekly@ cadence) | absent = fixed, `why` = the sentence a fixed row shows instead, `kind_label` = the pill's word (`your step`, `do soon`, `homework`, `scheduled run`, `reminder`, `session check-in`, `job`, `ask`, `app update`, `action`, `rec`, `check back`). `ask_kind` (2026-09-12) is the ask's own kind on an `ask` row and on the did row of one closing, so both surfaces can draw an `install` ask as the same teal cell it is in the chat — title, link-stripped detail, ONE Install button carrying the OTA link, Won't install as the out — instead of a generic Done/Dismiss row. It stays in `anytime` while open (never dated), in the owner's lane (the teal is the cell's shade, not a lane). **The past is a record, not a plan** (the future is prospective events, the past is steps that were done): an entry with `did: true` is the RECORD of something that happened, placed at the local minute it happened (`day`/`at` Eastern), closed by definition, and `verb` is the word for it. Its `actor` is the DOER — `owner`, or the surface the owner decided from (`app` | `web` | `cli`), or `hub` / `auto` / a session — and a reader's lane is the doer's (the owner's hands red, the agents' grey), not the kind's — **except `kind: rec`, which is purple for its whole life** (filed, deferred, decided, scored), because a rec's filing and the owner's answer have to read as two ends of one thing. A `did` row is also drawn in a different FORM from the plan: both surfaces put the plan in bars, the record in a strip down the edge of the day, and recs in a band above the clock (`docs/design/calendar.md`, "Three forms, three places"). The did rows: a closed ask the owner answered (id `did:ask:<id>`, ref `ask:<id>`, `at` from `resolved_at`; `verb` Read for a read card whichever button was tapped, Decided / Granted / Did by kind, Skipped when dismissed; a `physical` ask the hub's verifier closed counts as the owner's; **an `install` ask that reached `done` counts as the owner's however it closed** — the app's tap (`resolved_by: app`) or the phone reporting the build (`hub`, no check hint) — with `verb` Installed and the title cut to `build N`, so "Installed: build 880" is the placeholder the install leaves at the minute it happened; a session's own closes and asks a calendar item raised are not listed — the item is the row); a rec's decision (id `did:rec:<id>`, ref `rec:<id>`, `verb` Accepted | Declined | Did, `state` = the rec's status, `actor` = `decided_by`) and its score (id `did:rec:<id>:outcome`, `verb` Worked | Mixed | Didn't work | Unclear | Scored, `state` done); a decided action (its usual row, `did` once `decided_at` is set: `verb` Approved when the owner decided it, Ran when the gate let it through, Running / Failed / Denied by state); a closed item (its usual row on its plan day, `actor` = `resolved_by`, `verb` Did | Ran (agent) | Read (note) | Skipped (dismissed)). `thread_title` is the session's title wherever `thread_id` is set, so a run of did rows collapses under the session it was a step of. No entry is a session run with the time it ran. `run` and `job` are the **queued prompts, placed** (one clock, 2026-08-28 — nothing else is projected): a standing row (`repeat` set) appears once per occurrence in the window, stepping from its `not_before` on its cadence — a session's as `run` (id `run:<thread>:<ts>`, ref `thread:<id>`, detail = the row's text else the thread's `schedule_prompt`), a job's as `job` (id `job:<name>:<ts>`, ref `job:<name>`, detail = the job prompt's first line); `every@` rows are plumbing and omitted. A one-shot prompt lands on its day as `run` (id `prompt:<id>`; ref `thread:<id>` and the thread's title when it is bound for a session that exists, else ref `prompt:<id>` and the prompt's own title; `actor` = its author). A prompt that is an agent item's own wake is not shown twice — the item is the row. `ask` (in `anytime`) = an open ask no calendar item raised — work the owner can do whenever. `overdue` = the inbox: EVERY open `owner` or `homework` item (state `scheduled` or `fired`) whose day is before `today`, oldest first, independent of `from`/`to` — missed steps stack up in the inbox. A day inside the window lists such a row twice — in its own `days` cell and here — so a reader already drawing past days (the phone's Past agenda) skips the section. The per-entry `overdue?` flag follows the same rule. `due` = every open `owner`/`homework` item not yet overdue whose day is today, or — for repeating `homework` only — within its period before its day (at most 7 days: a weekly homework is due all week), independent of `from`/`to`, by day then minute; the console rail and the phone's Inbox sheet head it **Due**, between Overdue and Do soon, each row wearing its day; the rows stay in their day cells too. `soon` = EVERY open soon item (see Item), oldest first, independent of `from`/`to`; both surfaces head it **Do soon**, between Overdue and Anytime, each row reading "added Sep 20", and their Schedule lists skip an open soon row inside `days` so it prints once. **This is the one read model over everything dated** (Phase 2, 2026-08-26): `action` = every action on its decided day (else its created day; `state` = the action's state, `actor` = `decided_via` else its source), `rec` = EVERY rec on the minute it was FILED (id `filed:rec:<id>`, ref `rec:<id>`, `verb` Filed, `state` = `proposed` whatever the rec has since become — it is the record of the filing, and a declined rec's filed bar must not be struck; `day`/`at` from `created_at` in Eastern), plus, if the owner deferred it, its `review_on` day (id and ref `rec:<id>`, `state` = `deferred`, no `at`), plus its decision and score as `did` rows (below). The filed row is never a `did` row, and every rec row is purple. (Readers hide nothing by closed state since 2026-09-11 — the "Done & decided" tick is gone from both surfaces: a calendar always shows what happened in the past — only a lane's own tick hides a row.) Two bars per rec is the point: a darker purple one at the minute it was filed, a light purple one when it was accepted, declined or done. Readers draw a rec row with an `at` as a BAR in the clock at that minute, never in an all-day or above-the-clock band; a rec row with no `at` (Check back) is an all-day chip. `actor` = the rec's source. `actor` = who raised or decided the row (an item's `source`, `claude:thread:<id>` for an ask or check-in, `claude:job:<name>` for a job); `ref` = the typed pointer to the object behind it — `cal:<id>` | `ask:<id>` | `action:<id>` | `rec:<id>` | `thread:<id>` | `job:<name>` | `prompt:<id>` — set on every entry.
+
+### POST /api/v1/calendar
+Body = Item fields `{title, day, at?, kind?=owner, detail?, goal_id?, thread_id?, repeat?, nag_min?, source?, ask_kind?, check_hint?, surface?, soon?}` → 201 Item. 400 on bad day/at/kind/repeat or unknown thread. `lifectl cal add`. `soon: true` with no `day` files a soon item (400 with an `at`, a `repeat` or any kind but `owner`); an empty `day` WITHOUT it is still 400 — a forgotten day must not become a to-do. `lifectl cal add "<title>"` with no `--on` sends it, and a `thread_id` sent with it is dropped. An `agent` item posted with no `at` comes back with one (see Item).
+**Dated asks.** `ask_kind`/`check_hint`/`surface`/`say` are what a session sets when it dates an ask rather than raising it now — `lifectl ask add "…" --on YYYY-MM-DD [--at HH:MM]`, or a `NEEDS YOU 2026-08-27: …` line in a reply (`threads.DateAsk`). The item mints exactly that ask (its kind, its check hint, on its thread) on the morning of the day, so nothing sits on the owner's board before it is doable, and the hourly verifier can still close it on evidence.
+
+### GET /api/v1/calendar/{id}
+
+**Due window** (2026-09-26): `due` = `on` (its day only: missed at midnight, never overdue, one push, no nag) | `by` (owed from its period's start, overdue after, nagged) | empty (agent/note/soon). Default for a dated `owner`/`homework` item: `on` if `repeat=daily`, else `by`. Entries carry `due` and `tick` (true = no session waits on it — homework, or no/`calendar` thread: Did it / Skip, no words). `lifectl cal add|set --due on|by`. The agenda's `today` is the hub's local day — both clients anchor and ring "today" from it, never the device clock (2026-09-27).
+
+### PATCH /api/v1/calendar/{id}
+Body = any of `{title, detail, day, at, repeat, kind, scope}` → 200 Item; absent fields are left alone. A `kind` change (e.g. a hosted `owner` step becoming a `homework` practice) resets `nag_min` to the kind's default — 360 for `owner`, 0 for anything else. This is the only way to move a standing check-in: dismissing a repeating item spawns its next occurrence, so the chain survives. A **fired** item moves too (calendar events can be dragged): a `day`/`at` edit reschedules it — back to `scheduled`, its open ask dismissed as "rescheduled to …", the tick fires it again at the new moment — but its other fields stay locked (400), and `done`/`dismissed` still 400 (reopen first). `scope` applies to a repeating item's `day`/`at` move: `future` (default) moves the chain, including the already-spawned next occurrence's `at`; `one` detaches this occurrence — the next is minted now from the original shape and the moved row's `repeat` is cleared. `lifectl cal <id> set --at 23:30 [--day …] [--detail @file] [--repeat …] [--title …]`. **`day: ""` turns an open `owner` step into a soon item** (2026-09-21; `lifectl cal <id> soon`, or `set --day none`): `at` cleared, `nag_min` 0, `thread_id` cleared, and a fired one goes back to `scheduled` while **the ask it had raised leaves its session** — `dismissed`, `resolved_by: hub`, "now a do-soon to-do on the calendar" — so no prompt is queued, no session woken and no "Skipped" did row is written in the owner's name. 400 for a repeating item or another kind. A `day` on a soon item dates it again (`nag_min` back to the default; a fired one goes through the move above).
+
+### POST /api/v1/calendar/{id}/resolve
+Body `{state: done|dismissed|scheduled, by?=owner, note?}` → 200 Item. Instead of `state` a surface may post the pick it drew, `outcome: done|wont` (2026-09-26; → done|dismissed, any other value 400) — the row's own `outcomes` values, so no client maps them. Closing also closes the ask it raised; `scheduled` re-arms it. `lifectl cal <id> done|dismiss|reopen [note]`.
+**The owner closing their own step is a message, not a button** (so a stray tap cannot mark it done): `by=owner` on a `kind: owner` item with `done`|`dismissed` **requires `note`** → 409 without one (a `homework` item does NOT — it is a tick, 2026-09-12, and closes directly with its ask, no prompt); with one the hub queues ONE prompt to the item's session (`author owner`, target `new-or:<thread_id>`, `in_reply_to: cal:<id>`, `outcome: done|wont`, text = the note) and the item and its ask close through that prompt, quietly — the same row a Respond sheet or `POST /prompts` with that reference writes, so every surface converges on one write. `scheduled` (reopen) never needs words: it is the undo, and both surfaces keep a Reopen on every closed item. A reopen is quiet (2026-09-12): the item's stale ask is claimed `wont` by the hub, no prompt, no session woken — the tick re-fires the item as a fresh ask. Agents, the verifier and the hub close directly, as before. **A soon item closes right here** (it is tied to no session): the note is still required, it lands in `resolution`, and no prompt is queued and no session woken — it has no session to hear it.
+
+## Recommendations (the agent's track record, 2026-08-23)
+
+Needs-action and recommendations are two concepts: recommendations are tracked over time and new ones served. An **ask** is push (the owner's turn, now, closes when the deed is done); a **rec** is pull — a standing list the owner browses when in the mood to spend money, pick a tool or change a habit, and it closes twice: `status` = what the owner decided, `outcome` = whether it worked. Nothing else in the hub records an effect, which is why it is its own table (`recs`) and not a goal note.
+
+Rec: `{id (rec-xxxx), created_at, updated_at, title, detail?, goal_id?, thread_id?, source (owner|claude:thread:<id>|job:<name>), domain: money|health|audience|tools|home|other, kind: buy|subscribe|trade|try|stop|habit|process|other, cost_cents, cost_period: ""|monthly|yearly, effort: low|med|high, confidence 0..100, because?, expect?, act_by? (YYYY-MM-DD, after which it is stale), review_on? (when to score it — or, while `deferred`, the day it comes back), status: proposed|deferred|accepted|declined|done|superseded|expired, decided_at?, decided_by?, decision_note?, outcome: ""|worked|mixed|failed|unclear, outcome_at?, outcome_note?, prev_id?, links?, model?, message_id?, thread_running?}`. `thread_running` (2026-09-09) is `true` while the session that filed it (`thread_id`, else the one in `source`) has `status=running` — stamped by the server from the threads table on every list and single GET, never stored, omitted when false — so a card can say "running" and the owner knows not to follow the rec up; a rec the owner filed never carries it. `message_id` (2026-08-28, only on `?thread=`) is the rec's place in its session's chat — the first reply the filing session wrote after filing it — so both surfaces draw the rec as its own card under that reply; absent while the run is still in flight (draw it at the end). Resolved from thread_messages on read, not stored. `model` is the model id of the session that filed it (`claude-opus-5`, `claude-fable-5[1m]` — the run's own `--model`), so the track record is per model as well as per domain. It is **required** when `source` is `claude:thread:*`; the hub fills it from that session's live run (else its newest run that named one) when the body omits it, so `lifectl rec add` never has to know — `--model` overrides. Empty only on a rec the owner filed.
+
+Lifecycle: a session `POST`s one (status `proposed`, **no notification, no push**) → the owner decides → accepting sets `review_on` (+30 days if the rec named none) and the session mints whatever carries it out (calendar items for a dated plan, a proposal for a gated action), recording their ids in `links` → the weekly review scores it. `prev_id` supersedes: the older rec is closed to `superseded`, so the list never shows both halves of a changed plan. A `proposed` rec whose `act_by` has passed is swept to `expired` by the hub's daily tick. **Deferred** ("check back with me on another day") is neither yes nor no: `status=deferred` with `until` parks it — off the open list, `review_on` = that day, an `agent` calendar item that day (in the session that filed it) linked into `links` — and the same tick wakes it: back to `proposed`, undecided, with the deferral written into `detail`. Rows are never deleted; declines are the valuable half (they are why the same idea does not come back next month).
+
+### GET /api/v1/recs
+Query `status` (default `open` = proposed; `all` or any status, e.g. `deferred`), `domain`, `kind`, `goal`, `model` (exact id), `due` (YYYY-MM-DD: accepted/done, `review_on` ≤ day and not yet scored — the review queue), `max_cents`, `limit`, `thread` (the recs one session filed — `thread_id`, or the session in `source` — each with `message_id`; what a chat draws, with `status=all`) → `{recs: [Rec]}`, newest first, each stamped with `thread_running` when its filing session is running.
+Every Rec served (list, get, decide, reply, score, link) also carries the words both surfaces print verbatim (recs/labels.go, 2026-09-14): `cost_label` (`$11/mo`, `$120/yr`, `$33,837 one-off`, `free`, `price not checked` for an unpriced buy/subscribe), `days_left` (Eastern days to `act_by`, negative once past; absent with no `act_by`) and `dates_label` (`act by Jan 15 (12d) · review Oct 1`, `act by Jan 15 — stale`, `back Oct 1` while deferred). Wire-only: never columns, ignored in a request body.
+
+### POST /api/v1/recs
+Body = Rec fields `{title, detail?, domain?, kind?, cost_cents?, cost_period?, effort?, confidence?, because?, expect?, act_by?, review_on?, goal_id?, thread_id?, source?, prev_id?, model?}` → 201 Rec. 400 on a bad enum, negative cost, non-`YYYY-MM-DD` date, unknown `prev_id`, or a `claude:thread:*` source whose model the hub cannot find (no run of that session ever named one — pass `model`). `lifectl rec add`.
+
+### GET /api/v1/recs/stats
+→ counts by status and outcome (`proposed` is what waits on the owner; `deferred` is parked and counts as neither), `accept_rate` (over decided), `hit_rate` (worked + ½ mixed, over judged), `due_for_review` + `unscored_due`, `monthly_usd`/`one_off_usd` = what the owner said **yes** to, with `kind=trade` kept OUT of `one_off_usd` and summed as `traded_usd` instead (money moved inside the owner's accounts is not spend), `by_domain[]`, `by_model[]` (`{model, total, accepted, declined, worked, failed, scored}`, most-filed first; `owner` for the owner's own, `unknown` for an agent rec with no model), `oldest_open`, `last_scored`. The answer to "is the agent worth listening to, and what is its advice costing me".
+
+### GET /api/v1/recs/{id}
+
+### GET /api/v1/recs/{id}/starter
+→ `{rec_id, goal_id, opener, context, relay, source_session}` — what an agent is told when the owner decides on this rec, so a surface can show what is about to be sent. `relay` is the message the session that FILED it gets (short: it wrote the argument — the verdict, the owner's note, and what it means for the work); `opener`+`context` is what a NEW session gets, `opener` being the first line (the owner's decision note when one was typed, since the first line is the session title and the board preview) and `context` the hub-composed block underneath — the rec's id, cost, goal, `because`, `expect`, dates (filed / act by / score on / supersedes), detail, where to find the record, then **what it points at as of now** (`recs.Related`, resolved by `server.recRelated`: one line per id in `links` or named in its text — calendar items with state, recs with decision, asks, proposals, sessions — the other open calendar items on the same goal in the next 60 days, the filing session's title/status/cadence and its last reply cut to ~900 chars), and the instruction to carry it out and `link` what it mints, or for a decline not to do it and to write the owner's reason down. The related block exists because a new session opened with the record alone spent its first minute rediscovering all of it. `relay` carries only the links' current state (the filing session knows its own argument). `source_session` is the filing session's id, empty when it is gone or the owner filed the rec. Composed in `recs.StarterFor`/`recs.RelayFor` and sent by `/decide` itself, so no surface writes its own. 404 on unknown id.
+
+### POST /api/v1/recs/{id}/decide
+Body `{status: proposed|deferred|accepted|declined|done|expired, until? (YYYY-MM-DD, required with deferred), by?=owner, note?, deliver?: source|new, attachments?: [blob refs], at?|in?|on?+at_time?}` → 200 Rec + `{delivered, session_id, delivery_error}`. `attachments` are `blob_ref`s from `POST /observations` (a screenshot, exactly as on a chat message) and ride IN the one message with the owner's note, on either road — never as a second message after it; 409 when given without `deliver`, and an unknown ref is reported in `delivery_error` (the decision stands). Since 2026-08-28 a `source` delivery is a **prompt** answering `rec:<id>` (`in_reply_to`) with the status as `outcome` (accepted|declined|deferred; other statuses travel as a "Marked <status>" line) and the owner's note as the text — so the session's chat shows the answer under "↩ Accepted · <rec>" like an answered ask card, from whichever surface it was decided on; the bracketed frame the agent reads (`recs.RelayHeader`) is rendered from the row when the session wakes. The time fields are `POST /prompts`' own; `new` ignores them and opens the session now. They stay as a primitive for callers, but since 2026-09-09 **no surface offers them on a rec** — the console's rec box and the phone's decision sheet have no time select, so an answer from either always goes now. 409 on unknown id, `superseded` (that is set by `prev_id`, never chosen), `deferred` without a future `until`, or deferring anything but a proposed/deferred rec. `deferred` also mints the check-in calendar item and links it (a calendar failure is reported in `delivery_error`, the deferral stands); `lifectl rec <id> defer YYYY-MM-DD [note]`. Reopening (`proposed`) a deferred rec drops its `review_on`. The note is the owner's reason, in their words — and, when `deliver` is set, the message an agent gets (one box, not two). `source` sends it to the session that filed the rec, `new` opens a fresh one with the full brief and links it into `links`; a `source` whose session is gone falls back to `new`, so `delivered` is what actually happened and `session_id` is the one to open. Omitting `deliver` records the decision and tells nobody (what `lifectl rec <id> accept` does).
+
+### POST /api/v1/recs/{id}/reply
+Body `{note?, by?=owner, deliver: source|new, attachments?: [blob refs], at?|in?|on?+at_time?}` → 200 Rec + `{delivered, session_id, delivery_error}`, same shape as `/decide` (and the same note on the time fields: a primitive no surface sends) (attachments too: a picture with no words is still a reply — the record line reads `(sent 1 attachment)`, the picture is in the chat) — and the same road: to `source` it is a prompt answering `rec:<id>` with no outcome (frame `recs.ReplyRelayHeader`), shown as "↩ Replied · <rec>". The fourth button, reply without deciding: the owner's note reaches a session exactly the way a decision's does — the filing session gets `recs.ReplyRelay`, a new one `recs.ReplyStarter` — and the rec is NOT decided: status, dates and `decision_note` are untouched, the line is appended to `detail` (`_owner replied on 2026-08-26: …_`) so it stays on the record. 409 on unknown id, an empty note with no attachment, or a missing `deliver` (a reply that reaches nobody is not a reply). Any status takes one.
+
+### POST /api/v1/recs/{id}/score
+Body `{outcome: worked|mixed|failed|unclear, by?, note?}` → 200 Rec. 409 on unknown id/outcome. Written at review time, not decision time.
+
+### POST /api/v1/recs/{id}/link
+Body `{refs: ["cal-1234", "ask-ab12", "act-…"]}` → 200 Rec. Appends, deduped: what accepting this rec actually minted.
+
+## Push (APNs)
+
+Two kinds reach the phone, payload key `kind`: `needs_you` (title "Needs you", time-sensitive — an ask, a proposal, a calendar nag) and `read` (title "To read", interruption-level `active` — a read card; the app shows no foreground banner for it). Body = the card's title, then the session's title on its own line. The hub sends them one at a time, each waiting out the seconds the one before takes to be read aloud (Announce Notifications).
+
+### POST /api/v1/devices
+Body `{token, device?, env?, build?}` — APNs device token (hex) from the app; `env` = the build's aps-environment (`development` for Xcode/LAN builds → sandbox host, `production` for ad-hoc OTA builds → production host; empty → hub's `apns_production` default); `build` = the app's CFBundleVersion. Upserted → 204. 503 if push is not configured on the hub. Side effect: reconciles "Install app build N" asks — every active one with N ≤ the newest reported build is closed (`done`, by `hub`); one the app closed optimistically (by `app`, on the Install tap) is reopened after 10 min if the phone still reports < N, with the reason prepended to its detail.
+
+### POST /api/v1/devices/test
+Sends a test push to every registered device, and the hub host says it (notify/speak.go) → 204, or 502 with the APNs error. Optional body `{only: "phone"|"mac"}` sends that half alone (400 on anything else).
+
+## App self-update
+
+### POST /api/v1/app/install
+Body `{lane?: "ota"|"lan"}` (default `ota`). `ota` runs `make ship` (ops/ota.sh: ad-hoc archive + export, published at `/ota/<token>/`); `lan` runs `ops/install-phone.sh` (Xcode install over the hub host's Wi-Fi). In tmux → 202 `{status, lane}`. 409 if already running.
+
+### GET /api/v1/app/install/status
+→ `{running, tail[], log_at?, ota?}` last lines of ops/logs/app-install.log; `log_at` is that file's mtime (RFC3339) — the log outlives its run, so a client must drop a tail older than the build it started or a finished run's lines read as live. `ota` = the newest published OTA build (`data/ota/current.json`: `{version, build, url, profile_expires, aps, built_at, commit}`) plus `head` = the build the next `make ship` would produce (repo commit count; absent if git fails) and `app_changed` = whether anything under `app/` differs from `commit` (committed or working-tree; absent if git fails). The app opens `itms-services://?action=download-manifest&url=<url with manifest.plist>` to install. `build` is often BEHIND the phone: the LAN lane (`ops/install-phone.sh`) installs without republishing, so the app must compare `build`, its own `CFBundleVersion` and `head` before calling anything installable — and `head > build` alone does NOT mean newer app code, since the build number counts every commit in the repo including docs; that is what `app_changed` is for. `/status` carries the same `ota` object plus `devices:[{token (prefix), env, build}]` (env = aps-environment the app reported: development/production).
+
+### GET /ota/{token}/{file}
+Over-the-air install bundle published by `ops/ota.sh` into `data/ota`
+(`install.html`, `manifest.plist`, `Life.ipa`). No bearer auth — iOS fetches
+the manifest and .ipa itself with no headers — so `{token}` must equal
+`data/ota/.token` (404 otherwise). Open `install.html` in Safari on the phone
+and tap Install; works from anywhere on the tailnet, no LAN pairing needed.

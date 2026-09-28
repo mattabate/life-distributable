@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The hub. A template: `ops/hub.sh install` renders __HOME__ ($HOME) and
+     __CLAUDE_BIN_DIR__ (the directory of hub.json claude_bin, so the CLI's
+     node is on launchd's PATH) into ~/Library/LaunchAgents — don't load by hand. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.life.hub</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/life/ops/bin/hub</string>
+    <string>-config</string>
+    <string>__HOME__/life/ops/hub.json</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__CLAUDE_BIN_DIR__:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key><string>__HOME__</string>
+    <key>LANG</key><string>en_US.UTF-8</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>__HOME__/life/ops/logs/hub.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/life/ops/logs/hub.log</string>
+</dict>
+</plist>

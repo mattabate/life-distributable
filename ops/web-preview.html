@@ -1,0 +1,198 @@
+<!doctype html>
+<!--
+  Console render harness — the console's "look at it" lane for states the live
+  hub does not happen to be in right now, and before setup, with no hub at all.
+
+  The problem it solves: `make web-shot` photographs the real hub,
+  so a page whose whole point is a pending approval, or a goal editor, can only
+  be seen by first creating a real proposal — which puts a fake card on your
+  board and pushes your phone. This page loads THIS tree's app.css and app.js
+  (?web=) but replaces `fetch` with a fixture table, so any view can be drawn
+  in any state without touching your data. Nothing here ships: it is not under
+  hub/internal/server/web and so is not embedded in the binary.
+
+  Usage: make web-preview ROUTE='#/calendar'   → ops/logs/web/preview.png
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>console preview (fixtures)</title>
+<script>
+  const params = new URLSearchParams(location.search);
+  // ?web= draws THIS tree's console (file://…/hub/internal/server/web); ?fixtures=
+  // answers any route FIX lacks from shared/fixtures (hub JSON, `make generate`).
+  const WEB = params.get('web') || '/static';
+  const FIXDIR = params.get('fixtures') || '';
+  const iso = m => new Date(Date.now() - m * 60000).toISOString();
+  const TRIP = 'plan-the-spring-trip-a1b2';
+  const TIDY = 'tidy-the-weekly-digest-b988';
+
+  // One fixture per endpoint the console calls. Prefix match, longest first.
+  const FIX = {
+    '/threads': [
+      { id: TRIP, title: 'Plan the spring trip', status: 'needs_you',
+        last_message: 'Proposed the cabin — waiting on you.', last_message_at: iso(9), cost_usd: 1.42 },
+      { id: TIDY, title: 'Tidy the weekly digest', status: 'running',
+        last_message: 'Working through the dates.', last_message_at: iso(1) },
+    ],
+    '/asks': [
+      // surface: 'web' = laptop work, so this list is the only place it is
+      // anyone's turn (the phone folds it away).
+      { id: 'ask-1a2b', title: 'Make a weather API key', state: 'active', created_at: iso(140), kind: 'access',
+        surface: 'web', thread_id: TIDY, thread_title: 'Tidy the weekly digest',
+        detail: '- Open the provider\'s console\n- Create a **free** key\n- Paste it when the session asks',
+        outcomes: [{ value: '', label: 'Reply' }, { value: 'done', label: 'Granted' }, { value: 'wont', label: "Won't grant" }] },
+      { id: 'ask-9c8d', title: 'Which weekend for the trip?', state: 'active', created_at: iso(40), kind: 'decision',
+        surface: 'any', thread_id: TRIP, thread_title: 'Plan the spring trip',
+        detail: 'The cabin is free the **first** and the **third** weekend of April.',
+        outcomes: [{ value: '', label: 'Reply' }, { value: 'done', label: 'Decided' }, { value: 'wont', label: 'Not deciding' }] },
+    ],
+    '/board': { surface: 'web', count: 3, working: 1, for_you: { [TRIP]: 2, [TIDY]: 1 },
+      reads: {}, installs: {}, first: { [TRIP]: 'act-0002' },
+      todo: { [TRIP]: 'Book the cabin: $480 for two nights' },
+      detail: { [TRIP]: 'Two nights, refundable until a week before.' },
+      headings: [{ key: 'your_turn', label: 'Your turn', count: '3 in 2 sessions · 1 working', n: 2 }],
+      section: { [TRIP]: 'your_turn', [TIDY]: 'your_turn' },
+      pills: { [TRIP]: [{ tone: 'needs', word: '2 for you' }], [TIDY]: [{ tone: 'running', word: 'running' }, { tone: 'needs', word: '1 for you' }] },
+      badges: { your_turn: 3, calendar: 1, recs: 1 } },
+    [`/threads/${TRIP}`]: { id: TRIP, title: 'Plan the spring trip', status: 'needs_you',
+      model: 'claude-fable-5-1', cost_usd: 1.42, tokens: 412000, last_message_at: iso(9) },
+    [`/threads/${TRIP}/messages`]: [
+      { id: 1, thread_id: TRIP, role: 'owner', author: 'owner', ts: iso(60), run_id: 'r1', text: 'Find us a cabin for a spring weekend, under $500.' },
+      { id: 2, thread_id: TRIP, role: 'claude', ts: iso(30), run_id: 'r1', text: 'Two fit. The lake cabin is $480 for two nights and refundable; booking it is a money step, so it is on your board.', cost_usd: 1.42 },
+    ],
+    [`/threads/${TRIP}/steps`]: [],
+    [`/threads/${TRIP}/events`]: [],
+    '/prompts': [],
+    '/recs': { recs: [
+      { id: 'rec-11aa22bb', status: 'proposed', title: 'Book before the spring rate ends on Friday', thread_id: TRIP, message_id: 2,
+        because: 'The same nights go up to **$560** after Friday.', domain: 'travel', kind: 'buy', cost_label: '$480', cost_cents: 48000,
+        model: 'claude-fable-5-1', created_at: iso(28),
+        outcomes: [{ value: 'accepted', label: 'Accept' }, { value: 'declined', label: 'Decline' }, { value: '', label: 'Reply' }] },
+    ] },
+    '/actions': [
+      { id: 'act-0001', created_at: iso(29), project: 'life', kind: 'money', gated: true,
+        state: 'dismissed', thread_id: TRIP,
+        outcomes: [{ value: 'approved', label: 'Approve' }, { value: 'denied', label: 'Deny' }, { value: '', label: 'Reply' }],
+        title: 'Book the lodge: $620', detail: 'Superseded by the cabin below.' },
+      { id: 'act-0002', created_at: iso(23), project: 'life', kind: 'money', gated: true,
+        state: 'proposed', thread_id: TRIP,
+        outcomes: [{ value: 'approved', label: 'Approve' }, { value: 'denied', label: 'Deny' }, { value: '', label: 'Reply' }],
+        title: 'Book the cabin: $480 for two nights',
+        detail: 'Two nights, refundable until a week before.\n\n- Sleeps four\n- 40 minutes from the trailhead\n- Paid by the card you named at setup',
+        exec_type: 'claude', exec_payload: { project: 'life', prompt: 'Book the lake cabin and add both nights to the calendar.' } },
+      { id: 'act-0003', created_at: iso(96), project: 'life', kind: 'commit', gated: true,
+        state: 'proposed', thread_id: TIDY,
+        outcomes: [{ value: 'approved', label: 'Approve' }, { value: 'denied', label: 'Deny' }, { value: '', label: 'Reply' }],
+        title: 'Fix the weekly digest: it counts Sunday twice',
+        detail: 'The week boundary is inclusive at both ends, so Sunday lands in two digests.',
+        exec_type: 'shell', exec_payload: { cmd: 'make check && ops/commit.sh -m "digest: half-open week" hub/internal/goals', dir: '~/life' } },
+    ],
+    '/goals': [
+      { id: 'get-stronger', title: 'Get stronger and eat better', status: 'active', horizon: 'year', cadence: 'weekly',
+        statement: 'Three workouts a week, protein at every meal.', note_count: 12, last_reviewed_at: iso(700), sources: 'fitness' },
+      { id: 'travel-more', title: 'Travel more', status: 'active', horizon: 'ongoing', cadence: 'monthly',
+        statement: 'One trip a season, planned early enough to be cheap.', note_count: 3, last_reviewed_at: iso(60), sources: '' },
+    ],
+    '/goals/get-stronger': { id: 'get-stronger', title: 'Get stronger and eat better', status: 'active',
+      horizon: 'year', cadence: 'weekly', note_count: 12, last_reviewed_at: iso(700), sources: 'fitness',
+      statement: 'Three workouts a week, protein at every meal. The weekly check-in reads the workout and meal logs.' },
+    '/goals/get-stronger/notes': [
+      { id: 9, goal_id: 'get-stronger', created_at: iso(30), author: 'owner', kind: 'decision',
+        text: 'Mornings, not evenings — start Monday.' },
+      { id: 8, goal_id: 'get-stronger', created_at: iso(400), author: 'claude:thread:abc', kind: 'evidence',
+        text: '**3 of 3** workouts last week; protein short on two dinners.' },
+    ],
+    '/calendar': {
+      from: '2026-08-23', to: '2026-10-22', today: '2026-08-23',
+      overdue: [{ id: 'cal-0001', ref: 'cal:cal-0001', day: '2026-08-21', kind: 'owner', state: 'fired', title: 'Renew the passport', detail: 'Form and photo are in the drawer', overdue: true }],
+      days: [
+        { day: '2026-08-25', entries: [{ id: 'cal-0002', ref: 'cal:cal-0002', day: '2026-08-25', at: '07:00', kind: 'owner', state: 'scheduled', title: 'Workout: legs', detail: '45 minutes.', goal_id: 'get-stronger' }] },
+        { day: '2026-08-27', entries: [{ id: 'cal-0003', ref: 'cal:cal-0003', day: '2026-08-27', kind: 'agent', state: 'scheduled', title: 'Re-check the digest dates', detail: 'Confirm Sunday is counted once.', thread_id: TIDY }] },
+      ],
+      anytime: [{ id: 'ask:ask-1a2b', day: '', kind: 'ask', state: 'scheduled', title: 'Make a weather API key', ask_id: 'ask-1a2b', thread_id: TIDY }],
+    },
+    '/status': { ok: true, jobs: 2, pending_actions: 2, quiet: true },
+  };
+
+  // /spend/summary → shared/fixtures/spend_summary.json
+  function shared(clean) {
+    if (!FIXDIR) return undefined;
+    try {
+      const x = new XMLHttpRequest();
+      x.open('GET', `${FIXDIR}/${clean.replace(/^\//, '').split('/').join('_')}.json`, false);
+      x.send();
+      if (x.responseText) return JSON.parse(x.responseText);
+    } catch (e) { /* no fixture for this route */ }
+    return undefined;
+  }
+
+  function fixture(path) {
+    const clean = path.split('?')[0];
+    if (FIX[clean]) return FIX[clean];
+    const s = shared(clean);
+    if (s !== undefined) return s;
+    const keys = Object.keys(FIX).sort((a, b) => b.length - a.length);
+    for (const k of keys) if (clean === k || clean.startsWith(k + '/')) return FIX[k];
+    for (const k of keys) if (clean.startsWith(k)) return FIX[k];
+    return [];
+  }
+
+  // Every request is answered locally: the preview can never write to the hub.
+  window.fetch = async (url, opts = {}) => {
+    const p = String(url).replace(/^.*\/api\/v1/, '');
+    const body = (opts.method && opts.method !== 'GET') ? { ok: true } : fixture(p);
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  // A thrown render is otherwise invisible in a screenshot ("Couldn't load
+  // sessions" says nothing about where): print it in the corner, and in the
+  // DOM for `--dump-dom`.
+  const showErr = e => {
+    const box = document.getElementById('preview-err') || document.body.appendChild(Object.assign(document.createElement('pre'), { id: 'preview-err', style: 'position:fixed;bottom:0;left:0;right:0;margin:0;padding:8px;background:#fee;color:#900;font:12px monospace;white-space:pre-wrap;z-index:99' }));
+    box.textContent += (e.reason ? (e.reason.stack || e.reason.message || e.reason) : (e.error && e.error.stack) || e.message) + '\n';
+  };
+  window.addEventListener('error', showErr);
+  window.addEventListener('unhandledrejection', showErr);
+  const cerr = console.error.bind(console);
+  console.error = (...a) => { cerr(...a); showErr({ message: a.map(x => (x && x.stack) || String(x)).join(' ') }); };
+  if (!location.hash) location.hash = '#/sessions';
+  // &open=1 — expand every <details> before the screenshot, so a collapsed
+  // editor or activity block can be looked at too.
+  if (params.get('open')) setInterval(() => document.querySelectorAll('details').forEach(d => { d.open = true; }), 250);
+  document.write(`<link rel="stylesheet" href="${WEB}/app.css">`);
+  document.write(`<link rel="stylesheet" href="${WEB}/skin.css">`);
+  document.write(`<scr` + `ipt src="${WEB}/skin.js"></scr` + `ipt>`);
+</script>
+</head>
+<body>
+<nav id="nav">
+  <div class="brand">life <span id="build">preview</span></div>
+  <div class="tabs" id="navtabs">
+    <a href="#/sessions" data-tab="sessions">Sessions <span class="badge" id="badge-sessions"></span></a>
+    <a href="#/recs" data-tab="recs">Recs <span class="badge" id="badge-recs"></span></a>
+    <a href="#/calendar" data-tab="calendar">Calendar <span class="badge" id="badge-calendar"></span></a>
+    <a href="#/spend" data-tab="spend">Spend</a>
+    <a href="#/goals" data-tab="goals">Goals</a>
+    <a href="#/sources" data-tab="sources">Sources</a>
+  </div>
+  <div class="more">
+    <button class="navmore" id="navmore" onclick="navMoreToggle(event)" hidden><span class="label">More</span><span class="badge" id="badge-more"></span><span class="caret">▾</span></button>
+    <div class="navmenu" id="navmenu" hidden></div>
+  </div>
+  <button class="navnew" id="navnew" onclick="startSessionHere()">+ New<span class="long"> session</span></button>
+  <div id="conn" class="conn"></div>
+</nav>
+<main id="view"></main>
+<div id="toast"></div>
+<!-- Same files, same order as hub/internal/server/web/index.html. -->
+<script>
+  // Drifting from index.html is this page's own failure mode: a script
+  // missing here reads "Couldn't load sessions" for every chat.
+  for (const f of ['ui.js', 'tip.js', 'places.js', 'composer.js', 'views/asks.js', 'views/threads.js',
+                   'views/calgrid.js', 'views/calendar.js', 'views/spend.js', 'views/goals.js', 'views/recs.js',
+                   'views/sources.js', 'views/runs.js', 'app.js']) {
+    document.write(`<scr` + `ipt src="${WEB}/${f}"></scr` + `ipt>`);
+  }
+</script>
+</body>
+</html>

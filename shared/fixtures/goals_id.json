@@ -1,0 +1,19 @@
+{
+  "id": "get-smarter",
+  "created_at": "2026-09-28T06:55:28.576438Z",
+  "updated_at": "2026-09-28T06:55:28.576766Z",
+  "title": "Get smarter",
+  "statement": "Learn a thing a week",
+  "horizon": "year",
+  "cadence": "weekly",
+  "status": "active",
+  "sources": "learn",
+  "last_reviewed_at": "2026-09-28T06:55:28.577168Z",
+  "note_count": 1,
+  "digest": "Two tracks open.",
+  "digest_at": "2026-09-28T06:55:28.576766Z",
+  "emblem": {
+    "symbol": "learn",
+    "hue": 195
+  }
+}

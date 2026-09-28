@@ -1,0 +1,7 @@
+# Console: the Sessions list only — one picture of the cards, for a change to
+# what a session card prints (2026-08-28).
+#   make browse FLOW=ops/flows/sessions.txt
+goto #/sessions
+eval window.__fullHeight=function(){return 1000}
+wait 1500
+shot sessions-cards

@@ -1,0 +1,16 @@
+# Personal data and machine config — written at setup, never committed.
+data/
+ops/secrets/
+ops/hub.json
+ops/app.env
+ops/logs/
+ops/bin/
+projects/
+app/local.xcconfig
+
+# Generated.
+app/build/
+app/Life.xcodeproj/
+*.xcresult
+__pycache__/
+.DS_Store

@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "thread_id": "split-my-brokerage-cash-sensibly-00000001",
+    "run_id": "r1",
+    "ts": "2026-09-28T06:55:28.576273Z",
+    "kind": "tool_use",
+    "title": "Bash",
+    "body": "ls",
+    "summary": "listed"
+  },
+  {
+    "id": 2,
+    "thread_id": "split-my-brokerage-cash-sensibly-00000001",
+    "run_id": "r1",
+    "ts": "2026-09-28T06:55:28.576273Z",
+    "kind": "text",
+    "title": "",
+    "body": "Looking at the cash",
+    "summary": ""
+  }
+]

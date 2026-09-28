@@ -1,0 +1,35 @@
+[
+  {
+    "id": "p-00000001",
+    "created_at": "2026-09-28T06:55:28.594777Z",
+    "author": "hub",
+    "target": "new-or:split-my-brokerage-cash-sensibly-00000002",
+    "not_before": "2026-09-29T14:00:00Z",
+    "in_reply_to": "cal:cal-00000003",
+    "replies": [
+      {
+        "ref": "cal:cal-00000003"
+      }
+    ],
+    "text": "Re-check cash",
+    "title": "Re-check cash",
+    "state": "queued"
+  },
+  {
+    "id": "p-00000004",
+    "created_at": "2026-09-28T06:55:28.590413Z",
+    "author": "owner",
+    "target": "split-my-brokerage-cash-sensibly-00000002",
+    "not_before": "2026-10-01T13:00:00Z",
+    "in_reply_to": "ask:ask-00000005",
+    "outcome": "done",
+    "replies": [
+      {
+        "ref": "ask:ask-00000005",
+        "outcome": "done"
+      }
+    ],
+    "text": "Check again",
+    "state": "queued"
+  }
+]

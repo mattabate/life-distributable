@@ -1,0 +1,30 @@
+[
+  {
+    "message_id": 1,
+    "run_id": "20260928-025528-00000001",
+    "tools": 0,
+    "thoughts": 0,
+    "steps": 0,
+    "first_id": 0,
+    "last_id": 0,
+    "segments": [
+      {
+        "ref": "ask:ask-00000002",
+        "tools": 0,
+        "thoughts": 0,
+        "steps": 0,
+        "first_id": 0,
+        "last_id": 0
+      }
+    ]
+  },
+  {
+    "message_id": 3,
+    "run_id": "20260928-025528-00000001",
+    "tools": 0,
+    "thoughts": 0,
+    "steps": 0,
+    "first_id": 0,
+    "last_id": 0
+  }
+]

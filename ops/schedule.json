@@ -1,0 +1,52 @@
+{
+  "default_tools": [],
+  "prompt_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Edit",
+    "Write",
+    "WebSearch",
+    "WebFetch",
+    "Bash(lifectl:*)",
+    "Bash(git status:*)",
+    "Bash(git log:*)",
+    "Bash(git diff:*)",
+    "Bash(git add:*)",
+    "Bash(git commit:*)",
+    "Bash(ops/commit.sh:*)",
+    "Bash(bash ops/merge.sh:*)",
+    "Bash(ops/browse.js:*)",
+    "Bash(ops/web-smoke.sh:*)",
+    "Bash(make:*)",
+    "Bash(ops/install-phone.sh:*)",
+    "Bash(ops/hub.sh:*)",
+    "Bash(go:*)",
+    "Bash(gofmt:*)",
+    "Bash(npm install:*)",
+    "Bash(npm run:*)",
+    "Bash(xcodegen:*)",
+    "Bash(xcodebuild:*)",
+    "Bash(xcrun:*)",
+    "Bash(ls:*)",
+    "Bash(cat:*)",
+    "Bash(head:*)",
+    "Bash(tail:*)",
+    "Bash(grep:*)",
+    "Bash(find:*)",
+    "Bash(wc:*)",
+    "Bash(date:*)",
+    "Bash(ops/db.sh:*)",
+    "Bash(ops/py.sh:*)"
+  ],
+  "jobs": [
+    {
+      "name": "ask-verifier",
+      "project": "life",
+      "when": "every@1h",
+      "gate": "asks",
+      "timeout": "10m",
+      "prompt": "Ask verifier. The owner has open asks (things agents are waiting on them for). Your only job: find the ones they have evidently already done and close them with evidence, so they leave the owner's board without the owner having to say so. Steps: (1) `lifectl asks` — consider only asks whose check_hint is non-empty; skip decisions/questions (only the owner or the thread can close those). (2) For each, check the hint with read-only tools (lifectl obs/threads/status, `lifectl api GET /api/v1/…`, git log, ls) — e.g. an observation that arrived, an install that succeeded (ops/logs/app-install.log), a file that now exists. (3) Evidence is clear → `lifectl ask <id> done \"verifier: <what you saw>\"` (that posts into the thread so its agent continues). Ambiguous or no evidence → leave it alone; never guess, never dismiss. (4) Your final message must be ONLY the JSON envelope described above — no prose, no markdown, no backticks. Put one line per ask you closed (or 'nothing verifiable') in `summary`, and leave `findings` and `needs_you` empty: this job never raises asks of its own."
+    }
+  ]
+}

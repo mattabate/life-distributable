@@ -1,0 +1,23 @@
+{
+  "id": 1,
+  "job": "sweep",
+  "started_at": "2026-09-28T05:55:28.576273Z",
+  "finished_at": "2026-09-28T06:05:28.576273Z",
+  "ok": true,
+  "summary": "all quiet",
+  "output": "{\"is_error\":false,\"result\":\"Sweep done.\\n\\n{\\\"summary\\\":\\\"all quiet\\\",\\\"findings\\\":[{\\\"kind\\\":\\\"commit\\\",\\\"title\\\":\\\"commit x\\\",\\\"detail\\\":\\\"why\\\"}],\\\"needs_you\\\":[\\\"renew passport\\\"]}\",\"total_cost_usd\":0.5}",
+  "cost_usd": 0.5,
+  "text": "Sweep done.",
+  "findings": [
+    {
+      "kind": "commit",
+      "title": "commit x",
+      "detail": "why",
+      "exec_type": "",
+      "exec_payload": null
+    }
+  ],
+  "needs_you": [
+    "renew passport"
+  ]
+}

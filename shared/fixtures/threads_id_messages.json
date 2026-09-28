@@ -1,0 +1,49 @@
+[
+  {
+    "id": 1,
+    "thread_id": "split-my-brokerage-cash-sensibly-00000001",
+    "ts": "2026-09-28T06:55:28.578285Z",
+    "role": "owner",
+    "kind": "message",
+    "text": "Split my brokerage cash sensibly",
+    "cost_usd": 0,
+    "tokens": 0,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_cache_read": 0,
+    "tokens_cache_write": 0,
+    "attachments": [],
+    "run_id": "20260928-025528-00000002",
+    "queued": false,
+    "steered": false,
+    "author": "owner"
+  },
+  {
+    "id": 3,
+    "thread_id": "split-my-brokerage-cash-sensibly-00000001",
+    "ts": "2026-09-28T06:55:28.598049Z",
+    "role": "owner",
+    "kind": "decision",
+    "text": "Booked for Tuesday",
+    "cost_usd": 0,
+    "tokens": 0,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "tokens_cache_read": 0,
+    "tokens_cache_write": 0,
+    "attachments": [],
+    "run_id": "20260928-025528-00000002",
+    "queued": false,
+    "steered": true,
+    "in_reply_to": "cal:cal-00000003",
+    "outcome": "done",
+    "replies": [
+      {
+        "ref": "cal:cal-00000003",
+        "outcome": "done",
+        "label": "Did it"
+      }
+    ],
+    "author": "owner"
+  }
+]

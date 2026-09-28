@@ -1,0 +1,44 @@
+[
+  {
+    "id": 1,
+    "source": "health",
+    "kind": "steps",
+    "ts": "2026-09-28T06:55:28.576273Z",
+    "tz": "America/New_York",
+    "payload": {
+      "count": 8000,
+      "day": "2026-09-28",
+      "key": "s0"
+    },
+    "ingested_at": "2026-09-28T06:55:28.602414Z",
+    "schema_version": 1
+  },
+  {
+    "id": 2,
+    "source": "health",
+    "kind": "steps",
+    "ts": "2026-09-27T06:55:28.576273Z",
+    "tz": "America/New_York",
+    "payload": {
+      "count": 8500,
+      "day": "2026-09-27",
+      "key": "s1"
+    },
+    "ingested_at": "2026-09-28T06:55:28.602711Z",
+    "schema_version": 1
+  },
+  {
+    "id": 3,
+    "source": "health",
+    "kind": "steps",
+    "ts": "2026-09-26T06:55:28.576273Z",
+    "tz": "America/New_York",
+    "payload": {
+      "count": 9000,
+      "day": "2026-09-26",
+      "key": "s2"
+    },
+    "ingested_at": "2026-09-28T06:55:28.602974Z",
+    "schema_version": 1
+  }
+]

@@ -1,0 +1,440 @@
+<!doctype html>
+<!--
+  Console behaviour harness — the one thing `make web-smoke` could not do.
+
+  web-smoke proves each route RENDERS; it cannot prove a button WORKS, and the
+  two failures look identical on a screenshot. The Reply button on an ask card
+  drew perfectly for a week while doing nothing at all: its title argument was interpolated into
+  the onclick attribute, so a title containing a quote ended the attribute and
+  truncated the handler into a syntax error the browser swallowed.
+
+  So this page loads the real app.js off the running hub (unauthenticated
+  /static/, fetch stubbed — no request touches your data), builds a card from
+  a deliberately hostile title, clicks the button, and prints PASS/FAIL lines
+  that ops/web-smoke.sh greps. Every case here is a control that must still do
+  its job, not just appear.
+
+  That button is now Respond, and it does
+  more than fill a box: it opens the session AT the card with the ordinary
+  composer armed (a separate dialog was too thin to send files the normal
+  way), and Send
+  posts ONE prompt carrying the outcome, the words, which session hears them
+  and when. So the stub is a tiny router (an ask to read back, a prompt POST
+  to capture) and the last checks read the body that would have gone to the
+  hub.
+-->
+<html lang="en">
+<head><meta charset="utf-8"><title>console check</title>
+<script>
+  const HUB = new URLSearchParams(location.search).get('hub') || '';
+  const POSTED = [];
+  // `outcomes` is the hub's per-kind answer vocabulary (store/close.go
+  // AskOutcomes), default first — the console draws whatever it is sent.
+  // Linked to reply 5 by the hub (message_id): the card IS that turn's reply,
+  // drawn under its "turn ended" line (2026-09-13).
+  const ASK = { id: 'ask-t3st', thread_id: 't-t3st', thread_title: 'Exports', state: 'open', kind: 'decision', message_id: 5,
+                outcomes: [{ value: '', label: 'Reply' }, { value: 'done', label: 'Decided' }, { value: 'wont', label: 'Not deciding' }],
+                detail: 'line one\n- a bullet', created_at: new Date().toISOString() };
+  const DECIDED = [];
+  // Uploads (a pasted screenshot's observation payload) and plain chat
+  // messages: a rec's picture must be in the DECISION, never a message after it.
+  const UPLOADED = [], SENT = [];
+  // Mutable so the last cases can stop and restart the session under the
+  // chat: status, the extra messages of a run in flight, and its steps.
+  const THREAD = { id: 't-t3st', title: 'Exports', status: 'done' };
+  let EXTRA = [], EVENTS = [];
+  const REC = { id: 'rec-t3st', thread_id: 't-t3st', source: 'claude:thread:t-t3st', status: 'proposed', domain: 'money', kind: 'switch',
+                title: 'Move the "idle" cash (it\'s <b>$5k</b>)', because: 'yield gap', cost_cents: 0, effort: 'small', confidence: 70,
+                model: 'claude-fable-5', message_id: 6, created_at: new Date(Date.now() - 90000).toISOString(), updated_at: new Date().toISOString() };
+  // A SECOND open rec, on the list only: it is what makes "no box chosen"
+  // ambiguous. With one rec on the page a stray paste has exactly one place
+  // to go and the composer sends it there on purpose (pasteTarget), so the
+  // wrong-rec case only exists when two boxes are drawn.
+  const REC2 = Object.assign({}, REC, { id: 'rec-t3st-two', title: 'Cancel the second thing' });
+  window.fetch = async (url, opts = {}) => {
+    const j = b => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    if (url.includes('/asks/ask-t3st')) return j(ASK);
+    // The session Respond opens: a thread row, and its messages carrying the ask.
+    if (/\/threads\/t-t3st(\?|$)/.test(url)) return j(THREAD);
+    // Counts come from the hub, split at each starter exactly as it does —
+    // so the console can be checked for drawing what it was TOLD, never what
+    // it happens to have fetched (2026-08-28).
+    if (url.includes('/threads/t-t3st/steps')) {
+      const starters = EXTRA.filter(m => m.run_id).sort((a, b) => +new Date(a.ts) - +new Date(b.ts));
+      return j(starters.map((m, i) => {
+        const from = i === 0 ? -Infinity : +new Date(m.ts);
+        const to = i + 1 < starters.length ? +new Date(starters[i + 1].ts) : Infinity;
+        const evs = EVENTS.filter(e => { const t = +new Date(e.ts); return t >= from && t < to; });
+        return { message_id: m.id, run_id: m.run_id, tools: evs.filter(e => e.kind === 'tool_use').length,
+                 thoughts: evs.filter(e => e.kind === 'thinking').length, steps: evs.length,
+                 first_id: evs.length ? evs[0].id : 0, last_id: evs.length ? evs[evs.length - 1].id : 0 };
+      }));
+    }
+    // Events answer like the hub: since=0 = the NEWEST `limit`, since=N =
+    // the oldest after N, before=N = the page before N, ids= = exactly those.
+    // A window that moves is the whole point of the tick-down checks below.
+    if (url.includes('/threads/t-t3st/events')) {
+      const q = new URL(url, location.href).searchParams;
+      if (q.get('ids')) { const want = new Set(q.get('ids').split(',').map(Number)); return j(EVENTS.filter(e => want.has(e.id))); }
+      const since = +q.get('since') || 0, before = +q.get('before') || Infinity, limit = +q.get('limit') || 500;
+      const evs = EVENTS.filter(e => e.id > since && e.id < before).sort((a, b) => a.id - b.id);
+      return j(since > 0 ? evs.slice(0, limit) : evs.slice(-limit));
+    }
+    if (url.includes('/asks?') && url.includes('thread=t-t3st')) return j([ASK]);
+    // An earlier answer of the owner's, with the pick it carried: the chat
+    // must SHOW it.
+    if (url.includes('/threads/t-t3st/messages')) return j([
+      // The card is the reply (2026-09-09): a turn that raised a read card
+      // ends with NO text, and the chat draws that as one "turn ended" line.
+      { id: 5, thread_id: 't-t3st', ts: new Date(Date.now() - 120000).toISOString(), role: 'claude', kind: 'read', text: '', cost_usd: 1.44, tokens: 849000, attachments: [] },
+      // A row that still carries text (before 2026-09-13, when every reply
+      // became a card): no white bubble — the same end line, text folded.
+      { id: 6, thread_id: 't-t3st', ts: new Date(Date.now() - 60000).toISOString(), role: 'claude', kind: 'message', text: 'Filed a rec.', attachments: [] },
+      { id: 7, thread_id: 't-t3st', ts: new Date().toISOString(), role: 'owner', kind: 'decision',
+        text: 'the 4th', attachments: [], in_reply_to: 'ask:ask-t3st', outcome: 'done' },
+      // A decision made on the Recs page: the chat must show it as
+      // "↩ Accepted · <rec>" over the owner's note.
+      { id: 8, thread_id: 't-t3st', ts: new Date().toISOString(), role: 'owner', kind: 'decision',
+        text: 'go ahead', attachments: [], in_reply_to: 'rec:rec-t3st', outcome: 'accepted' }].concat(EXTRA));
+    // The rec this session filed, placed under reply 6 by the hub.
+    if (url.includes('/recs?') && url.includes('thread=t-t3st')) return j({ recs: [REC] });
+    if (url.includes('/recs/rec-t3st/decide') && (opts.method || 'GET') === 'POST') {
+      DECIDED.push(JSON.parse(opts.body));
+      return j({ id: 'rec-t3st', status: 'accepted', delivered: 'source', session_id: 't-t3st' });
+    }
+    // A pasted screenshot: the console uploads it as an observation first and
+    // sends the blob ref with the decision (2026-08-28).
+    if (url.includes('/observations') && (opts.method || 'GET') === 'POST') {
+      UPLOADED.push(opts.body instanceof FormData ? JSON.parse(opts.body.get('payload') || '{}') : {});
+      return j({ id: 'o-t3st', blob_ref: 'sha256/ab/abc.png' });
+    }
+    if (url.includes('/threads/t-t3st/messages') && (opts.method || 'GET') === 'POST') {
+      SENT.push(JSON.parse(opts.body));
+      return j({ id: 't-t3st' });
+    }
+    if (url.includes('/recs?') && !url.includes('thread=')) return j({ recs: [REC, REC2] });
+    if (url.includes('/prompts') && (opts.method || 'GET') === 'POST') {
+      POSTED.push(JSON.parse(opts.body));
+      return j({ id: 'p-t3st', state: 'queued' });
+    }
+    return j([]);
+  };
+  if (!location.hash) location.hash = '#/sessions';
+</script></head>
+<body>
+<nav id="nav"><div class="brand">life <span id="build">check</span></div>
+  <a href="#/sessions" data-tab="sessions">Sessions <span class="badge" id="badge-sessions"></span></a></nav>
+<main id="view"></main>
+<div id="toast"></div>
+<div id="out"></div>
+<!-- Same files, same order as hub/internal/server/web/index.html. -->
+<script>
+  // Every view, as index.html loads them. Drifting from that list is its own failure mode: composer.js missing made
+  // every recs assertion read "composerHTML is not defined", and views/setup.js
+  // stayed here for a file deleted with the console's Settings tab (08-28).
+  for (const f of ['ui.js', 'places.js', 'composer.js', 'views/asks.js', 'views/threads.js',
+                   'views/calgrid.js', 'views/calendar.js',
+                   'views/money.js', 'views/engagement.js', 'views/people.js', 'views/goals.js',
+                   'views/recs.js', 'views/sources.js', 'views/documents.js',
+                   'views/runs.js', 'app.js']) {
+    document.write(`<scr` + `ipt src="${HUB}/static/${f}"></scr` + `ipt>`);
+  }
+</script>
+<script>
+// A title with the three characters that break attribute quoting — a double
+// quote, an apostrophe, and a tag — plus the em dash real ask titles use.
+const TITLE = 'Amazon data export — the "6 steps" (one\'s easy to miss) & <b>x</b>';
+const lines = [];
+const check = (name, ok, got) => lines.push((ok ? 'PASS' : 'FAIL') + ' ' + name + (ok ? '' : ' — got: ' + got));
+
+const settle = () => new Promise(r => setTimeout(r, 60));
+
+setTimeout(async () => {
+  ASK.title = TITLE;
+  const host = document.getElementById('out');
+  try {
+    // The chat bubble: Respond + Dismiss.
+    host.innerHTML = askHTML(ASK);
+  } catch (e) {
+    check('askHTML renders', false, e.message);
+  }
+  const btn = host.querySelector('button.primary');
+  check('respond button exists', !!btn && btn.textContent === 'Respond', host.innerHTML.slice(0, 160));
+  // A truncated handler leaves the tail of the title parsed as bogus
+  // attributes; a well-formed card has exactly the ones we wrote. Respond
+  // takes only the id, so nothing free-form is in the attribute at all.
+  const attrs = btn ? [...btn.attributes].map(a => a.name).sort().join(',') : '';
+  check('no stray attributes', attrs === 'class,onclick', attrs);
+  const dismiss = [...host.querySelectorAll('button')].find(b => b.textContent === 'Dismiss');
+  check('dismiss button survives', !!dismiss && /resolveAsk\('/.test(dismiss.getAttribute('onclick') || ''), String(dismiss && dismiss.outerHTML));
+
+  if (btn) {
+    try { btn.click(); } catch (e) { check('click does not throw', false, e.message); }
+    // From the stack, Respond re-reads the ask and opens its session AT the
+    // card, with the composer armed; the router draws that asynchronously.
+    // Every id below is the SHARED composer's (composer.js, 08-29): the chat's
+    // box is keyed 'chat', so cdom() makes it `c-chat` and its parts hang off
+    // that — `-re` (the card being answered), `-draft`, `-chips`, `-target`,
+    // `-when`. The old free-standing #composer/#draft/#reply-strip ids are
+    // gone, and asserting them meant every check below quietly skipped.
+    const stripOf = () => document.querySelector('#c-chat-re .reply-strip');
+    for (let i = 0; i < 40 && !stripOf(); i++) await settle();
+    const strip = stripOf();
+    check('respond opens the session at the card', location.hash === '#/sessions/t-t3st/ask-t3st', location.hash);
+    check('composer is armed with the card', !!strip, String(document.getElementById('view').innerHTML).replace(/\s+/g, ' ').slice(0, 400));
+    check('no dialog', !document.getElementById('respond'), 'a dialog#respond exists');
+    if (strip) {
+      // The whole point of naming the card: you must see WHICH one you are
+      // answering, hostile punctuation and all.
+      check('strip quotes the ask', strip.textContent.includes('Amazon data export') && strip.textContent.includes('"6 steps"'),
+        strip.textContent.slice(0, 160));
+      // The form IS the ordinary composer: files, send-to and when are its
+      // own — but an armed card folds the route away (responding
+      // always means now + this session).
+      const comp = document.getElementById('c-chat');
+      check('composer keeps Attach', !![...comp.querySelectorAll('button')].find(b => b.textContent === 'Attach'), comp.innerHTML.slice(0, 200));
+      check('composer keeps send-to / when', !!document.getElementById('c-chat-target') && !!document.getElementById('c-chat-when'), comp.innerHTML.slice(0, 200));
+      check('the route is folded while the card is armed', (document.getElementById('c-chat-route') || {}).style?.display === 'none',
+        String((document.getElementById('c-chat-route') || {}).outerHTML).slice(0, 200));
+      // The owner's earlier answer shows what it answered and how, in the card's own word.
+      const re = document.querySelector('#msgs .msg.owner .re');
+      check('a sent answer shows its pick and card', !!re && re.textContent.includes('Decided') && re.textContent.includes('Amazon data export'),
+        String(re ? re.textContent : document.getElementById('msgs')?.innerHTML).slice(0, 200));
+      // The chips are the hub's words for THIS kind, its default lit.
+      check('strip offers the hub vocabulary', /primary[^>]*>Reply/.test(strip.innerHTML) && strip.innerHTML.includes('>Decided<') && strip.innerHTML.includes('>Not deciding<'),
+        strip.innerHTML.slice(0, 300));
+      // The card being answered is the box's HEADING now, so the chips sit UNDER it with the words they
+      // belong to — above it they pushed the card off the top of the box.
+      const chips = document.getElementById('c-chat-chips'), stripHost = document.getElementById('c-chat-re');
+      check('the card heads the box, its pictures under it', !!chips && !!stripHost && !!(stripHost.compareDocumentPosition(chips) & Node.DOCUMENT_POSITION_FOLLOWING),
+        comp.innerHTML.replace(/\s+/g, ' ').slice(0, 200));
+      // A pick and some words, then send — the one act, as one POST. The
+      // when-pick is set UNDERNEATH the fold on purpose: an armed answer
+      // must ignore it (now + this session, always).
+      composerPickOutcome('chat', 'done');
+      composerWhen('chat', 'tomorrow');
+      for (let i = 0; i < 40 && !/primary[^>]*>Decided/.test((stripOf() || {}).innerHTML || ''); i++) await settle();
+      check('picks survive the redraw', /primary[^>]*>Decided/.test((stripOf() || {}).innerHTML || ''), String((stripOf() || {}).innerHTML).slice(0, 200));
+      const draft = document.getElementById('c-chat-draft');
+      check('composer draft box exists', !!draft, comp.innerHTML.slice(0, 200));
+      if (draft) { draft.value = 'did it — the export is downloading'; draft.dispatchEvent(new Event('input')); }
+      await composerSend('chat');
+      await settle();
+      const p = POSTED[0];
+      check('one prompt posted', POSTED.length === 1, String(POSTED.length));
+      check('prompt references the card', !!p && p.in_reply_to === 'ask:ask-t3st', JSON.stringify(p));
+      check('prompt carries the outcome', !!p && p.outcome === 'done', JSON.stringify(p));
+      check('prompt carries the typed words', !!p && p.text === 'did it — the export is downloading', JSON.stringify(p));
+      check('prompt targets the session, or a fresh one', !!p && p.target === 'new-or:t-t3st', JSON.stringify(p));
+      check('an armed answer is pinned to now', !!p && !p.on && !p.at_time && !p.in, JSON.stringify(p));
+      for (let i = 0; i < 40 && stripOf(); i++) await settle();
+      check('composer disarms on send', !chatState.send.re && !stripOf(), JSON.stringify(chatState.send));
+
+      // A rec is a cell of the chat too, under the reply
+      // that filed it, with the Recs page's four answers on it.
+      const msgs = document.getElementById('msgs');
+      const card = document.getElementById('ask-card-rec-t3st');
+      check('rec card is drawn in the chat', !!card && card.textContent.includes('Move the "idle" cash'), String(msgs && msgs.innerHTML).replace(/\s+/g, ' ').slice(0, 300));
+      const end = msgs && msgs.querySelector('.msg.end.read .end-line');
+      // (Reply 6 keeps its old words behind a closed fold — that bubble is
+      // inside <details>, which is the point; the empty row has none at all.)
+      check('an empty reply is one "turn ended" line, not a bubble', !!end && end.textContent.startsWith('turn ended') && end.textContent.includes('$1.44') && !document.getElementById('msg-5').querySelector('.bubble'),
+        String(end && end.outerHTML));
+      const reply6 = document.getElementById('msg-6');
+      // There is no white cell (2026-09-13): a reply row with text is still
+      // the end line, its words behind a closed <details>, never an open bubble.
+      const fold = reply6 && reply6.querySelector('details.old-reply');
+      check('a reply with text draws no white bubble — end line, text folded', !!reply6 && reply6.classList.contains('end') && !!fold && !fold.open
+        && fold.querySelector('summary .end-line') && fold.textContent.includes('Filed a rec.') && !msgs.querySelector('.msg.claude:not(.end)'),
+        String(reply6 && reply6.outerHTML).replace(/\s+/g, ' ').slice(0, 300));
+      // Cards follow their message as siblings (askCards in msgHTML), so the
+      // rec's card belongs to reply 6 — not to the owner's answer at the end. Its
+      // immediate sibling is not the message: an ask hosted on the same reply
+      // is drawn first (asks, then approvals, then recs), so what this asserts
+      // is the nearest .msg above it.
+      const hostMsg = el => { let p = el.previousElementSibling; while (p && !p.classList.contains('msg')) p = p.previousElementSibling; return p; };
+      check('rec card sits under the reply that filed it', !!card && !!reply6 && hostMsg(card) === reply6,
+        String(card && card.previousElementSibling && card.previousElementSibling.className));
+      // The card a turn ended on is drawn right under that turn's end line —
+      // never lost to a tool-chain block with nothing in it (a count of "1 to
+      // read" with no cell under it).
+      const askCard = document.getElementById('ask-card-ask-t3st');
+      check('the reply card is drawn under its "turn ended" line', !!askCard && hostMsg(askCard) === document.getElementById('msg-5'),
+        String(askCard && hostMsg(askCard) && hostMsg(askCard).outerHTML).replace(/\s+/g, ' ').slice(0, 200));
+      const recRe = [...document.querySelectorAll('#msgs .msg.owner .re')].find(e => e.textContent.includes('Accepted'));
+      check('a Recs-page decision shows in the chat', !!recRe && recRe.textContent.includes('Move the "idle" cash'), String(recRe && recRe.textContent));
+      const accept = card && [...card.querySelectorAll('button')].find(b => b.textContent === 'Accept');
+      // Later left both surfaces with the three bands (d70bcc1).
+      check('rec card offers Accept · Decline · Reply', !!card && ['Accept', 'Decline', 'Reply'].every(l => [...card.querySelectorAll('button')].some(b => b.textContent === l)),
+        String(card && card.innerHTML).slice(0, 300));
+      if (accept) {
+        accept.click();
+        for (let i = 0; i < 40 && !stripOf(); i++) await settle();
+        const rs = stripOf();
+        check('Accept arms the composer with the rec', !!rs && rs.textContent.includes('Move the "idle" cash') && /primary[^>]*>Accept</.test(rs.innerHTML), String(rs && rs.innerHTML).slice(0, 300));
+        const d2 = document.getElementById('c-chat-draft');
+        if (d2) { d2.value = 'yes, from Bank A'; d2.dispatchEvent(new Event('input')); }
+        // A screenshot pasted while the rec is armed rides IN the decision
+        // (the screenshot backs up the note), not as a second message after it.
+        paste('shot.png');
+        for (let i = 0; i < 40 && !(drafts.chat[0] && drafts.chat[0].ref); i++) await settle();
+        check('a paste in the armed composer becomes a chip', !!document.querySelector('#c-chat-chips .chip') && drafts.chat[0]?.ref === 'sha256/ab/abc.png', JSON.stringify(drafts.chat));
+        await composerSend('chat');
+        await settle();
+        const dec = DECIDED[0];
+        check('Accept posts the decision, not a prompt', DECIDED.length === 1 && POSTED.length === 1, JSON.stringify({ DECIDED, prompts: POSTED.length }));
+        check('decision carries status, note and source delivery', !!dec && dec.status === 'accepted' && dec.note === 'yes, from Bank A' && dec.deliver === 'source', JSON.stringify(dec));
+        check('the screenshot is IN the decision', !!dec && JSON.stringify(dec.attachments) === '["sha256/ab/abc.png"]', JSON.stringify(dec));
+        check('no message rides after the decision', SENT.length === 0, JSON.stringify(SENT));
+        check('composer disarms after the decision', !chatState.send.re, JSON.stringify(chatState.send));
+      }
+    }
+  }
+
+  // A paste of one PNG, the way a screenshot arrives off the clipboard.
+  function paste(name) {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' }));
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }
+
+  // ---- ONE status line, and only while it runs (2026-08-28) ----
+  // Read the COMPUTED style, never `.hidden`: the first fix set the property
+  // correctly and the line stayed on screen anyway, because `[hidden]` is a
+  // user-agent rule and `.working { display: flex }` outranked it, so it
+  // showed "working" even on a stopped thread. A check on the property would have passed.
+  const workingShown = () => {
+    const f = document.getElementById('run-working');
+    return !!f && getComputedStyle(f).display !== 'none';
+  };
+  const liveBlock = () => [...document.querySelectorAll('#msgs .run')].find(r => r.querySelector('.dot.pulse'));
+  const redraw = async () => { await refreshThread('t-t3st', true); await settle(); };
+
+  check('a stopped session says nothing about working', !workingShown(),
+    String(document.getElementById('run-working') && document.getElementById('run-working').outerHTML));
+
+  // Running, but the turn's message has not landed yet: the footer is the
+  // only thing that can say so.
+  THREAD.status = 'running';
+  await redraw();
+  check('a running session with no run block shows working…', workingShown() && !liveBlock(), 'shown: ' + workingShown());
+
+  // The run in flight: its block is the status line, so the footer goes.
+  EXTRA = [{ id: 9, thread_id: 't-t3st', ts: new Date().toISOString(), role: 'owner', kind: 'message',
+             text: 'and this one', attachments: [], run_id: 'r-live' }];
+  await redraw();
+  check('a live run block replaces working…', !workingShown() && !!liveBlock(), 'shown: ' + workingShown() + ' block: ' + !!liveBlock());
+  check('an empty live run says starting…', (liveBlock() || {}).textContent?.includes('starting…'), String((liveBlock() || {}).textContent));
+
+  // …and once steps land it says what it is doing, not just that it is.
+  EVENTS = [{ id: 1, thread_id: 't-t3st', run_id: 'r-live', ts: new Date().toISOString(),
+              kind: 'tool_use', title: 'lifectl recs all', summary: 'Reading the rec ledger', body: '' }];
+  await redraw();
+  const head = (liveBlock() || {}).textContent || '';
+  check('a live run names the step in flight', head.includes('1 tool call') && head.includes('now: Reading the rec ledger'), head.trim());
+
+  // ---- A steering message never eats the block above it (2026-08-28) ----
+  // After a steering message, a block of 100 tool calls above it used to tick
+  // down: 99, 98, 97. The console re-read the newest 400 events each refresh, so every new
+  // step pushed one old step out of the window. Model it: 450 calls before
+  // the steer (more than one page, so the first read must walk back), then
+  // 3 after it — the block above must stay at 450 and the one below say 3.
+  const t0 = Date.now() - 600000, tSteer = Date.now() - 1000;
+  EXTRA[0].ts = new Date(t0 - 1000).toISOString();
+  EXTRA.push({ id: 10, thread_id: 't-t3st', ts: new Date(tSteer).toISOString(), role: 'owner', kind: 'message',
+               text: 'and the phone', attachments: [], run_id: 'r-live', steered: true });
+  const step = (i, ts) => ({ id: i, thread_id: 't-t3st', run_id: 'r-live', ts: new Date(ts).toISOString(), kind: 'tool_use', title: 'step ' + i, summary: 'Step ' + i, body: '' });
+  EVENTS = [];
+  for (let i = 1; i <= 450; i++) EVENTS.push(step(i, t0 + i * 1000));
+  chatState.events = new Map(); // a fresh open of the session
+  await redraw();
+  const blocks = () => [...document.querySelectorAll('#msgs .activity > .run > summary > .hl')].map(s => s.textContent);
+  // Only 400 events can be fetched in the first page, and the count is 450:
+  // the headline is the HUB's, not "what we happen to hold".
+  check('the headline is the hub count, not the page fetched', (blocks()[0] || '').startsWith('450 tool calls') && chatState.events.size <= 400,
+    JSON.stringify(blocks()) + ' held: ' + chatState.events.size);
+  for (let i = 451; i <= 453; i++) EVENTS.push(step(i, tSteer + (i - 450) * 100));
+  await redraw();
+  check('a step after the steer never counts down the block above', (blocks()[0] || '').startsWith('450 tool calls') && (blocks()[1] || '').startsWith('3 tool calls'), JSON.stringify(blocks()));
+
+  // Opening a folded block reads exactly its own steps, then draws them all.
+  const folded = [...document.querySelectorAll('#msgs .activity > .run')].find(r => !r.querySelector('.dot.pulse'));
+  check('a long finished run is folded, not preloaded', !!folded && !folded.open, String(!!folded) + ' open: ' + (folded || {}).open);
+  if (folded) {
+    folded.open = true;
+    folded.dispatchEvent(new Event('toggle'));
+    for (let i = 0; i < 60 && chatState.events.size < 453; i++) await settle();
+    await settle();
+    const rows = () => [...document.querySelectorAll('#msgs .activity > .run')].find(r => !r.querySelector('.dot.pulse'));
+    const body = rows() && rows().querySelector('.evs');
+    check('opening a block loads its own steps', !!body && body.querySelectorAll('.ev').length === 450 && !body.textContent.includes('loading'),
+      String(body && body.querySelectorAll('.ev').length) + ' held: ' + chatState.events.size);
+  }
+
+  // Stopping is the case that regressed: nothing may survive it.
+  THREAD.status = 'done';
+  await redraw();
+  check('stopping clears every working line', !workingShown() && !liveBlock(), 'shown: ' + workingShown() + ' block: ' + !!liveBlock());
+
+  // ---- The Recs page box takes a screenshot too (2026-08-28) ----
+  // Paste with no box chosen must go nowhere (the list draws two recs, so a
+  // guess would land on the wrong one); with the note box focused it becomes
+  // a chip, and Accept sends the ref in the decision body.
+  //
+  // Every id here belongs to the SHARED composer (composer.js, 08-29): the
+  // box is keyed 'rec:rec-t3st' and its elements hang off cdom() of that key
+  // — `c-rec-rec-t3st`, `-draft`, `-chips`. Deciding is no longer a decideRec
+  // call: it is the outcome chip plus the box's own Send, which is exactly
+  // what a click does.
+  location.hash = '#/recs';
+  const noteOf = () => document.getElementById('c-rec-rec-t3st-draft');
+  for (let i = 0; i < 40 && !noteOf(); i++) await settle();
+  const note = noteOf();
+  check('recs page draws the note box', !!note, String(document.getElementById('view').innerHTML).replace(/\s+/g, ' ').slice(0, 300));
+  if (note) {
+    check('recs box offers Attach', !![...document.getElementById('rec-rec-t3st').querySelectorAll('button')].find(b => b.textContent === 'Attach'), '');
+    check('each rec on the list has its own box', document.querySelectorAll('#view [data-c]').length === 2,
+      [...document.querySelectorAll('#view [data-c]')].map(e => e.dataset.c).join(','));
+    const before = UPLOADED.length;
+    note.blur(); document.body.focus();
+    paste('lost.png');
+    await settle(); await settle();
+    check('a paste with no box chosen uploads nothing', UPLOADED.length === before, String(UPLOADED.length - before));
+    note.focus();
+    paste('have-it.png');
+    const chipsEl = document.getElementById('c-rec-rec-t3st-chips');
+    for (let i = 0; i < 40 && !(drafts['rec:rec-t3st'] && drafts['rec:rec-t3st'][0] && drafts['rec:rec-t3st'][0].ref); i++) await settle();
+    check('a paste in the focused note box becomes its chip', !!chipsEl && !!chipsEl.querySelector('.chip'), String(chipsEl && chipsEl.innerHTML).slice(0, 200));
+    check('the upload is filed against the source session', UPLOADED[UPLOADED.length - 1]?.thread_id === 't-t3st', JSON.stringify(UPLOADED));
+    note.value = 'I already have this'; note.dispatchEvent(new Event('input'));
+    composerPickOutcome('rec:rec-t3st', 'accepted');
+    await composerSend('rec:rec-t3st');
+    await settle();
+    const rdec = DECIDED[DECIDED.length - 1];
+    check('Recs page Accept carries the screenshot', DECIDED.length === 2 && !!rdec && rdec.note === 'I already have this' && JSON.stringify(rdec.attachments) === '["sha256/ab/abc.png"]', JSON.stringify(rdec));
+    check('still no message after the decision', SENT.length === 0, JSON.stringify(SENT));
+    check('the chip is gone once sent', !(drafts['rec:rec-t3st'] || []).length, JSON.stringify(drafts['rec:rec-t3st']));
+  }
+
+  // ---- Where you were standing, in words (places.js) ----
+  // The picture is best-effort; this block is what always lands, so it has to
+  // name the right route AND the right files.
+  const acct = placeNow('#/money/simplefin/broker-1234');
+  check('a deep route is named, not just its tab', acct.label === 'Money → one account' && acct.hash === '#/money/simplefin/broker-1234', JSON.stringify(acct));
+  check('the place names both surfaces\' files',
+    acct.files.join(' ') === 'hub/internal/server/web/views/money.js app/Life/Sources/FinanceView.swift app/Life/Sources/AccountHistoryView.swift',
+    acct.files.join(' '));
+  check('an unknown route falls back to Sessions', placeNow('#/nope').key === 'sessions', placeNow('#/nope').key);
+  check('the empty chat is not "one session"', placeNow('#/sessions').label === 'Sessions', placeNow('#/sessions').label);
+  const block = placeBlock(acct);
+  check('the block is bullets a phone can render',
+    block.split('\n').filter(l => l && !l.startsWith('- ')).length === 1 && block.includes('- URL: ') && block.includes('views/money.js'),
+    JSON.stringify(block));
+
+  const pre = document.createElement('pre');
+  pre.id = 'result';
+  pre.textContent = lines.join('\n');
+  document.body.appendChild(pre);
+}, 1500);
+</script>
+</body></html>

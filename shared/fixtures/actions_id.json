@@ -1,0 +1,37 @@
+{
+  "id": "20260928-065528-00000001",
+  "created_at": "2026-09-28T06:55:28.58949Z",
+  "updated_at": "2026-09-28T06:55:28.58949Z",
+  "project": "",
+  "kind": "money",
+  "title": "move $5",
+  "detail": "to savings",
+  "gated": true,
+  "exec_type": "none",
+  "exec_payload": {},
+  "state": "proposed",
+  "outcomes": [
+    {
+      "value": "approved",
+      "label": "Approve",
+      "hint": "approved the moment you send; the session carries it out with your note"
+    },
+    {
+      "value": "denied",
+      "label": "Deny",
+      "hint": "denied; your reason goes to the session"
+    }
+  ],
+  "open": true,
+  "closed": false,
+  "lane": "mine",
+  "window": "now",
+  "events": [
+    {
+      "id": 1,
+      "action_id": "20260928-065528-00000001",
+      "ts": "2026-09-28T06:55:28.589963000Z",
+      "event": "proposed"
+    }
+  ]
+}

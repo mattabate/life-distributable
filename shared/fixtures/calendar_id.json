@@ -1,0 +1,23 @@
+{
+  "id": "cal-00000001",
+  "created_at": "2026-09-28T06:55:28.591992Z",
+  "updated_at": "2026-09-28T06:55:28.591992Z",
+  "title": "Water the plants",
+  "detail": "all of them",
+  "kind": "owner",
+  "day": "2026-09-28",
+  "at": "09:00",
+  "repeat": "weekly",
+  "goal_id": "get-smarter",
+  "thread_id": "water-the-plants-00000002",
+  "source": "owner",
+  "state": "scheduled",
+  "nag_min": 0,
+  "nag_count": 0,
+  "ask_kind": "physical",
+  "check_hint": "a photo",
+  "surface": "mobile",
+  "say": "Water the plants.",
+  "due": "on",
+  "window": "on"
+}

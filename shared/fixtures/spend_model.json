@@ -1,0 +1,28 @@
+{
+  "default_model": "",
+  "explicit": false,
+  "options": [
+    "claude-fable-5-1",
+    "claude-opus-5-5",
+    "claude-sonnet-5"
+  ],
+  "reason": "",
+  "rungs": [
+    {
+      "model": "claude-fable-5-1",
+      "open": true,
+      "why": ""
+    },
+    {
+      "model": "claude-opus-5-5",
+      "open": true,
+      "why": ""
+    },
+    {
+      "model": "claude-sonnet-5",
+      "open": true,
+      "why": ""
+    }
+  ],
+  "starts_on": ""
+}

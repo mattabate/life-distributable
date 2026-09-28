@@ -1,0 +1,19 @@
+// The app's identity. These defaults build an unsigned simulator app with no
+// setup at all. Setup writes app/local.xcconfig (git-ignored) with your own
+// values; it is included last, so anything set there wins:
+//
+//   LIFE_BUNDLE_ID = com.<github-user>.life
+//   LIFE_APP_GROUP = group.com.<github-user>.life
+//   DEVELOPMENT_TEAM = <10-char Apple team id>
+//
+// LIFE_BUNDLE_ID    the app's bundle id (the share extension is <id>.share);
+//                   ops/hub.json apns_bundle_id must match it
+// LIFE_APP_GROUP    the app group the app and the share extension share
+// DEVELOPMENT_TEAM  your Apple Developer team id (blank = unsigned sim build)
+// ops/ota.sh, ops/install-phone.sh and ops/screens.sh read the same values
+// (ops/app-identity.sh), so this pair of files is the one place they live.
+LIFE_BUNDLE_ID = com.example.life
+LIFE_APP_GROUP = group.com.example.life
+DEVELOPMENT_TEAM =
+
+#include? "local.xcconfig"
