@@ -80,6 +80,9 @@ func TestOnSendsCountsOnly(t *testing.T) {
 	if p["sessions_started"] != 1.0 || p["active_days"] != 1.0 || p["goals"] != 1.0 || p["pages"] != 6.0 || p["token_bucket"] != "1-10M" {
 		t.Errorf("properties = %v", p)
 	}
+	if p["$geoip_disable"] != true || p["$ip"] != nil {
+		t.Errorf("the sender's IP must not become a location: %v", p)
+	}
 	if got["distinct_id"] != h.InstallID() || len(h.InstallID()) != 32 || h.LastSent() == "" {
 		t.Errorf("id %v / %s, last_sent %q", got["distinct_id"], h.InstallID(), h.LastSent())
 	}

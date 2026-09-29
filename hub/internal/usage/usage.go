@@ -145,11 +145,16 @@ func (h *Heartbeat) Send(ctx context.Context) (bool, error) {
 	if token == "" {
 		token = DefaultToken
 	}
+	// PostHog would otherwise turn the connection's IP into a city and keep
+	// both. `$geoip_disable` stops the lookup; the project's "Discard client
+	// IP data" setting (the maintainer's side) drops the IP itself.
+	props := h.Payload()
+	props["$geoip_disable"] = true
 	body, _ := json.Marshal(map[string]any{
 		"api_key":     token,
 		"event":       "heartbeat",
 		"distinct_id": h.InstallID(),
-		"properties":  h.Payload(),
+		"properties":  props,
 	})
 	req, err := http.NewRequestWithContext(ctx, "POST", host+"/capture/", bytes.NewReader(body))
 	if err != nil {

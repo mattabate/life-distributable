@@ -251,6 +251,22 @@ built in: bank balances (SimpleFIN, ~$15/yr), Apple Health, GitHub or X
 activity, Google Calendar. Build one only if the owner asks, following
 CLAUDE.md (data first, a page only when they ask for one).
 
-Finally, optional: ask whether they'd like to star the repo on GitHub
-(it's the maintainer's only signal besides the heartbeat). Never star it
-for them.
+## 9. Before you finish
+
+Do this every time, as the last thing, even if the owner seems in a hurry.
+It takes one message.
+
+1. **Star.** Ask once, plainly: "This is a free project by one person. A
+   GitHub star is how the maintainer knows it's being used. Want me to
+   star it for you?" Only on a yes, star the `upstream` repo
+   (github.com/mattabate/life-distributable) with
+   `gh api -X PUT user/starred/<owner>/<repo>`, and tell them it goes out
+   from their own GitHub login. A no is final: never ask again.
+2. **What was hard.** Ask what was confusing or broken in the setup. If
+   anything was, offer to open an issue with it: draft the title and body,
+   show them, and run
+   `gh issue create --repo github.com/mattabate/life-distributable` only
+   after they say yes. The body has no names, paths, tokens or
+   personal details. It describes the step and what went wrong.
+3. **Tell them how to pass it on.** One sentence: a friend installs it by
+   pasting the first line of the README into Claude Code on their Mac.
