@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -88,33 +89,119 @@ func (s *Server) testPush(w http.ResponseWriter, r *http.Request) {
 // itms-services link from GET .../status `ota.url`); "lan" runs
 // ops/install-phone.sh (Xcode install over the Mac's Wi-Fi, phone must be on
 // the LAN). Runs in tmux so it outlives the request.
+//
+// A third lane, "mac" (2026-09-30), is the desktop app's Install button: it
+// runs ops/mac-apply.sh, which uses the build a session already staged
+// (ops/install-mac.sh, ~/Library/Application Support/life-mac/next) or
+// builds one, then asks the open app to quit and reopen on it — the swap is
+// ops/mac-swap.sh's. `build` is the card's number: a staged build below it
+// is rebuilt. `ask` is the card: it closes on the click, by "app", the way
+// the phone's does on the tap, and ReconcileMacInstalls reopens it if the
+// Mac still reports an older build 10 min later.
 var installMu sync.Mutex
 
 func (s *Server) appInstall(w http.ResponseWriter, r *http.Request) {
 	installMu.Lock()
 	defer installMu.Unlock()
-	var in struct{ Lane string }
+	var in struct {
+		Lane, Ask string
+		Build     int
+	}
 	if !decodeOptional(w, r, &in, 0) {
 		return
 	}
 	script := s.cfg.OpsPath("ota.sh")
-	if in.Lane == "lan" {
+	switch in.Lane {
+	case "", "ota":
+	case "lan":
 		script = s.cfg.OpsPath("install-phone.sh")
-	} else if in.Lane != "" && in.Lane != "ota" {
-		jsonErr(w, 400, "lane must be ota or lan")
+	case "mac":
+		script = s.cfg.OpsPath("mac-apply.sh")
+	default:
+		jsonErr(w, 400, "lane must be ota, lan or mac")
 		return
 	}
 	if _, err := exec.Command("tmux", "has-session", "-t", "=life-app-install").CombinedOutput(); err == nil {
 		jsonErr(w, 409, "an install is already running")
 		return
 	}
+	out := map[string]any{"status": "started", "lane": strings.TrimSuffix(filepath.Base(script), ".sh")}
+	run := script
+	if in.Lane == "mac" {
+		if in.Ask != "" {
+			if a, err := s.thr.GetAsk(in.Ask); err == nil && in.Build == 0 {
+				in.Build = askBuildNumber(a.Title)
+			}
+		}
+		// Through bash: the script need not be executable in the tree.
+		run = "bash " + script + " " + strconv.Itoa(in.Build)
+		// Staged already → the click is a swap (seconds); else a build (minutes).
+		out["staged"] = macStagedBuild() >= in.Build && macStagedBuild() > 0
+	}
 	logPath := s.cfg.OpsPath("logs", "app-install.log")
-	cmd := script + " > " + logPath + " 2>&1; echo \"exit=$?\" >> " + logPath
-	if out, err := exec.Command("tmux", "new-session", "-d", "-s", "life-app-install", "-c", s.cfg.Root, cmd).CombinedOutput(); err != nil {
-		jsonErr(w, 500, "tmux: "+strings.TrimSpace(string(out)))
+	cmd := run + " > " + logPath + " 2>&1; echo \"exit=$?\" >> " + logPath
+	if o, err := exec.Command("tmux", "new-session", "-d", "-s", "life-app-install", "-c", s.cfg.Root, cmd).CombinedOutput(); err != nil {
+		jsonErr(w, 500, "tmux: "+strings.TrimSpace(string(o)))
 		return
 	}
-	writeJSON(w, 202, map[string]string{"status": "started", "lane": strings.TrimSuffix(filepath.Base(script), ".sh")})
+	if in.Lane == "mac" && in.Ask != "" {
+		// The card leaves the board on the click (the phone's rule); the
+		// reconciler brings it back if the build never comes up.
+		if _, err := s.thr.ResolveAsk(in.Ask, "done", "app", "clicked Install"); err == nil {
+			out["ask"] = in.Ask
+		}
+	}
+	writeJSON(w, 202, out)
+}
+
+// macStagedBuild: the build number waiting in the desktop updater's staging
+// folder, 0 when none. `defaults` reads the bundle's plist whichever form
+// Xcode wrote it in (binary or XML).
+func macStagedBuild() int {
+	home, _ := os.UserHomeDir()
+	plist := filepath.Join(home, "Library/Application Support/life-mac/next/life.app/Contents/Info.plist")
+	if _, err := os.Stat(plist); err != nil {
+		return 0
+	}
+	b, err := exec.Command("defaults", "read", plist, "CFBundleVersion").Output()
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	return n
+}
+
+var buildNumber = regexp.MustCompile(`(?i)\bbuild (\d+)\b`)
+
+func askBuildNumber(title string) int {
+	mm := buildNumber.FindStringSubmatch(title)
+	if mm == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(mm[1])
+	return n
+}
+
+// macBuild: the desktop app says which build it runs (on every launch). The
+// Mac never registers as a push device — that would make the hub push to it
+// and count its build as the phone's — so this is its one report, kept as a
+// setting; it closes "Install desktop build N" cards with N <= build and
+// reopens a clicked one the Mac never came up on.
+func (s *Server) macBuild(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Build int }
+	if !decode(w, r, &in, 0) {
+		return
+	}
+	if in.Build <= 0 {
+		jsonErr(w, 400, "build required")
+		return
+	}
+	if err := s.thr.SetMacBuild(in.Build); err != nil {
+		jsonErr(w, 500, err.Error())
+		return
+	}
+	s.thr.ReconcileMacInstalls(in.Build)
+	w.WriteHeader(204)
 }
 
 func (s *Server) appInstallStatus(w http.ResponseWriter, r *http.Request) {

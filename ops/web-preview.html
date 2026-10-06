@@ -65,7 +65,7 @@
     [`/threads/${TRIP}/events`]: [],
     '/prompts': [],
     '/recs': { recs: [
-      { id: 'rec-11aa22bb', status: 'proposed', title: 'Book before the spring rate ends on Friday', thread_id: TRIP, message_id: 2,
+      { id: 'rec-11aa22bb', status: 'proposed', open: true, title: 'Book before the spring rate ends on Friday', thread_id: TRIP, message_id: 2,
         because: 'The same nights go up to **$560** after Friday.', domain: 'travel', kind: 'buy', cost_label: '$480', cost_cents: 48000,
         model: 'claude-fable-5-1', created_at: iso(28),
         outcomes: [{ value: 'accepted', label: 'Accept' }, { value: 'declined', label: 'Decline' }, { value: '', label: 'Reply' }] },
@@ -120,7 +120,8 @@
     if (!FIXDIR) return undefined;
     try {
       const x = new XMLHttpRequest();
-      x.open('GET', `${FIXDIR}/${clean.replace(/^\//, '').split('/').join('_')}.json`, false);
+      const named = NAMED.find(([re]) => re.test(clean));
+      x.open('GET', `${FIXDIR}/${named ? named[1] : clean.replace(/^\//, '').split('/').join('_')}.json`, false);
       x.send();
       if (x.responseText) return JSON.parse(x.responseText);
     } catch (e) { /* no fixture for this route */ }

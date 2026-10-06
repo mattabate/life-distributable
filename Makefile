@@ -1,7 +1,7 @@
 # See CLAUDE.md. `make check` is the gate.
 .PHONY: check test pylint build webcheck generate hub-install hub-restart ship ota install-phone
 
-check: test pylint build app-build-sim
+check: test pylint build app-build-sim mac-build
 	@echo "check: OK"
 
 # ops/*.py parse, open life.db read-only, verify TLS, take the hub address,
@@ -110,6 +110,23 @@ app-ui:
 
 install-phone:
 	ops/install-phone.sh
+
+# The desktop app (LifeMac, Mac Catalyst over the same sources): build, sign,
+# install into /Applications and relaunch. `make mac-build` only compiles it.
+mac:
+	bash ops/install-mac.sh
+
+# Screenshot every desktop page (ops/logs/screens/mac/); PAGES='recs thread:<id>'.
+mac-screens:
+	bash ops/mac-screens.sh $(PAGES)
+
+# Can the build `make mac` just made keep the decider code? A throwaway
+# Keychain item, saved as Settings saves the code; -34018 = it cannot.
+mac-keychain:
+	bash ops/mac-keychain-probe.sh
+
+mac-build:
+	cd app && xcodebuild -project Life.xcodeproj -scheme LifeMac -destination 'platform=macOS,variant=Mac Catalyst' -derivedDataPath build-mac CODE_SIGNING_ALLOWED=NO build -quiet
 
 # Screenshot every tab in the simulator against the live hub (ops/logs/screens/).
 screens: app-build-sim

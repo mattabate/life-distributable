@@ -80,6 +80,46 @@ struct NextModelCard: View {
     }
 
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        if !shown.isEmpty { macCard }
+        #else
+        phoneCard
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// The console's bar (money.js spendModelBar; the owner 2026-09-29: the desktop
+    /// is the web's layout): one white card, "New sessions run on X" in bold
+    /// on the left and the ladder's buttons on its right, the rung in use
+    /// filled blue; the pin and the shut rungs in a small grey line under it.
+    private var macCard: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 10) {
+                Text("New sessions run on \(shortModel(shown))").font(.system(size: 15, weight: .semibold))
+                Spacer(minLength: 10)
+                if !rungs.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(Array(rungs.enumerated()), id: \.element) { i, r in
+                            if i > 0 { Text("›").foregroundStyle(Web.muted) }
+                            Button(shortModel(r.model)) { choose?(r.model) }
+                                .buttonStyle(WebButtonStyle(primary: r.model == shown && r.open, small: true))
+                                .strikethrough(!r.open)
+                                .disabled(!r.open || choose == nil)
+                        }
+                        Text(" · ").foregroundStyle(Web.muted)
+                        Button("auto") { choose?("") }
+                            .buttonStyle(WebButtonStyle(primary: setting?.explicit != true, small: true))
+                            .disabled(choose == nil)
+                    }
+                }
+            }
+            Text(subtitle).font(.system(size: 12.5)).foregroundStyle(Web.muted)
+        }
+        .webCard()
+    }
+    #endif
+
+    @ViewBuilder private var phoneCard: some View {
         if !shown.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("New sessions run on \(shortModel(shown))")
@@ -139,6 +179,8 @@ struct QuotaWindowCard: View {
     /// Families whose own meter is already full, so the shared meters' headroom
     /// is not actually spendable on them.
     var lockedFamilies: [String] = []
+    /// Desktop: drawn inside the page's one Limits card (money.js `.card.limits`).
+    var bare = false
 
     var frac: Double { min(max(w.utilization / 100, 0), 1) }
     var locked: Bool { w.utilization >= 100 }
@@ -155,6 +197,58 @@ struct QuotaWindowCard: View {
     var gates: String { w.note ?? "" }
 
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        macCard
+            .chatAbout(ChatSubject(screen: "Spend", title: "\(w.label) limit", facts: facts,
+                                   code: "app/Life/Sources/QuotaView.swift (QuotaWindowCard) ← hub GET /api/v1/spend/quota; pace = burn_pct_per_hour, full_at"))
+        #else
+        phoneCard
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// The console's limit card (money.js drawSpend; the owner 2026-09-29: the
+    /// desktop is the web's layout): the label in bold, the percent at body
+    /// size and " · outlook" after it on the right, a 9pt meter on the grey
+    /// wash with the clock's tick, the hub's foot in small grey.
+    private var macCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(w.label).font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Text(used).font(.system(size: 15, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(toned ? tint : .primary)
+                if let o = w.outlook, !o.isEmpty {
+                    Text(" · \(o)").font(.system(size: 12.5)).foregroundStyle(toned ? tint : Web.muted)
+                }
+            }
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Web.code)
+                    Capsule().fill(toned ? tint : Web.accent).frame(width: g.size.width * frac)
+                    if w.elapsedPct > 0 {
+                        Rectangle().fill(Color.primary.opacity(0.55))
+                            .frame(width: 2)
+                            .offset(x: g.size.width * min(w.elapsedPct / 100, 1) - 1)
+                    }
+                }.clipShape(Capsule())
+            }.frame(height: 9).padding(.top, 5).padding(.bottom, 4)
+            if let f = w.foot, !f.isEmpty {
+                Text(f).font(.system(size: 12.5)).foregroundStyle(Web.muted)
+            }
+        }
+        .modifier(OptionalWebCard(on: !bare))
+    }
+
+    private struct OptionalWebCard: ViewModifier {
+        let on: Bool
+        func body(content: Content) -> some View {
+            if on { content.webCard() } else { content }
+        }
+    }
+    #endif
+
+    private var phoneCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(w.label).font(.subheadline.weight(.semibold))

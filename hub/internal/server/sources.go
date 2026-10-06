@@ -56,11 +56,15 @@ type Source struct {
 	// Whether the connection WORKS, which "connected" and `last` cannot say
 	// (2026-09-01): a credential can be present and every call still be refused,
 	// and `last` is the newest row of any kind.
-	Error    string          `json:"error,omitempty"`         // the newest failure, if it is still failing
-	LastOK   *time.Time      `json:"last_ok,omitempty"`       // the last tick that actually worked
-	Since    *time.Time      `json:"failing_since,omitempty"` // when the current run of failures began
-	Fails    int             `json:"fails,omitempty"`         // how many ticks it has wasted since
-	Total    int             `json:"total"`
+	Error  string     `json:"error,omitempty"`         // the newest failure, if it is still failing
+	LastOK *time.Time `json:"last_ok,omitempty"`       // the last tick that actually worked
+	Since  *time.Time `json:"failing_since,omitempty"` // when the current run of failures began
+	Fails  int        `json:"fails,omitempty"`         // how many ticks it has wasted since
+	Total  int        `json:"total"`
+	// What the collapsed row says it is connected to, in a few words ("3
+	// accounts"): the page starts with every source folded to one row.
+	// See sourceSummary.
+	Summary  string          `json:"summary,omitempty"`
 	Kinds    []SourceKind    `json:"kinds"`
 	Accounts []SourceAccount `json:"accounts"`
 }
@@ -211,14 +215,27 @@ func sortSources(groups []SourceGroup) {
 					break
 				}
 			}
-			if ranked {
-				continue
+			if !ranked {
+				sort.Slice(acc, func(i, j int) bool {
+					return strings.ToLower(acc[i].Label) < strings.ToLower(acc[j].Label)
+				})
 			}
-			sort.Slice(acc, func(i, j int) bool {
-				return strings.ToLower(acc[i].Label) < strings.ToLower(acc[j].Label)
-			})
+			g.Sources[si].Summary = sourceSummary(g.Sources[si])
 		}
 	}
+}
+
+// sourceSummary: "iPhone (Life app)", "Work laptop + 2 more" — the whole
+// "connected to" list in a few words, for the source's folded row.
+func sourceSummary(src Source) string {
+	as := src.Accounts
+	switch len(as) {
+	case 0:
+		return ""
+	case 1:
+		return as[0].Label
+	}
+	return fmt.Sprintf("%s + %d more", as[0].Label, len(as)-1)
 }
 
 func plural(n int, word string) string {

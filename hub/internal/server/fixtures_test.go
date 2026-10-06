@@ -87,7 +87,6 @@ func fixtureRoutes(id fixtureIDs) []fixtureRoute {
 		{"spend_model", "/api/v1/spend/model"},
 		{"usage", "/api/v1/usage"},
 		{"projects", "/api/v1/projects"},
-		{"sessions", "/api/v1/sessions"},
 		{"actions", "/api/v1/actions?state=&limit=100"},
 		{"actions_id", "/api/v1/actions/" + id.action},
 		{"runs_id", "/api/v1/runs/1"},

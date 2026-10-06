@@ -213,7 +213,7 @@ const ask = { id: 'ask-1a2b3c4d', thread_id: 't-1a2b3c4d', thread_title: 'Plan l
   detail: '- Mon\n- Tue', kind: 'decision', verb: 'decide', surface: 'any', state: 'open', open: true, closed: false, created_at: new Date().toISOString(), outcomes };
 // Where a row stands is the hub's (store.AskStanding / ActionStanding /
 // RecStanding): the fixtures carry it the way the wire does.
-const WAITING = { open: false, closed: false }, CLOSED = { open: false, closed: true };
+const WAITING = { open: false, closed: false }, CLOSED = { open: false, closed: true, reopen: true };
 const DISMISSED = { ...CLOSED, folded: 'dismissed' };
 const readAsk = { ...ask, kind: 'read', outcomes: [{ value: 'done', label: 'Read it' }] };
 
@@ -285,6 +285,13 @@ test('askHTML: every open card but a read offers Dismiss', () => {
   assert.match(askHTML({ ...ask, state: 'done', resolution: 'Read it', ...CLOSED }), /^<div class="ask answered"/);
 });
 
+// Every closed card reopens but an install — the hub's `reopen` says which; a done card keeps its state word beside the button.
+test('askHTML: a done card carries Reopen when the hub says reopen', () => {
+  const done = askHTML({ ...ask, kind: 'physical', state: 'done', ...CLOSED });
+  assert.match(done, /<div class="acts"><span class="small muted">done<\/span><button class="sm" onclick="cardFold\('ask','ask-1a2b3c4d',true\)">Reopen<\/button><\/div>/);
+  assert.doesNotMatch(askHTML({ ...ask, kind: 'install', state: 'done', ...CLOSED, reopen: false }), /Reopen/);
+});
+
 // The install cell: title, description, one teal Install
 // button — no Respond furniture. The button carries the OTA link itself, so
 // the link line is stripped from the shown detail; Dismiss stays as the out.
@@ -307,6 +314,26 @@ test('askHTML: an install card is teal with one Install button, link line stripp
   assert.match(askHTML({ ...inst, state: 'done', ...CLOSED }), /^<div class="ask answered"/);
 });
 
+// The desktop app's install cell (one click builds in the background, then
+// the app restarts): the same teal card, but its
+// Install is a button on the hub's `mac` lane, not a link — nothing to open
+// — and the detail stays whole. The hub's `target` says which device; an
+// older hub's card is told by its title.
+test('askHTML: a Mac install card has an Install button on the mac lane, no link', () => {
+  const mac = { ...ask, kind: 'install', verb: 'install', target: 'mac', title: 'Install desktop build 1512',
+    detail: 'The install cell for the desktop app.' };
+  const chat = askHTML(mac);
+  assert.match(chat, /^<div class="ask install" id="ask-card-ask-1a2b3c4d">/);
+  assert.match(chat, /<button class="sm primary" onclick="macInstall\('ask-1a2b3c4d'\)">Install<\/button>/);
+  assert.doesNotMatch(chat, /href=|>Respond</);
+  assert.match(chat, /Dismiss<\/button>/);
+  assert.match(chat, /install cell for the desktop app/);
+  assert.equal(askInstallTarget(mac), 'mac');
+  assert.equal(askInstallTarget({ ...mac, target: undefined }), 'mac');
+  assert.equal(askInstallTarget({ title: 'Install app build 1512 (tap the link)' }), 'phone');
+  assert.equal(askInstallTarget({ title: 'Install build 1512: the Mac bar' }), 'phone');
+});
+
 test('forYouPill: blue "to read" only when every item is a read', () => {
   assert.equal(forYouPill(0, 0), '');
   assert.equal(forYouPill(2, 2), '<span class="pill read">2 to read</span>');
@@ -323,7 +350,7 @@ test('askHTML: answered keeps its buttons with ⏳; closed loses them', () => {
   assert.match(chat, /class="ask" id=/);
   assert.match(chat, /⏳ <span class="verb">[a-z ]+<\/span><\/div><div class="t">Pick/);
   assert.match(chat, /Decided/);
-  const done = askHTML({ ...ask, state: 'done', ...CLOSED });
+  const done = askHTML({ ...ask, state: 'done', ...CLOSED, reopen: false });
   assert.match(done, /class="ask answered"/);
   assert.match(done, /✓ <span class="verb">decide<\/span><\/div><div class="t">Pick/);
   assert.match(done, /<span class="small muted">done<\/span>/);
@@ -393,7 +420,7 @@ test('recHTML: the rec card in the chat', () => {
   assert.match(h, /<a class="pill purple" href="#\/recs\/rec-1a2b3c4d">rec<\/a>/);
   assert.match(h, /<div class="acts"><button class="sm primary" onclick="armRecReply\('rec-1a2b3c4d','accepted'\)">Accept<\/button><button class="sm" onclick="armRecReply\('rec-1a2b3c4d','declined'\)">Decline<\/button><button class="sm" onclick="armRecReply\('rec-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('rec','rec-1a2b3c4d'\)">Dismiss<\/button><\/div>/);
   assert.doesNotMatch(h, /Open in Recs|The record/);
-  const done = recHTML({ ...rec, status: 'declined', decided_by: 'owner', decision_note: 'no', ...CLOSED });
+  const done = recHTML({ ...rec, status: 'declined', decided_by: 'owner', decision_note: 'no', ...CLOSED, reopen: false });
   assert.match(done, /^<div class="ask rec answered"/);
   assert.match(done, /✕ <span class="verb">rec<\/span><\/div><div class="t">Try/);
   assert.match(done, /<div class="acts"><span class="small muted">declined by owner — no<\/span><\/div>/);
@@ -408,7 +435,7 @@ test('recHTML: the rec card in the chat', () => {
 
 test('actionHTML: events[] draw only when the hub sent them', () => {
   assert.doesNotMatch(actionHTML(action), /approved by/);
-  const h = actionHTML({ ...action, state: 'approved', ...CLOSED, events: [
+  const h = actionHTML({ ...action, state: 'approved', ...CLOSED, reopen: false, events: [
     { id: 1, action_id: 'act-1a2b3c4d', ts: '2000-01-01T12:00:00Z', event: 'proposed', actor: 'claude:thread:t-1a2b3c4d' },
     { id: 2, action_id: 'act-1a2b3c4d', ts: '2000-01-01T12:02:00Z', event: 'approved', actor: 'app', note: 'ok' },
   ] });
@@ -457,20 +484,31 @@ vm.runInThisContext(fs.readFileSync(path.join(__dirname, '..', 'views', 'sources
 test('sources: a row opens the source\'s own page, which carries the prose', () => {
   const g = { id: 'code', title: 'Code', sources: [
     { id: 'gh', title: 'GitHub', status: 'connected', total: 108, from: 'GitHub API daily',
-      storage: 'observations table', accounts: [{ label: '@handle', via: 'API', url: 'https://github.com/handle' }],
+      storage: 'observations table', summary: '2 handles',
+      accounts: [{ label: '@handle', via: 'API', url: 'https://github.com/handle' }, { label: '@other' }],
       kinds: [{ kind: 'repo-stats', note: 'one row per sync', n: 27, first: '2026-08-23T05:58:27Z', last: '2026-09-26T04:05:11Z' }] },
   ] };
   const list = sourceGroupHTML(g);
-  // The row itself is a link to #/sources/<group>/<id>, a page deeper, and holds none of the prose — the
-  // fold-out detail row is gone.
-  assert.match(list, /<tr class="src-row click" onclick="location.hash='#\/sources\/code\/gh'">/);
+  // The name is a link to #/sources/<group>/<id>, a page deeper, and the row
+  // holds none of the prose.
+  assert.match(list, /<a class="src-link" href="#\/sources\/code\/gh" onclick="event.stopPropagation\(\)">GitHub<\/a>/);
   assert.doesNotMatch(list, /GitHub API daily|src-detail/);
-  // Account links keep working as links: that click must not also open the
-  // page — but only the link is exempt, the rest of the cell is the row's
-  // (the first walk clicked the row's centre, landed in this cell, and went
-  // nowhere).
+  // Folded by default: the summary shows, the account lines are in the row
+  // but hidden until the row is clicked.
+  assert.match(list, /<tr class="src-row click" data-k="code\/gh" onclick="srcToggle\(this\)">/);
+  assert.match(list, /<span class="src-chev"><\/span><span class="src-sum">2 handles<\/span><div class="src-accts" hidden>/);
+  // One thing connected is not a list: no chevron, nothing to unfold, the one name (its own link) on the row, the row a door.
+  const one = sourceGroupHTML({ id: 'a', title: 'A', sources: [{ id: 's', title: 'S', status: 'live', summary: 'Scholar profile',
+    accounts: [{ label: 'Scholar profile', url: 'https://scholar.example/u' }] }] });
+  assert.match(one, /<tr class="src-row click" data-k="a\/s" onclick="location.hash='#\/sources\/a\/s'">/);
+  assert.match(one, /<span class="src-chev none"><\/span><span class="src-sum"><a href="https:\/\/scholar.example\/u" target="_blank" rel="noopener" onclick="event.stopPropagation\(\)">Scholar profile<\/a><\/span>/);
+  assert.doesNotMatch(one, /src-accts|srcToggle/);
+  // Account links keep working as links: that click must not also fold the row.
   assert.match(list, /<a href="https:\/\/github.com\/handle" target="_blank" rel="noopener" onclick="event.stopPropagation\(\)">@handle<\/a>/);
   assert.doesNotMatch(list, /<td onclick/);
+  // A row with nothing to unfold is still a door to its page.
+  assert.match(sourceGroupHTML({ id: 'h', title: 'H', sources: [{ id: 'z', title: 'Z', status: 'live' }] }),
+    /onclick="location.hash='#\/sources\/h\/z'"/);
   const page = sourcePageHTML(g, g.sources[0]);
   assert.match(page, /<h2><a href="#\/sources">Sources<\/a> \/ GitHub<\/h2>/);
   assert.match(page, /GitHub API daily/);
@@ -495,7 +533,8 @@ test('sources: a failing source says how stale it is, on the row', () => {
   ] };
   const h = sourceGroupHTML(g);
   assert.match(h, /<span class="dot src-dot bad"/);
-  assert.match(h, /Not syncing — 4 tries failed · since 16h ago · last worked 2d ago/);
+  // The row sits under the "Not syncing" heading, so it says only how stale.
+  assert.match(h, /src-fail-inline">4 tries failed · since 16h ago · last worked 2d ago/);
   assert.match(h, /src-last">2m ago<\/td>/); // the contradiction, now visible
   // The error itself is on the source's page, under the same red line.
   const page = sourcePageHTML(g, g.sources[0]);
@@ -503,9 +542,34 @@ test('sources: a failing source says how stale it is, on the row', () => {
   assert.match(page, /What the service said: <code>gh: HTTP 402: credits depleted<\/code>/);
   // One failure, and one that has never worked at all.
   const once = sourceGroupHTML({ ...g, sources: [{ id: 'y', title: 'Y', status: 'failing' }] });
-  assert.match(once, /Not syncing — 1 try failed · never worked/);
+  assert.match(once, /src-fail-inline">1 try failed · never worked/);
   // Everything else keeps its quiet row.
   assert.doesNotMatch(sourceGroupHTML({ ...g, sources: [{ id: 'z', title: 'Z', status: 'connected' }] }), /src-fail|src-dot bad/);
+});
+
+// Alphabetical in each section, and every source that is not syncing pulled
+// out of its section into one at the bottom.
+test('sources: sections sort by name and the failing ones go to the bottom', () => {
+  const groups = [
+    { id: 'code', title: 'Code', sources: [
+      { id: 'yt', title: 'YouTube', status: 'connected' },
+      { id: 'x', title: 'Weather', status: 'failing' },
+      { id: 'gh', title: 'GitHub', status: 'connected' },
+    ] },
+    { id: 'home', title: 'Home', note: 'a long note', sources: [{ id: 'w', title: 'Thermostat', status: 'failing' }] },
+  ];
+  const h = sourcesListHTML(groups);
+  assert.ok(h.indexOf('>GitHub<') < h.indexOf('>YouTube<'));
+  assert.ok(h.indexOf('<h3>Not syncing</h3>') > h.indexOf('>YouTube<'));
+  assert.ok(h.indexOf('>Thermostat<') < h.indexOf('>Weather<'));
+  assert.ok(h.indexOf('>Weather<') > h.indexOf('<h3>Not syncing</h3>'));
+  // A section left with nothing working is not drawn at all; its failing row
+  // still opens under its own group.
+  assert.doesNotMatch(h, /<h3>Home<\/h3>/);
+  assert.match(h, /href="#\/sources\/home\/w"/);
+  assert.match(h, /4 sources · 2 not syncing/);
+  // The column names once, on the first card; the declared widths line the rest up.
+  assert.equal(h.split('<thead>').length - 1, 1);
 });
 
 test('sources: column widths are declared, so opening a row cannot move them', () => {

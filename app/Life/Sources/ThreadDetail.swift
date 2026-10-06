@@ -57,6 +57,9 @@ struct ThreadDetail: View {
     @State private var actions: [Action] = []
     @State private var actionsByMessage: [Int: [Action]] = [:]
     @State private var tailActions: [Action] = []
+    /// `load` has fetched this chat's own asks and proposals at least once;
+    /// until then the board's copy stands in (`seedCards`).
+    @State private var cardsLoaded = false
     /// The recommendations this session filed, each a cell under the reply
     /// that filed it, answerable without going to the Recs page. Every status
     /// is drawn — a decided one is the line that says what they chose. The card's
@@ -121,13 +124,25 @@ struct ThreadDetail: View {
     /// into the running turn (it sees it at its next step), so the composer
     /// never locks.
     var composerPlaceholder: String {
+        #if targetEnvironment(macCatalyst)
+        // The console's words (composer.js), the owner 2026-09-29: the same box.
+        return thread.status == "running" ? "Steer it while it works…" : "Message…"
+        #else
         switch thread.status {
         case "needs_you": "Answer…"
         case "running": "Steer it (it reads this next)"
         default: "Message…"
         }
+        #endif
     }
     @Environment(\.dismiss) private var dismiss
+    #if targetEnvironment(macCatalyst)
+    /// Pushed (a card's "sent by", All sessions) vs the pane's root: the
+    /// head's ← goes back a step, or to the empty chat as the console's
+    /// `#/sessions` does.
+    @Environment(\.isPresented) private var pushed
+    @Environment(SnapState.self) private var snap
+    #endif
 
     /// Events grouped by run, in stream order.
     var eventsByRun: [String: [ThreadEvent]] { Dictionary(grouping: events, by: \.run_id) }
@@ -421,6 +436,9 @@ struct ThreadDetail: View {
     var body: some View {
         let _ = Perf.event("ThreadDetail.body rows=\(rows.count) shown=\(shown) events=\(events.count)")
         VStack(spacing: 0) {
+            #if targetEnvironment(macCatalyst)
+            macHead
+            #endif
             ScrollViewReader { proxy in
                 ScrollView {
                     // Plain VStack (not lazy): rows exist as soon as messages
@@ -471,22 +489,50 @@ struct ThreadDetail: View {
                             // is inside `status == "running"`, so a stopped
                             // session shows neither.
                             let liveBlock = rows.contains { $0.live } || !orphanLive.isEmpty
+                            #if targetEnvironment(macCatalyst)
+                            // The desktop's Stop is the head's running pill,
+                            // as on the console (the owner 2026-09-29): here only
+                            // its "working…" line, a pulsing dot, no block yet.
+                            if !liveBlock {
+                                HStack(spacing: 7) {
+                                    LiveDot(color: Web.accent, size: 6)
+                                    Text("working…").font(.system(size: 12.5)).foregroundStyle(Web.muted)
+                                }.padding(.horizontal)
+                            }
+                            #else
                             HStack(spacing: 8) {
                                 if !liveBlock { ProgressView(); Text("working…").font(.caption).foregroundStyle(.secondary) }
                                 Spacer()
                                 Button { stop() } label: { Label("Stop", systemImage: "stop.fill").font(.caption.weight(.semibold)) }
                                     .buttonStyle(.bordered).tint(.orange).controlSize(.small).disabled(stopping)
                             }.padding(.horizontal)
+                            #endif
                         }
                         Color.clear.frame(height: 1).id("bottom")
-                    }.padding(.vertical, 10)
-                    // Exactly the viewport's width, never wider (a row
-                    // measured a hair too wide while a turn was live made
+                    }
+                    #if targetEnvironment(macCatalyst)
+                    // `.msgs`: 24 over, 18 under, the right wall 8 wider.
+                    .padding(.top, 24).padding(.bottom, 18).padding(.trailing, 8)
+                    #else
+                    .padding(.vertical, 10)
+                    #endif
+                    // Exactly the viewport's width, never wider (the owner
+                    // 2026-09-23: "the messages went to left and right" — a
+                    // row measured a hair too wide while a turn was live made
                     // the whole chat pan sideways). A vertical ScrollView takes
                     // its content's own width, so one over-wide child turns the
                     // page into a two-axis pan; pinned here, an over-wide child
                     // is its own problem and the chat stays a column.
+                    // On the Mac the container is the whole window (it ran
+                    // under the sidebar), so there the column is the detail
+                    // pane's width — wall to wall, like the console's `.msgs`
+                    // : the owner's blocks against the right wall,
+                    // the session's side capped per row (cards 860, runs 760).
+                    #if targetEnvironment(macCatalyst)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    #else
                     .containerRelativeFrame(.horizontal)
+                    #endif
                 }
                 // Initial position: open on the latest
                 // message — unless the thread is waiting on the owner for an ask
@@ -528,6 +574,24 @@ struct ThreadDetail: View {
                     }
                 }
             }
+            #if targetEnvironment(macCatalyst)
+            // The console's composer, wall to wall under the transcript:
+            // errors sit over the box, the armed cards are its reply-strip
+            // inside it. The Mac has no route line: a message there is
+            // always this session, now.
+            if error != nil || sendError != nil {
+                VStack(spacing: 6) {
+                    if let error { ErrorBanner(message: error) }
+                    if let sendError { sendFailedBanner(sendError) }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(Web.panel)
+            }
+            Composer(draft: draft, attachments: attachments,
+                     placeholder: replyPlaceholder,
+                     sending: sending, send: { send() }, allowEmpty: replies.contains { !$0.outcome.isEmpty },
+                     banner: replies.isEmpty ? nil : AnyView(macReplyStrip))
+            #else
             Divider()
             VStack(spacing: 6) {
                 if let error { ErrorBanner(message: error) }
@@ -538,10 +602,20 @@ struct ThreadDetail: View {
                          placeholder: replyPlaceholder,
                          sending: sending, send: { send() }, allowEmpty: replies.contains { !$0.outcome.isEmpty })
             }.padding(10)
+            #endif
         }
+        #if targetEnvironment(macCatalyst)
+        .background(Web.panel)
+        // A Finder drop anywhere on the chat — the messages, not only the
+        // composer — attaches the file.
+        .dropsFiles(into: attachments)
+        #endif
         .environment(\.askReply, AskReplyHook { a, outcome in
-            arm(ArmedReply(kind: .ask, id: a.id, title: a.title, outcome: outcome))
+            arm(ArmedReply(kind: .ask, id: a.id, title: a.title, outcome: outcome, outcomes: a.outcomes ?? []))
         })
+        // Every card in this chat draws its armed pick as the primary button
+        // (Card.swift `outcomeButtons`).
+        .environment(\.armedPicks, Dictionary(replies.map { ($0.ref, $0.outcome) }, uniquingKeysWith: { _, b in b }))
         .confirmationDialog("Are you sure?", isPresented: $confirmingEmpty, titleVisibility: .visible) {
             Button("Send without") { send(confirmed: true) }
             Button("Cancel", role: .cancel) {}
@@ -557,11 +631,17 @@ struct ThreadDetail: View {
         }
         .navigationTitle(mdPlain(thread.title))
         .navigationBarTitleDisplayMode(.inline)
+        .askButton()
         // Holding down anything inside a session talks to THAT session — it
         // already has the context. The sheet still offers a
         // new session when the question is really a fresh one.
         .environment(\.chatTarget, .session(id: thread.id, title: thread.title))
-        .askButton()
+        #if targetEnvironment(macCatalyst)
+        // The head above is the whole bar, as on the console: no window bar
+        // over it and no ⋯ menu (the same layout as the console's head; Stop
+        // is the running pill).
+        .toolbar(.hidden, for: .navigationBar)
+        #else
         .toolbar {
             Menu {
                 Button { Task { thread = (try? await hub.checkinThread(thread.id)) ?? thread; await load() } } label: { Label("Check in now", systemImage: "arrow.clockwise") }.disabled(thread.status == "running")
@@ -577,6 +657,7 @@ struct ThreadDetail: View {
                     .disabled(thread.status == "archived")
             } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Session actions")
         }
+        #endif
         .sheet(isPresented: $showSettings) { ThreadSettings(thread: $thread) }
         // The app's Settings, reached from the refusal banner: the owner fixes
         // the code and comes straight back to the armed card and their words.
@@ -587,22 +668,38 @@ struct ThreadDetail: View {
         }
         .navigationDestination(item: $openThread) { ThreadDetail(thread: $0) }
         .onAppear {
+            // On the Mac the sessions sidebar stays on screen beside the chat,
+            // so the board keeps polling there: paused, a card read here kept
+            // its cell on the left (the owner 2026-09-29).
+            #if !targetEnvironment(macCatalyst)
             store.pause()
+            #endif
             if let r = armOnOpen, !armedOnOpen { armedOnOpen = true; arm(r) }
         }
         // Back from the background: the change loop may be parked on a
         // request the OS froze, so read the session now (as RootView does).
         .onChange(of: scenePhase) { _, p in
+            // The Mac's `.inactive` is a window behind Chrome, still read:
+            // the chat keeps its loop (RootView does the same for the board).
+            #if targetEnvironment(macCatalyst)
+            foreground = p != .background
+            #else
             foreground = p == .active
+            #endif
             if p == .active { Task { await load() } }
         }
         // Back: the board loop resumes on its own within 2 s (RootView) —
         // kicking a refresh from here competed with the pop animation. The
         // events the phone assembled (disk seed + every delta) are written
         // back so the next open of this chat seeds from them, not from a
-        // 460 KB fetch.
+        // 460 KB fetch (speed phase, 2026-08-26).
+        // The board landed after this chat opened (a relaunch draws both at
+        // once): its cards, until the chat's own fetch answers.
+        .onChange(of: store.board?.bundleOf(thread)) { seedCards() }
         .onDisappear {
+            #if !targetEnvironment(macCatalyst)
             store.resume()
+            #endif
             let key = hub.cacheKey(HubClient.eventsPath(thread.id)), evs = Array(events.suffix(1000))
             if !evs.isEmpty { Task.detached { HubClient.remember(key: key, evs) } }
         }
@@ -630,6 +727,7 @@ struct ThreadDetail: View {
                     rows = computeRows()
                 }
             }
+            seedCards()
             await load(); try? await hub.readThread(thread.id)
             // Then park on the change feed for THIS chat and reload only when
             // it moves — a working session's steps land within a second, an
@@ -778,7 +876,12 @@ struct ThreadDetail: View {
         if replies.count > 1 { return "One message for all of them (optional)" }
         if r.kind == .rec { return r.outcome.isEmpty ? "Your line — it goes to the session, the rec stays open" : "Your note to the session (optional)" }
         if r.kind == .action { return r.outcome.isEmpty ? "Your line — it goes to the session, the proposal stays open" : "Your note to the session (optional)" }
+        #if targetEnvironment(macCatalyst)
+        // An ask, the console's words (composer.js, the owner 2026-09-29).
+        return r.outcome.isEmpty ? "Your answer…" : "Anything to add (optional)"
+        #else
         return "Your reply (optional)"
+        #endif
     }
 
     func send(confirmed: Bool = false) {
@@ -788,12 +891,11 @@ struct ThreadDetail: View {
             confirmingEmpty = true
             return
         }
-        let images = attachments.images, ids = attachments.assetIDs
-        let atts = AttachmentDraft(); atts.images = images; atts.assetIDs = ids
         // Clear the composer immediately (optimistic). Clearing only after the
         // round-trip left text in the bar when the hub was slow or the reply
         // was lost even though the message was stored; restore on failure.
-        draft.text = ""; attachments.clear(); replies = []
+        let atts = attachments.take(), ids = atts.assetIDs
+        draft.text = ""; replies = []
         sendError = nil; sendErrorNeedsDecider = false
         sending = true
         Task {
@@ -846,7 +948,7 @@ struct ThreadDetail: View {
                 sendErrorNeedsDecider = HubClient.isDeciderRefusal(error)
                 if replies.isEmpty { replies = armed }
                 if draft.text.isEmpty { draft.text = t }
-                if attachments.isEmpty { attachments.images = images; attachments.assetIDs = ids }
+                attachments.restore(atts)
             }
             sending = false
         }
@@ -893,7 +995,11 @@ struct ThreadDetail: View {
 
     @ViewBuilder func chatBubble(_ m: ThreadMessage) -> some View {
         let mine = m.role == "owner"
-        if !mine && m.kind != "error" {
+        // The CLI's "You've hit your session limit · resets 2:40am" is not a
+        // crash: the hub resumes the session then, so it draws as the turn's
+        // end line in amber, never a red bubble (the console's paused row).
+        let paused = m.kind == "error" && m.text.range(of: #"(?i)hit your (?:[a-z0-9 ]{0,24} )?limit[^\n]*?resets\s"#, options: .regularExpression) != nil
+        if !mine && (m.kind != "error" || paused) {
             // THERE IS NO WHITE CELL: anything the owner must read or do is
             // one of the special cells. A session's reply is the turn ENDING, never a
             // text bubble: the cards the turn raised are the reply (the hub
@@ -903,11 +1009,11 @@ struct ThreadDetail: View {
             // still carries text (an older row, or words folded beside a card)
             // keeps it behind the line, closed until tapped, for the record
             // only. Same as the console's `.msg.end` (views/threads.js msgHTML).
-            let hasOld = !m.text.isEmpty || !(m.attachments ?? []).isEmpty
+            let hasOld = !paused && (!m.text.isEmpty || !(m.attachments ?? []).isEmpty)
             let open = openReplies.contains(m.id)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 4) {
-                    Text("turn ended")
+                    Text(paused ? "turn paused · session limit" : "turn ended")
                     Text("·")
                     Text(m.ts, style: .time)
                     if m.cost_usd > 0 { Text("· " + usd(m.cost_usd)) }
@@ -916,7 +1022,7 @@ struct ThreadDetail: View {
                     Spacer()
                 }
                 .font(.caption2)
-                .foregroundStyle(m.kind == "read" ? Color.accentColor : Color.secondary)
+                .foregroundStyle(paused ? Color.orange : m.kind == "read" ? Color.accentColor : Color.secondary)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     guard hasOld else { return }
@@ -928,7 +1034,11 @@ struct ThreadDetail: View {
             }
             .padding(.horizontal)
         } else {
+            #if targetEnvironment(macCatalyst)
+            if mine { macMine(m) } else { chatBubbleBox(m, mine: false) }
+            #else
             chatBubbleBox(m, mine: mine)
+            #endif
         }
     }
 
@@ -1071,9 +1181,29 @@ struct ThreadDetail: View {
         rows = computeRows()
     }
 
-    /// The proposals this chat draws: its own, still open or dismissed (a
-    /// decided one is history — the "↩ Approved" message says so).
-    func inChat(_ a: Action) -> Bool { a.thread_id == thread.id && (a.open == true || a.folded == "dismissed") }
+    /// The proposals this chat draws: all of its own — open ones with their
+    /// buttons, dismissed ones folded, decided ones grey with who decided. A
+    /// decided card used to leave the chat, so an approved proposal was only
+    /// the owner's "↩ Approved" reply; same as the web chat.
+    func inChat(_ a: Action) -> Bool { a.thread_id == thread.id }
+
+    /// Draw the session's open cards from the board until this chat's own
+    /// fetch lands. The opening paint is the saved messages and steps, which
+    /// carry no cards, and `load` can be seconds away: the desktop app came
+    /// back from an update on a running session whose row beside it read
+    /// APPROVE while the chat showed "12 tool calls · now: thinking" and no
+    /// card, for the ten seconds the hub took to answer (the owner 2026-09-30:
+    /// "desktop app doesnt show approval cell in running chat"). The board
+    /// already holds them — it is what drew the row. Once `load` has the
+    /// chat's own lists those are the truth and the board is not read again:
+    /// it can lag a card just answered here.
+    func seedCards() {
+        guard !cardsLoaded, let b = store.board?.bundleOf(thread) else { return }
+        let a = b.asks.filter { x in x.thread_id == thread.id && !asks.contains { $0.id == x.id } }
+        let p = b.actions.filter(inChat).filter { x in !actions.contains { $0.id == x.id } }
+        if !a.isEmpty { placeAsks(asks + a) }
+        if !p.isEmpty { placeActions(actions + p) }
+    }
 
     func load() async {
         Perf.event("load start")
@@ -1083,8 +1213,8 @@ struct ThreadDetail: View {
             async let t = hub.thread(thread.id); async let m = hub.threadMessages(thread.id); async let e = hub.threadEvents(thread.id, since: since)
             async let st = hub.threadSteps(thread.id)
             async let k = hub.threadAsks(thread.id)
-            // Proposed AND dismissed: a dismissed proposal keeps
-            // its folded line in the chat, with Reopen inside.
+            // Every state: a dismissed proposal keeps its folded line with
+            // Reopen inside (2026-09-18), a decided one its grey card (09-30).
             async let p = hub.actions(state: "", thread: thread.id)
             async let rc = hub.threadRecs(thread.id)
             // The conversation is drawn as soon as the MESSAGES land. The
@@ -1095,7 +1225,7 @@ struct ThreadDetail: View {
             // Opened on a card: place the approvals BEFORE the first draw, so
             // the opening scroll (onChange of messages.count) has its target.
             // Every other time the approvals fill in after the messages.
-            let early: [Action]? = focusCard != nil && messages.isEmpty ? ((try? await p) ?? []).filter(inChat) : nil
+            let early: [Action]? = focusCard != nil && messages.isEmpty ? (try? await p)?.filter(inChat) : nil
             var moved = false
             let msgsMoved = freshMessages != messages
             // Only assign what actually changed: a plain reassignment every
@@ -1108,10 +1238,29 @@ struct ThreadDetail: View {
             // Goals name the goal on an ask card and barely ever change —
             // re-fetching them on every 3s poll was a round trip for nothing.
             if goals.isEmpty, let g = try? await hub.goals() { goals = g }
-            if let k = try? await k, k != asks || (msgsMoved && !k.isEmpty) { placeAsks(k) }
-            let mine: [Action]
-            if let early { mine = early } else { mine = ((try? await p) ?? []).filter(inChat) }
-            if mine != actions || (msgsMoved && !mine.isEmpty) { placeActions(mine) }
+            var cardsMoved = false
+            // The other device's install card is not this app's to draw
+            // (the owner 2026-10-01); the board already left it out.
+            let gotAsks = (try? await k)?.filter { !$0.isOtherDeviceInstall }
+            if let gotAsks, gotAsks != asks || (msgsMoved && !gotAsks.isEmpty) {
+                cardsMoved = gotAsks != asks
+                placeAsks(gotAsks)
+            }
+            // A fetch that failed keeps the cards already drawn (asks always
+            // did): an approval must not leave the chat because one request
+            // timed out — `?? []` read a failure as "no proposals".
+            let mine: [Action]?
+            if let early { mine = early } else { mine = (try? await p)?.filter(inChat) }
+            if let mine, mine != actions || (msgsMoved && !mine.isEmpty) {
+                cardsMoved = cardsMoved || mine != actions
+                placeActions(mine)
+            }
+            if gotAsks != nil, mine != nil { cardsLoaded = true }
+            // A run block draws only the cards this chat holds (`pieces`), and
+            // `place…` leaves those to it: a card that arrives after the cut
+            // did — no new step, no new message — needs the blocks rebuilt, or
+            // it is drawn nowhere until the next step.
+            if cardsMoved, !steps.isEmpty { rows = computeRows() }
             // A rec moves under its reply when that lands, and changes
             // without a message when the owner decides it from the Recs page.
             if let rc = try? await rc, rc != recs || (msgsMoved && !rc.isEmpty) { placeRecs(rc) }
@@ -1164,6 +1313,290 @@ struct ThreadDetail: View {
     }
 }
 
+#if targetEnvironment(macCatalyst)
+extension ThreadDetail {
+    /// The console's `.chat-head` (skin.css, one 52pt row), the owner 2026-09-29:
+    /// "I want the same exact layout within the desktop app". ← in a hairline
+    /// box, the title, its pills (the live ones are the controls — hovered,
+    /// running reads Stop, speaking reads Stop speaking), the grey model pill,
+    /// and at the right the schedule · next · $ · tokens line.
+    var macHead: some View {
+        HStack(spacing: 8) {
+            Button {
+                if pushed { dismiss() } else { snap.desk = nil; snap.deskGen += 1 }
+            } label: {
+                Text("←").font(.system(size: 13)).foregroundStyle(Web.muted)
+                    .frame(width: 30, height: 30)
+                    .background(Web.panel, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Web.lineStrong, lineWidth: 1) }
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back")
+            HStack(spacing: 6) {
+                Text(md(thread.title)).font(.system(size: 15, weight: .semibold)).tracking(-0.18)
+                    .lineLimit(1).truncationMode(.tail)
+                    .padding(.trailing, 6)
+                    .layoutPriority(1)
+                HStack(spacing: 4) {
+                    ForEach(Array(headPills.enumerated()), id: \.offset) { _, p in
+                        HeadPill(pill: p, act: headAct(p))
+                    }
+                }.fixedSize()
+                if let m = thread.modelShort {
+                    Text(m).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Web.muted)
+                        .padding(.horizontal, 7).frame(height: 20)
+                        .background(Web.code, in: RoundedRectangle(cornerRadius: 6))
+                        .fixedSize()
+                }
+            }
+            .padding(.leading, 4)
+            Spacer(minLength: 12)
+            if !headMeta.isEmpty {
+                Text(headMeta).font(.system(size: 12.5)).monospacedDigit().foregroundStyle(Web.muted)
+                    .lineLimit(1).truncationMode(.head)
+                    .padding(.trailing, 4)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 52)
+        .background(Web.panel)
+        .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
+    }
+
+    /// The row's pills, the board's words (views/threads.js headPills): the
+    /// session's own pill, else "running" while it works.
+    var headPills: [Pill] {
+        if let ps = store.board?.pills?[thread.id], !ps.isEmpty { return ps }
+        if let p = thread.pill { return [p] }
+        return thread.status == "running" ? [Pill(word: "running", tone: "running")] : []
+    }
+
+    /// `schedule · next when · $ · tokens`, the console's head-meta.
+    var headMeta: String {
+        var parts: [String] = []
+        if !thread.schedule.isEmpty { parts.append(thread.schedule_label ?? scheduleLabel(thread.schedule)) }
+        if let n = thread.next_run_at { parts.append("next " + nextLabel(n)) }
+        if thread.cost_usd > 0 { parts.append(usd(thread.cost_usd)) }
+        if let n = thread.tokens, n > 0 { parts.append(tokens(n)) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// What a live pill does when clicked (HEAD_ACT): Stop the turn, or hush
+    /// what the session is saying — the card stays.
+    /// The hover word is never longer than the pill's own: the pill is sized
+    /// by the wider of the two, and "Stop speaking" under "speaking" left the
+    /// resting pill twice its word (the owner 2026-09-30: "that pill was far too
+    /// wide… about the size of the word"). The tooltip says the whole thing.
+    func headAct(_ p: Pill) -> (label: String, help: String, run: () -> Void)? {
+        switch p.tone {
+        case "running": return ("Stop", "Stop", { stop() })
+        case "speaking", "waiting": return ("Stop", "Stop speaking", { headHush() })
+        default: return nil
+        }
+    }
+
+    /// The console's headHush: the local voice, the hub's "speaking" mark,
+    /// and every open card of this session that has a line.
+    func headHush() {
+        Speaker.shared.stop()
+        let id = thread.id
+        let lines = asks.filter { !$0.isClosed && !($0.said ?? "").isEmpty }.map(\.id)
+        Task {
+            _ = try? await hub.voice(thread: id, secs: 0)
+            for card in lines { try? await hub.hushVoice(card: card) }
+            try? await Task.sleep(for: .milliseconds(1200))
+            await load()
+        }
+    }
+
+    /// The owner's own message (skin.css): a soft grey block
+    /// against the right wall, dark text, the "↩ Read it · <card>" quote over
+    /// it, and only the time under it — "sent by the owner" dropped, any other
+    /// sender kept. At most 680 wide (860 for a long one).
+    @ViewBuilder func macMine(_ m: ThreadMessage) -> some View {
+        let long = isLongText(m.text)
+        HStack(spacing: 0) {
+            Spacer(minLength: 60)
+            VStack(alignment: .leading, spacing: 5) {
+                if m.kind == "checkin" { Text("⏰ scheduled check-in").font(.system(size: 12.5)).foregroundStyle(Web.muted) }
+                ForEach(macReplyLines(m), id: \.self) { r in
+                    (Text("↩ ") + Text(r.label).bold() + Text(" · " + r.title))
+                        .font(.system(size: 13)).foregroundStyle(Web.muted).lineLimit(2)
+                        .padding(.leading, 9)
+                        .overlay(alignment: .leading) { Rectangle().fill(Web.lineStrong).frame(width: 2) }
+                }
+                let refs = m.attachments ?? []
+                ForEach(refs.indices, id: \.self) { i in BlobAttachment(ref: refs[i], maxHeight: 180) }
+                if !m.text.isEmpty {
+                    let open = openLong.contains(m.id)
+                    if long && !open {
+                        StyledText(text: m.text, color: .primary)
+                            .frame(maxHeight: 320, alignment: .top)
+                            .clipped()
+                            .overlay(alignment: .bottom) {
+                                LinearGradient(colors: [.clear, Web.code], startPoint: .top, endPoint: .bottom)
+                                    .frame(height: 64).allowsHitTesting(false)
+                            }
+                    } else {
+                        StyledText(text: m.text, color: .primary)
+                    }
+                    if long {
+                        Button(open ? "Show less" : "Show all · \(longLineCount(m.text)) lines") {
+                            if open { openLong.remove(m.id) } else { openLong.insert(m.id) }
+                        }
+                        .buttonStyle(WebButtonStyle(small: true))
+                    }
+                }
+                HStack(spacing: 8) {
+                    Spacer(minLength: 0)
+                    if let by = sentBy(m), by.who != "you" {
+                        if let id = by.thread {
+                            Button { Task { if let t = try? await hub.thread(id) { openThread = t } } } label: {
+                                Text("sent by \(Text(by.who).underline())").lineLimit(1)
+                            }.buttonStyle(.plain)
+                        } else {
+                            Text("sent by \(by.who)").lineLimit(1)
+                        }
+                    }
+                    Text(macMeta(m))
+                }
+                .font(.system(size: 11)).foregroundStyle(Web.muted)
+                .padding(.top, -1)
+            }
+            .padding(.vertical, 11).padding(.horizontal, 16)
+            .background(Web.code, in: RoundedRectangle(cornerRadius: 16))
+            .overlay { if m.id == focusMessage { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.red.opacity(0.6), lineWidth: 1.5) } }
+            .chatAbout(bubbleSubject(m))
+            .frame(maxWidth: long ? 860 : 680, alignment: .trailing)
+        }
+        .padding(.horizontal)
+        // `.msg.owner { margin: 26px 0 16px }` against the stack's 12.
+        .padding(.top, 14).padding(.bottom, 4)
+    }
+
+    /// The block's foot: when, and what that turn cost if it did.
+    func macMeta(_ m: ThreadMessage) -> String {
+        var s = m.ts.formatted(date: .omitted, time: .shortened)
+        if m.cost_usd > 0 { s += " · " + usd(m.cost_usd) }
+        if let n = m.tokens, n > 0 { s += " · " + tokens(n) }
+        return s
+    }
+
+    /// The console's replyLineHTML: the verdict word bold, the card's title
+    /// plain, no emoji.
+    func macReplyLines(_ m: ThreadMessage) -> [MacReplyLine] {
+        let list = (m.replies?.isEmpty == false) ? m.replies! : [PromptReply(ref: m.in_reply_to ?? "", outcome: m.outcome)]
+        return list.compactMap { r in
+            let parts = r.ref.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { return nil }
+            let kind = parts[0], id = parts[1]
+            let title: String
+            switch kind {
+            case "rec": title = recs.first { $0.id == id }?.title ?? id
+            case "ask": title = asks.first { $0.id == id }?.title ?? id
+            case "action": title = actions.first { $0.id == id }?.title ?? id
+            default: title = "\(kind) \(id)"
+            }
+            return MacReplyLine(label: r.label ?? r.outcome ?? "", title: mdPlain(title))
+        }
+    }
+
+    /// The armed cards as the console's `.reply-strip`: a blue rail and an 8%
+    /// blue wash across the top of the box, one line per card — its pick,
+    /// its title — and × to drop that one.
+    var macReplyStrip: some View {
+        VStack(spacing: 0) {
+            ForEach(replies) { r in
+                HStack(spacing: 8) {
+                    (Text(r.label).foregroundStyle(Web.accent).fontWeight(.semibold) + Text(" · " + mdPlain(r.title)).foregroundStyle(Color.primary))
+                        .font(.system(size: 13)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button { replies.removeAll { $0.ref == r.ref } } label: {
+                        Text("×").font(.system(size: 15)).foregroundStyle(Web.muted)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Drop \(mdPlain(r.title))")
+                }
+                .padding(.vertical, 6).padding(.leading, 13).padding(.trailing, 16)
+            }
+        }
+        .background(Web.accent.opacity(0.08))
+        .overlay(alignment: .leading) { Rectangle().fill(Web.accent).frame(width: 3) }
+        .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
+    }
+}
+
+struct MacReplyLine: Hashable {
+    let label: String
+    let title: String
+}
+
+/// One of the head's pills (skin.css `.chat-head .head-id .pill`): 20 tall,
+/// 11.5pt semibold, radius 6, in its tone. A live one (running, speaking,
+/// waiting) is a button: hovered it turns red and reads its act — Stop, Stop
+/// speaking — at the same size, so nothing jumps (the owner 2026-09-28 on the
+/// console; the desktop the same, 2026-09-29).
+struct HeadPill: View {
+    let pill: Pill
+    let act: (label: String, help: String, run: () -> Void)?
+    @State private var hover = false
+
+    var tint: Color? {
+        switch pill.tone {
+        case "running", "read": Web.accent
+        case "speaking", "done": Color.green
+        case "waiting": Color.orange
+        case "needs": Color.red
+        case "install": Color.teal
+        default: nil
+        }
+    }
+
+    var body: some View {
+        if let act {
+            Button(action: act.run) { face(hot: hover, word: act.label) }
+                .buttonStyle(.plain)
+                .onHover { hover = $0 }
+                .help(act.help)
+        } else {
+            face(hot: false, word: nil)
+        }
+    }
+
+    /// The dot and word and, hovered, the square and the act laid over them
+    /// in the same cell (the console's `.w` and `.h`): the pill keeps the
+    /// wider width, and the act sits in its middle — "Stop" used to hang at
+    /// the left of a pill sized for "running" (the owner 2026-10-05 00:44:
+    /// "this is a little misaligned… it's in this weird left-turn state").
+    private func face(hot: Bool, word: String?) -> some View {
+        let color = hot ? Color.red : (tint ?? Web.muted)
+        return ZStack {
+            HStack(spacing: 6) {
+                if act != nil {
+                    if pill.tone == "waiting" { Circle().fill(color).frame(width: 6, height: 6) }
+                    else { LiveDot(color: color, size: 6) }
+                }
+                Text(pill.word)
+            }
+            .opacity(hot ? 0 : 1)
+            if let word {
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 1).fill(Color.red).frame(width: 6, height: 6)
+                    Text(word)
+                }
+                .opacity(hot ? 1 : 0)
+            }
+        }
+        .font(.system(size: 11.5, weight: .semibold)).lineLimit(1)
+        .foregroundStyle(color)
+        .padding(.horizontal, 7).frame(height: 20)
+        .background(hot ? Color.red.opacity(0.12) : (tint.map { $0.opacity(0.15) } ?? Web.code), in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+    }
+}
+#endif
+
 /// What the agent did during one run: tool calls (with their results),
 /// thinking and interim text, in order. ALWAYS collapsed to its one-line
 /// summary until the owner taps it — live or finished. A live run used to open itself,
@@ -1180,7 +1613,13 @@ struct RunActivity: View {
     /// Fetch this block's own events, called once when the owner opens it.
     var open: (() async -> Void)? = nil
     @State private var expanded: Bool? = nil
+    #if targetEnvironment(macCatalyst)
+    @State private var summaryHover = false
+    #endif
     var isOpen: Bool { expanded ?? false }
+    /// LIFE_SHOT_STEPS=1 (ops/mac-screens.sh STEPS=1): every run block and
+    /// each of its rows open, so a shot shows the step UI itself.
+    static let shotSteps = ProcessInfo.processInfo.environment["LIFE_SHOT_STEPS"] == "1"
 
     var tools: Int { count?.tools ?? events.filter { $0.kind == "tool_use" }.count }
     var summary: String {
@@ -1229,6 +1668,22 @@ struct RunActivity: View {
                 // a 5-step one.
                 if opening, let open { Task { await open() } }
             } label: {
+                #if targetEnvironment(macCatalyst)
+                // The console's `.run > summary` (skin.css), the owner 2026-09-29:
+                // a faint ▸/▾, the headline in 12.5 grey, no gear; hovered, a
+                // grey wash behind the row.
+                HStack(spacing: 6) {
+                    Text(isOpen ? "▾" : "▸").opacity(0.55)
+                    Text(headline).lineLimit(1)
+                    if live { LiveDot(color: Web.muted, size: 6) }
+                }
+                .font(.system(size: 12.5)).foregroundStyle(Web.muted)
+                .padding(.vertical, 3).padding(.leading, 6).padding(.trailing, 8)
+                .background(summaryHover ? Web.code : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                .padding(.leading, -6)
+                .contentShape(Rectangle())
+                .onHover { summaryHover = $0 }
+                #else
                 HStack(spacing: 6) {
                     Image(systemName: isOpen ? "chevron.down" : "chevron.right").font(.caption2.weight(.semibold))
                     Image(systemName: "gearshape.2").font(.caption)
@@ -1236,6 +1691,7 @@ struct RunActivity: View {
                     if live { LiveDot(color: .secondary, size: 5) }
                     Spacer()
                 }.foregroundStyle(.secondary)
+                #endif
             }.buttonStyle(.plain)
             if isOpen {
                 VStack(alignment: .leading, spacing: 4) {
@@ -1247,9 +1703,21 @@ struct RunActivity: View {
                 }.padding(.leading, 4)
             }
         }
+        #if targetEnvironment(macCatalyst)
+        // Flush with the column's left wall, at most 760 wide (`.activity`).
+        .frame(maxWidth: 760, alignment: .leading)
+        .padding(.horizontal)
+        #else
         .padding(.horizontal)
         .padding(.leading, 8)
+        #endif
         .chatAbout(ChatSubject(screen: "Session activity", title: "What it did here · \(summary)", facts: runFacts))
+        .task {
+            if Self.shotSteps, expanded == nil {
+                expanded = true
+                if let open { await open() }
+            }
+        }
     }
 
     /// The run's steps in order, for "why did you do this?".
@@ -1266,23 +1734,51 @@ struct RunActivity: View {
     }
 }
 
+/// One step of a run. Opened, it is one plain terminal block, not a stack of
+/// grey boxes (the owner 2026-10-05 23:28: "the UI just looks a little
+/// funky with these gray boxes… a light mode terminal display with lightly
+/// colored text"; the console's `.ev .io`). A thought: the purple line IS
+/// the thought — shut, its first line; open, all of it, nothing printed
+/// twice under it. A tool call: the call in blue (a shell command behind
+/// `$`, whole; any other tool's title line), what went in when the title
+/// cannot say it (an edit's lines), then the output in grey — its first
+/// `fold` lines, the rest behind "… N more lines" — or the error in red,
+/// whole ("the error is good"). A body that is still the input's JSON
+/// (stored before 10-05) is not shown: the title already says it.
 struct EventRow: View {
     let e: ThreadEvent
     let result: ThreadEvent?
-    @State private var open = false
+    @State private var open = RunActivity.shotSteps
+    @State private var whole = false
+    static let fold = 12
+    #if targetEnvironment(macCatalyst)
+    static let violet = Web.violet, red = Web.red, green = Web.green, blue = Web.accent
+    #else
+    static let violet = Color.purple, red = Color.red, green = Color.green, blue = Color.blue
+    #endif
 
     var icon: String {
         switch e.kind { case "thinking": "brain"; case "tool_use": "terminal"; case "text": "text.bubble"; default: "arrow.turn.down.right" }
     }
-    var tint: Color { e.kind == "thinking" ? .purple : result?.title == "error" ? .red : .secondary }
-    /// Tool calls read as plain English ("List goals", "Read DESIGN.md");
-    /// the raw title (tool · command) is shown when expanded.
+    var tint: Color { e.kind == "thinking" ? Self.violet : result?.title == "error" ? Self.red : .secondary }
+    /// Tool calls read as plain English ("List goals", "Read DESIGN.md").
     var headline: String {
         switch e.kind {
         case "tool_use": (e.summary ?? "").isEmpty ? e.title : e.summary!
-        case "thinking": "Thinking · " + (e.body.split(whereSeparator: \.isNewline).first.map(String.init) ?? "")
+        case "thinking": open ? e.body : "Thinking · " + (e.body.split(whereSeparator: \.isNewline).first.map(String.init) ?? "")
         default: e.body
         }
+    }
+    /// "Bash · grep …" → "Bash".
+    var tool: Substring { e.title.prefix { $0 != " " } }
+    /// The call line: a shell command whole behind `$`. Any other tool's
+    /// headline already names the call ("Edit app/…/x.swift"), so its block
+    /// holds only what went in (an edit's lines) and what came out.
+    var call: String { tool == "Bash" ? "$ " + e.body : "" }
+    var input: String { tool == "Bash" || e.body.hasPrefix("{") ? "" : e.body }
+    var outLines: [Substring] {
+        guard let r = result else { return [] }
+        return (r.body.isEmpty ? "(no output)" : r.body).split(separator: "\n", omittingEmptySubsequences: false)
     }
 
     var body: some View {
@@ -1292,21 +1788,26 @@ struct EventRow: View {
                     Image(systemName: icon).font(.caption2).frame(width: 14)
                     Text(headline).font(.caption).lineLimit(open ? nil : (e.kind == "text" ? 6 : 1)).multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
-                    if result != nil, !open { Image(systemName: "checkmark").font(.caption2).foregroundStyle(result?.title == "error" ? .red : .green) }
+                    if result != nil, !open { Image(systemName: "checkmark").font(.caption2).foregroundStyle(result?.title == "error" ? Self.red : Self.green) }
                 }.foregroundStyle(tint)
             }.buttonStyle(.plain)
-            if open {
-                if e.kind == "tool_use", !(e.summary ?? "").isEmpty {
-                    Text(e.title).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).lineLimit(3).padding(.leading, 20)
+            if open, e.kind == "tool_use" {
+                let bad = result?.title == "error"
+                let shown = whole || bad ? outLines : Array(outLines.prefix(Self.fold))
+                VStack(alignment: .leading, spacing: 2) {
+                    if !call.isEmpty { Text(call).foregroundStyle(Self.blue) }
+                    if !input.isEmpty { Text(input).foregroundStyle(.secondary) }
+                    if result != nil {
+                        Text(shown.joined(separator: "\n")).foregroundStyle(bad ? Self.red : .secondary)
+                        if !whole, !bad, outLines.count > Self.fold {
+                            Button("… \(outLines.count - Self.fold) more lines") { withAnimation { whole = true } }
+                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                        }
+                    }
                 }
-                if e.kind == "tool_use" || e.kind == "thinking", !e.body.isEmpty {
-                    Text(e.body).font(.system(.caption2, design: e.kind == "thinking" ? .default : .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-                        .padding(6).frame(maxWidth: .infinity, alignment: .leading).background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 6))
-                }
-                if let r = result {
-                    Text(r.body.isEmpty ? "(no output)" : r.body).font(.system(.caption2, design: .monospaced)).foregroundStyle(r.title == "error" ? .red : .secondary).textSelection(.enabled)
-                        .lineLimit(40).padding(6).frame(maxWidth: .infinity, alignment: .leading).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 6))
-                }
+                .font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 20)
             }
         }
     }
@@ -1471,11 +1972,14 @@ struct ArmedReply: Identifiable, Hashable {
     var ref: String {
         switch kind { case .ask: "ask:" + id; case .rec: "rec:" + id; case .action: "action:" + id }
     }
-    /// The banner's word for the pick: the hub's label for it (an ask's
-    /// banner always reads "Replying to").
+    /// The banner's word for the pick: the hub's label for it — the word on
+    /// the button tapped (I did this · Won't do · Decided · Accepted…).
+    /// Words alone on an ask read "Replying to" (the owner 2026-10-02: "make it so
+    /// that the physical text in the chat bar says done or wont do instead
+    /// of replying to").
     var label: String {
-        if kind == .ask { return "Replying to" }
-        return outcomes.first { $0.value == outcome && !$0.value.isEmpty }?.label ?? "Reply"
+        if let l = outcomes.first(where: { $0.value == outcome && !$0.value.isEmpty })?.label { return l }
+        return kind == .ask ? "Replying to" : "Reply"
     }
     /// The banner's mark: the card's own icon and colour.
     var icon: String {

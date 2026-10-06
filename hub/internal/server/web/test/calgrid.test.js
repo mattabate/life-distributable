@@ -106,6 +106,42 @@ test('one lane\'s pile collapses to one box; only different lanes sit side by si
   assert.equal(clear[0].n, 19 * 60 + 30 + CAL_SLOT_MIN);
 });
 
+test('a box fills every column that is empty beside it', () => {
+  // A quarter-wide 09:30 under a four-wide 08:00 row: the row should always
+  // be full when something is on at that time.
+  const ev = (id, at, kind, lane) => ({ id, at, title: id, kind, lane: lane || (kind === 'owner' ? 'mine' : 'agents') });
+  // Three lanes at 10:00 make three columns; the owner's 10:20 step chains the
+  // first column to 10:50, so the 10:35 run lands in the second and the third
+  // is empty beside it: two of three columns, not one.
+  const laid = calLayout([ev('a', '10:00', 'owner'), ev('b', '10:00', 'chore', 'chores'), ev('c', '10:00', 'homework', 'homework'),
+    ev('d', '10:20', 'owner'), ev('e', '10:35', 'run')]);
+  const by = Object.fromEntries(laid.map(p => [p.e.id, p]));
+  assert.deepEqual(laid.map(p => p.cols), [3, 3, 3, 3]);
+  assert.equal(by.a.span, 1);                       // b and c are beside it
+  assert.equal(by.b.span, 1);
+  assert.equal(by.c.span, 1);
+  assert.equal(by.e.col, 1);
+  assert.equal(by.e.span, 2);                       // the third column is empty at 10:35
+  assert.match(calBlockHTML(by.e.e, by.e), /left:calc\(33\.33\d*% \+ 1px\);width:calc\(66\.66\d*% - 3px\)/);
+  assert.match(calBlockHTML(by.b.e, by.b), /width:calc\(33\.33\d*% - 3px\)/);
+  // A box never grows over a column that is taken for any part of its height.
+  // (a 08:00/08:20/08:40 pile reaches 09:10; the owner's 08:45 step covers
+  // only its bottom, and that is enough to keep it one column wide.)
+  const tall = calLayout([ev('r1', '08:00', 'run'), ev('r2', '08:20', 'run'), ev('r3', '08:40', 'run'), ev('m', '08:45', 'owner')]);
+  const pile = tall.find(p => p.members.length === 3), step = tall.find(p => p.e.id === 'm');
+  assert.equal(pile.n, 9 * 60 + 10);
+  assert.equal(pile.span, 1);
+  assert.equal(step.col, 1);
+  assert.equal(step.span, 1);
+  // A brush of a minute is not a stack: a 09:01 step reaches 09:31, and the
+  // 09:30 run beside it still takes the whole row.
+  const brush = calLayout([ev('x', '09:00', 'run'), ev('y', '09:01', 'owner'), ev('z', '09:30', 'run')]);
+  const z = brush.find(p => p.e.id === 'z');
+  assert.equal(z.col, 0);
+  assert.equal(z.span, 2);
+  assert.equal(brush.find(p => p.e.id === 'x').span, 1);
+});
+
 test('a collapsed box says +N and opens the popout listing every member', () => {
   calState.off = new Set();
   const run = (id, at, state) => ({
@@ -126,7 +162,7 @@ test('a collapsed box says +N and opens the popout listing every member', () => 
   // The popout: one row per member, each a real .cal-ev that opens its card.
   calState.open = 'grp:t1,t2,t3';
   const panel = calPanelHTML({ days: [{ day: '2026-09-08', entries: es }] });
-  assert.match(panel, /3 agent runs in one box/);
+  assert.match(panel, /3 recurring runs in one box/);
   assert.match(panel, /data-id="t3"/);
   assert.match(panel, /check t2/);
   calState.open = '';
@@ -223,6 +259,11 @@ test('five lanes, five colours, and nothing else', () => {
   assert.equal(calShade(inst), CAL_INSTALL);
   assert.match(calRailRow(inst), new RegExp('--c:' + CAL_INSTALL));
   assert.match(calEntryHTML({ ...inst, detail: 'No link here.' }, {}), /openRespond\('ask-9'\)[^>]*>Respond</);
+  // The desktop app's card (2026-09-30): Install is a button on the mac lane.
+  const macCell = calEntryHTML({ ...inst, title: 'Install desktop build 1512', detail: 'The Mac build.' }, {});
+  assert.match(macCell, /<button class="sm install" onclick="macInstall\('ask-9'\)"[^>]*>Install<\/button>/);
+  assert.match(macCell, /resolveAskGlobal\('ask-9','dismissed'\)[^>]*>Won't install</);
+  assert.doesNotMatch(macCell, /href=|>Respond</);
   const did = { id: 'did:ask:ask-9', ref: 'ask:ask-9', ask_id: 'ask-9', kind: 'ask', ask_kind: 'install', state: 'done', did: true,
     actor: 'owner', verb: 'Installed', day: '2026-09-12', at: '09:15', title: 'build 881', lane: 'mine', closed: true, mark: 'done', kind_label: 'app update' };
   assert.equal(calShade(did), CAL_INSTALL);

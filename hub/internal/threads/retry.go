@@ -168,6 +168,31 @@ func (m *Manager) backfillErrorAsks() {
 // is the owner's to-do list, so a tapped card must leave) and the session starts
 // again on its own messages.
 func (m *Manager) RetryAsk(id string) (Thread, error) {
+	return m.retryAsk(id, "app", "restarted the session")
+}
+
+// ResumePaused: a session-limit card whose reset has come (Ask.ResumesAt,
+// a minute's grace) restarts its session by itself — the owner should never
+// have to type "are we back? can you keep going?". Called on the
+// hub's minute clock; a turn that hits the limit again raises a new card.
+func (m *Manager) ResumePaused(now time.Time) {
+	open, err := m.ListAsks("active", "", 500)
+	if err != nil {
+		return
+	}
+	for _, a := range open {
+		if a.Kind != "error" || !a.Open || a.ResumesAt == nil || now.Before(a.ResumesAt.Add(time.Minute)) {
+			continue
+		}
+		if _, err := m.retryAsk(a.ID, "hub", "resumed at the reset"); err != nil {
+			log.Printf("ask %s: resume at reset: %v", a.ID, err)
+			continue
+		}
+		log.Printf("ask %s: session %s resumed at its limit reset", a.ID, a.ThreadID)
+	}
+}
+
+func (m *Manager) retryAsk(id, by, note string) (Thread, error) {
 	a, err := m.GetAsk(id)
 	if err != nil {
 		return Thread{}, errors.New("no such ask")
@@ -188,7 +213,7 @@ func (m *Manager) RetryAsk(id string) (Thread, error) {
 	if r, ok := m.liveRun(a.ThreadID); ok && r.busy == 1 {
 		return Thread{}, errors.New("this session is running again already")
 	}
-	if _, err := m.ResolveAsk(id, "done", "app", "restarted the session"); err != nil {
+	if _, err := m.ResolveAsk(id, "done", by, note); err != nil {
 		return Thread{}, err
 	}
 	m.mu.Lock()

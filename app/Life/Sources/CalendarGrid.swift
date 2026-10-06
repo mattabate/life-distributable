@@ -251,11 +251,19 @@ struct CalPlaced: Identifiable {
     let end: Int
     let col: Int
     let cols: Int
+    /// How many of `cols` the box covers, from `col` rightward: every
+    /// column empty for its whole height, never fewer than one (the owner
+    /// 2026-09-30: "the row should always be full if they've got an event
+    /// at that time"). `span` in `calLayout`, views/calgrid.js.
+    let span: Int
     var e: CalEntry { members[0] }
     var id: String { e.id }
 }
 
 let calSlotMinutes = 30
+/// Two blocks overlapping by less than this sit side by side, not stacked —
+/// `CAL_TOUCH_MIN` in views/calgrid.js.
+let calTouchMinutes = 5
 
 /// A lane's pile collapses to ONE box (a title plus +N) rather than a row of
 /// unreadable slivers. The grouping never
@@ -339,7 +347,14 @@ func calLayout(_ list: [CalEntry]) -> [CalPlaced] {
             }
         }
         for it in cluster {
-            out.append(CalPlaced(members: it.members, start: it.s, end: it.n, col: it.col, cols: colsEnd.count))
+            var span = 1
+            // Every column to the right that is empty for the box's height;
+            // a brush under calTouchMinutes is not taken (views/calgrid.js).
+            for c in (it.col + 1)..<colsEnd.count {
+                if cluster.contains(where: { $0.col == c && min($0.n, it.n) - max($0.s, it.s) > calTouchMinutes }) { break }
+                span += 1
+            }
+            out.append(CalPlaced(members: it.members, start: it.s, end: it.n, col: it.col, cols: colsEnd.count, span: span))
         }
         cluster = []
         clusterEnd = -1
@@ -589,7 +604,7 @@ struct CalTimeGrid: View {
                      glyph: group ? calGroupGlyph(p.members) : nil,
                      closed: p.members.allSatisfy(CalCals.isClosed),
                      overdue: p.members.contains { $0.overdue == true && !CalCals.isClosed($0) })
-                .frame(width: w, height: h, alignment: .topLeading)
+                .frame(width: w * CGFloat(p.span), height: h, alignment: .topLeading)
                 .offset(x: Self.gutterW + CGFloat(p.col) * w + 1,
                         y: CGFloat(p.start) / 60 * Self.hourH)
                 .offset(dragState.id == p.e.id ? dragState.translation : .zero)
@@ -698,6 +713,67 @@ struct CalBlock: View {
         self.overdue = overdue ?? (e.overdue == true && !CalCals.isClosed(e))
     }
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        macBody
+        #else
+        phoneBody
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// The console's `.cal-ev.block` (the owner 2026-09-29: the desktop app is the
+    /// web's layout, exactly): 11.5 regular on a 1.45 line, the time at .85 in
+    /// tabular figures, 1×5 padding, radius 5, a 1px white-at-.35 edge; a
+    /// closed bar fades whole to .5 (the answered rec keeps full strength —
+    /// its pale shade is its "closed"), an overdue one wears the 2px amber ring.
+    ///
+    /// The box is its column's share and nothing more (the owner 2026-09-30, a
+    /// four-wide Sunday morning whose "08:00" bars ran over each other and
+    /// into the record strip — a `fixedSize` time and pill inside a
+    /// `maxWidth: .infinity` frame grew the whole bar past its 37 points).
+    /// So: time and title are ONE line that ellipsizes as the web's does
+    /// ("08…" in a four-column share); the +N pill is drawn only when it
+    /// fits whole and takes its width before the line does (the count is the
+    /// point of a pile, the owner 2026-09-08); `CalendarWeek` clips the frame the
+    /// way `overflow: hidden` does.
+    private var macBody: some View {
+        let ink = CalCals.ink(e)
+        let words = Text((glyph ?? calGlyph(e)) + (title ?? e.label)).strikethrough(badge == nil && calStruck(e))
+        let at = e.at ?? ""
+        let line = at.isEmpty ? words : Text(at).monospacedDigit().foregroundColor(ink.opacity(0.85)) + Text(" ") + words
+        return HStack(alignment: .firstTextBaseline, spacing: 4) {
+            line.lineLimit(1).truncationMode(.tail).layoutPriority(-1)
+            if let badge {
+                ViewThatFits(in: .horizontal) {
+                    Text(badge).font(.system(size: 11.5, weight: .bold)).lineLimit(1).fixedSize()
+                        .padding(.horizontal, 4)
+                        .background(ink.opacity(CalCals.recDone(e) ? 0.18 : 0.28), in: RoundedRectangle(cornerRadius: 8))
+                    Color.clear.frame(width: 0, height: 0)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 11.5))
+        .padding(.horizontal, 5).padding(.vertical, 1)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .foregroundStyle(CalCals.ink(e))
+        .background(CalCals.shade(e), in: RoundedRectangle(cornerRadius: 5))
+        .overlay {
+            RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(CalCals.recDone(e) ? CalCals.recInk.opacity(0.25) : Color.white.opacity(0.35), lineWidth: 1)
+        }
+        .overlay {
+            if overdue { RoundedRectangle(cornerRadius: 5).strokeBorder(calOverdueAmber, lineWidth: 2) }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .opacity(closed && !CalCals.recDone(e) ? 0.5 : 1)
+        .contentShape(RoundedRectangle(cornerRadius: 5))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+    }
+    #endif
+
+    private var phoneBody: some View {
         HStack(spacing: 3) {
             if let at = e.at, !at.isEmpty {
                 Text(at).font(.system(size: 10, weight: .semibold)).opacity(0.9).lineLimit(1).fixedSize()
@@ -735,6 +811,27 @@ struct CalBlock: View {
 struct CalChip: View {
     let e: CalEntry
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        // The console's `.cal-ev.chip` (the owner 2026-09-29: the web's layout):
+        // 11.5 regular on a 17 line, 1×5 padding, radius 5, faded whole to .5
+        // when closed (never the answered rec), 2px amber when overdue.
+        Text(calGlyph(e) + e.label)
+            .strikethrough(calStruck(e))
+            .font(.system(size: 11.5))
+            .lineLimit(1)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .foregroundStyle(CalCals.ink(e))
+            .background(CalCals.shade(e), in: RoundedRectangle(cornerRadius: 5))
+            .overlay {
+                if e.overdue == true && !CalCals.isClosed(e) {
+                    RoundedRectangle(cornerRadius: 5).strokeBorder(calOverdueAmber, lineWidth: 2)
+                }
+            }
+            .opacity(CalCals.isClosed(e) && !CalCals.recDone(e) ? 0.5 : 1)
+            .contentShape(Rectangle())
+            .accessibilityAddTraits(.isButton)
+        #else
         Text(calGlyph(e) + e.label)
             .strikethrough(calStruck(e))
             .font(.system(size: 11, weight: .medium))
@@ -750,6 +847,7 @@ struct CalChip: View {
             }
             .contentShape(Rectangle())
             .accessibilityAddTraits(.isButton)
+        #endif
     }
 }
 

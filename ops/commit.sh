@@ -3,7 +3,8 @@
 #   ops/commit.sh -m "<subject>" [-m "<body>"]… [--] <path>…
 # Prints `git status --short`, stages EXACTLY the given paths, commits only
 # those paths (anything else already staged by another session is left alone),
-# adds the Co-Authored-By trailer if missing, then prints the new short hash
+# adds the Co-Authored-By trailer if the message has none (a session on another
+# model passes its own as the last -m), then prints the new short hash
 # and the remaining `git status --short`.
 # Refuses: no -m, no paths, any path under data/, the repo root ("." etc.),
 # and paths with "..". Never uses -a / -A. Retries while index.lock is held.
@@ -58,11 +59,19 @@ retry() {
 
 # --literal-pathspecs: a path like ':/' or '*.go' is pathspec magic to git —
 # the whole tree or a glob — which walks straight past the checks above.
-retry git --literal-pathspecs add -- "${paths[@]}" || die "git add failed"
+# A deletion already staged (`git rm`, e.g. run by an approved proposal) is in
+# neither the tree nor the index, so `git add` refuses it; commit still takes it.
+addpaths=()
+for p in "${paths[@]}"; do
+  if [ -e "$p" ] || [ -n "$(git --literal-pathspecs ls-files -- "$p")" ]; then addpaths+=("$p"); fi
+done
+if [ ${#addpaths[@]} -gt 0 ]; then
+  retry git --literal-pathspecs add -- "${addpaths[@]}" || die "git add failed"
+fi
 
 has_trailer=0
 for m in "${msgs[@]}"; do
-  case "$m" in *"$TRAILER"*) has_trailer=1 ;; esac
+  case "$m" in *"Co-Authored-By: Claude "*) has_trailer=1 ;; esac
 done
 args=()
 for m in "${msgs[@]}"; do args+=(-m "$m"); done

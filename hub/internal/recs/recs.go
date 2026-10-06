@@ -169,8 +169,9 @@ type Rec struct {
 	Closed  bool   `json:"closed"`
 	Folded  string `json:"folded,omitempty"`
 	Lane    string `json:"lane"`
-	// Window: when it is owed — always soon: a rec is pulled whenever the owner
-	// comes looking, never pushed (the item's own `win`).
+	Reopen  bool   `json:"reopen,omitempty"`
+	// Window: when it is owed — always soon: a rec is pulled whenever the
+	// owner comes looking, never pushed (the item's own `win`).
 	Window string `json:"window"`
 }
 
@@ -673,7 +674,7 @@ func scanRec(sc scanner) (Rec, error) {
 	r.DecidedAt, r.OutcomeAt = pt(decAt), pt(outAt)
 	r.Answers = store.RecOutcomes()
 	st := store.RecStanding(r.Status, r.DecisionNote)
-	r.Waiting, r.Closed, r.Folded, r.Lane = st.Open, st.Closed, st.Folded, st.Lane
+	r.Waiting, r.Closed, r.Folded, r.Lane, r.Reopen = st.Open, st.Closed, st.Folded, st.Lane, st.Reopen
 	return r, nil
 }
 

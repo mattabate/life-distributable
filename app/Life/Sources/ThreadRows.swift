@@ -164,6 +164,53 @@ struct MiniCard: View {
     }
 }
 
+#if targetEnvironment(macCatalyst)
+/// The console's grey `.pill` (a model name): no icon, 12px.
+struct WebPill: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 5))
+    }
+}
+
+/// The console's `.card.sess > .ask.mini`: a full-width row under a hairline,
+/// a 3pt tint rail on the left, the whole title, the verb in caps in a tinted
+/// box at the right, three lines of what it says.
+struct WebMiniCard: View {
+    let c: SessionCell
+    let tap: () -> Void
+    var body: some View {
+        Button(action: tap) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(md(c.title)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 4)
+                    Text(c.verb.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(0.6)
+                        .foregroundStyle(c.color)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(c.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+                        .layoutPriority(1)
+                }
+                if let b = c.body, !b.isEmpty {
+                    Text(md(b)).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(3).multilineTextAlignment(.leading)
+                }
+            }
+            .padding(.leading, 13).padding(.trailing, 14).padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // (A Divider in an overlay lays out vertically — it drew a line
+            // down the middle of every card in build 1496.)
+            .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
+            .overlay(alignment: .leading) { Rectangle().fill(c.tone == "error" ? Color.secondary.opacity(0.5) : c.color).frame(width: 3) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+#endif
+
 /// One session on the list — the console's `sessionCardHTML`: its whole
 /// title, then its open cards as cells (up to `rowCards`, then "and N more"),
 /// what it is doing if it runs, and a foot of pills · model · schedule · cost
@@ -192,8 +239,12 @@ struct ThreadRow: View {
     /// How many of a session's open cards its row draws (console ROW_CARDS).
     static let rowCards = 2
 
-    init(t: Thread, board b: Board) {
+    /// The desktop: this session is the one open on the right (a blue ring).
+    var on = false
+
+    init(t: Thread, board b: Board, on: Bool = false) {
         self.t = t
+        self.on = on
         forYou = b.forYou[t.id] ?? 0
         cells = b.bundleOf(t).map(SessionCell.cells) ?? []
         let open = b.open?[t.id] ?? 0
@@ -212,6 +263,73 @@ struct ThreadRow: View {
     func open(_ card: String?) { nav.card = OpenAsk(thread: t, message: nil, card: card) }
 
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        macCard
+        #else
+        phoneRow
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// The console's `.card.sess`, line for line (skin.css, the owner 2026-09-29:
+    /// "I want the same exact layout within the desktop app"): the name, then
+    /// its state — pills · model · when · dollars — then what it is doing,
+    /// then its open cards as full-width rows under a hairline, each with a
+    /// tint rail and its verb in a small caps box.
+    var macCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(md(t.title)).font(.system(size: 14.5, weight: t.unread > 0 ? .bold : .semibold))
+                .foregroundStyle(.primary).multilineTextAlignment(.leading)
+            HStack(spacing: 5) {
+                ForEach(pills, id: \.self) { PillChip(pill: $0) }
+                if let m = t.modelShort { WebPill(text: m) }
+                Text(footWords).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+            }.padding(.top, 7)
+            if t.status == "running", let a = t.activity, !a.isEmpty {
+                HStack(spacing: 7) {
+                    Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+                    Text(a).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                }.padding(.top, 8)
+            } else if t.last_message_kind == "error", let m = summaryLine(t.last_message) {
+                Text(md("Error: \(m)")).font(.system(size: 12.5)).foregroundStyle(.red).lineLimit(2).padding(.top, 6)
+            }
+            if let todo, !todo.isEmpty, cells.isEmpty {
+                Text(md(todo)).font(.system(size: 13, weight: .medium)).foregroundStyle(tone).lineLimit(2).padding(.top, 8)
+            }
+            if !cells.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(cells.prefix(Self.rowCards)) { c in WebMiniCard(c: c) { open(c.id) } }
+                    if more > 0 {
+                        Button { open(cells[min(Self.rowCards, cells.count - 1)].id) } label: {
+                            Text("and \(more) more").font(.system(size: 12.5)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 14).padding(.vertical, 8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
+                        }.buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 10).padding(.horizontal, -14).padding(.bottom, -12)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? Color.accentColor : Color.primary.opacity(0.1), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 13).fill(on ? Color.accentColor.opacity(0.14) : .clear).padding(-3))
+        .contentShape(Rectangle())
+        .onTapGesture { open(first) }
+    }
+    /// "20h ago · daily 08:00 · $47.92" — the console's foot span.
+    var footWords: String {
+        var s = t.last_message_at.map { shortAgo($0) } ?? ""
+        if !t.schedule.isEmpty { s += " · " + scheduleChipLabel(t) }
+        if t.cost_usd > 0 { s += " · " + usd(t.cost_usd) }
+        return s
+    }
+    #endif
+
+    private var phoneRow: some View {
         VStack(alignment: .leading, spacing: 5) {
             // The whole name, never clamped.
             Text(md(t.title)).font(.body.weight(t.unread > 0 ? .semibold : .medium))

@@ -74,7 +74,7 @@ for tab in "${TABS[@]}"; do
   # SEND_ERROR=decider ops/screens.sh thread:<id> — the chat opens with the
   # refused-send banner (the decider-code case) staged above the composer.
   SIMCTL_CHILD_LIFE_HUB_TOKEN="$TOKEN" SIMCTL_CHILD_LIFE_TAB="$tab" SIMCTL_CHILD_LIFE_THREAD="$thread" \
-    SIMCTL_CHILD_LIFE_COMPOSE="$compose" SIMCTL_CHILD_LIFE_MORE="$more" SIMCTL_CHILD_LIFE_MONEY="$money" SIMCTL_CHILD_LIFE_SEND_ERROR="${SEND_ERROR:-}" SIMCTL_CHILD_LIFE_OPEN="$open" SIMCTL_CHILD_LIFE_CAL_MODE="$calmode" \
+    SIMCTL_CHILD_LIFE_COMPOSE="$compose" SIMCTL_CHILD_LIFE_MORE="$more" SIMCTL_CHILD_LIFE_MONEY="$money" SIMCTL_CHILD_LIFE_SEND_ERROR="${SEND_ERROR:-}" SIMCTL_CHILD_LIFE_OPEN="$open" SIMCTL_CHILD_LIFE_CAL_MODE="$calmode" SIMCTL_CHILD_LIFE_CAL_DAY="${LIFE_CAL_DAY:-}" \
     xcrun simctl launch "$UDID" "$BUNDLE" >/dev/null
   sleep 5   # first hub round-trips + list render (+ the push into a thread)
   xcrun simctl io "$UDID" screenshot --type=png "$OUT/$PREFIX$name.png" >/dev/null

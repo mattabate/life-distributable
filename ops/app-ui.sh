@@ -51,6 +51,13 @@ xcrun simctl boot "$UDID" 2>/dev/null || true
 xcrun simctl bootstatus "$UDID" -b >/dev/null
 xcrun simctl ui "$UDID" appearance "$APPEARANCE" >/dev/null 2>&1 || true
 
+# NOBUILD=1 walks the LAST GOOD build in app/build instead of compiling the
+# tree first: with several sessions in one tree, somebody's half-made change
+# often stops it compiling, and "what does the app that is on his phone do
+# when I tap this" should not wait on them (10-05: a decider-row repro was
+# blocked by another session's pending delete).
+ACTION=test; [ -z "${NOBUILD:-}" ] || ACTION=test-without-building
+
 echo "app-ui: $SIM ($APPEARANCE) — $(printf '%s' "$STEPS" | tr ';' '\n' | grep -c .) steps"
 set +e
 TEST_RUNNER_LIFE_UI_STEPS="$STEPS" \
@@ -64,7 +71,7 @@ TEST_RUNNER_LIFE_OPEN="${OPEN:-}" \
 xcodebuild -project app/Life.xcodeproj -scheme Life \
   -destination "platform=iOS Simulator,id=$UDID" \
   -derivedDataPath app/build -resultBundlePath "$RESULT" \
-  -only-testing:LifeUITests CODE_SIGNING_ALLOWED=NO test \
+  -only-testing:LifeUITests CODE_SIGNING_ALLOWED=NO "$ACTION" \
   > "$ROOT/ops/logs/app-ui.log" 2>&1
 rc=$?
 set -e

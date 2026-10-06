@@ -175,7 +175,7 @@ const ALL = ' all'; // drawList's activeID while #/sessions/all is open (no thre
 // The box is a <div> because a link cannot hold links; a click anywhere on it
 // that is not one of them opens the session at its first card.
 function sessionCardHTML(t, o) {
-  const failed = t.last_message_kind === 'error', running = t.status === 'running';
+  const failed = t.last_message_kind === 'error' && !isPauseText(t.last_message), running = t.status === 'running';
   const href = `#/sessions/${encodeURIComponent(t.id)}${o.first ? '/' + encodeURIComponent(o.first) : ''}`;
   return `
     <div class="card click sess${o.active ? ' on' : ''}" onclick="if(!event.target.closest('a'))location.hash='${href}'">
@@ -197,11 +197,11 @@ function sessionCards(bundle) {
   // …then the owner's dated steps that sit in this chat (`steps`, the
   // calendar's). An answered ask is never here: the board drops it.
   const asks = (bundle.asks || []).concat(bundle.steps || []).map(a => {
-    const k = a.kind;
+    const k = a.kind, paused = k === 'error' && !!a.resumes_at;
     return {
       id: a.id, title: a.title, verb: a.verb || 'for you',
-      tint: k === 'read' ? 'read' : k === 'install' ? 'install' : k === 'error' ? 'err-card' : '',
-      mark: k === 'read' ? '🔵' : k === 'install' ? '📲' : k === 'error' ? '⚠︎' : '🔴',
+      tint: k === 'read' ? 'read' : k === 'install' ? 'install' : paused ? 'paused' : k === 'error' ? 'err-card' : '',
+      mark: k === 'read' ? '🔵' : k === 'install' ? '📲' : paused ? PAUSE_MARK : k === 'error' ? '⚠︎' : '🔴',
       // An install's title is the whole instruction; an error's body is a log.
       detail: k === 'install' || k === 'error' ? '' : a.detail,
     };
@@ -298,9 +298,9 @@ function sessionPills(b, t) {
 // Hovered, "running" reads Stop and stops the turn; "speaking" / "waiting to
 // speak" read Stop speaking and hush the line — the card stays (headHush).
 const HEAD_ACT = {
-  running: ['Stop', "threadAct('stop')"],
-  speaking: ['Stop speaking', 'headHush()'],
-  waiting: ['Stop speaking', 'headHush()'],
+  running: ['Stop', "threadAct('stop')", 'Stop'],
+  speaking: ['Stop', 'headHush()', 'Stop speaking'],
+  waiting: ['Stop', 'headHush()', 'Stop speaking'],
 };
 function headPills(b, t) {
   const pills = (b && b.pills || {})[t.id] || (t.pill ? [t.pill] : null)
@@ -310,7 +310,7 @@ function headPills(b, t) {
     const act = HEAD_ACT[p.tone];
     if (!act) return pill(p.word, PILL_CLASS[p.tone]);
     const dot = p.tone === 'waiting' ? '<span class="dot"></span>' : '<span class="dot pulse"></span>';
-    return `<button class="pill ${p.tone} pill-act" onclick="${act[1]}" title="${esc(act[0])}">${dot}<span class="w">${esc(p.word)}</span><span class="h">${esc(act[0])}</span></button>`;
+    return `<button class="pill ${p.tone} pill-act" onclick="${act[1]}" title="${esc(act[2])}"><span class="w">${dot}${esc(p.word)}</span><span class="h"><span class="dot"></span>${esc(act[0])}</span></button>`;
   }).join('');
 }
 // Stop what this session is saying: the hub's "speaking" mark ends, and every
@@ -751,8 +751,8 @@ async function refreshThread(id, first) {
     // The counts every run block prints — the hub's, not "what we fetched".
     get(`/threads/${id}/steps`).catch(() => []),
     get(`/asks?state=all&thread=${id}`).catch(() => []),
-    // Every state, because a dismissed proposal folds where it was (2026-09-18)
-    // rather than leaving the chat; decided ones are dropped below.
+    // Every state: a dismissed proposal folds where it was (2026-09-18), a
+    // decided one stays as its grey card (below).
     get(`/actions?state=&thread=${encodeURIComponent(id)}&limit=500`).catch(() => []),
     // This session's own future: what it will be told, and when — by the owner or
     // by itself (a self-prompt checking back on a step). Phase 3 replaced the
@@ -768,11 +768,14 @@ async function refreshThread(id, first) {
   const events = await loadEvents(id);
   const el = document.getElementById('chat');
   if (!el || chatState.id !== id || gen !== route.gen) return;
-  // This session's pending approvals, drawn as cards in the conversation
-  // like its asks (see actionHTML), and its dismissed ones, folded. Deciding
-  // one changes this list without a new message, so it is part of "did the
+  // This session's approvals, drawn as cards in the conversation like its
+  // asks (see actionHTML): pending ones with their buttons, dismissed ones
+  // folded, decided ones grey with who decided — a decided card used to leave
+  // the chat, so an approved proposal was only the owner's "↩ Approved · <id>"
+  // reply. Deciding one
+  // changes its state without a new message, so it is part of "did the
   // structure change".
-  const acts = (allActs || []).filter(a => a.thread_id === id && (a.open || a.folded === 'dismissed'));
+  const acts = (allActs || []).filter(a => a.thread_id === id);
   // The deep-linked card (#/sessions/<thread>/<id>) is read on its own, once
   // per change of the list: GET /actions/{id} is the one read that carries
   // events[] — Phase 2's audit trail, drawn under the card — and it finds an
@@ -1025,6 +1028,11 @@ function msgHTML(m, asks, acts, askById, recs, recById) {
   // still carries text (before 09-13, or text folded beside a card) keeps it
   // behind that line, closed, for the record only. Errors stay red bubbles.
   // The phone draws the same line (ThreadDetail.chatBubble).
+  // A session limit is a pause, not a crash: its row is the
+  // same one line in the paused card's amber, and the card under it says when.
+  if (m.kind === 'error' && isPauseText(m.text)) {
+    return `<div class="msg ${role} end paused" id="msg-${esc(String(m.id))}"><div><span class="end-line">turn paused · session limit · ${meta}</span></div></div>${askCards}`;
+  }
   if (role === 'claude' && m.kind !== 'error') {
     const line = `<span class="end-line">turn ended · ${meta}</span>`;
     const old = (m.text || '').trim() || atts;
@@ -1271,22 +1279,42 @@ function pairRows(evs) {
 }
 
 const firstLine = s => String(s || '').split('\n').find(l => l.trim()) || '';
+// An opened step is one plain terminal block, not a stack of grey boxes: a
+// light-mode terminal with lightly coloured text.
+// A thought: the purple line IS the thought — shut, its first line; open, all
+// of it, and nothing printed twice under it. A tool call: a shell command in
+// blue behind `$`, whole (the headline is its English), what went in when
+// the headline cannot say it (an edit's lines), then the output in grey
+// — its first OUT_FOLD lines, the rest behind "… N more lines" — or the error
+// in red, whole ("the error is good"). A body that is still the input's JSON
+// (stored before 10-05) is not shown: the title already says it.
+const OUT_FOLD = 12;
 function evRowHTML([e, r]) {
   const icon = { thinking: '✻', tool_use: '⌘', text: '💬' }[e.kind] || '↳';
-  const headline = e.kind === 'tool_use' ? (e.summary || e.title)
-    : e.kind === 'thinking' ? 'Thinking · ' + firstLine(e.body)
-    : (firstLine(e.body) || e.title || e.kind);
   const bad = r && r.title === 'error';
   const key = 'ev:' + e.id;
-  const raw = e.kind === 'tool_use' && e.summary && e.summary !== e.title ? `<div class="raw mono">${esc(e.title)}</div>` : '';
-  const inp = (e.kind === 'tool_use' || e.kind === 'thinking') && e.body ? `<pre class="io${e.kind === 'thinking' ? ' think' : ''}">${esc(e.body)}</pre>` : '';
-  const out = r ? `<pre class="io out${bad ? ' err' : ''}">${esc(r.body || '(no output)')}</pre>` : '';
-  const detail = raw + inp + out;
-  const head = `<span class="ic">${icon}</span><span class="hl">${esc(headline)}</span>${r ? `<span class="tick${bad ? ' err' : ''}">${bad ? '✕' : '✓'}</span>` : ''}`;
-  if (!detail) return `<div class="ev flat">${head}</div>`;
   const open = chatState.open.get(key) === true;
-  return `<details class="ev${bad ? ' bad' : ''}" data-k="${esc(key)}" data-def="${open ? 1 : 0}"${open ? ' open' : ''}>
-    <summary>${head}</summary>${detail}</details>`;
+  const tick = r ? `<span class="tick${bad ? ' err' : ''}">${bad ? '✕' : '✓'}</span>` : '';
+  const fold = (cls, extra) => {
+    const o = chatState.open.get(key + extra) === true;
+    return `<details class="${cls}" data-k="${esc(key + extra)}" data-def="${o ? 1 : 0}"${o ? ' open' : ''}>`;
+  };
+  if (e.kind === 'thinking') {
+    return `${fold('ev think', '')}<summary><span class="ic">${icon}</span><span class="hl one">Thinking · ${esc(firstLine(e.body))}</span><span class="hl all">${esc(e.body)}</span></summary></details>`;
+  }
+  const head = `<span class="ic">${icon}</span><span class="hl">${esc(e.kind === 'tool_use' ? (e.summary || e.title) : (firstLine(e.body) || e.title || e.kind))}</span>${tick}`;
+  if (e.kind !== 'tool_use') return `<div class="ev flat">${head}</div>`;
+  // The call line is a shell command whole behind `$`; any other tool's
+  // headline already names the call ("Edit app/…/x.swift"), so its block
+  // holds only what went in and what came out.
+  const tool = e.title.split(' · ')[0];
+  const call = tool === 'Bash' ? `<pre class="io call">${esc('$ ' + e.body)}</pre>` : '';
+  const input = tool === 'Bash' || e.body.startsWith('{') ? '' : e.body;
+  const lines = r ? (r.body || '(no output)').split('\n') : [];
+  const out = !r ? '' : bad || lines.length <= OUT_FOLD
+    ? `<pre class="io out${bad ? ' err' : ''}">${esc(lines.join('\n'))}</pre>`
+    : `<pre class="io out">${esc(lines.slice(0, OUT_FOLD).join('\n'))}</pre>${fold('more', ':more')}<summary>… ${lines.length - OUT_FOLD} more lines</summary><pre class="io out">${esc(lines.slice(OUT_FOLD).join('\n'))}</pre></details>`;
+  return `${fold('ev' + (bad ? ' bad' : ''), '')}<summary>${head}</summary>${call}${input ? `<pre class="io in">${esc(input)}</pre>` : ''}${out}</details>`;
 }
 
 // The chat head's Stop is its "running" pill, hovered (headPills); Check in

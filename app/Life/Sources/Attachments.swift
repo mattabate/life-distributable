@@ -36,6 +36,9 @@ final class AttachmentDraft {
     var isEmpty: Bool { images.isEmpty && files.isEmpty }
     var count: Int { images.count + files.count }
 
+    /// What the File picker offers, and what the box takes dropped or pasted.
+    nonisolated static let fileTypes: [UTType] = [.pdf, .image, .commaSeparatedText, .json, .plainText]
+
     func add(_ image: UIImage, assetID: String? = nil) { images.append(image); assetIDs.append(assetID) }
     func add(_ file: AttachedFile) { files.append(file) }
     func remove(at i: Int) { images.remove(at: i); if i < assetIDs.count { assetIDs.remove(at: i) } }
@@ -49,11 +52,85 @@ final class AttachmentDraft {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         guard let data = try? Data(contentsOf: url), data.count <= 16 << 20 else { return }
-        if let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image), let img = UIImage(data: data) {
+        add(AttachedFile(name: url.lastPathComponent, data: data), picturesAsImages: true)
+    }
+
+    /// A file that arrived by name (picked, dropped on the box, pasted from
+    /// Finder): a picture joins the pictures, anything else stays a document.
+    func add(_ file: AttachedFile, picturesAsImages: Bool) {
+        let ext = (file.name as NSString).pathExtension
+        if picturesAsImages, let type = UTType(filenameExtension: ext), type.conforms(to: .image), let img = UIImage(data: file.data) {
             add(img)
         } else {
-            add(AttachedFile(name: url.lastPathComponent, data: data))
+            add(file)
         }
+    }
+
+    /// Everything in the box, moved out of it: what a send uploads while the
+    /// composer is already empty for the next message. Documents travel with
+    /// the pictures — the session composer's send copied `images` alone, so a
+    /// CSV whose chip the owner could see never left the Mac.
+    func take() -> AttachmentDraft {
+        let out = AttachmentDraft()
+        out.images = images; out.assetIDs = assetIDs; out.files = files
+        clear()
+        return out
+    }
+
+    /// A failed send puts them back, unless something was attached since.
+    func restore(_ taken: AttachmentDraft) {
+        guard isEmpty else { return }
+        images = taken.images; assetIDs = taken.assetIDs; files = taken.files
+    }
+
+    /// Everything dropped that is a file, into the box: a picture joins the
+    /// pictures, anything else is a chip. True when there was a file to take.
+    @discardableResult
+    func take(dropped providers: [NSItemProvider]) -> Bool {
+        let files = providers.filter(Self.isFile)
+        for p in files {
+            Self.loadFile(p) { [weak self] f in if let f { self?.add(f, picturesAsImages: true) } }
+        }
+        return !files.isEmpty
+    }
+
+    /// Is this dropped or pasted item a FILE (a CSV out of Finder, a PDF from
+    /// the Files app) rather than words? A text view takes any file whose
+    /// type is text and types its contents into the draft — a 3 KB statement
+    /// became the message itself. A file names itself: it
+    /// is a file URL, or it carries a name and is not a run of copied text.
+    nonisolated static func isFile(_ p: NSItemProvider) -> Bool {
+        let types = p.registeredTypeIdentifiers
+        if types.contains(UTType.fileURL.identifier) { return true }
+        guard let name = p.suggestedName, !name.isEmpty else { return false }
+        return !types.contains(UTType.utf8PlainText.identifier) && !types.contains(UTType.url.identifier)
+    }
+
+    /// The bytes and the name of a dropped or pasted file, same 16 MB bound
+    /// as a picked one. The load starts before this returns (a drop's
+    /// providers are only good inside the drop); `done` runs on the main
+    /// actor, with nil when there was nothing to read.
+    nonisolated static func loadFile(_ p: NSItemProvider, done: @escaping @MainActor @Sendable (AttachedFile?) -> Void) {
+        let finish: @Sendable (AttachedFile?) -> Void = { f in Task { @MainActor in done(f) } }
+        let read: @Sendable (URL, String?) -> AttachedFile? = { url, named in
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url), !data.isEmpty, data.count <= 16 << 20 else { return nil }
+            // The Files app names a dragged file without its extension; the
+            // copy it hands over keeps it.
+            var name = named ?? url.lastPathComponent
+            if (name as NSString).pathExtension.isEmpty, !url.pathExtension.isEmpty { name += "." + url.pathExtension }
+            return AttachedFile(name: name, data: data)
+        }
+        if p.registeredTypeIdentifiers.contains(UTType.fileURL.identifier) {
+            // Finder on the Mac: the file itself, where it lives.
+            _ = p.loadObject(ofClass: URL.self) { url, _ in finish(url.flatMap { read($0, nil) }) }
+            return
+        }
+        guard let type = p.registeredTypeIdentifiers.first else { finish(nil); return }
+        let named = p.suggestedName
+        // The copy is deleted when this handler returns: read it inside.
+        p.loadFileRepresentation(forTypeIdentifier: type) { url, _ in finish(url.flatMap { read($0, named) }) }
     }
 
     /// Downscale to ~1600px max side, JPEG 0.7 (~100–400 KB): enough for Claude
@@ -179,6 +256,15 @@ struct AttachBar: View {
                         ForEach(Array(draft.images.enumerated()), id: \.offset) { i, img in
                             Image(uiImage: img).resizable().scaledToFill()
                                 .frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: 10))
+                                #if targetEnvironment(macCatalyst)
+                                // A click on the chip opens the picture over
+                                // the window, as a click on a sent picture
+                                // does (BlobImage → MacLightbox); the ✕ above
+                                // it keeps its own click.
+                                .contentShape(RoundedRectangle(cornerRadius: 10))
+                                .onTapGesture { MacLightbox.open(image: img, name: "picture \(i + 1).jpg") }
+                                .help("Click to see it at full size")
+                                #endif
                                 .overlay(alignment: .topTrailing) {
                                     Button { draft.remove(at: i) } label: {
                                         Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(.white, .black.opacity(0.6))
@@ -215,6 +301,12 @@ struct AttachBar: View {
         @State private var showCamera = false
         @State private var showLibrary = false
         @State private var showFiles = false
+        #if targetEnvironment(macCatalyst)
+        /// The desktop composer's bar draws this as the console's "Attach"
+        /// button (a word in a hairline box) instead of the plus (the owner
+        /// 2026-09-29: the desktop chat is the web chat).
+        var label: String? = nil
+        #endif
         var body: some View {
             SwiftUI.Menu {
                 Button { showCamera = true } label: { Label("Take photo", systemImage: "camera") }
@@ -236,14 +328,25 @@ struct AttachBar: View {
                     } label: { Label("Paste picture", systemImage: "doc.on.clipboard") }
                 }
             } label: {
+                #if targetEnvironment(macCatalyst)
+                if let label { WebSmallButton(text: label) } else {
+                    Image(systemName: draft.isEmpty ? "plus.circle" : "plus.circle.fill").font(.system(size: 26))
+                }
+                #else
                 Image(systemName: draft.isEmpty ? "plus.circle" : "plus.circle.fill").font(.system(size: 26))
+                #endif
             }
             .accessibilityLabel("Attach photo")
+            #if targetEnvironment(macCatalyst)
+            // One plus, no chevron beside it (the owner 2026-09-29: "just a plus
+            // button, not a plus button and a dropdown").
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            #endif
             .fullScreenCover(isPresented: $showCamera) {
                 CameraPicker(image: Binding(get: { nil }, set: { if let img = $0 { draft.add(img) } })).ignoresSafeArea()
             }
             .photosPicker(isPresented: $showLibrary, selection: $pickerItems, maxSelectionCount: 6, matching: .images, photoLibrary: .shared())
-            .fileImporter(isPresented: $showFiles, allowedContentTypes: [.pdf, .image, .commaSeparatedText, .json, .plainText], allowsMultipleSelection: true) { result in
+            .fileImporter(isPresented: $showFiles, allowedContentTypes: AttachmentDraft.fileTypes, allowsMultipleSelection: true) { result in
                 for url in (try? result.get()) ?? [] { draft.add(fileAt: url) }
             }
             .onChange(of: pickerItems) { _, items in
@@ -286,14 +389,63 @@ struct BlobImage: View {
         }
         .frame(maxHeight: maxHeight)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+        #if targetEnvironment(macCatalyst)
+        // The console's click-to-enlarge (threads.js openImage): the whole
+        // file over the whole window, Esc or a click closes (MacLightbox).
+        .contentShape(Rectangle())
+        .onTapGesture { if image != nil { MacLightbox.open(ref: ref, hub: hub) } }
+        #endif
         .task(id: ref) {
             if let c = Self.cache.object(forKey: ref as NSString) { image = c; return }
+            #if targetEnvironment(macCatalyst)
+            // On the Mac the cell draws up to `maxHeight` points tall on a 2×
+            // screen, and a wide screenshot (2880×1800 at 180 pt = 288 pt
+            // across) needs its WIDTH sharp: decode to the pixels it will
+            // draw at, not `maxHeight × 3` on the longest side, which left a
+            // wide picture at 540 px wide for a 576 px draw and a 220 pt cell
+            // blurry (the owner 2026-09-30: "it's also low quality within the
+            // context of the cells").
+            let scale = max(2, UIScreen.main.scale)
+            guard let d = try? await hub.blob(ref),
+                  let img = await Self.thumbnail(d, height: maxHeight, scale: scale) else { failed = true; return }
+            Self.cache.setObject(img, forKey: ref as NSString)
+            image = img
+            MacLightbox.openIfShotAsks(ref: ref, hub: hub)
+            #else
             guard let d = try? await hub.blob(ref),
                   let img = await Self.thumbnail(d, max: Int(maxHeight * 3)) else { failed = true; return }
             Self.cache.setObject(img, forKey: ref as NSString)
             image = img
+            #endif
         }
     }
+
+    #if targetEnvironment(macCatalyst)
+    /// The pixels a picture `pt` points tall needs on a `scale` screen: its
+    /// height in pixels, or its width when it is wider than tall — the
+    /// longest side is what `kCGImageSourceThumbnailMaxPixelSize` caps.
+    /// Reads the file's own dimensions (and EXIF orientation, which swaps
+    /// them) first; never decodes past the file's real size.
+    nonisolated fileprivate static func thumbnail(_ data: Data, height pt: CGFloat, scale: CGFloat) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]
+            var w = CGFloat(props?[kCGImagePropertyPixelWidth] as? Int ?? 0)
+            var h = CGFloat(props?[kCGImagePropertyPixelHeight] as? Int ?? 0)
+            if let o = props?[kCGImagePropertyOrientation] as? UInt32, o >= 5 { swap(&w, &h) }
+            let aspect = (w > 0 && h > 0) ? w / h : 1
+            let need = Int((pt * scale * max(1, aspect)).rounded(.up))
+            let opts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: min(max(need, 1), Int(max(w, h, 1))),
+            ]
+            guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+            return UIImage(cgImage: cg)
+        }.value
+    }
+    #endif
 
     /// A phone photo arrives around 2200×4800. `UIImage(data:)` is cheap but
     /// lies: it decodes lazily, on whatever thread draws it — the main one,
@@ -412,3 +564,19 @@ struct BlobAvatar: View {
         }
     }
 }
+
+#if targetEnvironment(macCatalyst)
+extension View {
+    /// A file dragged out of Finder lands anywhere on the chat — the empty
+    /// "Ready when you are." pane, a session's messages, the composer — not
+    /// only on the bar along the bottom, as the console's whole messages pane
+    /// takes a drop (composer.js wireDrop). the owner 2026-10-05 23:17: two
+    /// bank statements dragged onto the chat, "it won't let me". A drop of
+    /// words stays words: only files are taken.
+    func dropsFiles(into attachments: AttachmentDraft) -> some View {
+        onDrop(of: [UTType.fileURL.identifier] + AttachmentDraft.fileTypes.map(\.identifier), isTargeted: nil) { providers in
+            attachments.take(dropped: providers)
+        }
+    }
+}
+#endif

@@ -27,8 +27,8 @@ async function goalList(view) {
         const on = g.status === 'active';
         return `<a class="goal-tile${on ? '' : ' off'}" href="#/goals/${encodeURIComponent(g.id)}" style="--h:${goalHue(g)}">
           ${goalEmblem(g)}
-          <span class="name">${mdInline(g.title, false)}</span>
-          ${on ? '' : `<span class="state">${esc(g.status)}</span>`}
+          <span class="grow"><span class="name">${mdInline(g.title, false)}</span>
+          ${on ? '' : `<span class="state">${esc(g.status)}</span>`}</span>
         </a>`;
       }).join('') || emptyHTML('No goals.')}</div>
     </div>`);

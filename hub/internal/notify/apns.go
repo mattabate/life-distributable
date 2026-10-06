@@ -241,7 +241,10 @@ func (a *APNs) token() (string, error) {
 	r.FillBytes(sig[:32])
 	s.FillBytes(sig[32:])
 	a.jwt = signing + "." + base64.RawURLEncoding.EncodeToString(sig)
-	a.jwtIssue = now
+	// Round(0): wall-clock age. The monotonic clock stops while the Mac sleeps,
+	// so a JWT minted before a sleep stayed "under 50 minutes" and every push
+	// got 403 ExpiredProviderToken (2026-10-03 00:21 on).
+	a.jwtIssue = now.Round(0)
 	return a.jwt, nil
 }
 

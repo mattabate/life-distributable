@@ -24,6 +24,12 @@ import UserNotifications
     }
 
     func register() {
+        #if targetEnvironment(macCatalyst)
+        // The desktop app is not a phone: registering would make the hub push
+        // cards to it and read its build as the phone's (install cards close
+        // on the phone's reported build). The Mac speaks through ops/duck.
+        status = "not used on the Mac"; return
+        #endif
         #if targetEnvironment(simulator)
         // ops/screens.sh: the permission alert would cover every screenshot.
         if ProcessInfo.processInfo.environment["LIFE_TAB"] != nil { status = "skipped (screenshot run)"; return }
@@ -71,8 +77,29 @@ import UserNotifications
     }
 }
 
-final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+/// A UIResponder (the end of the responder chain) so the desktop's menu
+/// commands land here.
+final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     static let push = PushState()
+
+    #if targetEnvironment(macCatalyst)
+    /// Edit ▸ Find is ours (MacFind): the system's Find menu answers only a
+    /// text view with its own find panel, so ⌘F on a page did nothing.
+    override func buildMenu(with builder: UIMenuBuilder) {
+        super.buildMenu(with: builder)
+        guard builder.system == .main else { return }
+        builder.remove(menu: .find)
+        let find = UIMenu(title: "Find", identifier: UIMenu.Identifier("life.find"), children: [
+            UIKeyCommand(title: "Find…", action: #selector(macFind(_:)), input: "f", modifierFlags: .command),
+            UIKeyCommand(title: "Find Next", action: #selector(macFindNext(_:)), input: "g", modifierFlags: .command),
+            UIKeyCommand(title: "Find Previous", action: #selector(macFindPrevious(_:)), input: "g", modifierFlags: [.command, .shift]),
+        ])
+        builder.insertChild(find, atEndOfMenu: .edit)
+    }
+    @objc func macFind(_ sender: Any?) { MacFind.shared.open() }
+    @objc func macFindNext(_ sender: Any?) { MacFind.shared.next() }
+    @objc func macFindPrevious(_ sender: Any?) { MacFind.shared.previous() }
+    #endif
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self

@@ -295,6 +295,12 @@ type Entry struct {
 	// Skip · Send; an open step of the owner's: Done · Won't do · Reply; a pending
 	// proposal: Approve · Deny (· Reply with a session). Absent otherwise.
 	Outcomes []store.Outcome `json:"outcomes,omitempty"`
+	// Coming (2026-10-05): a LATER occurrence of a repeating item, drawn on the
+	// day it will fall (`coming`). No row exists for it yet — a repeat's next
+	// occurrence is minted when the one before it fires — so it is read-only:
+	// not an item, no buttons, nothing to drag; `id` is `<item id>@<day>` and
+	// `ref` points at the occurrence that does exist.
+	Coming bool `json:"coming,omitempty"`
 }
 
 // stampEntry fills Lane / Closed / Item / Move / Why / KindLabel from the
@@ -302,7 +308,10 @@ type Entry struct {
 func stampEntry(e *Entry) {
 	refKind, _, _ := strings.Cut(e.Ref, ":")
 	install := e.AskKind == "install" && (e.Kind == "ask" || e.Did)
-	e.Item = refKind == "cal"
+	// A coming occurrence wears its item's lane and words, and nothing that
+	// acts: there is no row behind it to close or move yet.
+	isCal := refKind == "cal"
+	e.Item = isCal && !e.Coming
 	e.Tick = e.Item && !e.Soon && !e.Did && sessionless(e.Kind, e.ThreadID) && ownerKind(e.Kind)
 
 	// A rec is purple its whole life; homework keeps its blue whoever closed
@@ -317,7 +326,7 @@ func stampEntry(e *Entry) {
 		e.Lane = "homework"
 	case e.Kind == "agent":
 		e.Lane = "scheduled"
-	case e.Item && !e.Soon && store.Chore(e.Kind, e.Day, e.ThreadID):
+	case isCal && !e.Soon && store.Chore(e.Kind, e.Day, e.ThreadID):
 		e.Lane = "chores"
 	case e.Did:
 		// A did row whose doer is the owner (store.Owner) is red; anyone else — the
@@ -344,9 +353,10 @@ func stampEntry(e *Entry) {
 	e.Closed = e.Did || e.State == "done" || e.State == "accepted" || store.Wont(e.State) ||
 		(e.Kind == "action" && e.State != "" && e.State != "proposed")
 	e.Mark = store.CalMark(e.State, e.Did, e.Lane)
+	e.Open = false
 	switch e.State {
 	case "scheduled", "fired", "open", "answered":
-		e.Open = true
+		e.Open = !e.Coming
 	}
 
 	e.Outcomes = nil
@@ -356,10 +366,13 @@ func stampEntry(e *Entry) {
 		e.Outcomes = store.TickOutcomes(true)
 	case e.Item && e.Kind == "owner":
 		e.Outcomes = store.StepOutcomes()
+	case e.Item && e.Kind == "note":
+		e.Outcomes = store.NoteOutcomes()
 	case e.Kind == "action" && e.State == "proposed":
 		e.Outcomes = store.ActionOutcomes(e.ThreadID != "")
 	}
 
+	e.Move = ""
 	switch {
 	case e.Item && (e.State == "scheduled" || e.State == "fired"):
 		e.Move = "item"
@@ -369,6 +382,8 @@ func stampEntry(e *Entry) {
 	e.Why = ""
 	if e.Move == "" {
 		switch {
+		case e.Coming:
+			e.Why = "A repeat: this one appears for real when the one before it comes due. Move that one and these follow."
 		case e.Item && (e.State == "done" || e.State == "dismissed"):
 			e.Why = "Already " + e.State + " — reopen it first."
 		case e.Did:
@@ -892,7 +907,10 @@ func (c *Calendar) stampAgentSlots() {
 //   - A FIRED item moves too: dragging it is "not now, then" — it goes back
 //     to scheduled, its open ask leaves the board ("rescheduled"), and the
 //     tick fires it again at the new moment. Done/dismissed still refuse
-//     (reopen first), and a fired item's other fields stay locked.
+//     (reopen first), and a fired item's other fields stay locked — but
+//     for `detail`: the words on the owner's open card are the item's, and
+//     a session folds what a second card would have said into them, never
+//     a read card stacked beside the step. A detail edit moves nothing.
 //   - `scope` on a repeating item: "future" (default) moves the chain —
 //     including the already-spawned next occurrence, since fire() mints it
 //     at fire time — while "one" detaches this occurrence: the next one is
@@ -949,14 +967,15 @@ func (c *Calendar) Update(id string, in map[string]string) (Item, error) {
 		in["at"], hasAt = "", true
 	}
 	moving := hasDay || hasAt
+	_, hasDetail := in["detail"]
 	resched := it.State == "fired" && moving && !toSoon
-	if (it.State != "scheduled" && it.State != "fired") || (it.State == "fired" && !moving) {
+	if (it.State != "scheduled" && it.State != "fired") || (it.State == "fired" && !moving && !hasDetail) {
 		return Item{}, fmt.Errorf("item is %s, not scheduled", it.State)
 	}
 	if it.State == "fired" {
-		for _, f := range []string{"title", "detail", "repeat", "kind", "due"} {
+		for _, f := range []string{"title", "repeat", "kind", "due"} {
 			if _, ok := in[f]; ok {
-				return Item{}, errors.New("a fired item only moves — day and at; reopen it to edit the rest")
+				return Item{}, errors.New("a fired item only moves (day and at) or takes new detail; reopen it to edit the rest")
 			}
 		}
 	}
@@ -1347,6 +1366,11 @@ func (c *Calendar) Overdue() ([]Item, error) {
 // daily homework, and every `owner` step, on its day only — a weekly chore
 // ("Water the plants") is a day, not a deadline, and a week of them ahead
 // would bury today. Sorted by day, then minute.
+//
+// A repeat lists its NEXT occurrence only — never under Due and Do soon at
+// once, unless earlier ones are overdue: a later open row of the same
+// chain waits its turn — it keeps its cell on its day — until the one before
+// it closes or slips into Overdue, where a by-the-day chain's debt stacks.
 func (c *Calendar) DueAhead() ([]Item, error) {
 	now := c.Now()
 	today := now.Format("2006-01-02")
@@ -1361,17 +1385,31 @@ func (c *Calendar) DueAhead() ([]Item, error) {
 	}
 	defer rows.Close()
 	out := []Item{}
+	// Chains already listed, and whether a listed row repeats: an occurrence
+	// moved on its own ("only this one") has lost its repeat, its next has not.
+	listed := map[string]string{}
 	for rows.Next() {
 		it, err := scanItem(rows)
 		if err != nil {
 			return nil, err
 		}
 		if d, err := time.ParseInLocation("2006-01-02", it.Day, time.Local); err == nil && daysBetween(day0, d) < leadDays(it, d) {
+			k := chainKey(it)
+			if first, ok := listed[k]; ok && (it.Repeat != "" || first != "") {
+				continue
+			}
+			if _, ok := listed[k]; !ok {
+				listed[k] = it.Repeat
+			}
 			out = append(out, it)
 		}
 	}
 	return out, rows.Err()
 }
+
+// chainKey: the rows of one repeat chain — the same kind and title, which is
+// how spawnNext tells that a chain already continues.
+func chainKey(it Item) string { return it.Kind + "|" + strings.ToLower(it.Title) }
 
 // leadDays: how many days before its day a step is already due — for a
 // repeating by-the-day step its period (one occurrence is issued when the
@@ -1427,21 +1465,36 @@ func (c *Calendar) ChainBySource(source string) (repeat, openDay string, lastDon
 // IS the answer, so the day's card clears itself instead of asking the owner
 // to say in words that they did the thing the hub just recorded.
 // Returns how many closed.
+//
+// A by-the-day chain carries debt (2026-10-04), so there one piece of evidence
+// pays ONE assignment, the oldest owed — a video watched with two weeks open
+// leaves the other open — and it counts from the day the assignment is owed
+// (its week), not only on its day.
 func (c *Calendar) CloseBySource(source, by, note string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	today := c.Now().Format("2006-01-02")
-	rows, err := c.db.Query(`SELECT `+cols+` FROM items WHERE src='cal' AND source=? AND state IN ('scheduled','open') AND day<=? ORDER BY day`, source, today)
+	day0, _ := time.ParseInLocation("2006-01-02", today, time.Local)
+	rows, err := c.db.Query(`SELECT `+cols+` FROM items WHERE src='cal' AND source=? AND state IN ('scheduled','open') AND day<>'' ORDER BY day, at, created_at`, source)
 	if err != nil {
 		return 0
 	}
 	var items []Item
 	for rows.Next() {
-		if it, err := scanItem(rows); err == nil {
-			items = append(items, it)
+		it, err := scanItem(rows)
+		if err != nil {
+			continue
 		}
+		d, err := time.ParseInLocation("2006-01-02", it.Day, time.Local)
+		if err != nil || daysBetween(day0, d) >= leadDays(it, d) {
+			continue // not owed yet
+		}
+		items = append(items, it)
 	}
 	rows.Close()
+	if len(items) > 1 && items[0].Due == "by" {
+		items = items[:1]
+	}
 	for _, it := range items {
 		c.resolveLocked(it, "done", by, note, false)
 	}
@@ -1671,8 +1724,11 @@ func (c *Calendar) spawnNext(it Item) {
 	// Nor when the chain already continues through another open row: closing a
 	// stray duplicate occurrence must not fork a second chain (2026-08-30, a
 	// session dismissed five duplicates and each one spawned its next month).
-	c.db.QueryRow(`SELECT COUNT(*) FROM items WHERE src='cal' AND state IN ('scheduled','open') AND kind=? AND repeat=? AND lower(title)=lower(?) AND id<>?`,
-		it.Kind, it.Repeat, it.Title, it.ID).Scan(&n)
+	// An EARLIER row that already fired is debt, not the chain's continuation:
+	// a by-the-day homework the owner missed stays owed, it minted its
+	// next when it fired, and the week after still comes.
+	c.db.QueryRow(`SELECT COUNT(*) FROM items WHERE src='cal' AND kind=? AND repeat=? AND lower(title)=lower(?) AND id<>? AND (state='scheduled' OR (state='open' AND day>=?))`,
+		it.Kind, it.Repeat, it.Title, it.ID, it.Day).Scan(&n)
 	if n > 0 {
 		return
 	}
@@ -1843,8 +1899,15 @@ func (c *Calendar) fire(it Item, now time.Time) {
 // or any same-titled homework from an earlier day (a hand-made series has no
 // chain) — closes as `missed` by the hub, and its ask with it, quietly: one missed on
 // Tuesday is not done twice on Wednesday. Missed is a record on the calendar, not a debt.
+//
+// The window says which: an on-the-day practice (a daily drill) is missed; a
+// by-the-day assignment is never closed for the owner — it stays in Overdue
+// beside the next one, as work debt.
 func (c *Calendar) missPrevious(it Item, now time.Time) {
-	rows, err := c.db.Query(`SELECT id, ask_id FROM items WHERE src='cal' AND kind='homework' AND state IN ('scheduled','open') AND day<? AND id<>? AND (lower(title)=lower(?) OR id=?)`,
+	if it.Due == "by" {
+		return
+	}
+	rows, err := c.db.Query(`SELECT id, ask_id FROM items WHERE src='cal' AND kind='homework' AND due<>'by' AND state IN ('scheduled','open') AND day<? AND id<>? AND (lower(title)=lower(?) OR id=?)`,
 		it.Day, it.ID, it.Title, nullable(it.PrevID))
 	if err != nil {
 		return
@@ -1989,6 +2052,15 @@ func (c *Calendar) Agenda(from, to string) (View, error) {
 		e.Overdue = overdueItem(it, today, hhmm)
 		add(e)
 	}
+	// A repeat's later occurrences, on the days they will fall, so a week
+	// ahead is never empty of the homework that recurs in it.
+	have := map[string]bool{}
+	for _, it := range items {
+		have[chainKey(it)+"|"+it.Day] = true
+	}
+	for _, e := range c.coming(from, to, today, have) {
+		add(e)
+	}
 	// The inbox: every open step of the owner's from a day that has passed, whether or
 	// not that day is inside [from,to]. A day inside the window therefore lists
 	// its row twice — once in its own cell, where it happened, and once here —
@@ -2112,6 +2184,52 @@ func (c *Calendar) Agenda(from, to string) (View, error) {
 	return v, nil
 }
 
+// coming projects every repeating item's later occurrences onto [from,to].
+// The table holds ONE open occurrence per repeat — spawnNext mints the next
+// when it fires or closes — so without this a week past it drew empty, and
+// read as the repeat having been removed. A chain's last scheduled row is
+// stepped on its own cadence, exactly as spawnNext will step it (from its
+// day, never before tomorrow); a day the chain already has a real row on
+// (`have`: chainKey|day) is skipped. Read-only rows (Entry.Coming), and only
+// ever on their day: the Due / Do soon trays and every count read the table.
+func (c *Calendar) coming(from, to, today string, have map[string]bool) []Entry {
+	rows, err := c.db.Query(`SELECT ` + cols + ` FROM items WHERE src='cal' AND repeat<>'' AND day<>'' AND state='scheduled' ORDER BY day DESC, created_at DESC`)
+	if err != nil {
+		log.Printf("calendar: agenda coming: %v", err)
+		return nil
+	}
+	var tails []Item
+	seen := map[string]bool{}
+	for rows.Next() {
+		it, err := scanItem(rows)
+		if err != nil || seen[chainKey(it)] {
+			continue
+		}
+		seen[chainKey(it)] = true
+		tails = append(tails, it)
+	}
+	rows.Close()
+	var out []Entry
+	for _, it := range tails {
+		// 400 steps: a daily repeat reaches a year out, and a window further
+		// than that is nobody's week.
+		for nd, i := nextDay(it.Day, it.Repeat), 0; nd != "" && nd <= to && i < 400; nd, i = nextDay(nd, it.Repeat), i+1 {
+			if nd < from || nd <= today || have[chainKey(it)+"|"+nd] {
+				continue
+			}
+			n := it
+			n.ID, n.Day, n.PrevID = it.ID+"@"+nd, nd, it.ID
+			d := Row(n)
+			d.Ref = "cal:" + it.ID
+			e := entryFrom(d)
+			e.Coming = true
+			stampEntry(&e)
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // stampLive puts the session's live capsules on every row that has one —
 // the same words the Sessions board wears (attention.headings), minus the
 // card counts, because the calendar row IS the card. One ListBrief for the
@@ -2142,7 +2260,7 @@ func (c *Calendar) stampLive(v *View) {
 	live := func(id string) []threads.Pill { return pills[id] }
 	stamp := func(es []Entry) {
 		for i := range es {
-			if es[i].ThreadID != "" {
+			if es[i].ThreadID != "" && !es[i].Coming {
 				es[i].Live = live(es[i].ThreadID)
 			}
 		}

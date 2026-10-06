@@ -22,7 +22,6 @@ final class FixtureDecodeTests: XCTestCase {
         ("spend_model", ModelSetting.self),
         ("usage", UsageState.self),
         ("projects", [Project].self),
-        ("sessions", [TmuxSession].self),
         ("actions", [Action].self),
         ("actions_id", Action.self),
         ("runs_id", JobRun.self),

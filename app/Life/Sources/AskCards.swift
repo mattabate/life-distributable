@@ -21,6 +21,8 @@ struct OpenAsk: Identifiable, Hashable {
     /// The card to land on in the chat: a tapped approval, or the board's
     /// `first` for a session row.
     var card: String? = nil
+    /// The chat bar comes up replying to this card (a calendar row's Respond).
+    var arm: ArmedReply? = nil
     var id: String { thread.id }
 }
 
@@ -49,6 +51,7 @@ extension EnvironmentValues {
 struct AskCard: View {
     @Environment(HubClient.self) private var hub
     @Environment(\.askReply) private var askReply
+    @Environment(\.armedPicks) private var armedPicks
     let a: Ask
     var goals: [Goal] = []
     var reload: () async -> Void = {}
@@ -79,13 +82,19 @@ struct AskCard: View {
     /// next action but not a stopped session, so it can never wear red). An
     /// app update → teal, its own kind of cell. Inside a session a replied ask stays red until the
     /// agent closes it; a closed one is grey.
+    ///
+    /// A session-limit pause (the hub's `resumes_at`) is amber: nothing broke
+    /// and nothing is the owner's to do — it comes back on its own.
     var tint: Color {
-        closed || a.kind == "error" ? .secondary : a.kind == "read" ? .accentColor : a.kind == "install" ? .teal : .red
+        closed ? .secondary : paused ? .orange : a.kind == "error" ? .secondary : a.kind == "read" ? .accentColor : a.kind == "install" ? .teal : .red
     }
+    /// A crash that is only the plan's session limit: the hub resumes it at
+    /// `resumes_at`, and Restart is "Resume now".
+    var paused: Bool { a.kind == "error" && a.resumes_at != nil }
 
     var body: some View {
         Card(tint: tint,
-             mark: closed ? closedIcon : a.kind == "read" || a.kind == "install" ? kindIcon : "hand.raised.fill",
+             mark: closed ? closedIcon : paused ? "pause.circle" : a.kind == "read" || a.kind == "install" ? kindIcon : "hand.raised.fill",
              caption: closed ? a.state : a.state == "answered" ? "waiting on agent" : kindLabel,
              id: a.id,
              right: a.goal_id.map { g in goals.first { $0.id == g }?.title ?? g } ?? "",
@@ -94,7 +103,9 @@ struct AskCard: View {
              said: a.said ?? "",
              thread: a.thread_id,
              waiting: !closed && a.waiting_to_speak == true,
+             speaking: !closed && a.speaking == true,
              hush: { Task { await cardAct(busy: $busy, error: $error, reload: reload) { try await hub.hushVoice(card: a.id) } } },
+             extra: paused && !closed ? AnyView(PauseBar(from: a.created_at, to: a.resumes_at!)) : nil,
              closed: closed,
              line: a.resolution.flatMap { $0.isEmpty ? nil : $0 } ?? (a.state == "superseded" ? "replaced by a newer card" : ""),
              // A dismissed card — or a read marked Read —
@@ -108,8 +119,9 @@ struct AskCard: View {
             } else if !closed {
                 Button { dismiss.act() } label: { Label("Dismiss", systemImage: "xmark") }
             }
+            Button { UIPasteboard.general.string = copyText(a.said ?? "", a.detailWithoutLinks) } label: { Label("Copy text", systemImage: "doc.on.doc") }
             if let u = shareURL {
-                Button { UIPasteboard.general.url = u } label: { Label("Copy link", systemImage: "doc.on.doc") }
+                Button { UIPasteboard.general.url = u } label: { Label("Copy link", systemImage: "link") }
             }
         }
         .sheet(item: $responding) { RespondSheet(subject: RespondSubject(ask: a, first: $0.outcome), reload: reload) }
@@ -122,17 +134,33 @@ struct AskCard: View {
     private var dismiss: CardButton { fold(back: false) }
 
     private var buttons: [CardButton] {
-        if a.isFolded {
+        if closed {
             // Open link stays on a folded card: the URL was the point of it.
-            let link = a.firstLink.map { u in [CardButton(label: "Open link", url: u)] } ?? []
-            return link + [fold(back: true)]
+            // Every closed card but an install reopens — the hub's `reopen`
+            // (the owner 2026-09-29: "every kind of cell should be reopenable
+            // except for the install cells").
+            let link = a.isFolded ? a.firstLink.map { u in [CardButton(label: "Open link", url: u)] } ?? [] : []
+            return link + (a.reopen == true ? [fold(back: true)] : [])
         }
-        if closed { return [] }
         switch a.kind {
+        case "error" where paused:
+            return [CardButton(label: busy ? "Resuming…" : "Resume now", primary: true) { Task { await restart() } }, dismiss]
         case "error":
             // The error text is the whole story; the one thing worth doing to
             // a dead run is running it again.
             return [CardButton(label: busy ? "Restarting…" : "Restart", primary: true) { Task { await restart() } }, dismiss]
+        case "install" where a.isMacInstall:
+            // The desktop app's build (2026-09-30: "an install cell with the
+            // word install, and myself clicking it should do the thing where
+            // it kind of builds… in the background and then restart"). The
+            // click runs the hub's `mac` lane (ops/mac-apply.sh): a staged
+            // build restarts the Mac app in seconds, an unstaged one builds
+            // first; the hub closes the card on the click, by "app", and
+            // reopens it if the Mac still reports an older build 10 min
+            // later. Works from the phone too — the hub does the work.
+            return [CardButton(label: busy ? "Installing…" : "Install", primary: true) {
+                Task { await macInstall() }
+            }, dismiss]
         case "install" where a.phoneLink != nil:
             // The install cell is title + description + the one Install button.
             // Tapping it also closes the ask on the spot (by "app", no thread
@@ -156,7 +184,8 @@ struct AskCard: View {
             // The hub's words (Decided · Not deciding · Reply), each
             // arming the bar with that pick, then Dismiss — the silent close.
             let os = a.outcomes ?? []
-            let picks = os.isEmpty ? [CardButton(label: "Respond", primary: true) { respond("") }] : outcomeButtons(os) { respond($0) }
+            let picks = os.isEmpty ? [CardButton(label: "Respond", primary: true) { respond("") }]
+                : outcomeButtons(os, armed: armedPicks["ask:" + a.id]) { respond($0) }
             return picks + [dismiss]
         }
     }
@@ -169,6 +198,22 @@ struct AskCard: View {
         if let h = askReply { h.arm(a, outcome) } else { responding = Pick(outcome: outcome) }
     }
 
+    /// The Mac install card's click: the hub's `mac` lane. On the Mac itself,
+    /// a build that is already staged is applied here and now (the
+    /// unsent-words check, a clean quit); the hub's flag would
+    /// reach the same end five seconds later.
+    func macInstall() async {
+        await cardAct(busy: $busy, error: $error, reload: reload) {
+            let r = try await hub.appInstall(lane: "mac", ask: a.id, build: a.buildNumber)
+            #if targetEnvironment(macCatalyst)
+            if r.staged == true { MacUpdate.shared.applyFromCard() }
+            else { MacUpdate.shared.building = a.buildNumber }
+            #else
+            _ = r
+            #endif
+        }
+    }
+
     func resolve(_ state: String, by: String = "owner", note: String = "") async {
         await cardAct(busy: $busy, error: $error, reload: reload) { _ = try await hub.resolveAsk(a.id, state: state, note: note, by: by) }
     }
@@ -176,5 +221,33 @@ struct AskCard: View {
     /// Replay the turn this session died on; the card closes itself.
     func restart() async {
         await cardAct(busy: $busy, error: $error, reload: reload) { try await hub.retryAsk(a.id) }
+    }
+}
+
+/// How far a paused session is through its wait: a thin amber bar from when
+/// it paused to when the hub resumes it, then the two times and what is left.
+struct PauseBar: View {
+    let from: Date
+    let to: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { tl in
+            let total = max(to.timeIntervalSince(from), 1)
+            let done = min(max(tl.date.timeIntervalSince(from) / total, 0), 1)
+            let left = Int((to.timeIntervalSince(tl.date) / 60).rounded(.up))
+            VStack(spacing: 4) {
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.2))
+                        Capsule().fill(Color.orange).frame(width: g.size.width * done)
+                    }
+                }.frame(height: 4)
+                HStack {
+                    Text(from, format: .dateTime.hour().minute())
+                    Spacer()
+                    Text(left > 0 ? "\(to.formatted(.dateTime.hour().minute())) · \(left) min" : "resuming…")
+                }.font(.caption2).foregroundStyle(.secondary)
+            }
+        }
     }
 }

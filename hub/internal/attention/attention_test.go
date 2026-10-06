@@ -188,6 +188,60 @@ func TestReadsCount(t *testing.T) {
 	}
 }
 
+// An install card is listed only on the device it updates. The phone's board leaves out the Mac's build, the
+// desktop's the phone's, and the web console lists both — out of the count,
+// the pills, the bundle and the section alike, never a hidden-but-counted row.
+func TestInstallCardIsTheDevices(t *testing.T) {
+	ths := []threads.Thread{{ID: "ship", Status: "needs_you"}, {ID: "mac", Status: "needs_you"}, {ID: "both", Status: "needs_you"}}
+	asks := []threads.Ask{
+		{ID: "p1", ThreadID: "ship", Surface: "mobile", State: "open", Kind: "install", Class: "install", Title: "Install app build 1553 (tap the link)"},
+		{ID: "m1", ThreadID: "mac", Surface: "web", State: "open", Kind: "install", Class: "install", Title: "Install desktop build 1553"},
+		{ID: "p2", ThreadID: "both", Surface: "mobile", State: "open", Kind: "install", Class: "install", Title: "Install app build 1554 (tap the link)"},
+		{ID: "r1", ThreadID: "both", Surface: "any", State: "open", Kind: "read", Title: "The toolbar is in"},
+	}
+	for _, tc := range []struct {
+		surface         string
+		count           int
+		ship, mac, both int
+		shipSec, macSec string
+		bothPill        string
+	}{
+		{"web", 4, 1, 1, 2, "your_turn", "your_turn", "1 to read/read 1 to install/install"},
+		{"mobile", 3, 1, 0, 2, "your_turn", "", "1 to read/read 1 to install/install"},
+		{"desktop", 2, 0, 1, 1, "", "your_turn", "1 to read/read"},
+	} {
+		b := Build(tc.surface, asks, nil, ths)
+		if b.Surface != tc.surface || b.Count != tc.count || b.Badges.YourTurn != tc.count {
+			t.Fatalf("%s: surface=%s count=%d badge=%d", tc.surface, b.Surface, b.Count, b.Badges.YourTurn)
+		}
+		if b.ForYou["ship"] != tc.ship || b.ForYou["mac"] != tc.mac || b.ForYou["both"] != tc.both {
+			t.Fatalf("%s: for_you=%v", tc.surface, b.ForYou)
+		}
+		if b.Installs["ship"] != tc.ship || b.Installs["mac"] != tc.mac {
+			t.Fatalf("%s: installs=%v", tc.surface, b.Installs)
+		}
+		if b.Section["ship"] != tc.shipSec || b.Section["mac"] != tc.macSec {
+			t.Fatalf("%s: section=%v", tc.surface, b.Section)
+		}
+		var ps []string
+		for _, p := range b.Pills["both"] {
+			ps = append(ps, p.Word+"/"+p.Tone)
+		}
+		if got := strings.Join(ps, " "); got != tc.bothPill {
+			t.Fatalf("%s: both pills=%q", tc.surface, got)
+		}
+		listed := map[string]bool{}
+		for _, s := range b.Sessions {
+			for _, a := range s.Asks {
+				listed[a.ID] = true
+			}
+		}
+		if listed["p1"] != (tc.ship == 1) || listed["m1"] != (tc.mac == 1) || listed["p2"] != (tc.both == 2) || !listed["r1"] {
+			t.Fatalf("%s: listed=%v", tc.surface, listed)
+		}
+	}
+}
+
 // The Sessions page's headings and pills come from the hub, so both surfaces
 // print the same words: one heading per session, counts in cards.
 func TestHeadingsAndPills(t *testing.T) {

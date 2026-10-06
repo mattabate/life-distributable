@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"life/hub/internal/actions"
 )
@@ -30,17 +31,30 @@ func (s *Server) decider() *actions.Decider {
 // This is a guessing oracle by construction, which is only safe because the
 // secret is 100 bits (actions.NewSecret). Never point it at a short code
 // without a lockout — a session holding the hub token can call it in a loop.
+//
+// Every check is logged with the caller's User-Agent (2026-10-02): "the app
+// loses my code once a week" could not be answered because the phone and the
+// Mac both say via=app and a Check code tap left no trace — now a Settings
+// check reads as one line, and a refusal names the device that sent it.
 func (s *Server) deciderStatus(w http.ResponseWriter, r *http.Request) {
 	d := s.decider()
 	code := strings.TrimSpace(r.Header.Get("X-Life-Decider"))
-	writeJSON(w, 200, map[string]bool{
+	ok := !d.Armed() || d.Verify(code)
+	log.Printf("decider: check armed=%v sent=%v ok=%v ua=%q", d.Armed(), code != "", ok, r.UserAgent())
+	out := map[string]any{
 		"armed": d.Armed(),
 		"sent":  code != "",
 		// Unarmed: approve/deny take the hub token alone, so whatever this
 		// surface holds is good enough. Say so rather than reporting a
 		// failure the owner cannot act on.
-		"ok": !d.Armed() || d.Verify(code),
-	})
+		"ok": ok,
+	}
+	// When the hub's code was made, so a refusal can be read against the
+	// date on the Passwords entry instead of a bare "that one is old".
+	if at := d.SetAt(); !at.IsZero() {
+		out["set_at"] = at.UTC().Format(time.RFC3339)
+	}
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) listActions(w http.ResponseWriter, r *http.Request) {
@@ -122,11 +136,12 @@ func (s *Server) deciderOK(w http.ResponseWriter, r *http.Request, id, what, via
 	}
 	code := strings.TrimSpace(r.Header.Get("X-Life-Decider"))
 	if d.Verify(code) {
+		log.Printf("actions: %s of %s via %s — decider code accepted ua=%q", what, id, via, r.UserAgent())
 		return true
 	}
 	s.acts.Refused(id, via)
-	log.Printf("actions: refused %s of %s via %s — %s decider code",
-		what, id, via, map[bool]string{true: "missing", false: "wrong"}[code == ""])
+	log.Printf("actions: refused %s of %s via %s — %s decider code ua=%q",
+		what, id, via, map[bool]string{true: "missing", false: "wrong"}[code == ""], r.UserAgent())
 	jsonErr(w, 403, "this needs your decider code, which the hub token does not carry: "+
 		"the phone sends it automatically (Settings → Decider code), the console asks you for it once. "+
 		"Set or reset it with ops/decider-set.sh in a Terminal.")

@@ -94,6 +94,17 @@ func TickOutcomes(open bool) []Outcome {
 	}
 }
 
+// NoteOutcomes: a reminder (a `note` item) — a date to remember, nothing to
+// do. It had Done · Dismiss and no box, so there was nowhere to say anything
+// about it: now the homework box — Read it closes it quietly, words go to the
+// session behind it.
+func NoteOutcomes() []Outcome {
+	return []Outcome{
+		{Value: "done", Label: "Read it", Hint: "closed as read — with words, they go to its session"},
+		{Value: "", Label: "Send", Hint: "it stays open — your words go to its session"},
+	}
+}
+
 // ReplyLabel: the verdict word on the "↩ <label> · <card>" line under a
 // message that answered a card. An ask's is the card's own button word
 // (askKind); a rec's is the Recs page's; a calendar step's is the row's.
@@ -169,11 +180,16 @@ func Owner(by string) bool {
 //   - Folded: a silent close drawn as one grey line with Reopen —
 //     "dismissed", or "read" for a read card closed with its own button.
 //   - Lane: whose colour it wears — mine | chores | homework | recs | agents.
+//   - Reopen: a closed card that carries Reopen — every kind except the
+//     install cards, the only ones closed by an external check.
+//     A superseded ask has a newer card, and a decided proposal already ran
+//     or was refused at the gate — only a dismissed one comes back.
 type Standing struct {
 	Open   bool
 	Closed bool
 	Folded string
 	Lane   string
+	Reopen bool
 }
 
 // DoerLane: a record's lane is its doer's — red when the owner did it (Owner), grey
@@ -211,6 +227,7 @@ func AskStanding(kind, class, state, resolution, by string, chore bool) Standing
 	case s.Closed:
 		s.Lane = DoerLane(by)
 	}
+	s.Reopen = s.Closed && kind != "install" && state != "superseded"
 	return s
 }
 
@@ -225,6 +242,7 @@ func ActionStanding(state, decidedVia string) Standing {
 	if s.Closed {
 		s.Lane = DoerLane(decidedVia)
 	}
+	s.Reopen = state == "dismissed"
 	return s
 }
 
@@ -242,6 +260,7 @@ func RecStanding(status, note string) Standing {
 	if status == "expired" && note == RecDismissed {
 		s.Folded = "dismissed"
 	}
+	s.Reopen = s.Closed && status != "superseded"
 	return s
 }
 

@@ -22,6 +22,58 @@ type Voice struct {
 	// cards: the same holds by card, so the card itself can say so — its Play
 	// button reads "Waiting to speak" and a double tap drops the line.
 	cards map[string]int
+	// saying: the card each marked session is speaking, so the card itself
+	// reads "Speaking" while its line is in the owner's ears, not Play.
+	saying map[string]string
+}
+
+// MarkCard is Mark for a card's own line: the session is heard until `until`
+// and the card with it. A time already past ends both.
+func (v *Voice) MarkCard(thread, card string, until time.Time) {
+	if v == nil || thread == "" {
+		return
+	}
+	v.Mark(thread, until)
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.saying == nil {
+		v.saying = map[string]string{}
+	}
+	if card == "" || !until.After(time.Now()) {
+		delete(v.saying, thread)
+		return
+	}
+	v.saying[thread] = card
+}
+
+// CardSpeaking: whether one card's line is in the owner's ears at `now`.
+func (v *Voice) CardSpeaking(card string, now time.Time) bool {
+	if v == nil || card == "" {
+		return false
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	for thread, c := range v.saying {
+		if c == card {
+			return v.until[thread].After(now)
+		}
+	}
+	return false
+}
+
+// EndCard ends a card's "speaking" mark (a double tap hushed it).
+func (v *Voice) EndCard(card string) {
+	if v == nil || card == "" {
+		return
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	for thread, c := range v.saying {
+		if c == card {
+			delete(v.saying, thread)
+			delete(v.until, thread)
+		}
+	}
 }
 
 // Wait says `thread` has a line queued for `card` that is not being heard

@@ -75,6 +75,21 @@ func (a *APNs) Heard(thread, line string) {
 	a.db.Exec(`UPDATE voice_queue SET heard_at=? WHERE card=(SELECT card FROM voice_queue WHERE thread=? AND heard_at='' ORDER BY queued_at DESC LIMIT 1)`, now, thread)
 }
 
+// LineCard: the card the phone's line speaks for — the session's unheard row
+// with those words first, else its newest unheard row (read before Heard
+// stamps it).
+func (a *APNs) LineCard(thread, line string) string {
+	if a == nil || a.db == nil || thread == "" {
+		return ""
+	}
+	var card string
+	if a.db.QueryRow(`SELECT card FROM voice_queue WHERE thread=? AND body=? AND heard_at='' ORDER BY queued_at DESC LIMIT 1`, thread, line).Scan(&card) == nil {
+		return card
+	}
+	a.db.QueryRow(`SELECT card FROM voice_queue WHERE thread=? AND heard_at='' ORDER BY queued_at DESC LIMIT 1`, thread).Scan(&card)
+	return card
+}
+
 // Resume speaks again what the last hub left unheard: rows queued within
 // resumeWindow, never heard, never resumed, whose card is still open, oldest
 // first — each through the ordinary push path, so they queue behind one

@@ -71,8 +71,9 @@ function calEntryHTML(i, opts) {
   // pair. Homework is a COMPLETION, not a conversation: one tick, no words —
   // and the hub ticks it itself when the evidence lands (a full pitch round).
   // The hub's `tick` says which: no session waits on it (homework, a chore
-  // that needs no agent behind it).
-  const homework = isItem && (i.tick || i.kind === 'homework');
+  // that needs no agent behind it). A reminder (`note`) takes the same box:
+  // Read it ticks it, words go to its session.
+  const homework = isItem && (i.tick || i.kind === 'homework' || i.kind === 'note');
   const ownerStep = isItem && i.kind === 'owner' && !homework;
   // An install ask is the same teal cell here as in the chat — its own kind
   // of cell with an Install button, not Done:
@@ -81,7 +82,9 @@ function calEntryHTML(i, opts) {
   // closes it and the record row ("Installed: build N") takes its place at
   // that minute. No link in the detail → Respond, as the chat card does.
   const install = calIsInstall(i) && !closed;
-  const installLink = install ? askInstallLink(i.detail) : null;
+  // The desktop app's build (2026-09-30): Install runs the hub's `mac` lane.
+  const macInstall = install && askInstallTarget(i) === 'mac';
+  const installLink = install && !macInstall ? askInstallLink(i.detail) : null;
   const acts = closed ? `<span class="small muted">${esc(i.state)}</span>${isItem
         ? ` <button class="sm" onclick="resolveCal('${esc(i.id)}','scheduled')" title="Put it back on the calendar (and the board, if it was due)">Reopen</button>` : ''}`
     // The row's decisive `outcomes` (Approve · Deny); Reply is the session's.
@@ -90,10 +93,14 @@ function calEntryHTML(i, opts) {
     : ownerStep || homework ? ''
     : isItem ? `<button class="sm" onclick="resolveCal('${esc(i.id)}','done')">Done</button>
                 <button class="sm" onclick="resolveCal('${esc(i.id)}','dismissed')">Dismiss</button>`
-    : install ? (installLink ? `<a class="btn sm install" href="${esc(installLink)}" target="_blank" title="Open the install page — the phone reports the new build and the card closes itself">Install</a>`
+    : install ? (macInstall ? `<button class="sm install" onclick="macInstall('${esc(i.ask_id)}')" title="Build it if it isn't already, then restart the desktop app on it; the card closes itself">Install</button>`
+                  : installLink ? `<a class="btn sm install" href="${esc(installLink)}" target="_blank" title="Open the install page — the phone reports the new build and the card closes itself">Install</a>`
                   : `<button class="sm primary" onclick="openRespond('${esc(i.ask_id)}')">Respond</button>`)
                 + `<button class="sm" onclick="resolveAskGlobal('${esc(i.ask_id)}','dismissed')" title="Skip this build">Won't install</button>`
-    : i.ask_id ? `<button class="sm" onclick="resolveAskGlobal('${esc(i.ask_id)}','done')">Done</button>
+    // An ask answers from its session's chat bar, armed on the card —
+    // Respond, the chat card's own button, first.
+    : i.ask_id ? `${i.thread_id ? `<button class="sm primary" onclick="openRespond('${esc(i.ask_id)}')" title="Open its session with the chat bar replying to this card">Respond</button>
+                  ` : ''}<button class="sm" onclick="resolveAskGlobal('${esc(i.ask_id)}','done')">Done</button>
                   <button class="sm" onclick="resolveAskGlobal('${esc(i.ask_id)}','dismissed')">Dismiss</button>`
     : '';
   // A deferred rec on its review day reads as the question it is (Phase
@@ -142,10 +149,14 @@ function calEntryHTML(i, opts) {
 // and no pick leaves the item open. The buttons
 // are the row's own `outcomes` (store.TickOutcomes: Did it · Skip · Send).
 function calHomeworkBox(i) {
+  // The tick's own word: Did it (homework), Read it (a reminder).
+  const tick = ((i.outcomes || []).find(o => o.value === 'done') || {}).label || 'Did it';
+  const note = i.kind === 'note';
   return replyBox(calKey(i.id), { ref: 'cal', id: i.id, title: i.title || '' }, {
     outcomes: i.outcomes,
-    emptyMsg: 'Type something first — or press Did it twice to just tick it.',
-    placeholder: 'How did it go? Words start a session about it — or just press Did it.',
+    emptyMsg: `Type something first — or press ${tick} twice to just tick it.`,
+    placeholder: note ? `Anything to add? Words go to its session — or just press ${tick}.`
+      : `How did it go? Words start a session about it — or just press ${tick}.`,
     redraw: () => pageRedraw(),
     after: async () => { await pageRedraw(); refreshBadges(); },
     send: p => postReply(p, {

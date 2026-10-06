@@ -160,6 +160,9 @@ struct RecChip: View {
 /// side of the phone.
 struct FlowRow: Layout {
     var spacing: CGFloat = 6
+    /// Where a short row sits inside the width: `.leading` (chips) or `.center`
+    /// (a chart's key — the console's `.spend-key { justify-content: center }`).
+    var alignment: HorizontalAlignment = .leading
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let rows = lines(width: proposal.width ?? .infinity, subviews: subviews)
@@ -171,7 +174,8 @@ struct FlowRow: Layout {
         var y = bounds.minY
         var i = 0
         for row in lines(width: bounds.width, subviews: subviews) {
-            var x = bounds.minX
+            let slack = Swift.max(bounds.width - row.width, 0)
+            var x = bounds.minX + (alignment == .center ? slack / 2 : alignment == .trailing ? slack : 0)
             for _ in 0..<row.count {
                 let size = subviews[i].sizeThatFits(.unspecified)
                 subviews[i].place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(size))

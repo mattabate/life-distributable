@@ -19,6 +19,14 @@ struct StyledText: View {
     var color: Color = .primary
     /// Whole block semibold (ask/card titles, the text copied most often).
     var bold: Bool = false
+    /// Cut to this many lines with "…" (a rec card's `because`), still
+    /// selectable — a `Text` with `.lineLimit` cannot be dragged over on the
+    /// Mac (the owner 2026-09-30: "just highlight it and then right click and copy").
+    var lines: Int? = nil
+    /// The Mac's point size, when the text stands where a SwiftUI `Text` in
+    /// a MacFonts size stood: UIKit's own styles are the Mac's small desk
+    /// sizes (subheadline 11), which MacFonts.swift only lifts for SwiftUI.
+    var macSize: CGFloat? = nil
     /// Re-renders the attributed string when the system text size changes.
     @Environment(\.dynamicTypeSize) private var typeSize
     /// Inside a component that can be chatted about (`.chatAbout`), the text
@@ -35,13 +43,13 @@ struct StyledText: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(mdSegments(text).enumerated()), id: \.offset) { _, seg in
                     switch seg {
-                    case .text(let t): SelectableText(attributed: cached(t), tint: UIColor(color), chat: chatHook)
+                    case .text(let t): SelectableText(attributed: cached(t), tint: UIColor(color), chat: chatHook, lines: lines)
                     case .code(let code, let lang): CodeBlock(code: code, lang: lang, style: style)
                     }
                 }
             }
         } else {
-            SelectableText(attributed: cached(text), tint: UIColor(color), chat: chatHook)
+            SelectableText(attributed: cached(text), tint: UIColor(color), chat: chatHook, lines: lines)
         }
     }
 
@@ -52,7 +60,7 @@ struct StyledText: View {
     /// depends on the five inputs below, so it is built once and kept.
     private static let cache = NSCache<NSString, NSAttributedString>()
     private func cached(_ text: String) -> NSAttributedString {
-        let key = "\(style.rawValue)|\(bold)|\(color)|\(typeSize)|\(text)" as NSString
+        let key = "\(style.rawValue)|\(bold)|\(color)|\(typeSize)|\(macSize ?? 0)|\(text)" as NSString
         if let hit = Self.cache.object(forKey: key) { return hit }
         let built = Perf.time("StyledText.build") { build(text) }
         Self.cache.countLimit = 400
@@ -66,7 +74,11 @@ struct StyledText: View {
     private static let hang: CGFloat = 19
 
     private func build(_ text: String) -> NSAttributedString {
+        #if targetEnvironment(macCatalyst)
+        let plain = macSize.map { UIFont.systemFont(ofSize: $0) } ?? UIFont.preferredFont(forTextStyle: style)
+        #else
         let plain = UIFont.preferredFont(forTextStyle: style)
+        #endif
         let base = bold ? plain.bolded() : plain
         let heading = base.bolded()
         let ui = UIColor(color)
@@ -79,9 +91,15 @@ struct StyledText: View {
             // Collapse runs of blank lines into one small gap.
             let trimmedAll = raw.trimmingCharacters(in: .whitespaces)
             if trimmedAll.isEmpty {
+                #if !targetEnvironment(macCatalyst)
                 if !blank, !paras.isEmpty { paras.append(NSAttributedString(string: " ", attributes: [.font: base, .foregroundColor: ui])) }
+                #endif
                 blank = true; continue
             }
+            // On the Mac a blank line is a half-line gap above the next
+            // paragraph, not a whole empty line (the owner 2026-09-29, on Goals:
+            // "the markdown formatting is kind of weird and bad").
+            let gapBefore: CGFloat = blank && !paras.isEmpty ? base.pointSize * 0.55 : 0
             blank = false
             // A pipe table ("| Date | Buy |"): the run of pipe rows from here becomes rows
             // of tab-separated cells over shared tab stops, header bold.
@@ -117,6 +135,10 @@ struct StyledText: View {
             p.lineBreakMode = .byWordWrapping
             p.paragraphSpacing = 2          // the old VStack(spacing: 2)
             p.firstLineHeadIndent = indent
+            #if targetEnvironment(macCatalyst)
+            p.paragraphSpacingBefore = gapBefore
+            p.lineSpacing = 1.5
+            #endif
             let line = NSMutableAttributedString()
             if let mk = marker {
                 p.headIndent = indent + Self.hang
@@ -190,7 +212,13 @@ struct StyledText: View {
             let intent = run.inlinePresentationIntent ?? []
             var font = base
             // Code spans: monospaced at the same size so nothing jumps.
+            #if targetEnvironment(macCatalyst)
+            // On the Mac a code span is a point smaller on a faint wash, so
+            // an id or a path reads as a token, not a wide run of type.
+            if intent.contains(.code) { font = UIFont.monospacedSystemFont(ofSize: base.pointSize - 1.5, weight: .regular) }
+            #else
             if intent.contains(.code) { font = UIFont.monospacedSystemFont(ofSize: base.pointSize, weight: .regular) }
+            #endif
             var traits = font.fontDescriptor.symbolicTraits
             if intent.contains(.stronglyEmphasized) { traits.insert(.traitBold) }
             if intent.contains(.emphasized) { traits.insert(.traitItalic) }
@@ -200,6 +228,9 @@ struct StyledText: View {
             var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             if intent.contains(.strikethrough) { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if let link = run.link { attrs[.link] = link }
+            #if targetEnvironment(macCatalyst)
+            if intent.contains(.code) { attrs[.backgroundColor] = UIColor.label.withAlphaComponent(0.06) }
+            #endif
             out.append(NSAttributedString(string: String(parsed[run.range].characters), attributes: attrs))
         }
         return out
@@ -389,17 +420,32 @@ private struct CodeBlock: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
             Divider()
+            // The same text view the prose is, unwrapped: a `Text` with
+            // `.textSelection` copies only the whole block, and on the Mac a
+            // drag over it selected nothing (the owner 2026-10-01: "drag highlight
+            // text anywhere… I just can't do it inside the copy boxes").
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
-                    .font(.system(size: size, design: .monospaced))
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: true)
+                SelectableText(attributed: Self.mono(code, size: size), tint: .label, chat: nil, unwrapped: true)
                     .padding(10)
             }
         }
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.15)))
+    }
+
+    /// One string per (code, size): SelectableText keys its measured size on
+    /// the object it is handed.
+    private static let cache = NSCache<NSString, NSAttributedString>()
+    private static func mono(_ code: String, size: CGFloat) -> NSAttributedString {
+        let key = "\(size)|\(code)" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        let built = NSAttributedString(string: code, attributes: [
+            .font: UIFont.monospacedSystemFont(ofSize: size, weight: .regular),
+            .foregroundColor: UIColor.label,
+        ])
+        cache.countLimit = 200
+        cache.setObject(built, forKey: key)
+        return built
     }
 }
 
@@ -407,6 +453,18 @@ private struct CodeBlock: View {
 /// way to render it: a navigation bar title, a notification body.
 func mdPlain(_ s: String) -> String {
     String(md(s).characters)
+}
+
+/// A card's words as plain text for the pasteboard — "Copy text" in a card's
+/// hold menu, for passing the words on. A link keeps its URL, fence lines go.
+func copyText(_ parts: String...) -> String {
+    let link = /\[([^\]]+)\]\((\S+?)\)/
+    return parts.filter { !$0.isEmpty }.map { s in
+        let kept = s.components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("```") }
+            .joined(separator: "\n")
+        return mdPlain(kept.replacing(link) { m in m.1 == m.2 ? String(m.2) : "\(m.1) (\(m.2))" })
+    }.joined(separator: "\n\n")
 }
 
 private extension UIFont {
@@ -423,6 +481,10 @@ private struct SelectableText: UIViewRepresentable {
     let attributed: NSAttributedString
     let tint: UIColor
     var chat: ChatHook?
+    var lines: Int? = nil
+    /// A fenced block: every line as long as it is, never wrapped to the
+    /// width on offer (the box scrolls sideways).
+    var unwrapped = false
     @Environment(\.openURL) private var openURL
 
     /// Adds "Chat about this" to the selection menu, carrying the selected
@@ -476,10 +538,18 @@ private struct SelectableText: UIViewRepresentable {
     func updateUIView(_ v: UITextView, context: Context) {
         context.coordinator.chat = chat
         context.coordinator.open = openURL
+        v.textContainer.maximumNumberOfLines = lines ?? 0
+        v.textContainer.lineBreakMode = lines == nil ? .byWordWrapping : .byTruncatingTail
         // Threads poll every 3s; reassigning identical text would kill an
         // in-progress selection and re-lay out the whole list.
         Perf.time("SelectableText.update") { if v.attributedText != attributed { v.attributedText = attributed } }
+        #if targetEnvironment(macCatalyst)
+        // Links are the tint alone on the Mac: a note full of ids read as a
+        // wall of underlines.
+        v.linkTextAttributes = [.foregroundColor: UIColor.tintColor]
+        #else
         v.linkTextAttributes = [.foregroundColor: tint, .underlineStyle: NSUnderlineStyle.single.rawValue]
+        #endif
     }
 
     /// The phone's width, for a text view that has no window yet: the widest
@@ -499,7 +569,7 @@ private struct SelectableText: UIViewRepresentable {
         // live chat is measured before it is attached, and answering with
         // the unwrapped line width there is what let one row
         // grow past the phone and the whole chat pan sideways.
-        let bound = proposed.isFinite && proposed > 0 ? proposed : (uiView.window?.bounds.width ?? Self.screenWidth)
+        let bound = unwrapped ? huge : proposed.isFinite && proposed > 0 ? proposed : (uiView.window?.bounds.width ?? Self.screenWidth)
         return Perf.time("SelectableText.sizeThatFits") {
             let c = context.coordinator
             // Same object = same text, font and colour (StyledText hands out

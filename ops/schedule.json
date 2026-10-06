@@ -16,6 +16,7 @@
     "Bash(git commit:*)",
     "Bash(ops/commit.sh:*)",
     "Bash(bash ops/merge.sh:*)",
+    "Bash(bash ops/render.sh:*)",
     "Bash(ops/browse.js:*)",
     "Bash(ops/web-smoke.sh:*)",
     "Bash(make:*)",

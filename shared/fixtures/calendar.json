@@ -1,12 +1,12 @@
 {
-  "from": "2026-09-28",
-  "to": "2026-11-27",
-  "today": "2026-09-28",
+  "from": "2026-10-06",
+  "to": "2026-12-05",
+  "today": "2026-10-06",
   "anytime": [
     {
       "id": "cal-00000001",
-      "day": "2026-09-28",
-      "at": "02:55",
+      "day": "2026-10-06",
+      "at": "00:43",
       "kind": "owner",
       "title": "Buy a fern",
       "state": "scheduled",
@@ -95,7 +95,7 @@
   "overdue": [
     {
       "id": "cal-00000006",
-      "day": "2026-09-26",
+      "day": "2026-10-04",
       "kind": "owner",
       "title": "Renew parking",
       "state": "scheduled",
@@ -136,7 +136,7 @@
   "due": [
     {
       "id": "cal-00000007",
-      "day": "2026-09-28",
+      "day": "2026-10-06",
       "at": "09:00",
       "kind": "owner",
       "title": "Water the plants",
@@ -184,12 +184,12 @@
   "soon": [],
   "days": [
     {
-      "day": "2026-09-28",
+      "day": "2026-10-06",
       "entries": [
         {
           "id": "cal-00000001",
-          "day": "2026-09-28",
-          "at": "02:55",
+          "day": "2026-10-06",
+          "at": "00:43",
           "kind": "owner",
           "title": "Buy a fern",
           "state": "scheduled",
@@ -220,7 +220,7 @@
         },
         {
           "id": "cal-00000007",
-          "day": "2026-09-28",
+          "day": "2026-10-06",
           "at": "09:00",
           "kind": "owner",
           "title": "Water the plants",
@@ -268,11 +268,11 @@
       ]
     },
     {
-      "day": "2026-09-29",
+      "day": "2026-10-07",
       "entries": [
         {
           "id": "cal-00000008",
-          "day": "2026-09-29",
+          "day": "2026-10-07",
           "at": "10:00",
           "kind": "agent",
           "title": "Re-check cash",
@@ -297,11 +297,11 @@
       ]
     },
     {
-      "day": "2026-10-01",
+      "day": "2026-10-09",
       "entries": [
         {
           "id": "prompt:p-00000009",
-          "day": "2026-10-01",
+          "day": "2026-10-09",
           "at": "09:00",
           "kind": "run",
           "title": "Split my brokerage cash sensibly",
@@ -321,6 +321,222 @@
           "open": true,
           "why": "A one-shot wake, or a cadence the calendar cannot rewrite (every@…). Change it in the session.",
           "kind_label": "recurring run"
+        }
+      ]
+    },
+    {
+      "day": "2026-10-13",
+      "entries": [
+        {
+          "id": "cal-00000007@2026-10-13",
+          "day": "2026-10-13",
+          "at": "09:00",
+          "kind": "owner",
+          "title": "Water the plants",
+          "detail": "all of them",
+          "state": "scheduled",
+          "goal_id": "get-smarter",
+          "thread_id": "water-the-plants-00000003",
+          "repeat": "weekly",
+          "due": "on",
+          "window": "on",
+          "actor": "owner",
+          "ref": "cal:cal-00000007",
+          "thread_title": "Water the plants",
+          "lane": "mine",
+          "mark": "todo",
+          "why": "A repeat: this one appears for real when the one before it comes due. Move that one and these follow.",
+          "kind_label": "your step",
+          "coming": true
+        }
+      ]
+    },
+    {
+      "day": "2026-10-20",
+      "entries": [
+        {
+          "id": "cal-00000007@2026-10-20",
+          "day": "2026-10-20",
+          "at": "09:00",
+          "kind": "owner",
+          "title": "Water the plants",
+          "detail": "all of them",
+          "state": "scheduled",
+          "goal_id": "get-smarter",
+          "thread_id": "water-the-plants-00000003",
+          "repeat": "weekly",
+          "due": "on",
+          "window": "on",
+          "actor": "owner",
+          "ref": "cal:cal-00000007",
+          "thread_title": "Water the plants",
+          "lane": "mine",
+          "mark": "todo",
+          "why": "A repeat: this one appears for real when the one before it comes due. Move that one and these follow.",
+          "kind_label": "your step",
+          "coming": true
+        }
+      ]
+    },
+    {
+      "day": "2026-10-27",
+      "entries": [
+        {
+          "id": "cal-00000007@2026-10-27",
+          "day": "2026-10-27",
+          "at": "09:00",
+          "kind": "owner",
+          "title": "Water the plants",
+          "detail": "all of them",
+          "state": "scheduled",
+          "goal_id": "get-smarter",
+          "thread_id": "water-the-plants-00000003",
+          "repeat": "weekly",
+          "due": "on",
+          "window": "on",
+          "actor": "owner",
+          "ref": "cal:cal-00000007",
+          "thread_title": "Water the plants",
+          "lane": "mine",
+          "mark": "todo",
+          "why": "A repeat: this one appears for real when the one before it comes due. Move that one and these follow.",
+          "kind_label": "your step",
+          "coming": true
+        }
+      ]
+    },
+    {
+      "day": "2026-11-03",
+      "entries": [
+        {
+          "id": "cal-00000007@2026-11-03",
+          "day": "2026-11-03",
+          "at": "09:00",
+          "kind": "owner",
+          "title": "Water the plants",
+          "detail": "all of them",
+          "state": "scheduled",
+          "goal_id": "get-smarter",
+          "thread_id": "water-the-plants-00000003",
+          "repeat": "weekly",
+          "due": "on",
+          "window": "on",
+          "actor": "owner",
+          "ref": "cal:cal-00000007",
+          "thread_title": "Water the plants",
+          "lane": "mine",
+          "mark": "todo",
+          "why": "A repeat: this one appears for real when the one before it comes due. Move that one and these follow.",
+          "kind_label": "your step",
+          "coming": true
+        }
+      ]
+    },
+    {
+      "day": "2026-11-10",
+      "entries": [
+        {
+          "id": "cal-00000007@2026-11-10",
+          "day": "2026-11-10",
+          "at": "09:00",
+          "kind": "owner",
+          "title": "Water the plants",
+          "detail": "all of them",
+          "state": "scheduled",
+          "goal_id": "get-smarter",
+          "thread_id": "water-the-plants-00000003",
+          "repeat": "weekly",
+          "due": "on",
+          "window": "on",
+          "actor": "owner",
+          "ref": "cal:cal-00000007",
+          "thread_title": "Water the plants",
+          "lane": "mine",
+          "mark": "todo",
+          "why": "A repeat: this one appears for real when the one before it comes due. Move that one and these follow.",
+          "kind_label": "your step",
+          "coming": true
+        }
+      ]
+    },
+    {
+      "day": "2026-11-17",
+      "entries": [
+        {
+          "id": "cal-00000007@2026-11-17",
+          "day": "2026-11-17",
+          "at": "09:00",
+          "kind": "owner",
+          "title": "Water the plants",
+          "detail": "all of them",
+          "state": "scheduled",
+          "goal_id": "get-smarter",
+          "thread_id": "water-the-plants-00000003",
+          "repeat": "weekly",
+          "due": "on",
+          "window": "on",
+          "actor": "owner",
+          "ref": "cal:cal-00000007",
+          "thread_title": "Water the plants",
+          "lane": "mine",
+          "mark": "todo",
+          "why": "A repeat: this one appears for real when the one before it comes due. Move that one and these follow.",
+          "kind_label": "your step",
+          "coming": true
+        }
+      ]
+    },
+    {
+      "day": "2026-11-24",
+      "entries": [
+        {
+          "id": "cal-00000007@2026-11-24",
+          "day": "2026-11-24",
+          "at": "09:00",
+          "kind": "owner",
+          "title": "Water the plants",
+          "detail": "all of them",
+          "state": "scheduled",
+          "goal_id": "get-smarter",
+          "thread_id": "water-the-plants-00000003",
+          "repeat": "weekly",
+          "due": "on",
+          "window": "on",
+          "actor": "owner",
+          "ref": "cal:cal-00000007",
+          "thread_title": "Water the plants",
+          "lane": "mine",
+          "mark": "todo",
+          "why": "A repeat: this one appears for real when the one before it comes due. Move that one and these follow.",
+          "kind_label": "your step",
+          "coming": true
+        }
+      ]
+    },
+    {
+      "day": "2026-12-01",
+      "entries": [
+        {
+          "id": "cal-00000007@2026-12-01",
+          "day": "2026-12-01",
+          "at": "09:00",
+          "kind": "owner",
+          "title": "Water the plants",
+          "detail": "all of them",
+          "state": "scheduled",
+          "goal_id": "get-smarter",
+          "thread_id": "water-the-plants-00000003",
+          "repeat": "weekly",
+          "due": "on",
+          "window": "on",
+          "actor": "owner",
+          "ref": "cal:cal-00000007",
+          "thread_title": "Water the plants",
+          "lane": "mine",
+          "mark": "todo",
+          "why": "A repeat: this one appears for real when the one before it comes due. Move that one and these follow.",
+          "kind_label": "your step",
+          "coming": true
         }
       ]
     }

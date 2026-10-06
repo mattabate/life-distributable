@@ -31,7 +31,6 @@ import (
 	"life/hub/internal/recs"
 	"life/hub/internal/sched"
 	"life/hub/internal/server"
-	"life/hub/internal/sessions"
 	"life/hub/internal/spend"
 	"life/hub/internal/store"
 	"life/hub/internal/syncruns"
@@ -134,15 +133,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	sessMgr := sessions.New(cfg.TmuxPrefix, cfg.JobsDir, cfg.ClaudeBin)
-	sessMgr.AllowedTools = sch.Table().PromptTools
-	sessMgr.ModelArgs = oneShotArgs("prompt")
+	// data/blobs → data/imports/intake: the in-box a file sent to a session
+	// is saved in under its own name.
+	ob.IntakeDir = filepath.Join(filepath.Dir(cfg.BlobDir), "imports", "intake")
 	thr, err := threads.New(db, cfg.ClaudeBin, filepath.Join(cfg.JobsDir, "threads"), cfg.TmuxPrefix, projDir, sch.Table().PromptTools, sch)
 	if err != nil {
 		log.Fatal(err)
 	}
 	thr.OwnerName = cfg.OwnerName
 	thr.BlobPath = ob.BlobPath
+	thr.IntakePath = ob.IntakePath
 	thr.AutoCompactWindow = cfg.AutoCompactWindow
 	if push != nil {
 		// A spoken card marks its session "speaking" on the Sessions list.
@@ -259,7 +259,7 @@ func main() {
 	thr.RunJob = sch.Fire
 	thr.JobHeld = sch.Held
 	sch.SetClock(thr)
-	ck.Every("prompts", time.Minute, false, func() error { thr.DuePrompts(time.Now()); return nil })
+	ck.Every("prompts", time.Minute, false, func() error { thr.DuePrompts(time.Now()); thr.ResumePaused(time.Now()); return nil })
 	// A prompt answering a proposal names it: "[The owner APPROVED … "<title>"]".
 	thr.ActionTitle = func(id string) string {
 		a, err := acts.Get(id)
@@ -292,7 +292,7 @@ func main() {
 			thr.Poll()
 		}
 	}()
-	h := server.New(cfg, token, sessMgr, acts, sch, gs, ob, thr)
+	h := server.New(cfg, token, acts, sch, gs, ob, thr)
 	h.Push = push
 	h.Runs = runLog
 	h.UseBudget(guard)
@@ -318,9 +318,10 @@ func main() {
 			}
 			// An ask the owner has replied to (`answered`: the ball is the
 			// agent's) wants no voice either: a line still waiting for its
-			// turn is dropped.
+			// turn is dropped. Nor one whose session the owner has written
+			// into since it was raised (threads.WroteSince): the line is stale.
 			if k, err := thr.GetAsk(card); err == nil {
-				return k.State == "open"
+				return k.State == "open" && !thr.WroteSince(k.ThreadID, k.CreatedAt)
 			}
 			if it, err := cal.Get(card); err == nil {
 				return it.State == "fired"
@@ -368,6 +369,8 @@ func main() {
 	// (phone still reports an older build after 10 min).
 	if push != nil {
 		ck.Every("install", time.Minute, false, func() error {
+			// The desktop app's cards, against the build it last reported.
+			thr.ReconcileMacInstalls(thr.MacBuild())
 			if n := thr.ReconcileInstalls(push.MaxBuild()); n > 0 {
 				// Tapped, not landed yet: silent push launches the new
 				// build in the background so it reports itself.

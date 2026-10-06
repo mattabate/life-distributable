@@ -103,6 +103,18 @@ func (s *Server) postObs(w http.ResponseWriter, r *http.Request) {
 				pl = map[string]any{}
 			}
 			pl["blob_bytes"], pl["filename"] = size, hdr.Filename
+			// A document sent to a session (the composer's File picker, a
+			// drop on the chat, the share sheet) is saved in the finance
+			// intake's in-box under its own name as well — the blob is a
+			// hash, and a bank statement is a file to import and file away
+			// (obs.PutIntake). A failed copy never loses the upload.
+			if o.Kind == "upload" {
+				if p, err := s.obs.PutIntake(ref, hdr.Filename); err != nil {
+					log.Printf("obs: intake copy of %s: %v", hdr.Filename, err)
+				} else if p != "" {
+					pl["intake_path"] = p
+				}
+			}
 			o.Payload, _ = json.Marshal(pl)
 		}
 	} else {
@@ -179,7 +191,7 @@ func (s *Server) phoneSpeech(o obs.Observation) {
 	case "spoke":
 		log.Printf("phone: spoke into %s (%s)", p.Route, p.State)
 		if s.thr != nil && p.Thread != "" {
-			s.thr.Voice.Mark(p.Thread, now.Add(notify.PhoneSpeakTime(p.Line)))
+			s.thr.Voice.MarkCard(p.Thread, s.Push.LineCard(p.Thread, p.Line), now.Add(notify.PhoneSpeakTime(p.Line)))
 		}
 		if s.Push != nil {
 			// The line was heard: its voice_queue row closes, so a hub
@@ -201,7 +213,7 @@ func (s *Server) phoneSpeech(o obs.Observation) {
 		log.Printf("phone: silent, route %s (%s)", p.Route, p.State)
 	}
 	if s.thr != nil && p.Thread != "" {
-		s.thr.Voice.Mark(p.Thread, now)
+		s.thr.Voice.MarkCard(p.Thread, "", now)
 	}
 }
 

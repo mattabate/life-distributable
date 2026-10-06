@@ -981,3 +981,62 @@ func TestConsoleMessageIsStampedNotInjected(t *testing.T) {
 		t.Fatalf("the stamp sits under the console message:\n%s", p)
 	}
 }
+
+// The desktop app's install card, like the phone's, shows only the most
+// recent build at any given time: "Install desktop build N" is kind install
+// with target mac, and every phone rule applies per device — the newest mac
+// card retires older mac cards and never a phone card (the two builds count
+// from the same tree but land on different machines), the Mac's own build
+// report closes it, and a clicked card the Mac never came up on reopens.
+func TestMacInstallCardIsItsOwnDevice(t *testing.T) {
+	m, _, _ := setup(t)
+	t1, _ := m.Create("", "life", "", "Desktop install.", "", "", nil)
+	t2, _ := m.Create("", "life", "", "Calendar bars.", "", "", nil)
+	phone, _ := m.AddAsk(t1.ID, "", "Install app build 1510 (tap the link)", "itms://x", "install", "")
+	mac, _ := m.AddAsk(t1.ID, "", "Install desktop build 1508", "the install cell", "physical", "")
+	if mac.Kind != "install" || mac.Target != "mac" || mac.Surface != "web" {
+		t.Fatalf("mac card: %+v", mac)
+	}
+	if phone.Target != "phone" {
+		t.Fatalf("phone card: %+v", phone)
+	}
+	// neither retires the other, whatever the numbers
+	phone, _ = m.GetAsk(phone.ID)
+	mac, _ = m.GetAsk(mac.ID)
+	if phone.State != "open" || mac.State != "open" {
+		t.Fatalf("cross-device supersede: %+v %+v", phone, mac)
+	}
+	// a newer mac card retires the older mac card only
+	mac2, _ := m.AddAsk(t2.ID, "", "Install desktop build 1512", "bars", "install", "")
+	phone, _ = m.GetAsk(phone.ID)
+	mac, _ = m.GetAsk(mac.ID)
+	if mac.State != "superseded" || mac.SupersededBy != mac2.ID || mac.Resolution != "replaced by build 1512" || phone.State != "open" {
+		t.Fatalf("mac supersede: %+v %+v", mac, phone)
+	}
+	// the Mac reporting an older build closes nothing; the phone's report
+	// never touches a mac card
+	m.ReconcileMacInstalls(1508)
+	m.ReconcileInstalls(1600)
+	mac2, _ = m.GetAsk(mac2.ID)
+	if mac2.State != "open" {
+		t.Fatalf("closed early: %+v", mac2)
+	}
+	// clicked Install (the hub's mac lane closes it by "app"); 10 min on
+	// with the Mac still on 1508 it comes back with the desktop's words
+	m.ResolveAsk(mac2.ID, "done", "app", "clicked Install")
+	m.db.Exec(`UPDATE items SET resolved_at=? WHERE id=?`, ts(time.Now().Add(-11*time.Minute)), mac2.ID)
+	m.ReconcileMacInstalls(1508)
+	mac2, _ = m.GetAsk(mac2.ID)
+	if mac2.State != "open" || !strings.Contains(mac2.Detail, "the desktop app still reports build 1508") {
+		t.Fatalf("not reopened: %+v", mac2)
+	}
+	// the Mac comes up on 1512: closed, with the desktop's resolution
+	m.ReconcileMacInstalls(1512)
+	mac2, _ = m.GetAsk(mac2.ID)
+	if mac2.State != "done" || mac2.Resolution != "the desktop app reports build 1512" {
+		t.Fatalf("not closed by the report: %+v", mac2)
+	}
+	if err := m.SetMacBuild(1512); err != nil || m.MacBuild() != 1512 {
+		t.Fatalf("mac build setting: %v %d", err, m.MacBuild())
+	}
+}

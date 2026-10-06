@@ -4,9 +4,12 @@
 // The words come from the hub (`outcomes` on asks, actions and recs — the
 // same list the console's ui.js draws), decisive first with the first one
 // in the card's tint, "Reply" after them, and the client's silent close
-// (Dismiss / Read) last. Same components, no extra styling code. A closed card is the same box in grey with its state
-// line where the buttons were; a dismissed one folds to a grey line and
-// unfolds to the body + Reopen.
+// (Dismiss / Read) last. the owner: "they should have the same components, and
+// there shouldn't be any excess styling code… reuse as much code as possible,
+// standardize the UI." A closed card is the same box in grey with its state
+// line and Reopen where the buttons were (every kind but an install, the owner
+// 2026-09-29); a dismissed one folds to a grey line and unfolds to the body
+// + Reopen.
 //
 // AskCard, ApprovalCard and RecCard decide WHAT the buttons say and do;
 // nothing in them draws a box, a row or a button.
@@ -23,12 +26,30 @@ struct CardButton: Identifiable {
 
 /// A hub outcome (`{value,label}`) as a card button, in the hub's order —
 /// the same order the Respond sheet's chips and the console's row and strip
-/// draw, so bar and card never disagree on order. The hub lists the decisive picks first and words-only
-/// ("Reply", value "") last; the first decisive one is the primary.
+/// draw (the owner 2026-09-18: "Buttons are in a different order on the bar than
+/// on the card"). The hub lists the decisive picks first and words-only
+/// ("Reply", value "") last; the first decisive one is the primary — unless
+/// a pick is armed on the chat bar, and then THAT one is (the owner 2026-10-02:
+/// tapping Won't do after I did this switched the pick but nothing on the
+/// card or the bar showed it, so it read as "clicking does nothing").
 /// `arm` is called with the value.
-func outcomeButtons(_ outcomes: [AskOutcome], arm: @escaping (String) -> Void) -> [CardButton] {
+func outcomeButtons(_ outcomes: [AskOutcome], armed: String? = nil, arm: @escaping (String) -> Void) -> [CardButton] {
     outcomes.enumerated().map { i, o in
-        CardButton(label: o.label, primary: i == 0 && !o.value.isEmpty) { arm(o.value) }
+        let primary = armed.map { $0 == o.value } ?? (i == 0 && !o.value.isEmpty)
+        return CardButton(label: o.label, primary: primary) { arm(o.value) }
+    }
+}
+
+/// The picks armed on the chat bar of the session a card sits in, by the
+/// card's ref ("ask:<id>" / "rec:<id>" / "action:<id>") → outcome value ("" =
+/// words alone). ThreadDetail sets it from its `replies`; the card draws its
+/// armed pick as the primary button. Empty outside a session.
+private struct ArmedPicksKey: EnvironmentKey { static let defaultValue: [String: String] = [:] }
+
+extension EnvironmentValues {
+    var armedPicks: [String: String] {
+        get { self[ArmedPicksKey.self] }
+        set { self[ArmedPicksKey.self] = newValue }
     }
 }
 
@@ -100,6 +121,8 @@ struct Card: View {
     /// The line is queued, not yet spoken: Play reads "Waiting to speak", and
     /// a double tap runs `hush` — the audio goes, the card stays.
     var waiting = false
+    /// Its line is being heard right now (the hub's per-card "speaking").
+    var speaking = false
     var hush: () -> Void = {}
     /// Between the body and the meta row (an approval's "will run" block).
     var extra: AnyView? = nil
@@ -144,14 +167,15 @@ struct Card: View {
             // paste-this string, an endpoint).
             if titled { StyledText(text: title, style: .body, color: closed ? .secondary : .primary, bold: !closed) }
             if !said.isEmpty { saidLine }
-            if !text.isEmpty, !closed { bodyText }
+            // A closed card keeps its body: what it said is often what the owner came
+            // back to copy (the owner 2026-09-29: "there was text I was supposed to
+            // copy out of it").
+            if !text.isEmpty { bodyText }
             if let extra { extra }
             if let meta { meta }
-            if closed {
-                if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.tertiary) }
-            } else if !buttons.isEmpty {
-                buttonRow
-            }
+            if closed, !line.isEmpty { StyledText(text: line, style: .caption1, color: .secondary, macSize: 12) }
+            // A closed card's row is Reopen alone, when its owner gives one.
+            if !buttons.isEmpty { buttonRow }
             if let trail { trail }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
         }
@@ -174,7 +198,19 @@ struct Card: View {
 
     /// Hear the spoken message again; tap again to stop.
     @ViewBuilder private var playButton: some View {
-        if waiting && !hushed {
+        if speaking && !hushed {
+            // The line being heard reads "Speaking", and the same double tap
+            // stops it — the hub cuts the Mac's voice, this stops the phone's
+            // (the owner 2026-09-29: "if you double click it turns back into the
+            // play button").
+            Label("Speaking", systemImage: "circle.fill")
+                .labelStyle(.titleAndIcon).textCase(.uppercase).foregroundStyle(.green)
+                .symbolEffect(.pulse)
+                .frame(minHeight: 22).padding(.leading, 8).contentShape(Rectangle())
+                .onTapGesture(count: 2) { hushed = true; speaker.stop(); hush() }
+                .accessibilityLabel("Speaking").accessibilityHint("Double-tap to stop speaking")
+                .accessibilityAction { hushed = true; speaker.stop(); hush() }
+        } else if waiting && !hushed {
             Label("Waiting to speak", systemImage: "circle.fill")
                 .labelStyle(.titleAndIcon).textCase(.uppercase).foregroundStyle(.orange)
                 .frame(minHeight: 22).padding(.leading, 8).contentShape(Rectangle())
@@ -196,16 +232,18 @@ struct Card: View {
     }
 
     /// The spoken message, recorded, in plain body type under the caption
-    /// line. Selectable, because a line worth hearing may be worth reusing.
+    /// line. Selectable, because a line worth hearing is a line one may
+    /// want to reuse. A text view, not a `Text`: `.textSelection` copies only
+    /// the whole line, and on the Mac a drag over it selected nothing (the owner
+    /// 2026-09-30: "I can copy the text, but it's only the full thing").
     private var saidLine: some View {
-        Text(said).font(.subheadline).foregroundStyle(closed ? .secondary : .primary).textSelection(.enabled)
+        StyledText(text: said, style: .subheadline, color: closed ? .secondary : .primary, macSize: 13.5)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder private var bodyText: some View {
         if let lines {
-            Text(md(text)).font(.subheadline).foregroundStyle(.secondary).lineLimit(lines)
+            StyledText(text: text, style: .subheadline, color: .secondary, lines: lines, macSize: 13.5)
         } else if isLongText(text) {
             // Folds like a long chat bubble: a screen's worth fading out, then
             // its full height — never a box scrolling inside the chat.

@@ -13,7 +13,7 @@ final class ContractDecodeTests: XCTestCase {
         try HubClient.decoder().decode(T.self, from: Data(json.utf8))
     }
 
-    // MARK: GET /projects · /spend/summary · /spend/quota · /sessions · /jobs
+    // MARK: GET /projects · /spend/summary · /spend/quota
 
     func testProjects() throws {
         let p = try decode([Project].self, #"[{"name":"life","dir":"/Users/x/life"},{"name":"site","dir":"/Users/x/life/projects/site"}]"#)
@@ -84,12 +84,6 @@ final class ContractDecodeTests: XCTestCase {
         let f = try decode(ChangeFeed.self, #"{"version":"9a1b2c3d4e5f6071","changed":true}"#)
         XCTAssertEqual(f.version, "9a1b2c3d4e5f6071")
         XCTAssertTrue(f.changed)
-    }
-
-    func testTmuxSessions() throws {
-        let s = try decode([TmuxSession].self, #"[{"name":"life-rc-life","kind":"remote-control","project":"life","created":"2026-08-26T09:00:00Z","attached":false}]"#)
-        XCTAssertEqual(s.first?.id, "life-rc-life")
-        XCTAssertEqual(s.first?.kind, "remote-control")
     }
 
     func testJobRun() throws {

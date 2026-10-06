@@ -68,3 +68,16 @@ type Voice interface {
 	Mark(thread string, until time.Time)
 	Wait(thread, card string) (release func())
 }
+
+// markCard marks the session heard with the card whose line it is, so the
+// card reads "Speaking" (threads.Voice.MarkCard); a Voice without cards gets
+// the session mark alone.
+func (a *APNs) markCard(thread, card string, until time.Time) {
+	if v, ok := a.Voice.(interface {
+		MarkCard(thread, card string, until time.Time)
+	}); ok {
+		v.MarkCard(thread, card, until)
+		return
+	}
+	a.Voice.Mark(thread, until)
+}

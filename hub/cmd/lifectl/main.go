@@ -295,6 +295,7 @@ func main() {
 		//   lifectl prompt "text" --in 30m            → this session, in 30 min (check back on yourself)
 		//   lifectl prompt "text" --on 2026-09-03 --at 09:00
 		//   lifectl prompt "text" --new [--title ...] → a fresh session (a parallel worker)
+		//   lifectl prompt @/path/to/file …           → the file's contents are the text
 		//   lifectl prompt "text" --re ask:ask-1234 [--outcome done]
 		//   lifectl prompts [queued] / lifectl prompt cancel <id>
 		need(3)
@@ -322,7 +323,7 @@ func main() {
 		if target == "" {
 			die("prompt: --thread required outside a session (or --new)")
 		}
-		c.call("POST", "/api/v1/prompts", map[string]any{"author": author, "target": target, "text": titleArg(os.Args[2]),
+		c.call("POST", "/api/v1/prompts", map[string]any{"author": author, "target": target, "text": text(titleArg(os.Args[2])),
 			"in": *in, "on": *on, "at": *at, "title": *title, "goal_id": *goal, "in_reply_to": *re, "outcome": *outcome})
 	case "prompts":
 		// lifectl prompts [queued|delivered|cancelled|failed] [--thread id]
@@ -346,6 +347,7 @@ func main() {
 		// lifectl ask <id> done|dismiss|reopen ["what happened"]
 		// lifectl ask <id> surface mobile|web|any
 		// lifectl ask <id> kind decision|access|physical|read|install|other
+		// lifectl ask <id> set [--title t] [--say s] [--detail d|@file]   reword an open card in place
 		need(3)
 		if os.Args[2] == "add" {
 			need(4)
@@ -390,6 +392,18 @@ func main() {
 		if os.Args[3] == "kind" {
 			need(5)
 			c.call("POST", "/api/v1/asks/"+id+"/kind", map[string]string{"kind": os.Args[4]})
+			return
+		}
+		if os.Args[3] == "set" {
+			// lifectl ask <id> set [--title t] [--say s] [--detail d|@file] — reword
+			// an open card in place when the owner's later words made it stale (quiet:
+			// no push, no wake; the trail records the rewrite).
+			fs := flag.NewFlagSet("ask set", flag.ExitOnError)
+			title := fs.String("title", "", "new title (≤80 chars, imperative)")
+			say := fs.String("say", "", "new message: the card leads with it and Play speaks it (2-5 plain sentences, ≤700 chars)")
+			detail := fs.String("detail", "", "new steps (@/path or - reads it from a file/stdin)")
+			fs.Parse(os.Args[4:])
+			c.call("POST", "/api/v1/asks/"+id+"/reword", map[string]string{"title": *title, "say": *say, "detail": text(*detail), "by": actor()})
 			return
 		}
 		state := map[string]string{"done": "done", "dismiss": "dismissed", "dismissed": "dismissed", "reopen": "open", "open": "open"}[os.Args[3]]
@@ -444,7 +458,7 @@ func main() {
 				return
 			}
 			if os.Args[3] == "set" {
-				// lifectl cal <id> set [--title t] [--detail d|@file] [--day YYYY-MM-DD] [--at HH:MM] [--repeat r]
+				// lifectl cal <id> set [--title t] [--detail d|@file] [--day YYYY-MM-DD] [--at HH:MM] [--repeat r] [--scope one|future]
 				fs := flag.NewFlagSet("cal set", flag.ExitOnError)
 				title := fs.String("title", "", "new title")
 				detail := fs.String("detail", "", "new detail (@/path or - reads it from a file/stdin)")
@@ -453,6 +467,7 @@ func main() {
 				at := fs.String("at", "", "HH:MM, or \"none\" for all-day")
 				repeat := fs.String("repeat", "", "daily|weekly|monthly|yearly|every<N>d, or \"none\" to stop repeating")
 				due := fs.String("due", "", "on (its day only) | by (any time up to its day)")
+				scope := fs.String("scope", "", "on a repeat: one (only this occurrence) | future (the chain from here; the default)")
 				fs.Parse(os.Args[4:])
 				body := map[string]string{}
 				put := func(k, v string, prose bool) {
@@ -475,6 +490,7 @@ func main() {
 				if len(body) == 0 {
 					die("cal set: nothing to change")
 				}
+				put("scope", *scope, false)
 				c.call("PATCH", "/api/v1/calendar/"+id, body)
 				return
 			}
@@ -601,7 +617,40 @@ func main() {
 				"note": strings.Join(os.Args[4:], " ")})
 		}
 	case "threads":
-		c.call("GET", "/api/v1/threads", nil)
+		// lifectl threads                       every non-archived session (JSON)
+		// lifectl threads --q <words> [--archived]   the sessions whose title, goal,
+		//   standing prompt, last message or cards carry every word — one line each:
+		//   the way to find the session with experience before `lifectl relay`.
+		fs := flag.NewFlagSet("threads", flag.ExitOnError)
+		q := fs.String("q", "", "words to match (all of them, any case)")
+		archived := fs.Bool("archived", false, "include archived sessions")
+		fs.Parse(os.Args[2:])
+		query := ""
+		if *archived {
+			query = "&archived=1"
+		}
+		if *q == "" {
+			c.call("GET", "/api/v1/threads?"+strings.TrimPrefix(query, "&"), nil)
+			return
+		}
+		var rows []struct {
+			ID, Title, Status, GoalID, Schedule, LastMessage string
+			ScheduleLabel                                    string `json:"schedule_label"`
+		}
+		c.fetch("/api/v1/threads?q="+url.QueryEscape(*q)+query, &rows)
+		for _, r := range rows {
+			line := r.ID + "  " + r.Status
+			if r.GoalID != "" {
+				line += "  goal " + r.GoalID
+			}
+			if r.ScheduleLabel != "" {
+				line += "  " + r.ScheduleLabel
+			}
+			fmt.Println(line + "  " + r.Title)
+		}
+		if len(rows) == 0 {
+			fmt.Println("no session matches", *q)
+		}
 	case "thread":
 		// lifectl thread new "<prompt>" [--goal id] [--schedule when]
 		// lifectl thread <id>                 show
@@ -694,6 +743,24 @@ func main() {
 }
 
 type client struct{ base, token string }
+
+// fetch GETs one path and decodes its JSON into out (a printer's half of call).
+func (c client) fetch(path string, out any) {
+	req, _ := http.NewRequest("GET", c.base+path, nil)
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		die("%v", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		die("%s", b)
+	}
+	if err := json.Unmarshal(b, out); err != nil {
+		die("%v", err)
+	}
+}
 
 func (c client) call(method, path string, body any) {
 	var rd io.Reader
@@ -832,7 +899,7 @@ gate      propose --title t --detail d [--kind money|delete|contact|share|commit
             [--exec none|shell|claude --payload json] [--project p] [--thread id] [--say "…"]
           actions [state] · approve|deny|dismiss|reopen <id> [note…]
           relay <session-id> "text|@file" [--why "…"] [--say "…"] [--thread id]
-sessions  threads · thread new "prompt" [--goal g] [--schedule w] [--title t] [--project p]
+sessions  threads [--q words] [--archived] · thread new "prompt" [--goal g] [--schedule w] [--title t] [--project p]
           thread <id> [send text|@file|- | schedule when|off ["check-in prompt"] | goal g|off
             | model auto|judgment|build|claude-… | checkin | stop | archive | events]
           prompt "text" [--thread id | --new [--title t] [--goal g]] [--in 30m | --on YYYY-MM-DD [--at HH:MM]]
