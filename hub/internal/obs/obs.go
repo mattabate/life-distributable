@@ -6,6 +6,7 @@
 package obs
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -78,6 +79,12 @@ func BaseKey(k string) string {
 type Store struct {
 	db      *store.DB
 	BlobDir string
+	// IntakeDir: `data/imports/intake`, the in-box a session reaches for a
+	// file to import or file away. A file the owner sends a session (an
+	// `app/upload`) is saved here too, under its own name (PutIntake), so a
+	// document dragged onto a chat is in the intake the moment it lands and
+	// never only a hash under blobs/. "" = no copy (tests that never set it).
+	IntakeDir string
 
 	mu    sync.RWMutex
 	kinds []Kind // Register
@@ -124,6 +131,104 @@ func (s *Store) PutBlob(r io.Reader, ext string) (ref string, size int64, err er
 		return "", 0, err
 	}
 	return ref, size, os.Rename(tmp.Name(), dst)
+}
+
+// PutIntake saves the blob at ref into IntakeDir under its own name — the
+// name the owner's file had, made one safe path component — and returns the
+// absolute path ("" when there is no IntakeDir). The same bytes under the
+// same name are the same file (a second send of the same statement changes
+// nothing); a different file under a taken name becomes name-2, name-3…
+// Nothing here is ever overwritten.
+func (s *Store) PutIntake(ref, name string) (string, error) {
+	if s.IntakeDir == "" {
+		return "", nil
+	}
+	src, err := s.BlobPath(ref)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(s.IntakeDir, 0o755); err != nil {
+		return "", err
+	}
+	name = intakeName(name, filepath.Ext(src))
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for i := 1; i <= 99; i++ {
+		cand := name
+		if i > 1 {
+			cand = fmt.Sprintf("%s-%d%s", stem, i, ext)
+		}
+		dst := filepath.Join(s.IntakeDir, cand)
+		have, err := os.ReadFile(dst)
+		if errors.Is(err, os.ErrNotExist) {
+			if err := os.WriteFile(dst, data, 0o644); err != nil {
+				return "", err
+			}
+			return dst, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if bytes.Equal(have, data) {
+			return dst, nil
+		}
+	}
+	return "", errors.New("intake: too many files named " + name)
+}
+
+// intakeName: the upload's name as one path component — its base name,
+// anything but letters, digits, space and ._-() replaced by _, no leading
+// dot — with the blob's extension when the name has none. An empty name is
+// "upload".
+func intakeName(name, blobExt string) string {
+	name = filepath.Base(strings.TrimSpace(name))
+	var b strings.Builder
+	for _, c := range name {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == ' ', c == '.', c == '_', c == '-', c == '(', c == ')':
+			b.WriteRune(c)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	name = strings.Trim(b.String(), " .")
+	if name == "" {
+		name = "upload"
+	}
+	if filepath.Ext(name) == "" && blobExt != "" {
+		name += strings.ToLower(blobExt)
+	}
+	return name
+}
+
+// IntakePath: where an upload's intake copy is, "" when it never had one or
+// it is gone (a session renamed it `loaded_…`, the owner deleted it).
+func (s *Store) IntakePath(ref string) string {
+	rows, err := s.db.Query(`SELECT payload FROM observations WHERE blob_ref=? AND kind='upload' ORDER BY id DESC LIMIT 5`, ref)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw string
+		if rows.Scan(&raw) != nil {
+			continue
+		}
+		var pl struct {
+			IntakePath string `json:"intake_path"`
+		}
+		if json.Unmarshal([]byte(raw), &pl) != nil || pl.IntakePath == "" {
+			continue
+		}
+		if _, err := os.Stat(pl.IntakePath); err == nil {
+			return pl.IntakePath
+		}
+	}
+	return ""
 }
 
 func (s *Store) BlobPath(ref string) (string, error) {

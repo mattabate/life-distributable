@@ -104,6 +104,55 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(LIFE_BUNDLE_ID).share
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: false
+  # The desktop app: the SAME sources as the phone, run on the Mac through
+  # Mac Catalyst, so there is one app, not a fork. It mirrors the web
+  # console's pages. Its own target so the phone's build never changes: its
+  # own bundle id ($(LIFE_BUNDLE_ID).mac, from the same xcconfig pair), no
+  # push/share extension, not sandboxed (on the hub's Mac it reads the hub
+  # token from ops/secrets — LifeApp.swift; on another Mac, Settings takes
+  # the hub address and token). Mac-only code is
+  # `#if targetEnvironment(macCatalyst)`. `make mac` (ops/install-mac.sh)
+  # builds it, signs it with your team and puts it in /Applications.
+  LifeMac:
+    type: application
+    platform: iOS
+    sources: [Life/Sources, Life/Resources]
+    info:
+      path: LifeMac/Info.plist
+      properties:
+        CFBundleDisplayName: life
+        CFBundleName: life
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        LSApplicationCategoryType: public.app-category.productivity
+        NSCameraUsageDescription: Photos you take here are saved to your own hub.
+        NSPhotoLibraryUsageDescription: Pick photos to send to a session.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+        CFBundleURLTypes:
+          - CFBundleURLSchemes: [life]
+            CFBundleURLName: $(LIFE_BUNDLE_ID).mac
+    entitlements:
+      path: LifeMac/LifeMac.entitlements
+      properties:
+        com.apple.security.network.client: true
+        # The decider code's home (DeciderKeychain): a Catalyst app has only
+        # the data protection keychain, and without an access group every
+        # save is -34018. A restricted entitlement, so a signed build embeds
+        # a provisioning profile (install-mac.sh: -allowProvisioningUpdates).
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(LIFE_BUNDLE_ID).mac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(LIFE_BUNDLE_ID).mac
+        PRODUCT_NAME: life
+        SUPPORTS_MACCATALYST: YES
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+        # 6 = "Optimize Interface for Mac": Mac-sized controls and text,
+        # not an iPad scaled down to 77%.
+        TARGETED_DEVICE_FAMILY: "2,6"
+        GENERATE_INFOPLIST_FILE: false
+        ENABLE_HARDENED_RUNTIME: YES
   # Unit tests: one decode test per hub response type, from hand-written JSON
   # that mirrors shared/api.md and from shared/fixtures. `make app-test` — not
   # in `make check`, since it needs a booted simulator.

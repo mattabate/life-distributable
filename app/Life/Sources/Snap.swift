@@ -21,6 +21,19 @@ final class SnapState {
         pending = SnapImage(image: img, file: file)
     }
 
+    /// The desktop's "+ New session": the console's one button (the owner
+    /// 2026-09-29: "those are supposed to be the same button named new session
+    /// and its supposed to take a screenshot"). It photographs the page it was
+    /// pressed on and hands the picture to the Sessions page's empty chat —
+    /// no sheet, no second window ("it should close the window when a session
+    /// starts"). `deskGen` rebuilds that chat on every press.
+    var desk: SnapImage?
+    var deskGen = 0
+    func snapForDesk(from file: String) {
+        desk = captureKeyWindow().map { SnapImage(image: $0, file: file) }
+        deskGen += 1
+    }
+
     /// Whatever LifeShare left in the app-group inbox becomes a new-session
     /// sheet with those files attached — called when the app comes forward
     /// and when the extension opens `life://inbox`. Nothing there: no-op.
@@ -97,7 +110,11 @@ struct SnapButton: View {
         Button { Task { await state.snap(from: file) } } label: {
             Label("Ask", systemImage: "camera.viewfinder")
         }
+        #if !targetEnvironment(macCatalyst)
+        // (The desktop bar picks the style: words, or icons when narrow.)
         .labelStyle(.titleAndIcon)
+        #endif
+        .help("Snap this screen and start a session")
         .buttonStyle(.borderedProminent)
         .opacity(state.capturing ? 0 : 1)
         .accessibilityLabel("Snap this screen and start a session")
@@ -112,7 +129,13 @@ struct AskButtonModifier: ViewModifier {
     @Environment(SnapState.self) private var snap
     let file: String
     func body(content: Content) -> some View {
+        #if targetEnvironment(macCatalyst)
+        // The desktop app has ONE Ask, on its top bar beside + New session
+        // (MacTopBar), the way the console has one.
+        content
+        #else
         content.toolbar { ToolbarItem(placement: .topBarTrailing) { SnapButton(state: snap, file: file) } }
+        #endif
     }
 }
 

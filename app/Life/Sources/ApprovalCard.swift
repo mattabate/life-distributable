@@ -33,6 +33,7 @@ import SwiftUI
 /// says who decided it and when.
 struct ApprovalCard: View {
     @Environment(HubClient.self) private var hub
+    @Environment(\.armedPicks) private var armedPicks
     let a: Action
     /// Drawn inside its own session's chat: the buttons arm that chat bar.
     var inThread = false
@@ -85,9 +86,8 @@ struct ApprovalCard: View {
     /// The row: the hub's words, each arming the bar (a job's proposal, with
     /// no session, decides on the spot), then Dismiss. A folded one: Reopen.
     private var buttons: [CardButton] {
-        if dismissed { return [fold(back: true)] }
-        guard isOpen else { return [] }
-        return outcomeButtons(a.outcomes ?? []) { pick($0) } + [fold(back: false)]
+        guard isOpen else { return a.reopen == true ? [fold(back: true)] : [] }
+        return outcomeButtons(a.outcomes ?? [], armed: armedPicks["action:" + a.id]) { pick($0) } + [fold(back: false)]
     }
 
     /// Dismiss / Reopen: a plain move, no code, no relay.

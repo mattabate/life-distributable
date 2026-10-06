@@ -2,8 +2,8 @@
   "recs": [
     {
       "id": "rec-00000001",
-      "created_at": "2026-09-28T06:55:28.600858Z",
-      "updated_at": "2026-09-28T06:55:28.60155Z",
+      "created_at": "2026-10-06T04:43:16.072472Z",
+      "updated_at": "2026-10-06T04:43:16.073176Z",
       "title": "Cancel the gym",
       "source": "owner",
       "domain": "money",
@@ -12,9 +12,9 @@
       "cost_period": "monthly",
       "effort": "low",
       "confidence": 50,
-      "review_on": "2026-10-28",
+      "review_on": "2026-11-05",
       "status": "accepted",
-      "decided_at": "2026-09-28T06:55:28.60155Z",
+      "decided_at": "2026-10-06T04:43:16.073176Z",
       "decided_by": "owner",
       "decision_note": "yes",
       "outcomes": [
@@ -37,14 +37,15 @@
       "open": false,
       "closed": true,
       "lane": "recs",
+      "reopen": true,
       "window": "soon",
       "cost_label": "$40/mo",
-      "dates_label": "review Oct 28"
+      "dates_label": "review Nov 5"
     },
     {
       "id": "rec-00000002",
-      "created_at": "2026-09-28T06:55:28.60014Z",
-      "updated_at": "2026-09-28T06:55:28.60014Z",
+      "created_at": "2026-10-06T04:43:16.071755Z",
+      "updated_at": "2026-10-06T04:43:16.071755Z",
       "title": "Try Semantic Scholar's API key",
       "detail": "free tier",
       "goal_id": "get-smarter",
@@ -58,8 +59,8 @@
       "confidence": 70,
       "because": "rate limits",
       "expect": "fewer 429s",
-      "act_by": "2026-10-05",
-      "review_on": "2026-10-28",
+      "act_by": "2026-10-13",
+      "review_on": "2026-11-05",
       "status": "proposed",
       "model": "claude-opus-5",
       "thread_running": true,
@@ -86,7 +87,7 @@
       "window": "soon",
       "cost_label": "$11/mo",
       "days_left": 7,
-      "dates_label": "act by Oct 5 (7d) · review Oct 28"
+      "dates_label": "act by Oct 13 (7d) · review Nov 5"
     }
   ]
 }

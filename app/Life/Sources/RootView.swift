@@ -14,13 +14,16 @@ struct RootView: View {
     /// Where a hub id tapped in a card's text lands — see Refs.swift.
     @State private var nav = RefNav()
     @State private var tab = {
-        #if targetEnvironment(simulator)
-        // ops/screens.sh: LIFE_TAB=calendar opens that tab directly for a screenshot.
+        #if targetEnvironment(simulator) || targetEnvironment(macCatalyst)
+        // ops/screens.sh (ops/mac-screens.sh): LIFE_TAB=calendar opens that tab directly for a screenshot.
         if let t = ProcessInfo.processInfo.environment["LIFE_TAB"], !t.isEmpty { return t }
         #endif
         return "sessions"
     }()
     @Environment(\.scenePhase) private var scenePhase
+    #if targetEnvironment(macCatalyst)
+    @State private var find = MacFind.shared
+    #endif
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             tabs
@@ -48,7 +51,16 @@ struct RootView: View {
             // is answered (see InstallState in Push.swift).
             .onChange(of: scenePhase) { _, p in
                 push.install.scene(p)
+                // On the Mac, `.inactive` is a window that is merely not
+                // frontmost — still on screen beside a browser — so the loop
+                // keeps going; only `.background` (hidden, minimised) stops
+                // it. Treating it as the phone's inactive froze the list for
+                // as long as another app had the focus.
+                #if targetEnvironment(macCatalyst)
+                store.active = p != .background
+                #else
                 store.active = p == .active
+                #endif
                 if p == .active { Task { await store.refresh(hub) }; snap.drainInbox() }
             }
             // ONE loop for the board, the threads and the goals, whatever
@@ -76,7 +88,15 @@ struct RootView: View {
             // button reads SnapState). Attached below them it had neither,
             // and the first render after Send killed the app.
             .sheet(item: $snap.pending) { s in
+                #if targetEnvironment(macCatalyst)
+                // The desktop: the window closes the moment the session starts
+                // and the session opens on Sessions, beside the list.
+                NewThreadSheet(initialImage: s.image, initialPlace: s.path, initialFiles: s.files, initialImages: s.images,
+                               onCreated: { await store.refresh(hub) },
+                               started: { t in snap.pending = nil; tab = "sessions"; nav.card = OpenAsk(thread: t, message: nil) })
+                #else
                 NewThreadSheet(initialImage: s.image, initialPlace: s.path, initialFiles: s.files, initialImages: s.images) { await store.refresh(hub) }
+                #endif
             }
             // Ask is a toolbar item on every screen (see Snap.swift `askButton`).
             .environment(snap)
@@ -92,9 +112,15 @@ struct RootView: View {
                 return .handled
             })
             .task {
-                #if targetEnvironment(simulator)
-                // ops/screens.sh open:<id> — the app as it is after that id
-                // was tapped in a card's text.
+                #if targetEnvironment(macCatalyst)
+                // A Mac that is not the hub's has no token file to read: it
+                // opens on Settings for the hub address and token.
+                if !hub.isConfigured { tab = "settings" }
+                #endif
+                #if targetEnvironment(simulator) || targetEnvironment(macCatalyst)
+                // ops/screens.sh open:<id> (and ops/mac-screens.sh open:<id>)
+                // — the app as it is after that id was tapped in a
+                // card's text.
                 if let id = ProcessInfo.processInfo.environment["LIFE_OPEN"], !id.isEmpty, let u = URL(string: "life://open/\(id)") {
                     await nav.open(u, hub: hub)
                 }
@@ -125,6 +151,47 @@ struct RootView: View {
         }.padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)).padding()
     }
 
+    #if targetEnvironment(macCatalyst)
+    /// The desktop app is the console's LAYOUT, not the phone's: one bar
+    /// across the top in the console's order with its red numbers,
+    /// + New session on the right, and the page under it at the window's
+    /// full width.
+    private var tabs: some View {
+        VStack(spacing: 0) {
+            MacTopBar(tab: $tab)
+                .accessibilityElement(children: .contain).accessibilityIdentifier(MacFind.skip)
+            Divider()
+            // ⌘F (MacFind): the find bar pushes the page down under the top bar.
+            if find.shown {
+                MacFindBar().accessibilityElement(children: .contain).accessibilityIdentifier(MacFind.skip)
+                Divider()
+            }
+            macPage(tab)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .font(.body)  // MacFonts: a bare Text/Label takes the bigger body too
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { find.pageFrame = $0 }
+        }
+        .onChange(of: tab) { _, _ in find.pageChanged() }
+        // The hidden title bar still reserves its strip; the bar takes it.
+        .ignoresSafeArea(.container, edges: .top)
+        .sheet(item: $chat.pending) { r in ChatAboutSheet(request: r) }
+        .task { MacUpdate.shared.start(hub: hub) }
+    }
+
+    /// A page is drawn when its tab is picked — the console redraws a page
+    /// on every visit too, and the store keeps the numbers warm between.
+    @ViewBuilder private func macPage(_ t: String) -> some View {
+        switch t {
+        case "recs": NavigationStack { RecsView() }.macColumn()
+        case "calendar": CalendarView()
+        case "goals": NavigationStack { GoalsView() }.macColumn()
+        case "spend": SpendView().macColumn()
+        case "sources": NavigationStack { SourcesView() }.macColumn()
+        case "settings": NavigationStack { SettingsView() }.macColumn()
+        default: ThreadsView()
+        }
+    }
+    #else
     private var tabs: some View {
         TabView(selection: $tab) {
             // The bar is the console's nav, in the console's order: Sessions,
@@ -155,15 +222,152 @@ struct RootView: View {
         // not the ZStack: two `.sheet(item:)` on one view only honour the first.
         .sheet(item: $chat.pending) { r in ChatAboutSheet(request: r) }
     }
+    #endif
 
     private var versionTag: some View {
+        #if targetEnvironment(macCatalyst)
+        // On the Mac the label sits in the top bar, after the status dot.
+        EmptyView()
+        #else
         Text(appVersionLabel)
             .font(.system(size: 9)).monospacedDigit()
             .foregroundStyle(.tertiary)
             .padding(.trailing, 44).padding(.bottom, 6)  // clear the screen's rounded corner, or the label is clipped
             .allowsHitTesting(false)
+        #endif
     }
 }
+
+#if targetEnvironment(macCatalyst)
+/// The console's top bar, drawn natively: the "life" wordmark, the pages in
+/// the console's order with its red numbers (the picked one a filled blue
+/// pill), then + New session (which snaps the page, as the console's
+/// does — there is no separate Ask), the status dot and the build on the right.
+/// The window's title bar is hidden (MacWindow.size), so the bar starts past
+/// the traffic lights.
+struct MacTopBar: View {
+    @Binding var tab: String
+    @Environment(Badges.self) private var badges
+    @Environment(BoardStore.self) private var store
+    @Environment(SnapState.self) private var snap
+
+    static let pages: [(key: String, title: String)] = [
+        ("sessions", "Sessions"), ("recs", "Recs"), ("calendar", "Calendar"),
+        ("goals", "Goals"), ("spend", "Spend"), ("sources", "Sources"),
+    ]
+    /// The file Ask names as "the screen the owner was on", as `.askButton()` did.
+    private var file: String {
+        switch tab {
+        case "sessions": "Life/ThreadsView.swift"
+        case "recs": "Life/RecsView.swift"
+        case "calendar": "Life/CalendarView.swift"
+        case "goals": "Life/GoalsView.swift"
+        case "spend": "Life/SpendView.swift"
+        case "sources": "Life/SourcesView.swift"
+        default: "Life/SettingsView.swift"
+        }
+    }
+    private func count(_ key: String) -> Int {
+        switch key {
+        case "sessions": badges.yourTurn
+        case "recs": badges.recs
+        case "calendar": badges.calendar
+        default: 0
+        }
+    }
+
+    /// Never squeezed: when the window is too narrow for every word (the
+    /// console folds tabs into More), the buttons on the right go to icons
+    /// first, with their words as tooltips; the pages keep their names.
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            bar(compact: false)
+            bar(compact: true)
+        }
+        .padding(.leading, 84).padding(.trailing, 16)
+        .frame(height: 44)
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private func bar(compact: Bool) -> some View {
+        HStack(spacing: 4) {
+            Text("life").font(.system(size: 19, weight: .bold)).padding(.trailing, compact ? 6 : 14)
+            ForEach(Self.pages, id: \.key) { p in item(p.key, p.title) }
+            Spacer(minLength: 12)
+            Group {
+                MacUpdateButton()
+                Button { snap.snapForDesk(from: file); tab = "sessions" } label: { Label("New session", systemImage: "plus") }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .help("New session")
+            }
+            .labelStyle(BarLabel(compact: compact))
+            Button { tab = "settings" } label: { Image(systemName: "gearshape") }
+                .buttonStyle(.plain).foregroundStyle(tab == "settings" ? Color.accentColor : .secondary)
+                .help("Settings").padding(.leading, 4)
+            Circle().fill(store.error == nil ? Color.green : Color.red).frame(width: 8, height: 8)
+                .help((store.error ?? "Hub reachable") + (compact ? " · build \(appVersionLabel)" : "")).padding(.leading, 6)
+            if !compact {
+                Text(appVersionLabel).font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Icon and words, or the icon alone on a narrow window.
+    struct BarLabel: LabelStyle {
+        var compact: Bool
+        func makeBody(configuration: Configuration) -> some View {
+            HStack(spacing: 6) {
+                configuration.icon
+                if !compact { configuration.title }
+            }
+        }
+    }
+
+    private func item(_ key: String, _ title: String) -> some View {
+        let on = tab == key
+        let n = count(key)
+        return Button { tab = key } label: {
+            HStack(spacing: 5) {
+                // Never wraps: a bar too tight for its words falls to the
+                // compact one (ViewThatFits), not "Session / s".
+                Text(title).font(.system(size: 13, weight: on ? .semibold : .medium)).lineLimit(1).fixedSize()
+                if n > 0 {
+                    // On the picked tab the number turns white with blue
+                    // digits, as the console's does (`#nav a.on .badge`).
+                    // One line, as the title is: a bar that just fits used to
+                    // stack "10" as 1 over 0 rather than go compact.
+                    Text("\(n)").font(.system(size: 10, weight: .bold)).monospacedDigit().lineLimit(1).fixedSize()
+                        .foregroundStyle(on ? Color.accentColor : Color.white)
+                        .padding(.horizontal, 5).frame(minWidth: 17, minHeight: 17)
+                        .background(on ? Color.white : Color.red, in: Capsule())
+                }
+            }
+            .foregroundStyle(on ? Color.white : Color.primary)
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(on ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+extension View {
+    /// A list page on the desktop: wall to wall on its grey ground, with no
+    /// grey bars at the sides.
+    func macColumn() -> some View {
+        self.frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Web.page)
+    }
+}
+#endif
+
+/// Extra vertical room for a list row of prose on the desktop, where a
+/// Catalyst row hugs its text; nothing on the phone.
+#if targetEnvironment(macCatalyst)
+let macRowPad: CGFloat = 8
+#else
+let macRowPad: CGFloat = 0
+#endif
 
 /// "1.0 (193)": marketing major.minor + build number.
 let appVersionLabel: String = {

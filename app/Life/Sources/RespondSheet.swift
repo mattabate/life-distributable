@@ -390,6 +390,11 @@ struct PickChip: View {
             .background(on ? AnyShapeStyle(tint.opacity(0.18)) : AnyShapeStyle(.quaternary.opacity(0.5)), in: Capsule())
             .foregroundStyle(on ? tint : .secondary)
             .overlay { Capsule().strokeBorder(on ? tint.opacity(0.6) : .clear, lineWidth: 1) }
+            // The whole capsule takes the click, not just its glyphs: a plain
+            // button's hit area is its drawn content, and on the Mac a click
+            // beside the word fell through (the owner 2026-10-01: "it's not
+            // letting me click on did or skip").
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)

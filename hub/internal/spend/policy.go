@@ -22,7 +22,7 @@ import (
 //     ambiguous finance: ladder from the top) or `build` (runbook execution,
 //     sweeps, shipping: ladder from opus). A thread's class is set by hand
 //     (`lifectl thread <id> model build`), else by its goal, else the default.
-//     A model id is a class too: `claude-sonnet-5` pins a rote session
+//     A model id is a class too: `claude-sonnet-5-5` pins a rote session
 //     (an export, a diff, a count, copy) to sonnet for every wake.
 //
 // Only `job` (ops/schedule.json one-shots) names sonnet outright; every
@@ -91,7 +91,7 @@ func DefaultPolicy() *Policy {
 			// checks, and only when a session is pinned to it (`lifectl thread
 			// <id> model claude-sonnet-5`). Lean (no --resume) and $8-capped.
 			"checkin": {Model: "class", MaxBudgetUSD: 8, Fresh: true},
-			"job":     {Model: "claude-sonnet-5", Effort: "medium", MaxBudgetUSD: 5},
+			"job":     {Model: "claude-sonnet-5-5", Effort: "medium", MaxBudgetUSD: 5},
 			"prompt":  {Model: "ladder"},
 		},
 		Classes:      map[string]string{"judgment": "", "build": "claude-opus-5-5"},

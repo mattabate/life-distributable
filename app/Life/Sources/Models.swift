@@ -109,15 +109,6 @@ struct Quota: Codable {
     var windows: [QuotaWindow]
 }
 
-struct TmuxSession: Codable, Identifiable, Hashable {
-    var name: String
-    var kind: String
-    var project: String
-    var created: Date
-    var attached: Bool
-    var id: String { name }
-}
-
 struct APIError: Codable, Error, LocalizedError {
     var error: String
     /// The HTTP status, filled in by `HubClient.send` — not part of the body.
@@ -138,6 +129,9 @@ struct DeciderStatus: Codable, Hashable {
     var sent: Bool
     /// True when the code verifies, or when nothing is armed.
     var ok: Bool
+    /// When the hub's current code was made (nil when unarmed, or from a hub
+    /// older than 2026-10-05). A refusal is read against this date.
+    var set_at: Date?
 }
 
 struct Action: Codable, Identifiable, Hashable {
@@ -177,11 +171,13 @@ struct Action: Codable, Identifiable, Hashable {
     var outcomes: [AskOutcome]?
     /// Where it stands, the hub's (store.ActionStanding): `open` = proposed,
     /// `closed` = decided; `folded` "dismissed" = set aside, Reopen inside.
+    /// `reopen` = carries Reopen (only a dismissed one: a decided one ran).
     var open: Bool?
     var closed: Bool?
     var folded: String?
     var lane: String?
-    /// When it is owed (the items table): now | on | by | soon.
+    var reopen: Bool?
+    /// When it is owed (the items table, 2026-09-27): now | on | by | soon.
     var window: String?
 
     /// The scheduled job behind a thread-less proposal, or nil.
@@ -569,6 +565,9 @@ struct Ask: Codable, Identifiable, Hashable {
     /// That sentence is queued and not yet spoken (the hub's "waiting to
     /// speak"): Play reads so, and a double tap drops the line, not the card.
     var waiting_to_speak: Bool?
+    /// That sentence is being heard right now: Play reads "Speaking", and a
+    /// double tap stops it.
+    var speaking: Bool?
     /// The board's class for this card — the pill it wears (read, install,
     /// decision…). Optional: an older hub does not send it.
     var `class`: String?
@@ -583,6 +582,9 @@ struct Ask: Codable, Identifiable, Hashable {
     /// What the card wants from the owner in one word — "decide", "grant", "read",
     /// "restart"… (store.AskVerb); the card's caption.
     var verb: String?
+    /// A session that hit its plan's session limit: when the hub resumes it on
+    /// its own (verb "paused"). Optional — absent on every other card.
+    var resumes_at: Date?
 
     /// More than the card's three-line preview can show.
     /// True when the detail just restates the title (prefix match on the
@@ -609,9 +611,31 @@ struct Ask: Codable, Identifiable, Hashable {
     var closed: Bool?
     var folded: String?
     var lane: String?
-    /// When it is owed (the items table): now | on | by | soon.
+    var reopen: Bool?
+    /// An install card's device (2026-09-30): "phone" (the OTA link) or "mac"
+    /// (the desktop app — its Install runs the hub's `mac` lane, no link).
+    /// Older hubs do not send it: the title says ("Install desktop build N").
+    var target: String?
+    /// When it is owed (the items table, 2026-09-27): now | on | by | soon.
     var window: String?
     var isClosed: Bool { closed == true }
+    /// The Mac's install card — `target`, or the title's word on an older hub.
+    var isMacInstall: Bool { kind == "install" && (target == "mac" || Self.isMacInstallTitle(title)) }
+    /// The OTHER device's install card — the phone's build seen from the Mac,
+    /// the Mac's from the phone. Never drawn (the owner 2026-10-01, at the desktop
+    /// app, of a phone build's card: "I shouldn't need to see this one because
+    /// it does not actually apply to the desktop app itself… install cards
+    /// should only appear in the tool that they're using"). The board already
+    /// leaves it out (`surface=desktop|mobile`); this covers the chat and the
+    /// calendar, which list every ask a session raised.
+    var isOtherDeviceInstall: Bool { kind == "install" && buildNumber > 0 && isMacInstall != Device.isMac }
+    static func isMacInstallTitle(_ t: String) -> Bool { t.range(of: #"^install (desktop|mac) build \d+"#, options: [.regularExpression, .caseInsensitive]) != nil }
+    /// The card's build number ("… build 1512 …"), 0 when the title has none.
+    var buildNumber: Int { Self.buildNumber(in: title) }
+    static func buildNumber(in t: String) -> Int {
+        guard let r = t.range(of: #"\bbuild (\d+)\b"#, options: [.regularExpression, .caseInsensitive]) else { return 0 }
+        return Int(t[r].split(separator: " ").last ?? "") ?? 0
+    }
     var isFolded: Bool { folded != nil }
     /// The white Read button's resolution — the hub's own word for a read
     /// card's one outcome (`outcomes[0]`, store.AskOutcomes("read")).
@@ -1069,6 +1093,10 @@ struct CalEntry: Codable, Identifiable, Hashable {
     /// (store/close.go): a tick's Did it · Skip · Send, a step's Done · Won't
     /// do · Reply, a proposal's Approve · Deny (· Reply). Absent = no buttons.
     var outcomes: [AskOutcome]?
+    /// A LATER occurrence of a repeating item (2026-10-05), drawn on the day
+    /// it will fall. No row exists for it yet, so `item` is absent and it is
+    /// read-only: no buttons, no drag; `why` says so.
+    var coming: Bool?
 
     var isItem: Bool { item == true }
     /// What the row is called on a chip, a block or an agenda line: a record
@@ -1089,6 +1117,12 @@ struct CalEntry: Codable, Identifiable, Hashable {
     /// The one-tap install link (itms-services form) an open install row's
     /// button carries — the same rewrite the chat's card does.
     var installLink: URL? { isInstall && isOpen ? Ask.installLink(in: detail ?? "") : nil }
+    /// The desktop app's build, told by its title ("Install desktop build N",
+    /// 2026-09-30): its Install runs the hub's `mac` lane instead of a link.
+    var isMacInstall: Bool { isInstall && Ask.isMacInstallTitle(title) }
+    /// The other device's build (see `Ask.isOtherDeviceInstall`): not this
+    /// calendar's row, open or installed.
+    var isOtherDeviceInstall: Bool { isInstall && Ask.buildNumber(in: title) > 0 && isMacInstall != Device.isMac }
     /// The detail without its link line: the button IS the link.
     var detailShown: String? { installLink != nil ? Ask.detailWithoutLinks(detail ?? "") : detail }
 }
@@ -1110,6 +1144,30 @@ struct CalView: Codable {
     /// The owner's open to-dos with no due day, oldest first ("Do soon").
     var soon: [CalEntry]?
     var days: [CalDay]
+
+    /// The same view without the other device's install rows (Anytime holds
+    /// the open build, a day its installed record) — `Ask.isOtherDeviceInstall`.
+    var forThisDevice: CalView {
+        var v = self
+        let keep = { (e: CalEntry) in !e.isOtherDeviceInstall }
+        v.anytime = anytime.filter(keep); v.overdue = overdue.filter(keep)
+        v.due = due?.filter(keep); v.soon = soon?.filter(keep)
+        v.days = days.map { CalDay(day: $0.day, entries: $0.entries.filter(keep)) }
+        return v
+    }
+}
+
+/// Which app this is — the phone's or the Mac's (Catalyst) build of the same
+/// code. The one fact a card about a build needs: a build is installed on the
+/// device it is for, so its card appears there and nowhere else.
+enum Device {
+    static let isMac: Bool = {
+        #if targetEnvironment(macCatalyst)
+        true
+        #else
+        false
+        #endif
+    }()
 }
 
 struct CalItem: Codable, Identifiable, Hashable {
@@ -1192,8 +1250,13 @@ struct SourceEntry: Codable, Identifiable, Hashable {
     var failingSince: Date?
     var fails: Int = 0
     var total: Int
+    /// The folded row's few words for `accounts` ("21 repos", "@handle").
+    var summary: String?
     var kinds: [SourceKindCount]
     var accounts: [SourceAccount] = []
+
+    /// What the folded row says it is connected to.
+    var shortTo: String { summary ?? accounts.first?.label ?? "" }
 
     // A `= []` default is NOT applied by Swift's synthesized decoder, and the
     // hub sends `"accounts": null` for a source with none (no omitempty), so
@@ -1202,7 +1265,7 @@ struct SourceEntry: Codable, Identifiable, Hashable {
     /// Spelled out because three keys are snake_case on the wire and there is no
     /// key strategy on the decoder (HubClient.decoder reads keys verbatim).
     enum CodingKeys: String, CodingKey {
-        case id, title, from, storage, status, last, error, total, kinds, accounts
+        case id, title, from, storage, status, last, error, total, summary, kinds, accounts
         case lastOK = "last_ok"
         case failingSince = "failing_since"
         case fails
@@ -1221,6 +1284,7 @@ struct SourceEntry: Codable, Identifiable, Hashable {
         failingSince = try c.decodeIfPresent(Date.self, forKey: .failingSince)
         fails = try c.decodeIfPresent(Int.self, forKey: .fails) ?? 0
         total = try c.decode(Int.self, forKey: .total)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
         kinds = try c.decodeIfPresent([SourceKindCount].self, forKey: .kinds) ?? []
         accounts = try c.decodeIfPresent([SourceAccount].self, forKey: .accounts) ?? []
     }
@@ -1298,7 +1362,8 @@ struct Rec: Codable, Identifiable, Hashable {
     var closed: Bool?
     var folded: String?
     var lane: String?
-    /// When it is owed (the items table): always `soon` — a rec
+    var reopen: Bool?
+    /// When it is owed (the items table, 2026-09-27): always `soon` — a rec
     /// is pulled, never pushed.
     var window: String?
     /// nil for no model; otherwise the one `shortModel`.

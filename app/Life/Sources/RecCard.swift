@@ -14,6 +14,7 @@ import SwiftUI
 /// the session and notifies nobody.
 struct RecCard: View {
     @Environment(HubClient.self) private var hub
+    @Environment(\.armedPicks) private var armedPicks
     let rec: Rec
     /// Arm the chat bar with this rec and a pick ("accepted" | "declined" |
     /// "" for words alone).
@@ -41,14 +42,14 @@ struct RecCard: View {
              buttons: buttons, busy: busy, error: error)
         .contextMenu {
             if open { Button { decide("") } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") } }
+            Button { UIPasteboard.general.string = copyText(rec.title, rec.because ?? rec.detail ?? "") } label: { Label("Copy text", systemImage: "doc.on.doc") }
             Button { UIPasteboard.general.string = rec.id } label: { Label("Copy id", systemImage: "doc.on.doc") }
         }
     }
 
     private var buttons: [CardButton] {
-        if dismissed { return [fold(back: true)] }
-        guard open else { return [] }
-        return outcomeButtons(rec.outcomes ?? [], arm: decide) + [fold(back: false)]
+        guard open else { return rec.reopen == true ? [fold(back: true)] : [] }
+        return outcomeButtons(rec.outcomes ?? [], armed: armedPicks["rec:" + rec.id], arm: decide) + [fold(back: false)]
     }
 
     /// Dismiss / Reopen: the same call the console makes (cardFold), by the owner's hand.

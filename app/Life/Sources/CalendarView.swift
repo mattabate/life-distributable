@@ -11,7 +11,9 @@ struct CalendarView: View {
     @Environment(\.openURL) private var openURL
     @Environment(BoardStore.self) private var store
     @State private var cal = HubLoad<CalView>()
-    private var view: CalView? { cal.value }
+    /// Without the other device's build rows (the owner 2026-10-01: an install
+    /// card appears only in the app it updates) — `CalView.forThisDevice`.
+    private var view: CalView? { cal.value?.forThisDevice }
     /// The store's copy: RootView's one poll keeps it current.
     private var goals: [Goal] { store.goals }
     /// A failed move or close; the next good load clears it.
@@ -39,9 +41,10 @@ struct CalendarView: View {
     /// rather than one staying invisible.
     @AppStorage("cal.off") private var offRaw = ""
     /// The day the grid is centred on once the owner moves off today; of the moment,
-    /// so it is not persisted. nil = today.
-    @State private var picked: String?
-    /// TODAY IS THE HUB'S: the agenda's own
+    /// so it is not persisted. nil = today. LIFE_CAL_DAY=YYYY-MM-DD opens a
+    /// screenshot run on that day's week (ops/mac-screens.sh).
+    @State private var picked: String? = ProcessInfo.processInfo.environment["LIFE_CAL_DAY"].flatMap { $0.isEmpty ? nil : $0 }
+    /// TODAY IS THE HUB'S (cross-client audit 2026-09-27): the agenda's own
     /// `today`, computed once in the hub's zone, so the phone never rings a
     /// different day than the console. The device clock is only the first
     /// guess, before the first answer lands — a wrong guess reloads once.
@@ -66,6 +69,111 @@ struct CalendarView: View {
 
     var body: some View {
         NavigationStack {
+            Group {
+                #if targetEnvironment(macCatalyst)
+                macWeek.toolbar(.hidden, for: .navigationBar)
+                #else
+                phoneBody
+                #endif
+            }
+            .task(id: modeRaw + anchor) { await load() }
+            #if !targetEnvironment(macCatalyst)
+            // The desktop draws the panel inside the page (`macPanel`), never
+            // as a sheet.
+            .sheet(item: $selected, onDismiss: { Task { await load() } }) { e in CalEntrySheet(entry: e, goals: goals) }
+            #endif
+            .sheet(item: $respondTo) { r in RespondSheet(subject: r.entry.isTickBox ? RespondSubject(homework: r.entry, first: r.outcome) : RespondSubject(cal: r.entry, first: r.outcome), reload: { await load() }) }
+            .sheet(item: $group, onDismiss: {
+                if let e = pendingOpen { pendingOpen = nil; open(e) } else { Task { await load() } }
+            }) { g in groupSheet(g) }
+            .sheet(isPresented: $showFilters) { CalFiltersSheet(filters: filtersBinding) }
+            .sheet(isPresented: $showAnytime) { anytimeSheet }
+            .navigationDestination(item: $openRec) { RecDetail(rec: $0, onChange: { await load() }) }
+            .onChange(of: nav.cal, initial: true) { _, e in if let e { nav.cal = nil; picked = e.day; open(e) } }
+            .alert("Move every check-in?", isPresented: Binding(get: { cadenceMove != nil }, set: { if !$0 { cadenceMove = nil } })) {
+                Button("Cancel", role: .cancel) { cadenceMove = nil }
+                Button("Move them all") { if let m = cadenceMove { cadenceMove = nil; Task { await applyCadence(m) } } }
+            } message: {
+                Text(cadenceMove.map { "This is a standing check-in, not one event.\n\nMove EVERY check-in of “\($0.entry.title)” to \($0.cadence.replacingOccurrences(of: "@", with: " at "))?" } ?? "")
+            }
+            .confirmationDialog("This repeats", isPresented: Binding(get: { repeatMove != nil }, set: { if !$0 { repeatMove = nil } }), titleVisibility: .visible) {
+                Button("Only this one") { if let m = repeatMove { repeatMove = nil; Task { await applyRepeat(m, scope: "one") } } }
+                Button("This and all future ones") { if let m = repeatMove { repeatMove = nil; Task { await applyRepeat(m, scope: "future") } } }
+                Button("Cancel", role: .cancel) { repeatMove = nil }
+            } message: {
+                Text(repeatMove.map { "“\($0.entry.title)” repeats \($0.entry.repeat ?? ""). Move it to \($0.at.isEmpty ? "the all-day band" : $0.at)?" } ?? "")
+            }
+        }
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// The console's page: the rail down the left, the week beside it, the
+    /// week's name between its own arrows (see CalendarWeek.swift).
+    /// Laid out as `.cal-page` (the owner 2026-09-29: "I want the same exact
+    /// layout within the desktop app"): the grey page, 10 above and 16 at the
+    /// walls, the 226 rail and the grid 14 apart; the bar is ‹ borderless,
+    /// the week's name at 20/600, › borderless, then a bordered Today.
+    private var macWeek: some View {
+        HStack(alignment: .top, spacing: 14) {
+            CalRail(view: view, anchor: anchor, today: today, filters: filtersBinding,
+                    onJump: { picked = $0 == today ? nil : $0 }, onOpen: { open($0) })
+                .frame(width: 226)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 4) {
+                    Button { step(-7) } label: { Text("‹") }
+                        .buttonStyle(CalWebButtonStyle(kind: .icon)).help("Last week")
+                    Text(calWeekLabel(calWeekStart(anchor)))
+                        .font(.system(size: 20, weight: .semibold)).tracking(-0.2)
+                        .padding(.horizontal, 2)
+                    Button { step(7) } label: { Text("›") }
+                        .buttonStyle(CalWebButtonStyle(kind: .icon)).help("Next week")
+                    Button("Today") { picked = nil }
+                        .buttonStyle(CalWebButtonStyle()).padding(.leading, 8)
+                    Spacer()
+                    if let error { ErrorBanner(message: error).fixedSize(horizontal: false, vertical: true) }
+                }
+                .padding(.bottom, 10)
+                CalWeekGrid(start: calWeekStart(anchor), today: today, byDay: byDay, filters: filters,
+                            onTap: { open($0) },
+                            onTapGroup: { group = CalGroup(entries: $0) },
+                            onMove: { e, day, at in Task { await move(e, day: day, at: at) } })
+            }
+        }
+        .padding(.horizontal, 16).padding(.top, 10)
+        .background(Web.page)
+        .overlay { macPanel }
+    }
+
+    /// The console's `.cal-overlay`: a dim ground over the PAGE with the
+    /// panel near its top — under the top bar, never over it. It was a
+    /// Catalyst sheet, which floats over the whole window and blocks it,
+    /// top bar included: with the panel in the page the top bar stays a
+    /// click away while a card is open. A click on the ground or Esc closes;
+    /// the agenda reloads either way, as a sheet's onDismiss did.
+    @ViewBuilder private var macPanel: some View {
+        if let e = selected {
+            ZStack(alignment: .top) {
+                Color.black.opacity(0.34)
+                    .contentShape(Rectangle())
+                    .onTapGesture { closePanel() }
+                CalEntrySheet(entry: e, goals: goals, close: { closePanel() })
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Web.line))
+                    .shadow(color: .black.opacity(0.3), radius: 20, y: 12)
+                    .padding(.top, 48)
+            }
+            .id(e.id)
+            .transition(.opacity)
+        }
+    }
+
+    private func closePanel() {
+        selected = nil
+        Task { await load() }
+    }
+    #endif
+
+    private var phoneBody: some View {
             VStack(spacing: 0) {
                 // The range lives in the page, not the navigation bar: the bar
                 // gives a title about 90pt and clips "August 2026" to "ugust
@@ -95,30 +203,6 @@ struct CalendarView: View {
                 if let m = ProcessInfo.processInfo.environment["LIFE_CAL_MODE"], CalMode(rawValue: m) != nil { modeRaw = m }
                 if CalMode(rawValue: modeRaw) == nil { modeRaw = CalMode.schedule.rawValue }
             }
-            .task(id: modeRaw + anchor) { await load() }
-            .sheet(item: $selected, onDismiss: { Task { await load() } }) { e in CalEntrySheet(entry: e, goals: goals) }
-            .sheet(item: $respondTo) { r in RespondSheet(subject: r.entry.isHomework ? RespondSubject(homework: r.entry, first: r.outcome) : RespondSubject(cal: r.entry, first: r.outcome), reload: { await load() }) }
-            .sheet(item: $group, onDismiss: {
-                if let e = pendingOpen { pendingOpen = nil; open(e) } else { Task { await load() } }
-            }) { g in groupSheet(g) }
-            .sheet(isPresented: $showFilters) { CalFiltersSheet(filters: filtersBinding) }
-            .sheet(isPresented: $showAnytime) { anytimeSheet }
-            .navigationDestination(item: $openRec) { RecDetail(rec: $0, onChange: { await load() }) }
-            .onChange(of: nav.cal, initial: true) { _, e in if let e { nav.cal = nil; picked = e.day; open(e) } }
-            .alert("Move every check-in?", isPresented: Binding(get: { cadenceMove != nil }, set: { if !$0 { cadenceMove = nil } })) {
-                Button("Cancel", role: .cancel) { cadenceMove = nil }
-                Button("Move them all") { if let m = cadenceMove { cadenceMove = nil; Task { await applyCadence(m) } } }
-            } message: {
-                Text(cadenceMove.map { "This is a standing check-in, not one event.\n\nMove EVERY check-in of “\($0.entry.title)” to \($0.cadence.replacingOccurrences(of: "@", with: " at "))?" } ?? "")
-            }
-            .confirmationDialog("This repeats", isPresented: Binding(get: { repeatMove != nil }, set: { if !$0 { repeatMove = nil } }), titleVisibility: .visible) {
-                Button("Only this one") { if let m = repeatMove { repeatMove = nil; Task { await applyRepeat(m, scope: "one") } } }
-                Button("This and all future ones") { if let m = repeatMove { repeatMove = nil; Task { await applyRepeat(m, scope: "future") } } }
-                Button("Cancel", role: .cancel) { repeatMove = nil }
-            } message: {
-                Text(repeatMove.map { "“\($0.entry.title)” repeats \($0.entry.repeat ?? ""). Move it to \($0.at.isEmpty ? "the all-day band" : $0.at)?" } ?? "")
-            }
-        }
     }
 
     // MARK: chrome
@@ -173,6 +257,11 @@ struct CalendarView: View {
     }
 
     private func step(_ n: Int) {
+        #if targetEnvironment(macCatalyst)
+        let to = calAddDays(anchor, n)
+        picked = to == today ? nil : to
+        return
+        #endif
         switch mode {
         case .day: picked = calAddDays(anchor, n)
         case .schedule: break
@@ -180,6 +269,11 @@ struct CalendarView: View {
     }
 
     private var visibleRange: (String, String) {
+        #if targetEnvironment(macCatalyst)
+        // The week AND the rail's mini month, in one fetch (`calFetchRange`).
+        let w = calWeekStart(anchor), m = calMonthGridStart(anchor)
+        return (min(w, m), max(calAddDays(w, 6), calAddDays(m, 41)))
+        #endif
         switch mode {
         case .day: return (anchor, anchor)
         case .schedule:
@@ -291,7 +385,64 @@ struct CalendarView: View {
 
     /// The popout behind a collapsed box: every member on its own line, in the
     /// order the box holds them (time order), each row opening its full card.
-    private func groupSheet(_ g: CalGroup) -> some View {
+    @ViewBuilder private func groupSheet(_ g: CalGroup) -> some View {
+        #if targetEnvironment(macCatalyst)
+        macGroupPanel(g)
+        #else
+        phoneGroupSheet(g)
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// The console's popout (`calGroupPanelHTML`, the owner 2026-09-29: the web's
+    /// layout): the lane's swatch, the long day at 600 and "N recurring runs
+    /// in one box" / "7 steps in <session>" grey, ✕; then one rail line per
+    /// member — dot, time, ○ ✓ ✕ and the title — each opening its own panel.
+    private func macGroupPanel(_ g: CalGroup) -> some View {
+        let es = g.entries
+        let lane = es.first.map(CalCals.of) ?? CalCals.agents
+        let name = calGroupLabel(es)
+        let what = name.badge.hasPrefix("+") ? "\(es.count) \(lane.label.lowercased()) in one box" : "\(name.badge) in \(name.title)"
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    RoundedRectangle(cornerRadius: 3).fill(lane.color).frame(width: 12, height: 12)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(parseDay(es.first?.day ?? "")?.formatted(.dateTime.weekday(.wide).month(.wide).day().year()) ?? "")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(what).font(.system(size: 12.5)).foregroundStyle(Web.muted)
+                    }
+                    Spacer()
+                    Button { group = nil } label: { Text("✕").font(.system(size: 15)) }
+                        .buttonStyle(CalWebButtonStyle()).help("Close").keyboardShortcut(.cancelAction)
+                }
+                .padding(.vertical, 12).padding(.horizontal, 14)
+                Web.line.frame(height: 1)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(es) { e in
+                        Button { pendingOpen = e; group = nil } label: {
+                            HStack(spacing: 5) {
+                                Circle().fill(CalCals.color(e)).frame(width: 7, height: 7)
+                                Text(e.at ?? "").monospacedDigit().opacity(0.7)
+                                Text(calGlyph(e) + e.label).strikethrough(calStruck(e)).lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .font(.system(size: 12.5)).foregroundStyle(.primary)
+                            .opacity(CalCals.isClosed(e) ? 0.5 : 1)
+                            .padding(.vertical, 2)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 8)
+            }
+        }
+        .background(Web.panel)
+    }
+    #endif
+
+    private func phoneGroupSheet(_ g: CalGroup) -> some View {
         NavigationStack {
             List {
                 Section {
@@ -418,10 +569,19 @@ struct CalendarView: View {
                         // trail folds.
                         let routine = d.entries.filter { $0.kind == "run" || $0.kind == "job" }
                         let decided = d.entries.filter { $0.did == true ? CalCals.of($0).key == "agents" : ($0.kind == "action" && $0.state != "proposed") }
-                        let primary = d.entries.filter { !routine.contains($0) && !decided.contains($0) }
+                        // A repeat's later occurrences (hub `coming`, 10-05) fold
+                        // the same way: three daily practices on each of sixty
+                        // days would bury the one row that is the owner's this week.
+                        let coming = d.entries.filter { $0.coming == true }
+                        let primary = d.entries.filter { !routine.contains($0) && !decided.contains($0) && $0.coming != true }
                         Section {
                             if d.entries.isEmpty { Text("Nothing scheduled").foregroundStyle(.tertiary) }
                             ForEach(primary) { row($0, day: d.day) }
+                            if !coming.isEmpty {
+                                foldedRows(coming, day: d.day, key: d.day + "/coming", icon: "repeat",
+                                           label: coming.count == 1 ? "1 repeat" : "\(coming.count) repeats",
+                                           sub: coming.map { $0.title }.joined(separator: " · "))
+                            }
                             if !routine.isEmpty {
                                 foldedRows(routine, day: d.day, key: d.day, icon: "clock.arrow.circlepath",
                                            label: routine.count == 1 ? "1 agent check-in" : "\(routine.count) agent check-ins",
@@ -568,7 +728,11 @@ struct CalendarView: View {
         // One fetch covers the mode's range plus a week either side, so a
         // step to the next week draws from what is already here.
         let (a, b) = visibleRange
+        #if targetEnvironment(macCatalyst)
+        let pad = 0
+        #else
         let pad = mode == .schedule ? 0 : 7
+        #endif
         // Goals and the tab's oval come from the store: a change here bumps
         // the hub's change feed and RootView's poll refreshes both, so a
         // board, threads and goals refetch on every step was three wasted calls.
@@ -625,6 +789,12 @@ extension CalEntry {
     /// the hub ticks it itself when the evidence lands. A chore no session is
     /// behind closes the same way: the hub's `tick`.
     var isHomework: Bool { isItem && (tick == true || kind == "homework") }
+    /// A reminder (`note`): a date to remember, nothing to do. It answers in
+    /// the homework box (the owner 2026-10-01: "why isn't there a normal chat bar
+    /// here?") — Read it ticks it quietly, words go to the session behind it.
+    var isNote: Bool { isItem && kind == "note" }
+    /// Answers with a tick box (Did it / Read it · Send), not a step's words.
+    var isTickBox: Bool { isHomework || isNote }
     /// The hub's word for one of the row's answers (`outcomes`), nil when it
     /// sent none for that value.
     func outcomeLabel(_ value: String) -> String? { outcomes?.first { $0.value == value }?.label }
@@ -764,22 +934,294 @@ struct CalEntrySheet: View {
     @State private var respond: RespondModel?
     private var isProposedAction: Bool { entry.refKind == "action" && entry.state == "proposed" }
 
-    init(entry: CalEntry, goals: [Goal]) {
+    /// The desktop's panel is an overlay in the page, not a presentation, so
+    /// `dismiss` is nothing there: the page hands over its own close.
+    var close: (() -> Void)? = nil
+    /// Close the panel, whichever way it was opened.
+    private func shut() { if let close { close() } else { dismiss() } }
+
+    init(entry: CalEntry, goals: [Goal], close: (() -> Void)? = nil) {
         self.entry = entry
         self.goals = goals
+        self.close = close
         let subject: RespondSubject? = !entry.isOpen ? nil
-            : entry.isHomework ? RespondSubject(homework: entry, first: "")
+            : entry.isTickBox ? RespondSubject(homework: entry, first: "")
             : entry.isOwnerStep ? RespondSubject(cal: entry, first: "") : nil
         _respond = State(initialValue: subject.map { RespondModel($0) })
     }
     private var isOpenInstall: Bool { entry.isInstall && entry.isOpen && entry.ask_id != nil }
+    /// An open ask's Respond: the chat bar replying to it, words alone.
+    private var askArm: ArmedReply? {
+        guard !entry.isItem, entry.isOpen, let id = entry.ask_id else { return nil }
+        return ArmedReply(kind: .ask, id: id, title: entry.title, outcome: "")
+    }
+    /// The card the session opens on: a proposal's row lands on the proposal
+    /// (the audit trail is drawn there), any other row with a card (a fired
+    /// step's `ask_id` IS its card, 2026-09-27) on that card.
+    private var focusCard: String? { entry.refKind == "action" ? entry.refID : entry.ask_id }
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        macBody
+        #else
+        phoneBody
+        #endif
+    }
+
+    private func fetch() async {
+        if let id = entry.thread_id { thread = try? await hub.thread(id) }
+        if isProposedAction, let id = entry.refID {
+            do { action = try await hub.action(id) } catch { self.error = error.localizedDescription }
+        }
+        if isOpenInstall, let id = entry.ask_id, !isMac {
+            do { ask = try await hub.ask(id) } catch { self.error = error.localizedDescription }
+        }
+    }
+    private var isMac: Bool {
+        #if targetEnvironment(macCatalyst)
+        true
+        #else
+        false
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    @Environment(\.openURL) private var openURL
+    @Environment(RefNav.self) private var nav
+    @State private var macInstalling = false
+    /// What the panel's text measures, and what its composer measures: the
+    /// sheet is exactly their sum (see `macBody`).
+    @State private var macBodyHeight: CGFloat = 0
+    @State private var macFootHeight: CGFloat = 0
+
+    /// The console's panel (`calPanelHTML`, the owner 2026-09-29: "I want the same
+    /// exact layout within the desktop app"): a head — the lane's swatch, the
+    /// long day and time at 600, the lane's name · repeat grey, ✕ — over the
+    /// agenda's own row (`calEntryHTML`): the 16 title with its ○ ✓ ✕, the
+    /// when and the kind pill on the right, the text, then one grey line of
+    /// who, session and live pills with the row's buttons at its end.
+    ///
+    /// As tall as its words, no taller (the owner 2026-10-01, 00:18: "there should
+    /// be a lot less space here"): a 520 minimum left a homework row's panel
+    /// two-thirds blank between the text and the composer. The body and the
+    /// composer are measured and the sheet's frame is their sum; only a body
+    /// past 640 scrolls (the console's panel never does).
+    private var macBody: some View {
+        let closed = CalCals.isClosed(entry)
+        let bodyH: CGFloat = min(macBodyHeight, 640)
+        let total: CGFloat = macBodyHeight > 0 ? bodyH + macFootHeight : 240
+        return NavigationStack {
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        macHead
+                        Web.line.frame(height: 1)
+                        VStack(alignment: .leading, spacing: 6) {
+                            macTitleLine(closed: closed)
+                            if let d = entry.detailShown, !d.isEmpty {
+                                // Whole, not the list's two lines: the panel is where
+                                // the full text is read.
+                                StyledText(text: d, style: .callout, color: Web.muted)
+                            }
+                            macMetaLine(closed: closed)
+                        }
+                        .opacity(closed ? 0.62 : 1)
+                        .padding(.vertical, 13).padding(.horizontal, 16)
+                        if isProposedAction {
+                            // The proposal's own card: Approve · Deny with what they do.
+                            Group {
+                                if let a = action { ApprovalCard(a: a, inThread: false) { shut() } }
+                                else if error == nil { ProgressView().frame(maxWidth: .infinity) }
+                            }
+                            .padding(.horizontal, 16).padding(.bottom, 13)
+                        }
+                        if let error = error ?? respond?.error {
+                            ErrorBanner(message: error).padding(.horizontal, 16).padding(.bottom, 13)
+                        }
+                    }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { macBodyHeight = $0 }
+                }
+                .frame(height: macBodyHeight > 0 ? bodyH : nil)
+                // The owner's step or homework: the composer under the row, as the
+                // console's calStepBox / calHomeworkBox.
+                if let r = respond {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Web.line.frame(height: 1)
+                        RespondChips(model: r).padding(.horizontal, 16).padding(.top, 10)
+                        RespondBar(model: r) { shut() }
+                    }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { macFootHeight = $0 }
+                }
+            }
+            .background(Web.panel)
+            .toolbar(.hidden, for: .navigationBar)
+            .task { await fetch() }
+        }
+        // The console's panel is 620 wide (`.cal-panel`; the owner 2026-09-30: "it
+        // would be nice if it's just a little wider"); the height is the
+        // measured content, no more — as a sheet, Catalyst kept the window at
+        // the tallest it had been, so a reminder's panel was two-thirds blank
+        // (the owner 2026-10-01, 01:58: "so much white space on top and on
+        // bottom"); in the page (`macPanel`) the frame is the panel.
+        .frame(width: 620, height: total)
+    }
+
+    /// "open session" leaves the panel for the Sessions page with that chat
+    /// open on its card — the console's `openRef`, never a chat pushed
+    /// inside the panel (the owner 2026-10-01, 00:18: "we took a session from a
+    /// calendar invite and we made it really small right here… clicking
+    /// open session should bring us over to the sessions page, right in the
+    /// session, potentially at the card").
+    private func macOpenSession(_ t: Thread) {
+        shut()
+        nav.card = OpenAsk(thread: t, message: nil, card: focusCard)
+        nav.tab = "sessions"
+    }
+
+    private var macHead: some View {
+        let long: String = parseDay(entry.day)?.formatted(.dateTime.weekday(.wide).month(.wide).day().year()) ?? ""
+        let when: String = entry.soon == true && !CalCals.isClosed(entry) ? "Anytime · added \(long)"
+            : !entry.day.isEmpty ? long + ((entry.at ?? "").isEmpty ? " · all day" : " · \(entry.at ?? "")")
+            : "No date — anytime"
+        let lane = CalCals.of(entry)
+        return HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 3).fill(CalCals.shade(entry)).frame(width: 12, height: 12)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(when).font(.system(size: 14, weight: .semibold))
+                Text(lane.label + ((entry.repeat ?? "").isEmpty ? "" : " · " + (entry.repeat ?? "")))
+                    .font(.system(size: 12.5)).foregroundStyle(Web.muted)
+            }
+            Spacer()
+            Button { shut() } label: { Text("✕").font(.system(size: 15)) }
+                .buttonStyle(CalWebButtonStyle()).help("Close")
+                .keyboardShortcut(.cancelAction)
+        }
+        .padding(.vertical, 12).padding(.horizontal, 14)
+    }
+
+    /// `.spread`: the title left (16; ○ bold for an open owner step, ✓ grey
+    /// when done, ✕ and struck when not happening), the when and the kind
+    /// pill right, both grey at 12.5 — "overdue" red at 600 first.
+    private func macTitleLine(closed: Bool) -> some View {
+        let wont = calStruck(entry)
+        let tick = closed ? (wont ? "✕" : "✓") : CalCals.of(entry).owner ? "○" : ""
+        let text = entry.verb == nil && entry.kind == "rec" ? "Check back: " + entry.title : entry.label
+        let when = entry.soon == true && !closed ? calAdded(entry) : (entry.at ?? "")
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                if !tick.isEmpty { Text(tick).foregroundStyle(Web.muted).frame(width: 21, alignment: .leading) }
+                Text(md(text))
+                    .fontWeight(calIsOwner(entry) && !closed ? .bold : .regular)
+                    .strikethrough(wont)
+                    .foregroundStyle(closed ? Web.muted : Color.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.system(size: 16))
+            Spacer(minLength: 0)
+            HStack(spacing: 4) {
+                if entry.overdue == true && !closed {
+                    Text("overdue").fontWeight(.semibold).foregroundStyle(calWebRed)
+                    Text("·")
+                }
+                if !when.isEmpty { Text(when); Text("·") }
+                WebTag(CalKind.label(entry), tint: CalCals.shade(entry))
+            }
+            .font(.system(size: 12.5)).foregroundStyle(Web.muted)
+            .fixedSize()
+        }
+    }
+
+    /// `.row.small.muted`: by whom and in which session (a record), repeat,
+    /// goal, the session link with its live pills — then the row's buttons.
+    private func macMetaLine(closed: Bool) -> some View {
+        HStack(spacing: 6) {
+            if entry.did == true {
+                if let a = entry.actor { Text("by \(a)") }
+                if let a = entry.actor, a.isEmpty == false, (entry.thread_title ?? "").isEmpty == false { Text("·") }
+            }
+            if let r = entry.repeat, !r.isEmpty { Text(r); Text("·") }
+            if let g = entry.goal_id { Text(goals.first { $0.id == g }?.title ?? g) }
+            if let t = thread {
+                Button { macOpenSession(t) } label: {
+                    Text(entry.did == true ? t.title : entry.refKind == "action" ? "open in session" : "open session")
+                        .foregroundStyle(Web.accent).lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .help("Go to the Sessions page with this chat open on its card")
+            }
+            ForEach(Array((entry.live ?? []).enumerated()), id: \.offset) { _, p in PillChip(pill: p) }
+            Spacer(minLength: 8)
+            macActions(closed: closed)
+        }
+        .font(.system(size: 12.5)).foregroundStyle(Web.muted)
+        .padding(.top, 6)
+    }
+
+    /// The row's own buttons, the console's: a closed item says its state and
+    /// keeps Reopen; an install is Install · Won't install; an item or an ask
+    /// is Done · Dismiss. The owner's step and homework answer in the composer below;
+    /// a proposal in its card.
+    @ViewBuilder private func macActions(closed: Bool) -> some View {
+        if closed {
+            Text(entry.state)
+            if entry.isItem {
+                Button("Reopen") { Task { await resolve("scheduled") } }
+                    .buttonStyle(CalWebButtonStyle())
+                    .help("Put it back on the calendar (and the board, if it was due)")
+            }
+        } else if isProposedAction || respond != nil {
+            EmptyView()
+        } else if isOpenInstall {
+            if entry.isMacInstall, let id = entry.ask_id {
+                // The desktop app's own build (2026-09-30): the hub's `mac`
+                // lane, as the chat card's Install — staged → restart now.
+                Button(macInstalling ? "Installing…" : "Install") {
+                    macInstalling = true
+                    Task {
+                        do {
+                            let r = try await hub.appInstall(lane: "mac", ask: id, build: Ask.buildNumber(in: entry.title))
+                            if r.staged == true { MacUpdate.shared.applyFromCard() } else { MacUpdate.shared.building = Ask.buildNumber(in: entry.title) }
+                            shut()
+                        } catch { self.error = error.localizedDescription; macInstalling = false }
+                    }
+                }
+                .buttonStyle(CalWebButtonStyle(kind: .primary, fill: CalCals.install))
+                .disabled(macInstalling)
+                .help("Build it if it isn't already, then restart this app on it; the card closes itself")
+            } else if let u = entry.installLink {
+                Button("Install") {
+                    openURL(u)
+                    AppDelegate.push.install.tapped(entry.title)
+                    Task {
+                        if let a = entry.ask_id { _ = try? await hub.resolveAsk(a, state: "done", note: "tapped Install", by: "app") }
+                        shut()
+                    }
+                }
+                .buttonStyle(CalWebButtonStyle(kind: .primary, fill: CalCals.install))
+                .help("Open the install page — the phone reports the new build and the card closes itself")
+            }
+            Button("Won't install") { Task { await resolve("dismissed") } }
+                .buttonStyle(CalWebButtonStyle()).help("Skip this build")
+        } else if entry.isItem || entry.ask_id != nil {
+            // An ask answers from its session's chat bar, armed on the card
+            // (the owner 2026-10-05, 23:40: "there isn't any sort of bar to respond").
+            if let t = thread, let arm = askArm {
+                Button("Respond") { shut(); nav.card = OpenAsk(thread: t, message: nil, card: focusCard, arm: arm); nav.tab = "sessions" }
+                    .buttonStyle(CalWebButtonStyle(kind: .primary))
+                    .help("Open its session with the chat bar replying to this card")
+            }
+            Button("Done") { Task { await resolve("done") } }.buttonStyle(CalWebButtonStyle())
+            Button("Dismiss") { Task { await resolve("dismissed") } }.buttonStyle(CalWebButtonStyle())
+        }
+    }
+    #endif
+
+    private var phoneBody: some View {
         NavigationStack {
             List {
                 if isProposedAction {
                     Section {
                         if let a = action {
-                            ApprovalCard(a: a, inThread: false) { dismiss() }
+                            ApprovalCard(a: a, inThread: false) { shut() }
                         } else if error == nil {
                             HStack { ProgressView(); Text("Loading the proposal…").font(.caption).foregroundStyle(.secondary) }
                         }
@@ -788,7 +1230,7 @@ struct CalEntrySheet: View {
                 if isOpenInstall {
                     Section {
                         if let a = ask {
-                            AskCard(a: a, goals: goals, reload: { dismiss() })
+                            AskCard(a: a, goals: goals, reload: { shut() })
                                 .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                         } else if error == nil {
                             HStack { ProgressView(); Text("Loading the build…").font(.caption).foregroundStyle(.secondary) }
@@ -814,6 +1256,11 @@ struct CalEntrySheet: View {
                     // The install cell above IS the buttons.
                 } else if entry.isOpen && (entry.isItem || entry.ask_id != nil) {
                     Section {
+                        if let t = thread, let arm = askArm {
+                            NavigationLink { ThreadDetail(thread: t, focusCard: focusCard, armOnOpen: arm) } label: {
+                                Label("Respond", systemImage: "arrowshape.turn.up.left.fill")
+                            }
+                        }
                         Button { Task { await resolve("done") } } label: { Label("Done", systemImage: "checkmark.circle.fill") }
                         Button(role: .destructive) { Task { await resolve("dismissed") } } label: { Label("Dismiss", systemImage: "xmark.circle") }
                     }
@@ -826,7 +1273,7 @@ struct CalEntrySheet: View {
                     Section {
                         // An action row lands ON its card in the session (the
                         // audit trail is drawn there), via `ref`, not the id.
-                        NavigationLink { ThreadDetail(thread: t, focusCard: entry.refKind == "action" ? entry.refID : nil) } label: {
+                        NavigationLink { ThreadDetail(thread: t, focusCard: focusCard) } label: {
                             HStack(spacing: 6) {
                                 Label(t.title, systemImage: "bubble.left.and.bubble.right")
                                 // What it is doing right now — the row's `live`
@@ -845,22 +1292,14 @@ struct CalEntrySheet: View {
                 if let r = respond {
                     VStack(alignment: .leading, spacing: 0) {
                         RespondChips(model: r).padding(.horizontal, 12).padding(.top, 10)
-                        RespondBar(model: r) { dismiss() }
+                        RespondBar(model: r) { shut() }
                     }.background(.bar)
                 }
             }
             .navigationTitle(entry.verb ?? CalKind.label(entry).capitalized)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Close") { dismiss() } } }
-            .task {
-                if let id = entry.thread_id { thread = try? await hub.thread(id) }
-                if isProposedAction, let id = entry.refID {
-                    do { action = try await hub.action(id) } catch { self.error = error.localizedDescription }
-                }
-                if isOpenInstall, let id = entry.ask_id {
-                    do { ask = try await hub.ask(id) } catch { self.error = error.localizedDescription }
-                }
-            }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Close") { shut() } } }
+            .task { await fetch() }
         }
     }
 
@@ -868,7 +1307,7 @@ struct CalEntrySheet: View {
         do {
             if entry.isItem { _ = try await hub.resolveCalItem(entry.id, state: state) }
             else if let a = entry.ask_id { _ = try await hub.resolveAsk(a, state: state) }
-            dismiss()
+            shut()
         } catch { self.error = error.localizedDescription }
     }
 }

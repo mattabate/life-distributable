@@ -814,6 +814,14 @@ func TestDragMovesFiredAndRepeatingItems(t *testing.T) {
 		t.Fatalf("setup: %+v", f)
 	}
 	askID := f.AskID
+	// New words on the open card move nothing (a second card's content
+	// is folded into the fired step); its title stays locked.
+	if w, err := c.Update(juice.ID, map[string]string{"detail": "The copy to paste"}); err != nil || w.State != "fired" || w.AskID != askID || w.Detail != "The copy to paste" {
+		t.Fatalf("a fired item takes new detail and stays fired: %+v %v", w, err)
+	}
+	if _, err := c.Update(juice.ID, map[string]string{"title": "Drink water"}); err == nil {
+		t.Fatal("a fired item's title must stay locked")
+	}
 	moved, err := c.Update(juice.ID, map[string]string{"at": "19:00"})
 	if err != nil {
 		t.Fatal(err)

@@ -332,6 +332,100 @@ func TestBackgroundTaskTurnsFoldIntoOneReply(t *testing.T) {
 	}
 }
 
+// A held result released by the owner's next message is the reply of the turn
+// it ENDED, not of the turn their message opens. The turn had ended on a
+// background build; the message came in with the run idle, opened turn 2, and
+// the held reply was stamped turn 2 too — so it and its read card drew under
+// that message, below every tool call turn 2 went on to make. Both surfaces key
+// blocks by run_id, so the stamp is the whole fix. The same for a held row
+// written before the stamp existed (the fallback in heldTurn), and for rows
+// already in the DB (backfillHeldReplyTurn).
+func TestHeldResultReleasedByAMessageEndsItsOwnTurn(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		m, _, _ := setup(t)
+		th, _ := m.Create("", "life", "", "Ship it.", "", "", nil)
+		out := pendingOut(t, m, th.ID)
+		appendOut(t, out, `{"type":"system","subtype":"init","session_id":"sess-1"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"make ship","run_in_background":true}}]}}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash","description":"Ship"}]}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"started"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"Say: Hey Alex, the build you approved finished.","total_cost_usd":0.50,"session_id":"sess-1"}
+`)
+		m.Poll()
+		msgs, _ := m.Messages(th.ID, 50)
+		if len(msgs) != 1 {
+			t.Fatalf("held result became a reply: %+v", msgs)
+		}
+		base := msgs[0].RunID
+		if legacy {
+			var held string
+			m.db.QueryRow(`SELECT held FROM thread_runs WHERE thread_id=?`, th.ID).Scan(&held)
+			held = strings.Replace(held, `,"turn":"`+base+`"`, "", 1)
+			if strings.Contains(held, `"turn"`) {
+				t.Fatalf("legacy held row still names its turn: %s", held)
+			}
+			m.db.Exec(`UPDATE thread_runs SET held=? WHERE thread_id=?`, held, th.ID)
+		}
+		// The build runs quietly; the stuck rule has marked the run idle by
+		// the time the message arrives, so it opens turn 2.
+		m.db.Exec(`UPDATE thread_runs SET busy=0 WHERE thread_id=?`, th.ID)
+		time.Sleep(5 * time.Millisecond)
+		if err := m.Send(th.ID, "I approve, but I don't think that's the case."); err != nil {
+			t.Fatal(err)
+		}
+		appendOut(t, out, `{"type":"system","subtype":"init","session_id":"sess-1"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu2","name":"Read","input":{"file_path":"/tmp/x.png"}}]}}
+`)
+		m.Poll()
+		msgs, _ = m.Messages(th.ID, 50)
+		if len(msgs) != 3 || msgs[1].Role != "owner" || msgs[2].Role != "claude" || msgs[2].Kind != "read" {
+			t.Fatalf("legacy=%v: %+v", legacy, msgs)
+		}
+		if msgs[2].RunID != base || msgs[1].RunID != base+"-t2" {
+			t.Fatalf("legacy=%v: the held reply is turn 1's, the message opens turn 2: reply %q, message %q", legacy, msgs[2].RunID, msgs[1].RunID)
+		}
+		// Turn 2's steps count under the OWNER's message, not the reply's block; the
+		// read card sits on the reply (message_id), so both surfaces draw
+		// turn 1's tool calls, the card, then turn 2's.
+		steps, _ := m.Steps(th.ID)
+		if len(steps) != 2 || steps[0].MessageID != msgs[0].ID || steps[0].Tools != 1 || steps[1].MessageID != msgs[1].ID || steps[1].Tools != 1 {
+			t.Fatalf("legacy=%v: %+v", legacy, steps)
+		}
+		if asks, _ := m.ListAsks("active", th.ID, 10); len(asks) != 1 || asks[0].MessageID != msgs[2].ID {
+			t.Fatalf("legacy=%v: %+v", legacy, asks)
+		}
+	}
+	// Rows already written the wrong way round: the constructor's repair
+	// moves each reply back one turn, chained turns included.
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Ship it.", "", "", nil)
+	var run string
+	m.db.QueryRow(`SELECT id FROM thread_runs WHERE thread_id=?`, th.ID).Scan(&run)
+	at := func(s int) string { return ts(time.Now().Add(time.Duration(s) * time.Second)) }
+	m.db.Exec(`UPDATE thread_messages SET run_id=?, ts=? WHERE thread_id=?`, run, at(0), th.ID)
+	m.db.Exec(`INSERT INTO thread_events (thread_id, run_id, ts, kind, title) VALUES (?,?,?,?,?)`, th.ID, run, at(1), "tool_use", "Bash")
+	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, run_id) VALUES (?,?,?,?,?,?)`, th.ID, at(10), "owner", "message", "next", run+"-t2")
+	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, run_id) VALUES (?,?,?,?,?,?)`, th.ID, at(11), "claude", "read", "", run+"-t2")
+	m.db.Exec(`INSERT INTO thread_events (thread_id, run_id, ts, kind, title) VALUES (?,?,?,?,?)`, th.ID, run+"-t2", at(12), "tool_use", "Bash")
+	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, run_id) VALUES (?,?,?,?,?,?)`, th.ID, at(20), "owner", "message", "and again", run+"-t3")
+	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, run_id) VALUES (?,?,?,?,?,?)`, th.ID, at(21), "claude", "read", "", run+"-t3")
+	m.db.Exec(`INSERT INTO thread_events (thread_id, run_id, ts, kind, title) VALUES (?,?,?,?,?)`, th.ID, run+"-t3", at(22), "tool_use", "Bash")
+	m.backfillHeldReplyTurn()
+	msgs, _ := m.Messages(th.ID, 50)
+	var got []string
+	for _, x := range msgs {
+		got = append(got, x.Role+":"+strings.TrimPrefix(x.RunID, run))
+	}
+	if want := "owner: owner:-t2 claude: owner:-t3 claude:-t2"; strings.Join(got, " ") != want {
+		t.Fatalf("backfill: %v", got)
+	}
+	m.backfillHeldReplyTurn() // nothing left to move
+	msgs, _ = m.Messages(th.ID, 50)
+	if msgs[4].RunID != run+"-t2" {
+		t.Fatalf("backfill moved a repaired row again: %+v", msgs)
+	}
+}
+
 // A folded result is still the reply when the process exits on it, and
 // when its background task never comes back.
 func TestHeldResultLandsOnExitOrTimeout(t *testing.T) {
@@ -519,7 +613,9 @@ func TestSpokenFallback(t *testing.T) {
 	for _, c := range []struct{ kind, class, title, thread, want string }{
 		{"read", "read", "This thread is completed", "Puzzle layout refinement", "about Puzzle layout refinement. This thread is completed."},
 		{"physical", "step", "Buy a new kettle", "Calendar", "a reminder. Buy a new kettle."},
-		{"decision", "unblock", "Pick a venue?", "Party", "I need you on Party. Pick a venue?"},
+		{"decision", "unblock", "Pick a venue?", "Party", "Pick a venue? It's for Party."},
+		{"install", "", "Install app build 1523 (tap the link)", "Desktop approval cell", "build 1523 is ready to install on your phone."},
+		{"install", "", "Install desktop build 1524", "Desktop approval cell", "build 1524 is ready to install on the desktop app."},
 		{"read", "read", "Done.", "", "Done."},
 	} {
 		if got := spokenFallback(c.kind, c.class, c.title, c.thread); got != hey+c.want {
@@ -744,5 +840,24 @@ func TestToolSummary(t *testing.T) {
 	}
 	if s, d := toolSummary("Bash", []byte(`{"command":"ls -la"}`)); s != "" || d != "ls -la" {
 		t.Fatal(s, d)
+	}
+}
+
+// The body under an opened call is only what its title cannot say: a Read has none, an Edit reads as a diff, a shell command
+// is kept whole, anything else is key: value lines — never the input's JSON.
+func TestDescribeToolBody(t *testing.T) {
+	if title, body := describeTool("Read", []byte(`{"file_path":"/x/y.go"}`)); title != "Read · /x/y.go" || body != "" {
+		t.Fatalf("Read: %q %q", title, body)
+	}
+	_, body := describeTool("Edit", []byte(`{"file_path":"/x/y.go","old_string":"a\nb","new_string":"c"}`))
+	if body != "- a\n- b\n+ c" {
+		t.Fatalf("Edit: %q", body)
+	}
+	long := strings.Repeat("x", 200)
+	if title, body := describeTool("Bash", []byte(`{"command":"`+long+`"}`)); len(title) > 135 || body != long {
+		t.Fatalf("Bash: %d %d", len(title), len(body))
+	}
+	if _, body := describeTool("Agent", []byte(`{"prompt":"look\naround","subagent_type":"Explore"}`)); body != "prompt: look\nsubagent_type: Explore" {
+		t.Fatalf("Agent: %q", body)
 	}
 }

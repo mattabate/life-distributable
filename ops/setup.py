@@ -1,6 +1,7 @@
-"""Write this Mac's config files from what setup knows (SETUP.md step 4 and 7).
+"""Write this Mac's config files from what setup knows (SETUP.md steps 5 and 7).
 
-    ops/py.sh setup.py hub --owner Sam --usage no      # ops/hub.json
+    ops/py.sh setup.py hub --owner Sam --usage no [--surfaces phone,desktop,web]
+                                                       # ops/hub.json
     ops/py.sh setup.py app --github samsmith [--team ABCDE12345]
                                                        # app/local.xcconfig + ops/app.env
     ops/py.sh setup.py apns --key-id K1234ABCDE --team ABCDE12345 --key-file ~/Downloads/AuthKey_K1234ABCDE.p8
@@ -53,6 +54,7 @@ def cmd_hub(a):
     cfg.pop("_comment", None)
     cfg["owner_name"] = a.owner
     cfg["usage_opt_in"] = a.usage == "yes"
+    cfg["surfaces"] = a.surfaces
     cfg["listen_addr"] = "%s:%d" % (ip, a.port)
     cfg["public_host"] = "%s:%d" % (host, a.port)
     cfg["cert_file"] = "~/life/ops/secrets/%s.crt" % host
@@ -65,7 +67,21 @@ def cmd_hub(a):
     with open(HUB_JSON, "w") as f:
         json.dump(cfg, f, indent=2)
         f.write("\n")
-    print("wrote ops/hub.json: owner %s, hub https://%s:%d" % (a.owner, host, a.port))
+    print("wrote ops/hub.json: owner %s, hub https://%s:%d, apps %s"
+          % (a.owner, host, a.port, ", ".join(a.surfaces)))
+
+
+SURFACES = ("phone", "desktop", "web")
+
+
+def surfaces(v):
+    """`--surfaces phone,web` → ["phone", "web"], in the fixed order."""
+    picked = {s.strip().lower() for s in v.split(",") if s.strip()}
+    bad = picked - set(SURFACES)
+    if bad or not picked:
+        raise argparse.ArgumentTypeError(
+            "a comma list of %s (got %r)" % (", ".join(SURFACES), v))
+    return [s for s in SURFACES if s in picked]
 
 
 def cmd_app(a):
@@ -127,13 +143,19 @@ def cmd_show(_):
         print(("  ok   " if ok else "  --   ") + what)
     cfg = json.load(open(HUB_JSON)) if os.path.exists(HUB_JSON) else {}
     mark(bool(cfg), "ops/hub.json")
+    chosen = cfg.get("surfaces") or list(SURFACES)
+    print("       apps: %s" % ", ".join(chosen))
     host = cfg.get("public_host", "").split(":")[0]
     mark(bool(host) and os.path.exists(os.path.join(SECRETS, host + ".crt")), "TLS certificate (ops/renew-cert.sh)")
     mark(os.path.exists(os.path.join(SECRETS, "hub.token")), "hub token (made on first hub start)")
     mark(os.path.exists(os.path.join(SECRETS, "restic.env")), "backup credentials ops/secrets/restic.env")
-    mark(os.path.exists(LOCAL_XC), "app identity app/local.xcconfig")
-    mark(bool(cfg.get("apns_key_file")), "push key (APNs)")
-    mark(os.path.exists(os.path.join(ROOT, "data", "ota", "current.json")), "an app build published (make ship)")
+    if "phone" in chosen or "desktop" in chosen:
+        mark(os.path.exists(LOCAL_XC), "app identity app/local.xcconfig")
+    if "phone" in chosen:
+        mark(bool(cfg.get("apns_key_file")), "push key (APNs)")
+        mark(os.path.exists(os.path.join(ROOT, "data", "ota", "current.json")), "an app build published (make ship)")
+    if "desktop" in chosen:
+        mark(os.path.exists("/Applications/life.app"), "desktop app installed (make mac)")
 
 
 def main():
@@ -142,7 +164,9 @@ def main():
     h = sub.add_parser("hub")
     h.add_argument("--owner", required=True, help="the name your agent calls you")
     h.add_argument("--usage", choices=["yes", "no"], required=True,
-                   help="send the weekly anonymous usage heartbeat (SETUP.md step 4)")
+                   help="send the weekly anonymous usage heartbeat (SETUP.md step 5)")
+    h.add_argument("--surfaces", type=surfaces, default=list(SURFACES),
+                   help="which apps: comma list of phone,desktop,web (default all three)")
     h.add_argument("--port", type=int, default=8443)
     h.add_argument("--force", action="store_true")
     h.add_argument("--resolve", action="store_true", help="store claude's resolved real path")

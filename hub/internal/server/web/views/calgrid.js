@@ -133,6 +133,7 @@ const calPileID = es => es.length > 1 ? 'grp:' + es.map(m => m.id).join(',') : e
 
 const CAL_HOUR_H = 44;   // px per hour in the time grid
 const CAL_SLOT_MIN = 30; // an item is a moment, not a span; 30 min is the block we draw it as
+const CAL_TOUCH_MIN = 5; // two blocks overlapping by less than this are side by side, not stacked (calLayout span)
 const CAL_SNAP = 15;     // drag snaps to the quarter hour, like Google
 
 // Local days are ui.js's localDate/ymd/addDays/todayYMD; these are the grid's minutes.
@@ -509,7 +510,19 @@ function calLayout(list) {
       if (c < 0) { c = colsEnd.length; colsEnd.push(0); }
       colsEnd[c] = it.n; it.col = c;
     }
-    for (const it of cluster) out.push({ ...it, cols: colsEnd.length });
+    // A box grows rightward over every column that is empty for its whole
+    // height (a lone 09:30 under a four-wide 08:00 row fills its row):
+    // `span` columns of `cols`, never fewer than one. A brush
+    // under CAL_TOUCH_MIN (a 09:01 pile's last minute against a 09:30 step,
+    // a hairline on the clock) does not count as taken.
+    for (const it of cluster) {
+      let span = 1;
+      for (let c = it.col + 1; c < colsEnd.length; c++) {
+        if (cluster.some(o => o.col === c && Math.min(o.n, it.n) - Math.max(o.s, it.s) > CAL_TOUCH_MIN)) break;
+        span++;
+      }
+      out.push({ ...it, cols: colsEnd.length, span });
+    }
     cluster = []; clusterEnd = -1;
   };
   for (const it of evs) {
@@ -551,7 +564,7 @@ const calGroupGlyph = es => es.every(m => m.mark === 'wont') ? '✕ '
 function calBlockHTML(e, p) {
   if ((p.members || []).length > 1) return calGroupBlockHTML(p);
   const top = (p.s / 60) * CAL_HOUR_H, h = Math.max(20, (CAL_SLOT_MIN / 60) * CAL_HOUR_H);
-  const w = 100 / p.cols, left = p.col * w;
+  const w = (100 / p.cols) * (p.span || 1), left = p.col * (100 / p.cols);
   const mv = calMovable(e);
   const closed = calClosed(e);
   return `<div class="cal-ev block${closed ? ' closed' : ''}${calRecCls(e)}${calWont(e)}${e.overdue && !closed ? ' overdue' : ''}"
@@ -570,7 +583,7 @@ function calBlockHTML(e, p) {
 function calGroupBlockHTML(p) {
   const es = p.members, e = es[0];
   const top = (p.s / 60) * CAL_HOUR_H, h = Math.max(20, ((p.n - p.s) / 60) * CAL_HOUR_H);
-  const w = 100 / p.cols, left = p.col * w;
+  const w = (100 / p.cols) * (p.span || 1), left = p.col * (100 / p.cols);
   const closed = es.every(calClosed);
   const { title, n } = calGroupLabel(es);
   return `<div class="cal-ev block group${closed ? ' closed' : ''}${calRecCls(e)}${es.some(m => m.overdue && !calClosed(m)) ? ' overdue' : ''}"

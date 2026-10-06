@@ -37,6 +37,11 @@ final class HubClient {
     }
     /// Is a code saved on this phone? Cheap, no Face ID prompt (see `exists`).
     var deciderSaved: Bool = DeciderKeychain.exists()
+    /// The decider row's own line in Settings: a Keychain save that failed
+    /// (with its status), a wrong paste, a check that errored, or "saved".
+    /// Kept HERE, not as view state, so it survives leaving Settings and
+    /// coming back, so a pasted code always shows what Save did with it.
+    var deciderStatus: String?
 
     /// The code is XXXXX-XXXXX-XXXXX-XXXXX in Crockford-ish base32, and it is
     /// typed by hand into a field that shows dots — so a wrong character is
@@ -63,6 +68,27 @@ final class HubClient {
         // for a face, and a copy sitting in memory for the whole session is the
         // thing that used to be sent wrong on every request.
         decider = ""
+        #if targetEnvironment(macCatalyst)
+        // On the hub's own Mac the token is the file ops/hub.sh serves
+        // (the clone SETUP.md puts at ~/life, or $LIFE_ROOT), read fresh
+        // every launch so a rotated token never strands the app (not
+        // sandboxed, see project.yml LifeMac). On any other Mac there is no
+        // such file and the token typed into Settings is used.
+        let root = ProcessInfo.processInfo.environment["LIFE_ROOT"].map { URL(fileURLWithPath: $0) }
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appending(path: "life")
+        let file = root.appending(path: "ops/secrets/hub.token")
+        if let t = try? String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { token = t }
+        // The address too, from the same Mac's ops/hub.json, until one is
+        // typed into Settings.
+        if baseURL.isEmpty, let d = try? Data(contentsOf: root.appending(path: "ops/hub.json")),
+           let cfg = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+           let host = cfg["public_host"] as? String, !host.isEmpty {
+            baseURL = "https://" + host
+        }
+        // A screenshot run can put a made-up code in the Settings box
+        // (LIFE_DECIDER_SHOT=AAAAA-…), to prove a snap leaves it out.
+        if ProcessInfo.processInfo.environment["LIFE_SHOT"] != nil, let d = ProcessInfo.processInfo.environment["LIFE_DECIDER_SHOT"] { decider = Self.normalizeDecider(d) }
+        #endif
         #if targetEnvironment(simulator)
         // ops/screens.sh launches the simulator build with the hub token in the
         // environment so the quality agent can screenshot real screens.
@@ -240,14 +266,11 @@ final class HubClient {
     func usage() async throws -> UsageState { try await request("GET", "/api/v1/usage", cache: false) }
     func setUsage(on: Bool) async throws -> UsageState { try await request("PUT", "/api/v1/usage", body: ["on": on]) }
     func projects() async throws -> [Project] { try await request("GET", "/api/v1/projects") }
-    func sessions() async throws -> [TmuxSession] { try await request("GET", "/api/v1/sessions") }
-    func startSession(project: String) async throws -> TmuxSession { try await request("POST", "/api/v1/sessions", body: ["project": project]) }
     /// A replayed card's line is being heard for `secs` (0 = it stopped): the
     /// session reads "speaking" and no push talks over it.
     func voice(thread: String, secs: Double) async throws -> VoiceFloor {
         try await request("POST", "/api/v1/voice", body: VoiceIn(thread_id: thread, secs: secs), cache: false)
     }
-    func killSession(name: String) async throws { let _: Empty = try await request("DELETE", "/api/v1/sessions/\(name)") }
     /// `thread` narrows to one session's proposals on the hub; an older hub
     /// ignores it, so callers still filter by `thread_id` themselves.
     func actions(state: String = "", thread: String = "") async throws -> [Action] {
@@ -288,9 +311,23 @@ final class HubClient {
             DeciderKeychain.read(reason: reason)
         }.value
         deciderSaved = found
+        if !found, SettingsView.looksLikeDeciderCode(decider) {
+            // A code sitting in the Settings box IS the code, whatever the
+            // Keychain says: send it, and take this chance to save it, so a
+            // pasted code is never refused as "missing decider code".
+            let typed = decider
+            if DeciderKeychain.save(typed) {
+                deciderSaved = DeciderKeychain.exists()
+                if deciderSaved { decider = ""; deciderStatus = nil }
+                else { deciderStatus = "saved, but the Keychain cannot find it again — the pasted code was used" }
+            } else {
+                deciderStatus = "could not save the code to the Keychain (\(DeciderKeychain.lastStatus)) — the pasted code was used"
+            }
+            return typed
+        }
         guard found else { return nil }
         guard let code else {
-            throw APIError(error: "Face ID was cancelled, so the decider code stayed locked. Nothing was sent.", status: 0)
+            throw APIError(error: "\(DeciderKeychain.unlockName) was cancelled, so the decider code stayed locked. Nothing was sent.", status: 0)
         }
         return code
     }
@@ -301,6 +338,11 @@ final class HubClient {
     func checkDecider(unlock: Bool) async throws -> DeciderStatus {
         try await request("GET", "/api/v1/decider",
                           decider: unlock ? try await unlockDecider("Check your decider code") : nil)
+    }
+    /// Would the hub take THIS code? Asked before a pasted code is saved, so
+    /// a refused one never replaces a code that may be working.
+    func checkDecider(code: String) async throws -> DeciderStatus {
+        try await request("GET", "/api/v1/decider", cache: false, decider: code)
     }
     func status() async throws -> HubStatus { try await request("GET", "/api/v1/status") }
     func goals() async throws -> [Goal] { try await request("GET", Self.goalsPath, cache: true) }
@@ -380,7 +422,11 @@ final class HubClient {
     nonisolated static let threadsPath = "/api/v1/threads"
     nonisolated static func messagesPath(_ id: String) -> String { "/api/v1/threads/\(id)/messages?limit=200" }
     nonisolated static func eventsPath(_ id: String) -> String { "/api/v1/threads/\(id)/events?since=0&limit=1000" }
-    nonisolated static let boardPath = "/api/v1/board?surface=mobile"
+    /// The board this app asks for: `mobile` on the phone,
+    /// `desktop` on the Mac — the one query the hub reads `surface` for, so
+    /// each lists only the build it can install itself.
+    nonisolated static let boardSurface = Device.isMac ? "desktop" : "mobile"
+    nonisolated static let boardPath = "/api/v1/board?surface=\(boardSurface)"
     nonisolated static let goalsPath = "/api/v1/goals"
     /// The change feed: parks until something the phone draws has changed
     /// (or `wait` seconds pass), then answers with the version to send next
@@ -414,7 +460,7 @@ final class HubClient {
     /// What needs the owner on one surface, ranked, bundled and counted by the hub
     /// (GET /api/v1/board) — the phone prints these numbers, it never derives
     /// its own, so it and the console can no longer disagree.
-    func board(surface: String = "mobile") async throws -> Board { try await request("GET", "/api/v1/board?surface=\(surface)", cache: true) }
+    func board(surface: String = HubClient.boardSurface) async throws -> Board { try await request("GET", "/api/v1/board?surface=\(surface)", cache: true) }
     /// Every ask a session ever raised (open, answered, done, dismissed) — the
     /// thread view shows each under the reply that raised it.
     func threadAsks(_ threadID: String) async throws -> [Ask] { try await request("GET", "/api/v1/asks?state=all&thread=\(threadID)", cache: true) }
@@ -468,9 +514,14 @@ final class HubClient {
     /// a button to Settings beside it, so the words stop at the fact.
     static func deciderHint(_ error: Error) -> String {
         if isDeciderRefusal(error) {
+            #if targetEnvironment(macCatalyst)
+            let here = "Mac"
+            #else
+            let here = "phone"
+            #endif
             return DeciderKeychain.exists()
-                ? "Not sent: the decider code saved on this phone is wrong. Replace it in Settings, then send again."
-                : "Not sent: no decider code is saved on this phone. Paste it from Apple Passwords in Settings, then send again."
+                ? "Not sent: the decider code saved on this \(here) is wrong. Replace it in Settings, then send again."
+                : "Not sent: no decider code is saved on this \(here). Paste it from Apple Passwords in Settings, then send again."
         }
         return error.localizedDescription
     }
@@ -492,8 +543,20 @@ final class HubClient {
     func readThread(_ id: String) async throws { let _: Empty = try await request("POST", "/api/v1/threads/\(id)/read") }
     /// Drop a card's line still waiting to speak; the card stays open.
     func hushVoice(card: String) async throws { let _: Empty = try await request("POST", "/api/v1/voice/hush", body: ["card": card]) }
-    /// lane "ota" (default): `make ship`, then open `InstallStatus.ota.installURL`; "lan": Xcode install over the hub host's Wi-Fi.
-    func appInstall(lane: String = "ota") async throws { struct R: Decodable { var status: String }; let _: R = try await request("POST", "/api/v1/app/install", body: ["lane": lane]) }
+    /// lane "ota" (default): `make ship`, then open `InstallStatus.ota.installURL`;
+    /// "lan": Xcode install over the Mac's Wi-Fi; "mac": the desktop
+    /// app's Install — `ask` is the card (the hub closes it on the click, by
+    /// "app"), `build` its number; `staged` says the build was already waiting,
+    /// so the app restarts in seconds rather than after a build.
+    struct InstallStarted: Decodable { var status: String; var lane: String?; var staged: Bool?; var ask: String? }
+    @discardableResult
+    func appInstall(lane: String = "ota", ask: String? = nil, build: Int? = nil) async throws -> InstallStarted {
+        struct Body: Encodable { var lane: String; var ask: String?; var build: Int? }
+        return try await request("POST", "/api/v1/app/install", body: Body(lane: lane, ask: ask, build: build))
+    }
+    /// The desktop app says which build it runs (every launch): the hub keeps
+    /// it and closes "Install desktop build N" cards with N ≤ it.
+    func reportMacBuild(_ build: Int) async throws { let _: Empty = try await request("POST", "/api/v1/app/mac", body: ["build": build]) }
     struct InstallStatus: Decodable { var running: Bool; var tail: [String]; var ota: OTABuild?; var log_at: Date? }
     func appInstallStatus() async throws -> InstallStatus { try await request("GET", "/api/v1/app/install/status") }
     /// Recommendations. Deliberately no unread/badge call anywhere: a rec is
@@ -692,38 +755,63 @@ private struct AnyEncodable: Encodable {
 /// stays as the fallback for a failed scan.
 enum DeciderKeychain {
     private static let account = "hub.decider.protected"
+    /// What unlocks it, as the screen names it: the Mac has Touch ID (or its
+    /// password), not a face.
+    #if targetEnvironment(macCatalyst)
+    static let unlockName = "Touch ID"
+    #else
+    static let unlockName = "Face ID"
+    #endif
+
+    /// The last Keychain status a save got, for Settings to print.
+    nonisolated(unsafe) static var lastStatus: OSStatus = errSecSuccess
 
     /// Write the code behind Face ID. Also clears the old unprotected item, so
     /// there is never a plaintext copy left to be read or to go stale.
+    ///
+    /// The Mac keeps it exactly as the phone does. A Catalyst app has ONE
+    /// keychain, the data protection one — `kSecUseDataProtectionKeychain:
+    /// false` is ignored there, so no query reaches the login keychain — and
+    /// that keychain answers -34018 (errSecMissingEntitlement) to a build
+    /// signed without an application identifier (Settings then reads "could
+    /// not save the code to the Keychain (-34018)"). The fix is the
+    /// signature, not the query: LifeMac carries `keychain-access-groups`
+    /// (app/project.yml), which makes Xcode embed a provisioning profile;
+    /// `ops/mac-keychain-probe.sh` proves a build can save before the owner
+    /// is asked to paste anything.
     static func save(_ code: String) -> Bool {
         clear()
         Keychain.set("", for: "hub.decider") // delete the legacy plaintext item
         guard !code.isEmpty else { return true }
+        lastStatus = add(code, account: account)
+        return lastStatus == errSecSuccess
+    }
+
+    static func clear() { remove(account: account) }
+
+    private static func add(_ code: String, account: String) -> OSStatus {
         guard let access = SecAccessControlCreateWithFlags(nil,
-            kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .userPresence, nil) else { return false }
-        let add: [String: Any] = [
+            kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .userPresence, nil) else { return errSecParam }
+        let item: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: account,
             kSecAttrService as String: "life.hub",
             kSecValueData as String: Data(code.utf8),
             kSecAttrAccessControl as String: access,
         ]
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+        return SecItemAdd(item as CFDictionary, nil)
     }
 
-    static func clear() {
+    @discardableResult
+    private static func remove(account: String) -> OSStatus {
         SecItemDelete([kSecClass as String: kSecClassGenericPassword,
                        kSecAttrAccount as String: account,
                        kSecAttrService as String: "life.hub"] as CFDictionary)
     }
 
-    /// Is a code stored at all? Answered WITHOUT a Face ID prompt: attributes
-    /// only, through a context that may not show UI. The answer is "no" ONLY
-    /// when the Keychain says the item is not there. Asking for the DATA and
-    /// counting only `errSecInteractionNotAllowed`/`errSecSuccess` as a yes
-    /// misreads a saved code that comes back with some other status, so every
-    /// Approve would send no code and the hub would refuse it.
-    static func exists() -> Bool {
+    /// Attributes only, through a context that may not show UI: the status
+    /// says whether the item is there, and nobody is asked for a finger.
+    private nonisolated static func find(account: String) -> OSStatus {
         let ctx = LAContext()
         ctx.interactionNotAllowed = true
         let q: [String: Any] = [
@@ -734,7 +822,42 @@ enum DeciderKeychain {
             kSecMatchLimit as String: kSecMatchLimitOne,
             kSecUseAuthenticationContext as String: ctx,
         ]
-        return SecItemCopyMatching(q as CFDictionary, nil) != errSecItemNotFound
+        return SecItemCopyMatching(q as CFDictionary, nil)
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// `LIFE_KEYCHAIN_PROBE=<file>` (ops/mac-keychain-probe.sh): save a
+    /// throwaway item the way `save` does, find it, delete it, write the
+    /// three statuses to the file and exit before any window. The owner's code
+    /// is a different account and is never touched. `add=0 find=-25308
+    /// delete=0` = this build's signature can keep the decider code (the
+    /// find is "there, behind Touch ID" — what `exists` counts as saved);
+    /// -34018 = it cannot.
+    static func probeIfAsked() {
+        guard let path = ProcessInfo.processInfo.environment["LIFE_KEYCHAIN_PROBE"], !path.isEmpty else { return }
+        let probe = "hub.decider.probe"
+        remove(account: probe)
+        let a = add("PROBE", account: probe), f = find(account: probe), d = remove(account: probe)
+        try? "add=\(a) find=\(f) delete=\(d)\n".write(toFile: path, atomically: true, encoding: .utf8)
+        exit(0)
+    }
+    #endif
+
+    /// Is a code stored at all? Answered WITHOUT a Face ID prompt: attributes
+    /// only, through a context that may not show UI. The answer is "no" ONLY
+    /// when the Keychain says the item is not there. The old test asked for
+    /// the DATA and counted only `errSecInteractionNotAllowed`/`errSecSuccess`
+    /// as a yes, and a code that was saved could come back as some other
+    /// status, so every Approve sent no code and the hub refused it as
+    /// "missing decider code".
+    nonisolated static func exists() -> Bool {
+        let st = find(account: account)
+        #if targetEnvironment(macCatalyst)
+        // A Mac build signed without the entitlement gets -34018 for every
+        // keychain call: that is "nothing saved here", not a saved code.
+        if st == errSecMissingEntitlement { return false }
+        #endif
+        return st != errSecItemNotFound
     }
 
     /// Read the code, prompting for Face ID. Blocking, so it is called off the
@@ -754,6 +877,9 @@ enum DeciderKeychain {
         var out: AnyObject?
         let st = SecItemCopyMatching(q as CFDictionary, &out)
         guard st != errSecItemNotFound else { return (nil, false) }
+        #if targetEnvironment(macCatalyst)
+        if st == errSecMissingEntitlement { return (nil, false) }
+        #endif
         guard st == errSecSuccess, let d = out as? Data else { return (nil, true) }
         return (String(data: d, encoding: .utf8), true)
     }

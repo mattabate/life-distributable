@@ -85,6 +85,9 @@ type Config struct {
 	UsageOptIn bool   `json:"usage_opt_in"`
 	UsageHost  string `json:"usage_host"`
 	UsageToken string `json:"usage_token"`
+	// Surfaces: the setup answer to "which apps?" (phone, desktop, web);
+	// empty = all three. `setup.py show` reads it to list what is left.
+	Surfaces []string `json:"surfaces"`
 	// Root is the repo checkout (~/life), derived at load time from the
 	// config file's location (<root>/ops/hub.json); never written in the file.
 	Root string `json:"-"`

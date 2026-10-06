@@ -29,15 +29,27 @@ func (s *Server) UseUsage(c *spend.Cache) { s.usage = c }
 // first Spend request after a restart does not wait for the walk.
 func (s *Server) WarmSpend() { s.usage.Prime() }
 
-func (s *Server) resolveProject(cwd string) string {
-	best := ""
-	bestLen := 0
-	for _, p := range s.cfg.AllProjects() {
-		if (cwd == p.Dir || strings.HasPrefix(cwd, p.Dir+"/")) && len(p.Dir) > bestLen {
-			best, bestLen = p.Name, len(p.Dir)
+// projectResolver maps a transcript's cwd to its project. The project list is
+// read ONCE per summary and each cwd answered once: AllProjects lists the
+// projects root on every call, and calling it per usage made a 30-day Spend
+// summary take 14 s — the console's Spend page stayed blank that long.
+func (s *Server) projectResolver() spend.ProjectResolver {
+	projects := s.cfg.AllProjects()
+	memo := map[string]string{}
+	return func(cwd string) string {
+		if p, ok := memo[cwd]; ok {
+			return p
 		}
+		best := ""
+		bestLen := 0
+		for _, p := range projects {
+			if (cwd == p.Dir || strings.HasPrefix(cwd, p.Dir+"/")) && len(p.Dir) > bestLen {
+				best, bestLen = p.Name, len(p.Dir)
+			}
+		}
+		memo[cwd] = best
+		return best
 	}
-	return best
 }
 
 func (s *Server) spendSummary(w http.ResponseWriter, r *http.Request) {
@@ -59,9 +71,9 @@ func (s *Server) spendSummary(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	var sum spend.Summary
 	if hours > 0 {
-		sum = spend.SummarizeWindow(us, time.Duration(hours)*time.Hour, now, s.resolveProject)
+		sum = spend.SummarizeWindow(us, time.Duration(hours)*time.Hour, now, s.projectResolver())
 	} else {
-		sum = spend.Summarize(us, days, now, s.resolveProject)
+		sum = spend.Summarize(us, days, now, s.projectResolver())
 	}
 	// The hub's own split of the same window: thread turns by what woke them,
 	// job runs by name — "what do the check-ins cost?" as a number.
@@ -222,47 +234,6 @@ func (s *Server) setSpendModel(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("spend: default model → %q", in.DefaultModel)
 	writeJSON(w, 200, s.modelSetting(r.Context()))
-}
-
-func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
-	ss, err := s.sess.List()
-	if err != nil {
-		jsonErr(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, 200, ss)
-}
-
-func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Project string `json:"project"`
-	}
-	if !decode(w, r, &in, 0) {
-		return
-	}
-	p, ok := s.cfg.Project(in.Project)
-	if !ok {
-		jsonErr(w, 404, "unknown project")
-		return
-	}
-	sess, created, err := s.sess.StartRemoteControl(p.Name, p.Dir)
-	if err != nil {
-		jsonErr(w, 500, err.Error())
-		return
-	}
-	code := 200
-	if created {
-		code = 201
-	}
-	writeJSON(w, code, sess)
-}
-
-func (s *Server) killSession(w http.ResponseWriter, r *http.Request) {
-	if err := s.sess.Kill(r.PathValue("name")); err != nil {
-		jsonErr(w, 400, err.Error())
-		return
-	}
-	w.WriteHeader(204)
 }
 
 func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {

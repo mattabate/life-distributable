@@ -21,8 +21,9 @@ import (
 // DefaultLadder. No 1M-context variant: long-context input is billed higher
 // and threads rarely need it — the CLI compacts instead. Fable 5.1 on top
 // (same base price as 5, cheaper cache reads, better benchmarks), Opus 5.5
-// as the fallback (cheaper than Opus 5, $4/$20 against $5/$25).
-var DefaultLadder = []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5"}
+// as the fallback (cheaper than Opus 5, $4/$20 against $5/$25), Sonnet 5.5
+// at the bottom.
+var DefaultLadder = []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5"}
 
 // successors: a rung the ladder retired → the id that replaced it. A thread
 // pins its model at birth (threads.DefaultModel), so threads made on a
@@ -30,8 +31,9 @@ var DefaultLadder = []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonn
 // step-down and no fable day cap, and fable 5 reads its cache at 4× fable
 // 5.1's price.
 var successors = map[string]string{
-	"claude-fable-5": "claude-fable-5-1",
-	"claude-opus-5":  "claude-opus-5-5",
+	"claude-fable-5":  "claude-fable-5-1",
+	"claude-opus-5":   "claude-opus-5-5",
+	"claude-sonnet-5": "claude-sonnet-5-5",
 }
 
 // Current: the model a pinned rung runs on today — its successor when the

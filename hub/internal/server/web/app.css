@@ -445,15 +445,24 @@ textarea { resize: vertical; }
 .ev .tick { color: var(--green); font-size: 11px; }
 .ev .tick.err { color: var(--red); }
 .ev.bad .hl { color: var(--red); }
-.ev .raw { padding: 2px 0 4px 19px; opacity: .8; word-break: break-all; }
+/* An opened step is one terminal block, no grey boxes (2026-10-05): the call
+   in blue, an edit's lines and the output in grey, an error in red; the
+   output folds at 12 lines behind "… N more lines" and never scrolls inside
+   itself. A thought is purple and IS its own detail: the first line shut,
+   the whole thought open. */
+.ev.think .hl { color: var(--violet); }
+.ev.think[open] .hl.one, .ev.think:not([open]) .hl.all { display: none; }
 .ev .io {
-  margin: 4px 0 6px 19px; padding: 7px 9px; background: var(--code); border-radius: 7px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
-  white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto;
+  margin: 2px 0 2px 19px; padding: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word;
 }
-.ev .io.think { font-family: inherit; font-size: 12.5px; background: transparent;
-  border-left: 2px solid var(--line); border-radius: 0; }
+.ev .io.call { color: var(--accent); }
 .ev .io.err { color: var(--red); }
+.ev .more > summary { cursor: pointer; list-style: none; margin-left: 19px; font-size: 11.5px; opacity: .8; }
+.ev .more > summary::-webkit-details-marker { display: none; }
+.ev .more > summary:hover { color: var(--accent); }
+.ev .more[open] > summary { display: none; }
 .working { display: flex; align-items: center; gap: 7px; padding: 4px 8px 10px; }
 
 /* ---------- the one card (ui.js cardHTML) ----------
@@ -473,6 +482,14 @@ textarea { resize: vertical; }
 .ask.read { --tint: var(--accent); }
 .ask.install { --tint: var(--teal); }
 .ask.rec { --tint: var(--violet); }
+/* Paused on a session limit (2026-09-30): amber, like every "waiting", and
+   the wait as a bar toward the reset — a bar only ever runs toward a limit. */
+.ask.paused { --tint: var(--amber); }
+.ask .pause-bar { height: 4px; border-radius: 2px; margin: 4px 0 6px; overflow: hidden;
+  background: color-mix(in srgb, var(--amber) 16%, transparent); }
+.ask .pause-bar > i { display: block; height: 100%; border-radius: 2px; background: var(--amber); transition: width .6s ease; }
+.ask .pause-foot { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.msg.end.paused .end-line { color: var(--amber); }
 .ask.answered, .ask.err-card { --tint: var(--line); background: var(--panel); }
 .ask.err-card { opacity: .92; }
 .ask.err-card .t { font-weight: 500; color: var(--muted); }
@@ -835,12 +852,17 @@ td.n, th.n { text-align: right; }
    is one pixel of ink and still has to be askable. */
 .daycol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
           justify-content: flex-end; align-self: stretch; }
-/* one segment per model, stacked (2026-09-17); the gap between two segments is
-   a border, not a flex gap, so the column's height stays proportional to its
-   dollars. A $0 day is one hairline `i.none`. */
-.daycol > i { display: block; min-height: 3px; border-bottom: 2px solid var(--panel); }
-.daycol > i:last-child { border-bottom: 0; }
+/* one segment per model, stacked (2026-09-17), flush: no white stripe between
+   segments and no 3px floor (a day of five thin models read as white
+   bands); the colours part them. A $0 day
+   is one hairline `i.none`. */
+.daycol > i { display: block; }
 .daycol > i:first-child { border-radius: 2px 2px 0 0; }
+/* Spend's limits: one card, a window per block, a hairline between */
+.card.limits .lim + .lim { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.card.limits .meter { margin: 5px 0 4px; }
+.spend-key { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 0; }
+.spend-key .pkey > i { width: 10px; height: 10px; border-radius: 2px; }
 .daycol > i:hover { filter: brightness(1.12) saturate(1.1); }
 .daycol > i.none { background: var(--accent); min-height: 1px; height: 1px; }
 .daycol:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
@@ -895,6 +917,9 @@ td.n, th.n { text-align: right; }
 .src-head { padding: 12px 16px 10px; border-bottom: 1px solid var(--line); }
 .src-head h3 { margin: 0; }
 .src-head .small { display: block; margin-top: 3px; }
+/* The section's live-facts line stays one line (2026-09-30: the page was "too
+   big"); the whole sentence is its tooltip. */
+.src-head .src-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Fixed layout + a colgroup (views/sources.js): long prose in one cell cannot
    re-align the header above it. */
 .src-table { table-layout: fixed; }
@@ -930,6 +955,23 @@ td.n, th.n { text-align: right; }
 .src-acct a { color: inherit; text-decoration: none; }
 .src-acct a:hover { color: var(--accent); text-decoration: underline; }
 .src-last { white-space: nowrap; }
+/* A folded row (2026-09-30): the name is the page's link, the rest of the row
+   unfolds the account lines under the summary. */
+.src-link { color: inherit; font-weight: 700; text-decoration: none; }
+.src-link:hover { color: var(--accent); text-decoration: underline; }
+.src-to { font-size: 13px; }
+.src-chev { display: inline-block; width: 14px; }
+.src-chev::before {
+  content: ''; display: inline-block; width: 5px; height: 5px; vertical-align: 2px;
+  border: solid var(--muted); border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); transition: transform .12s;
+}
+.src-row.open .src-chev::before { transform: rotate(45deg); vertical-align: 3px; }
+.src-chev.none::before { display: none; }
+.src-sum { color: var(--muted); }
+.src-sum a { color: inherit; text-decoration: none; }
+.src-sum a:hover { color: var(--accent); text-decoration: underline; }
+.src-fail-inline { color: var(--red); font-size: 12px; margin-left: 10px; }
+.src-accts { margin: 6px 0 2px 14px; }
 .src-legend .dot { display: inline-block; margin: 0 5px 0 12px; vertical-align: 1px; }
 .src-sep { margin: 0 6px; }
 

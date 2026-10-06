@@ -113,6 +113,29 @@ func (s *Server) setAskKind(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, a)
 }
 
+// rewordAsk: an open card's words rewritten in place (threads.RewordAsk) —
+// `lifectl ask <id> set --title … --say … --detail …`. Quiet: no push, no wake.
+func (s *Server) rewordAsk(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Title, Detail, Say, By string }
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		jsonErr(w, 400, "bad json")
+		return
+	}
+	if in.By == "" {
+		in.By = "owner"
+	}
+	a, err := s.thr.RewordAsk(r.PathValue("id"), in.Title, in.Detail, in.Say, in.By)
+	if err != nil {
+		code := 409
+		if err.Error() == "no such ask" {
+			code = 404
+		}
+		jsonErr(w, code, err.Error())
+		return
+	}
+	writeJSON(w, 200, a)
+}
+
 // retryAsk: the Restart button on an error card. Replays the turn the session
 // died on and closes the card (threads.RetryAsk).
 func (s *Server) retryAsk(w http.ResponseWriter, r *http.Request) {

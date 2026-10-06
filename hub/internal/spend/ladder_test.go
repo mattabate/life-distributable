@@ -27,7 +27,7 @@ func TestPickerStepDown(t *testing.T) {
 	for _, c := range []struct {
 		util float64
 		want string
-	}{{84, "claude-fable-5-1"}, {85, "claude-opus-5-5"}, {94, "claude-opus-5-5"}, {95, "claude-sonnet-5"}, {100, "claude-sonnet-5"}} {
+	}{{84, "claude-fable-5-1"}, {85, "claude-opus-5-5"}, {94, "claude-opus-5-5"}, {95, "claude-sonnet-5-5"}, {100, "claude-sonnet-5-5"}} {
 		p := pickerWith(`{"five_hour":{"utilization":` + jsonNum(c.util) + `,"resets_at":"` + later + `"}}`)
 		if got := p.pick(ctx, now); got != c.want {
 			t.Errorf("shared %v%%: got %s want %s", c.util, got, c.want)
@@ -64,7 +64,7 @@ func TestPickFromAndPolicy(t *testing.T) {
 		t.Fatalf("off-ladder: %s", got)
 	}
 	p.closed["claude-opus-5-5"] = time.Now()
-	if got := p.PickFrom(ctx, "claude-opus-5-5"); got != "claude-sonnet-5" {
+	if got := p.PickFrom(ctx, "claude-opus-5-5"); got != "claude-sonnet-5-5" {
 		t.Fatalf("opus closed: %s", got)
 	}
 
@@ -86,7 +86,7 @@ func TestPickFromAndPolicy(t *testing.T) {
 		t.Fatalf("build checkin: %+v", r)
 	}
 	// Sonnet only when the session is pinned to it (a rote lane).
-	if r := pol.Resolve("checkin", "claude-sonnet-5", ""); r.Model != "claude-sonnet-5" {
+	if r := pol.Resolve("checkin", "claude-sonnet-5-5", ""); r.Model != "claude-sonnet-5-5" {
 		t.Fatalf("pinned checkin: %+v", r)
 	}
 	// No launch carries --max-turns: a turn's length is not a lever.
@@ -107,7 +107,7 @@ func TestPickFromAndPolicy(t *testing.T) {
 	}
 	// A partial config keeps the defaults it does not name.
 	cfg := (&Policy{Triggers: map[string]Rule{"checkin": {Model: "claude-haiku-4-5-20251001"}}}).Merge(DefaultPolicy())
-	if cfg.Triggers["job"].Model != "claude-sonnet-5" || cfg.Triggers["checkin"].Model != "claude-haiku-4-5-20251001" || cfg.DefaultClass != "judgment" {
+	if cfg.Triggers["job"].Model != "claude-sonnet-5-5" || cfg.Triggers["checkin"].Model != "claude-haiku-4-5-20251001" || cfg.DefaultClass != "judgment" {
 		t.Fatalf("merge: %+v", cfg)
 	}
 	if !pol.ValidClass("build") || !pol.ValidClass("auto") || pol.ValidClass("cheap") {
@@ -130,7 +130,7 @@ func TestPickerLadder(t *testing.T) {
 	}
 	// …and opus too → sonnet.
 	p = pickerWith(`{"five_hour":{"utilization":40,"resets_at":"` + later + `"},"seven_day_fable":{"utilization":100,"resets_at":"` + later + `"},"seven_day_opus":{"utilization":101,"resets_at":"` + later + `"}}`)
-	if got := p.pick(ctx, now); got != "claude-sonnet-5" {
+	if got := p.pick(ctx, now); got != "claude-sonnet-5-5" {
 		t.Fatalf("opus full: %s", got)
 	}
 	// A full bucket whose reset is in the past is stale → ignored.
@@ -140,7 +140,7 @@ func TestPickerLadder(t *testing.T) {
 	}
 	// Shared bucket full → bottom rung (nothing better exists).
 	p = pickerWith(`{"five_hour":{"utilization":100,"resets_at":"` + later + `"}}`)
-	if got := p.pick(ctx, now); got != "claude-sonnet-5" {
+	if got := p.pick(ctx, now); got != "claude-sonnet-5-5" {
 		t.Fatalf("shared full: %s", got)
 	}
 	// A run that just died on a limit closes its rung for an hour even
@@ -306,7 +306,7 @@ func TestExplainFromPinnedRung(t *testing.T) {
 		`"seven_day_fable":{"utilization":100,"resets_at":"` + later + `"},` +
 		`"seven_day_opus":{"utilization":100,"resets_at":"` + later + `"}}`)
 	m, why := full.ExplainFrom(context.Background(), now, "claude-opus-5-5")
-	if m != "claude-sonnet-5" {
+	if m != "claude-sonnet-5-5" {
 		t.Fatalf("model = %q (%q)", m, why)
 	}
 	if !strings.Contains(strings.ToLower(why), "opus") || strings.Contains(strings.ToLower(why), "fable") {
@@ -357,7 +357,7 @@ func TestBelowAndNotAbove(t *testing.T) {
 		{"", "", ""}, // no cap: the policy's own rung
 		{"", "claude-opus-5-5", "claude-opus-5-5"},                                    // top rung clamped down
 		{"claude-opus-5-5", "claude-opus-5-5", "claude-opus-5-5"},                     // already there
-		{"claude-sonnet-5", "claude-opus-5-5", "claude-sonnet-5"},                     // never clamped UP
+		{"claude-sonnet-5-5", "claude-opus-5-5", "claude-sonnet-5-5"},                 // never clamped UP
 		{"claude-haiku-4-5-20251001", "claude-opus-5-5", "claude-haiku-4-5-20251001"}, // off-ladder id left alone
 		{"", "claude-mythos-9", ""},                                                   // a floor the ladder does not list
 	}
@@ -379,7 +379,8 @@ func (w Window) by_modelKeys() []string {
 func TestCurrentMapsRetiredRungs(t *testing.T) {
 	for in, want := range map[string]string{
 		"claude-fable-5": "claude-fable-5-1", "claude-opus-5": "claude-opus-5-5",
-		"claude-fable-5-1": "claude-fable-5-1", "claude-sonnet-5": "claude-sonnet-5", "": "",
+		"claude-sonnet-5":  "claude-sonnet-5-5",
+		"claude-fable-5-1": "claude-fable-5-1", "claude-sonnet-5-5": "claude-sonnet-5-5", "": "",
 	} {
 		if got := Current(in); got != want {
 			t.Errorf("Current(%q) = %q, want %q", in, got, want)

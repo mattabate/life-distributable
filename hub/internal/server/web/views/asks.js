@@ -59,6 +59,17 @@ async function resolveAskGlobal(id, state) {
   return act(() => post(`/asks/${id}/resolve`, { state }), 'ask ' + state, render);
 }
 
+// The desktop app's Install (2026-09-30): the hub's `mac` lane builds the
+// desktop app if nothing is staged, then restarts it on the build; the hub
+// closes the card on the click (by "app") and reopens it if the Mac still
+// reports an older build 10 min later.
+async function macInstall(id) {
+  return act(async () => {
+    const r = await post('/app/install', { lane: 'mac', ask: id });
+    return r;
+  }, 'installing on the Mac', render);
+}
+
 // ================= Respond (prompts engine phase 3, 2026-08-27) =================
 // One control for the one act. A response to a card has three parts and used
 // to be three buttons that could each only do one of them: an OUTCOME (their

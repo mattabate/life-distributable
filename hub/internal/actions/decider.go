@@ -28,6 +28,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"time"
 )
 
 type Decider struct{ path string }
@@ -48,6 +49,22 @@ func (d *Decider) hash() string {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+
+// SetAt is when the code the hub holds was made: the hash file's write time
+// (decider-set.sh replaces the file, so it is the last rotation). Zero when
+// unarmed. It is the one fact about the current code that is not a secret,
+// and it is what a refused code gets compared with, so a refusal can say
+// which side is older with a date on each.
+func (d *Decider) SetAt() time.Time {
+	if d == nil || d.path == "" {
+		return time.Time{}
+	}
+	fi, err := os.Stat(d.path)
+	if err != nil {
+		return time.Time{}
+	}
+	return fi.ModTime()
 }
 
 // Verify is constant-time and never logs the secret.

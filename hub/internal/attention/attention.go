@@ -2,7 +2,7 @@
 // the owner, bundled by session, on a given surface. Both clients used to
 // compute this themselves and printed different numbers for one pile of asks.
 // The hub now builds the board and the clients draw it:
-// GET /api/v1/board?surface=web|mobile.
+// GET /api/v1/board?surface=web|mobile|desktop.
 //
 // The rules below read
 // `store.Dated` rows, the same read model `calendar.Agenda` places on days —
@@ -24,6 +24,9 @@
 //     `surface` still rides the ask (it decides which link the phone draws
 //     as a button), but nothing here reads it: both surfaces get the same
 //     count, the same bundles, the same order.
+//   - THE ONE EXCEPTION: AN INSTALL CARD IS THE DEVICE'S. The phone's board
+//     (`mobile`) leaves out the Mac's build, the desktop app's (`desktop`)
+//     leaves out the phone's; the web console (`web`) lists both.
 //   - An ask the owner has answered is the agent's move: it is on neither
 //     board, only in its chat.
 //   - On both, dated steps (a fired calendar item is its own card) list on their own
@@ -228,7 +231,7 @@ func Build(surface string, asks []threads.Ask, acts []actions.Action, ths []thre
 // is where something is blocked on the owner; the Calendar tab already
 // counts those rows.
 func BuildRows(surface string, rows []store.Dated, ths []threads.Thread) Board {
-	if surface != "mobile" {
+	if surface != "mobile" && surface != "desktop" {
 		surface = "web"
 	}
 	b := Board{Surface: surface, Calendar: []threads.Ask{}, Sessions: []Session{},
@@ -247,6 +250,11 @@ func BuildRows(surface string, rows []store.Dated, ths []threads.Thread) Board {
 		// board whole — count, pills, bundle, steps, the card a row opens on —
 		// and lives on in its chat, where it says "waiting on agent".
 		case r.Kind == "ask" && r.State == "answered":
+		// AN INSTALL CARD SHOWS ONLY ON THE DEVICE IT UPDATES: the phone's
+		// board drops the Mac's build, the desktop app's drops the phone's,
+		// and the web console lists both. That is the ONE thing `surface`
+		// decides; every other card is on every board.
+		case r.Kind == "ask" && hiddenInstall(surface, r):
 		case r.Kind == "ask" && threads.OwnerClass(r.AskClass):
 			ownerRows = append(ownerRows, r)
 		case r.Kind == "ask":
@@ -255,7 +263,8 @@ func BuildRows(surface string, rows []store.Dated, ths []threads.Thread) Board {
 			actRows = append(actRows, r)
 		}
 	}
-	// The same board for both surfaces; `surface` is only echoed.
+	// The same board for every surface but for the install rule
+	// above; `surface` is otherwise only echoed.
 	b.build(askRows, actRows, running, title)
 	// The owner's own dated work joins the calendar list after the counted rows,
 	// oldest day first — the list is the same on both surfaces.
@@ -265,6 +274,21 @@ func BuildRows(surface string, rows []store.Dated, ths []threads.Thread) Board {
 	b.Badges.YourTurn = b.Count
 	b.headings(ths)
 	return b
+}
+
+// hiddenInstall: an install card for the other device. `mobile` never lists
+// the Mac's build, `desktop` never lists the phone's; `web` lists both.
+func hiddenInstall(surface string, r store.Dated) bool {
+	if r.AskKind != "install" {
+		return false
+	}
+	switch threads.InstallTarget(r.AskKind, r.Title) {
+	case "mac":
+		return surface == "mobile"
+	case "phone":
+		return surface == "desktop"
+	}
+	return false
 }
 
 // steps hands each LISTED session the dated steps that sit in its chat, and

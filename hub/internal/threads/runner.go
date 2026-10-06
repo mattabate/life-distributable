@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -96,6 +97,64 @@ type heldResult struct {
 	Env resultEnvelope `json:"env"`
 	Tok Tokens         `json:"tok"` // usage of every folded sub-turn, this one included
 	At  time.Time      `json:"at"`  // when the hub saw the result line
+	// Turn: the turn the folded result ended (`r.turnID()` at the hold). A
+	// held reply is written LATER — when the owner's next message opens a turn
+	// of its own — and by then the run's turn counter has moved on; stamping
+	// the reply with the current turn put it under the NEW turn's message, so
+	// its read card drew below every tool call that message went on to make.
+	// The read card sticks where it appears in the tool chain.
+	Turn string `json:"turn,omitempty"`
+}
+
+// heldTurn: the turn a folded result ended. A held row from before `Turn`
+// was stamped falls back to the turn before the one a message opened after
+// the hold; a steered message never opens one, so that case stays put.
+func (m *Manager) heldTurn(r run, h heldResult) string {
+	if h.Turn != "" {
+		return h.Turn
+	}
+	if r.turns > 1 {
+		var opened int
+		m.db.QueryRow(`SELECT COUNT(*) FROM thread_messages WHERE run_id=? AND role!='claude' AND delivered_at > ?
+			AND id=(SELECT MIN(id) FROM thread_messages WHERE run_id=? AND role!='claude')`, r.turnID(), ts(h.At), r.turnID()).Scan(&opened)
+		if opened > 0 {
+			prev := r
+			prev.turns--
+			return prev.turnID()
+		}
+	}
+	return r.turnID()
+}
+
+// backfillHeldReplyTurn repairs reply rows written before heldResult.Turn:
+// a claude row stamped with a turn that a message OPENED before it (the row
+// sits after that message and the turn's tool calls come after the row),
+// whose previous turn has no reply of its own, is that previous turn's
+// reply. Two such rows can chain (each turn's reply stamped one turn late),
+// so it repeats until nothing moves. Idempotent: a repaired row's old turn
+// then has its own reply, or is opened by no message.
+func (m *Manager) backfillHeldReplyTurn() {
+	const prev = `CASE WHEN CAST(substr(run_id, instr(run_id, '-t') + 2) AS INTEGER) = 2
+		THEN substr(run_id, 1, instr(run_id, '-t') - 1)
+		ELSE substr(run_id, 1, instr(run_id, '-t') + 1) || (CAST(substr(run_id, instr(run_id, '-t') + 2) AS INTEGER) - 1) END`
+	for i := 0; i < 10; i++ {
+		res, err := m.db.Exec(`UPDATE thread_messages SET run_id = ` + prev + ` WHERE id IN (
+			SELECT c.id FROM thread_messages c
+			WHERE c.role = 'claude' AND c.run_id LIKE '%-t%'
+			AND EXISTS (SELECT 1 FROM thread_events e WHERE e.thread_id = c.thread_id AND e.run_id = c.run_id AND e.kind = 'tool_use' AND e.ts > c.ts)
+			AND EXISTS (SELECT 1 FROM thread_messages u WHERE u.thread_id = c.thread_id AND u.run_id = c.run_id AND u.role != 'claude' AND u.ts < c.ts)
+			AND NOT EXISTS (SELECT 1 FROM thread_messages p WHERE p.thread_id = c.thread_id AND p.role = 'claude'
+				AND p.run_id = (SELECT ` + prev + ` FROM thread_messages x WHERE x.id = c.id)))`)
+		if err != nil {
+			log.Printf("threads: held reply turn backfill: %v", err)
+			return
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return
+		}
+		log.Printf("threads: %d reply row(s) moved to the turn they ended", n)
+	}
 }
 
 // heldResult decodes the run's held envelope, if any.
@@ -372,6 +431,9 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 			// (PutBlob keeps the upload's): a shared PDF is read page by page,
 			// not looked at as a picture.
 			paths := make([]string, len(q.atts))
+			// A document's copy under its own name in the intake in-box
+			// (obs.PutIntake): the path the session works from, never a hash.
+			intake := make([]string, len(q.atts))
 			docs := 0
 			for i, ref := range q.atts {
 				p, err := m.BlobPath(ref)
@@ -381,18 +443,25 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 				paths[i] = p
 				if !isImageBlob(ref) {
 					docs++
+					if m.IntakePath != nil {
+						intake[i] = m.IntakePath(ref)
+					}
 				}
 			}
+			const intakeNote = "each file is also saved under its own name in data/imports/intake/, the in-box — work from that path, and rename it `loaded_…` once it is imported"
 			switch {
 			case docs == 0:
 				fmt.Fprintf(&b, "\n\n[The owner attached %d image(s) from their phone — look at each with the Read tool before answering; they are also stored as app/photo observations (lifectl obs):", len(q.atts))
 			case docs == len(q.atts):
-				fmt.Fprintf(&b, "\n\n[The owner attached %d file(s) from their phone — read each with the Read tool before answering (a PDF: pages=\"1-5\" and on, up to 20 a call); they are also stored as app/upload observations (lifectl obs):", len(q.atts))
+				fmt.Fprintf(&b, "\n\n[The owner attached %d file(s) from their phone — read each with the Read tool before answering (a PDF: pages=\"1-5\" and on, up to 20 a call; %s); they are also stored as app/upload observations (lifectl obs):", len(q.atts), intakeNote)
 			default:
-				fmt.Fprintf(&b, "\n\n[The owner attached %d image(s) and %d file(s) from their phone — look at / read each with the Read tool before answering (a PDF: pages=\"1-5\" and on); they are also stored as app/photo and app/upload observations (lifectl obs):", len(q.atts)-docs, docs)
+				fmt.Fprintf(&b, "\n\n[The owner attached %d image(s) and %d file(s) from their phone — look at / read each with the Read tool before answering (a PDF: pages=\"1-5\" and on; %s); they are also stored as app/photo and app/upload observations (lifectl obs):", len(q.atts)-docs, docs, intakeNote)
 			}
 			for i, p := range paths {
 				fmt.Fprintf(&b, "\n  %d. %s", i+1, p)
+				if intake[i] != "" {
+					fmt.Fprintf(&b, " — saved as %s", intake[i])
+				}
 			}
 			b.WriteString("]")
 			// A snap with no words typed is still wordless, whatever preamble
@@ -433,10 +502,11 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 	}
 	// Check-ins may be answering nothing; the owner's messages and decisions
 	// usually resolve something — either way the agent sees what is pending.
-	// A steer lands in a turn that already read who else is live.
+	// A steer lands in a turn that already read who else is live and what is
+	// open for the owner everywhere (boardHeader).
 	peers := ""
 	if !midTurn {
-		peers = m.peersHeader(t.ID)
+		peers = m.boardHeader(t.ID) + m.peersHeader(t.ID)
 	}
 	return m.asksHeader(t.ID) + peers + prompt, nil
 }
@@ -983,7 +1053,7 @@ func (m *Manager) tail(r run) run {
 		case head.Type == "result" || (head.Type == "" && strings.Contains(line, `"result"`)):
 			var env resultEnvelope
 			if json.Unmarshal([]byte(line), &env) == nil {
-				h := heldResult{Env: env, Tok: env.tokens(), At: now}
+				h := heldResult{Env: env, Tok: env.tokens(), At: now, Turn: r.turnID()}
 				if prev, ok := r.heldResult(); ok {
 					h.Tok = addTokens(prev.Tok, h.Tok) // the folded sub-turns' usage rides on the reply
 				}
@@ -1228,13 +1298,71 @@ func describeTool(name string, input json.RawMessage) (string, string) {
 	if arg = firstLine(arg, 120); arg != "" {
 		title = name + " · " + arg
 	}
+	// The body is what the chat prints under the call once it is opened
+	// (EventRow, evRowHTML). It used to be the input as JSON, so a Read opened
+	// to `{"file_path": "…"}` under a title that already said the path. Now it is only what the title cannot say: a
+	// shell command whole (the title cuts it at 120), an edit as its old and
+	// new lines, a written file's text; nothing for a call the title covers
+	// (Read, Grep, Glob, a fetch, a search); `key: value` lines for the rest.
 	var body string
-	if name == "Bash" {
+	switch name {
+	case "Bash":
 		body = str("command")
-	} else if pretty, err := json.MarshalIndent(in, "", "  "); err == nil && len(in) > 0 {
-		body = string(pretty)
+	case "Edit":
+		body = editLines(str("old_string"), str("new_string"))
+	case "MultiEdit":
+		var parts []string
+		if edits, ok := in["edits"].([]any); ok {
+			for _, e := range edits {
+				if m, ok := e.(map[string]any); ok {
+					o, _ := m["old_string"].(string)
+					n, _ := m["new_string"].(string)
+					parts = append(parts, editLines(o, n))
+				}
+			}
+		}
+		body = strings.Join(parts, "\n\n")
+	case "Write":
+		body = str("content")
+	case "NotebookEdit":
+		body = str("new_source")
+	case "Read", "Grep", "Glob", "WebFetch", "WebSearch", "TodoWrite":
+		body = ""
+	default:
+		keys := make([]string, 0, len(in))
+		for k := range in {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var lines []string
+		for _, k := range keys {
+			v, ok := in[k].(string)
+			if !ok {
+				if raw, err := json.Marshal(in[k]); err == nil {
+					v = string(raw)
+				}
+			}
+			lines = append(lines, k+": "+firstLine(v, 200))
+		}
+		body = strings.Join(lines, "\n")
 	}
 	return title, truncate(body, eventBodyMax)
+}
+
+// editLines: an Edit as a reader sees a diff — the old lines behind "- ",
+// the new ones behind "+ ".
+func editLines(old, new string) string {
+	mark := func(prefix, s string) []string {
+		if s == "" {
+			return nil
+		}
+		var out []string
+		for _, l := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+			out = append(out, prefix+l)
+		}
+		return out
+	}
+	return strings.Join(append(mark("- ", old), mark("+ ", new)...), "\n")
 }
 
 // resultText flattens a tool_result content (string or [{type:text,text}]).
@@ -1549,8 +1677,10 @@ func isEndSentinel(text string) bool {
 // usage of any sub-turns folded into this one (heldResult). Caller holds m.mu.
 func (m *Manager) finishTurn(r run, h heldResult) run {
 	env := h.Env
+	// A result that was held belongs to the turn it ended, which may not be
+	// the run's current one any more (heldResult.Turn).
+	threadID, turn := r.thread, m.heldTurn(r, h)
 	r.held = ""
-	threadID, turn := r.thread, r.turnID()
 	now := time.Now()
 	ok := 1
 	kind, role, text := "message", "claude", strings.TrimSpace(env.Result)
@@ -1779,6 +1909,14 @@ func (m *Manager) relaunchBelow(r run, text string) bool {
 // is still the detail.
 func failureTitle(text string) string {
 	switch {
+	// A session limit names its reset, and the hub resumes the turn then
+	// (ResumePaused), so the title is when it is back.
+	case spend.IsSessionLimit(text):
+		now := time.Now()
+		if at, ok := spend.ResetAt(text, now); ok {
+			return "Session limit · back at " + spend.ClockWords(at, now)
+		}
+		return "Session limit"
 	case spend.IsLimitError(text):
 		return "Session paused: plan limit reached on every model"
 	case spend.IsUnsupportedModelError(text):

@@ -51,16 +51,25 @@ func TestCardPicksOneLane(t *testing.T) {
 
 func TestSpokenSentences(t *testing.T) {
 	for _, c := range []struct{ kind, class, title, thread, want string }{
-		{"approval", "", "Buy VEA", "", "Hey, I need your approval. Buy VEA."},
+		{"approval", "", "Buy VEA", "", "Hey, Buy VEA. It's waiting for your approval."},
 		{"approval", "", "", "", "Hey, something is waiting for your approval."},
 		{"read", "", "Done!", "Money", "Hey, about Money. Done!"},
 		{"needs_you", "step", "Water the plants", "Calendar", "Hey, a reminder. Water the plants."},
+		{"needs_you", "practice", "Perfect pitch: one round", "Calendar", "Hey, a reminder. Perfect pitch: one round."},
+		{"needs_you", "chore", "Take your supplements", "Calendar", "Hey, reminder to take your supplements."},
+		{"needs_you", "chore", "IKEA run", "Calendar", "Hey, reminder to IKEA run."},
 		{"error", "", "Crashed", "Build", "Hey, Build stopped on an error. Crashed."},
-		{"needs_you", "", "Pick one", "Build", "Hey, I need you on Build. Pick one."},
+		{"needs_you", "", "Pick one", "Build", "Hey, Pick one. It's for Build."},
 		{"needs_you", "", "Pick one", "", "Hey, Pick one."},
 	} {
 		if got := Spoken(c.kind, c.class, c.title, c.thread); got != c.want {
 			t.Errorf("Spoken(%q,%q,%q,%q) = %q, want %q", c.kind, c.class, c.title, c.thread, got, c.want)
 		}
+	}
+	if got, want := InstallSpoken("phone", 1523), "Hey, build 1523 is ready to install on your phone."; got != want {
+		t.Errorf("InstallSpoken phone = %q", got)
+	}
+	if got, want := InstallSpoken("mac", 1524), "Hey, build 1524 is ready to install on the desktop app."; got != want {
+		t.Errorf("InstallSpoken mac = %q", got)
 	}
 }

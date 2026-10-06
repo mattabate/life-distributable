@@ -1,6 +1,10 @@
 package notify
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+	"unicode"
+)
 
 // The one push funnel: an ask, a proposal and a calendar nag each used to
 // reach the owner through their own copy of "card lane if the notifier has
@@ -55,29 +59,64 @@ func Card(n Needer, kind, line, say, thread, card string) (said string, err erro
 // caller strips its own markup) — never a label form read in parts like
 // "To read. <title>. <session>". The owner's own dated work (a step, a
 // practice) is a reminder, not a session talking; a proposal asks for
-// approval, with no id in it.
+// approval, with no id in it. A chore (class "chore": only ever a spoken
+// class, the card's stays practice) is "reminder to <its title>".
+//
+// The thing leads and the session follows: "I need you on <session>" opened
+// every card with the same words before saying anything. An install card is
+// its own sentence, InstallSpoken.
 func Spoken(kind, class, title, thread string) string {
 	title = sentence(title)
 	if kind == "approval" {
 		if title == "" {
 			return "Hey, something is waiting for your approval."
 		}
-		return "Hey, I need your approval. " + title
+		return "Hey, " + title + " It's waiting for your approval."
 	}
 	if r := []rune(thread); len(r) > 80 {
 		thread = strings.TrimSpace(string(r[:80]))
 	}
 	switch {
-	case class == "step" || class == "practice":
+	case class == "chore" && title != "":
+		// A chore's title is the thing to do, so the line is one sentence.
+		return "Hey, reminder to " + lowerFirst(title)
+	case class == "step" || class == "practice" || class == "chore":
 		return "Hey, a reminder. " + title
 	case thread == "":
 		return "Hey, " + title
 	case kind == "read":
 		return "Hey, about " + thread + ". " + title
+	case kind == "error" && strings.HasPrefix(title, "Session limit"):
+		// "Session limit · back at 2:40 AM." — a pause with an end, not a crash.
+		if _, at, ok := strings.Cut(title, " back at "); ok {
+			return "Hey, " + thread + " hit the session limit. It picks up on its own at " + at
+		}
+		return "Hey, " + thread + " hit the session limit."
 	case kind == "error":
 		return "Hey, " + thread + " stopped on an error. " + title
 	}
-	return "Hey, I need you on " + thread + ". " + title
+	return "Hey, " + title + " It's for " + thread + "."
+}
+
+// InstallSpoken is an install card's line: which build, for which device.
+func InstallSpoken(target string, build int) string {
+	device := "your phone"
+	if target == "mac" {
+		device = "the desktop app"
+	}
+	return fmt.Sprintf("Hey, build %d is ready to install on %s.", build, device)
+}
+
+// lowerFirst puts a title mid-sentence: "Take your supplements" → "take your
+// supplements". A first word with a capital further in (IKEA, iPhone) or a
+// lone "I" is a name and keeps its case.
+func lowerFirst(s string) string {
+	word, _, _ := strings.Cut(s, " ")
+	r := []rune(word)
+	if len(r) < 2 || !unicode.IsUpper(r[0]) || strings.ToLower(string(r[1:])) != string(r[1:]) {
+		return s
+	}
+	return string(unicode.ToLower(r[0])) + s[len(string(r[0])):]
 }
 
 // sentence ends s with a stop unless it already has one.

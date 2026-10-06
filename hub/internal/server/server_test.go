@@ -23,7 +23,6 @@ import (
 	"life/hub/internal/obs"
 	"life/hub/internal/recs"
 	"life/hub/internal/sched"
-	"life/hub/internal/sessions"
 	"life/hub/internal/store"
 	"life/hub/internal/syncruns"
 	"life/hub/internal/threads"
@@ -40,8 +39,6 @@ func newTest(t *testing.T) *Server {
 func newTestDB(t *testing.T) (*Server, *store.DB) {
 	cfg := &config.Config{ListenAddr: "127.0.0.1:0", ClaudeProjectsDir: t.TempDir(), Root: t.TempDir(),
 		Projects: []config.Project{{Name: "life", Dir: "/Users/owner/life"}}}
-	m := sessions.New("life", t.TempDir(), "/usr/local/bin/claude")
-	m.Run = func(n string, a ...string) ([]byte, error) { return []byte(""), nil }
 	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +55,7 @@ func newTestDB(t *testing.T) (*Server, *store.DB) {
 	th, _ := threads.New(db, "/usr/local/bin/claude", filepath.Join(t.TempDir(), "runs"), "life", func(p string) (string, bool) { return "/tmp", p == "life" }, nil, nil)
 	th.Summarize = nil // no claude in tests
 	th.Run = func(string, ...string) ([]byte, error) { return nil, nil }
-	s := New(cfg, "secret", m, q, sc, gs, ob, th)
+	s := New(cfg, "secret", q, sc, gs, ob, th)
 	s.Runs, _ = syncruns.New(db)
 	rc, _ := recs.New(db)
 	s.SetRecs(rc)
@@ -585,7 +582,7 @@ func TestObservationsBlobFirstAndAfterID(t *testing.T) {
 	if w := do("POST", "/api/v1/blobs?ext=../x", "pixels"); w.Code != 400 {
 		t.Fatal("bad ext accepted:", w.Code)
 	}
-	w = do("POST", "/api/v1/observations/batch", `{"source":"car","items":[
+	w = do("POST", "/api/v1/observations/batch", `{"source":"laptop","items":[
 		{"kind":"screen","uniq_key":"mac:1","blob_ref":"`+b.Ref+`"},
 		{"kind":"click","uniq_key":"mac:2","tz":"EDT"},
 		{"kind":"marker","uniq_key":"mac:3"}]}`)
@@ -593,11 +590,11 @@ func TestObservationsBlobFirstAndAfterID(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	var rows []obs.Observation
-	json.Unmarshal(do("GET", "/api/v1/observations?source=car&limit=1", "").Body.Bytes(), &rows)
+	json.Unmarshal(do("GET", "/api/v1/observations?source=laptop&limit=1", "").Body.Bytes(), &rows)
 	if len(rows) != 1 || rows[0].Kind != "marker" {
 		t.Fatalf("newest first: %+v", rows)
 	}
-	json.Unmarshal(do("GET", "/api/v1/observations?source=car&limit=5&after_id="+strconv.FormatInt(rows[0].ID-2, 10), "").Body.Bytes(), &rows)
+	json.Unmarshal(do("GET", "/api/v1/observations?source=laptop&limit=5&after_id="+strconv.FormatInt(rows[0].ID-2, 10), "").Body.Bytes(), &rows)
 	if len(rows) != 2 || rows[0].Kind != "click" || rows[1].Kind != "marker" || rows[0].TZ != "America/New_York" {
 		t.Fatalf("after_id: %+v", rows)
 	}
@@ -966,9 +963,21 @@ func TestDeciderCheck(t *testing.T) {
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
 		}
-		var out map[string]bool
-		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		var raw map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
 			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for k, v := range raw {
+			if b, isBool := v.(bool); isBool {
+				out[k] = b
+			}
+		}
+		// set_at is the date a refusal is read against: there once a code
+		// is armed, absent before.
+		_, dated := raw["set_at"]
+		if dated != out["armed"] {
+			t.Fatalf("set_at present=%v but armed=%v: %s", dated, out["armed"], w.Body.String())
 		}
 		return out
 	}
@@ -1077,14 +1086,10 @@ func TestSpendAndSessions(t *testing.T) {
 		!strings.Contains(w.Body.String(), `"days":0`) || !strings.Contains(w.Body.String(), `"key":"life"`) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
-	if w := get("POST", "/api/v1/sessions", `{"project":"nope"}`); w.Code != 404 {
-		t.Fatal(w.Code)
-	}
-	if w := get("POST", "/api/v1/sessions", `{"project":"life"}`); w.Code != 200 && w.Code != 201 {
+	// The remote-control lane is gone (2026-09-30): nothing starts a
+	// `claude remote-control` server from the hub any more.
+	if w := get("POST", "/api/v1/sessions", `{"project":"life"}`); w.Code != 404 && w.Code != 405 {
 		t.Fatal(w.Code, w.Body.String())
-	}
-	if w := get("DELETE", "/api/v1/sessions/other-thing", ""); w.Code != 400 {
-		t.Fatal(w.Code)
 	}
 }
 
@@ -1101,7 +1106,7 @@ func TestDefaultModelToggle(t *testing.T) {
 	}
 	w := do("GET", "/api/v1/spend/model", "")
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"explicit":false`) ||
-		!strings.Contains(w.Body.String(), `"claude-fable-5-1","claude-opus-5-5","claude-sonnet-5"`) ||
+		!strings.Contains(w.Body.String(), `"claude-fable-5-1","claude-opus-5-5","claude-sonnet-5-5"`) ||
 		!strings.Contains(w.Body.String(), `"rungs":[{"model":"claude-fable-5-1","open":`) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
@@ -1400,6 +1405,45 @@ func TestBudgetAndModelClass(t *testing.T) {
 // The Respond control on both surfaces posts one prompt: what it answers,
 // the outcome, where it goes and when. The reference has to survive the wire
 // (an untagged `in_reply_to` decoded to "" and the whole point was lost).
+// An open card's words can be rewritten in place (`lifectl ask <id> set`),
+// quietly, and a session can be found by what it knows (`lifectl threads
+// --q`) — the two halves of cross-session care (2026-10-02).
+func TestRewordAskAndFindThreads(t *testing.T) {
+	s := newTest(t)
+	do := func(method, url, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, url, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer secret")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	var th struct{ ID string }
+	json.Unmarshal(do("POST", "/api/v1/threads", `{"prompt":"Sort out the Lemurs brief.","title":"Face and supplements"}`).Body.Bytes(), &th)
+	var a struct{ ID string }
+	json.Unmarshal(do("POST", "/api/v1/asks", `{"thread_id":"`+th.ID+`","title":"Hand over the Lemurs AI email","kind":"physical"}`).Body.Bytes(), &a)
+
+	w := do("POST", "/api/v1/asks/"+a.ID+"/reword", `{"title":"Forward the Lemurs email","say":"Hey, forward the Lemurs email.","by":"claude:thread:other"}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"title":"Forward the Lemurs email"`) || !strings.Contains(w.Body.String(), `"said":"Hey, forward the Lemurs email."`) || !strings.Contains(w.Body.String(), `"state":"open"`) {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if w := do("POST", "/api/v1/asks/"+a.ID+"/reword", `{}`); w.Code != 409 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if w := do("POST", "/api/v1/asks/ask-nope/reword", `{"title":"x"}`); w.Code != 404 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	do("POST", "/api/v1/threads", `{"prompt":"Draft today's tweet.","title":"Daily tweet draft"}`)
+	var found []struct{ ID string }
+	json.Unmarshal(do("GET", "/api/v1/threads?q=lemurs+supplements", "").Body.Bytes(), &found)
+	if len(found) != 1 || found[0].ID != th.ID {
+		t.Fatalf("%+v", found)
+	}
+	json.Unmarshal(do("GET", "/api/v1/threads", "").Body.Bytes(), &found)
+	if len(found) != 2 {
+		t.Fatalf("%+v", found)
+	}
+}
+
 func TestPromptsAPI(t *testing.T) {
 	s := newTest(t)
 	do := func(method, url, body string) *httptest.ResponseRecorder {
@@ -1677,5 +1721,40 @@ func TestThreadsCarryTheirModel(t *testing.T) {
 	}
 	if w := s.do(t, "GET", "/api/v1/threads/"+b.ID, nil); strings.Contains(w.Body.String(), `"model"`) {
 		t.Fatal(w.Body.String())
+	}
+}
+
+// The desktop app reports its build on launch (POST /api/v1/app/mac) — the
+// Mac's device report, kept as a setting since the Mac is never a push
+// device — and the "Install desktop build N" cards it satisfies close on the
+// spot.
+func TestMacBuildReportClosesDesktopInstallCards(t *testing.T) {
+	s := newTest(t)
+	th, _ := s.thr.Create("", "life", "", "Desktop install.", "", "", nil)
+	a, _ := s.thr.AddAsk(th.ID, "", "Install desktop build 1512", "the install cell", "install", "")
+	do := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/api/v1/app/mac", strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer secret")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	if w := do(`{}`); w.Code != 400 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := do(`{"build":1510}`); w.Code != 204 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if got, _ := s.thr.GetAsk(a.ID); got.State != "open" || got.Target != "mac" {
+		t.Fatalf("closed by an older build: %+v", got)
+	}
+	if w := do(`{"build":1512}`); w.Code != 204 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if got, _ := s.thr.GetAsk(a.ID); got.State != "done" || got.Resolution != "the desktop app reports build 1512" {
+		t.Fatalf("%+v", got)
+	}
+	if s.thr.MacBuild() != 1512 {
+		t.Fatalf("setting: %d", s.thr.MacBuild())
 	}
 }

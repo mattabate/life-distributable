@@ -35,9 +35,6 @@ func (s *Server) routes() []route {
 		{"POST /api/v1/spend/budget/clear", s.spendBudgetClear, false},
 		{"GET /api/v1/usage", s.getUsage, false},
 		{"PUT /api/v1/usage", s.setUsage, false},
-		{"GET /api/v1/sessions", s.listSessions, false},
-		{"POST /api/v1/sessions", s.startSession, false},
-		{"DELETE /api/v1/sessions/{name}", s.killSession, false},
 		{"GET /api/v1/actions", s.listActions, false},
 		{"POST /api/v1/actions", s.proposeAction, false},
 		{"GET /api/v1/actions/{id}", s.getAction, false},
@@ -91,6 +88,7 @@ func (s *Server) routes() []route {
 		{"POST /api/v1/asks/{id}/retry", s.retryAsk, false},
 		{"POST /api/v1/asks/{id}/surface", s.setAskSurface, false},
 		{"POST /api/v1/asks/{id}/kind", s.setAskKind, false},
+		{"POST /api/v1/asks/{id}/reword", s.rewordAsk, false},
 		{"GET /api/v1/calendar", s.calendarView, false},
 		{"POST /api/v1/calendar", s.calendarAdd, false},
 		{"GET /api/v1/calendar/{id}", s.calendarGet, false},
@@ -109,6 +107,7 @@ func (s *Server) routes() []route {
 		{"POST /api/v1/devices/test", s.testPush, false},
 		{"POST /api/v1/app/install", s.appInstall, false},
 		{"GET /api/v1/app/install/status", s.appInstallStatus, false},
+		{"POST /api/v1/app/mac", s.macBuild, false},
 		{"GET /ota/{token}/{file}", s.ota, true},
 	}
 }

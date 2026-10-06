@@ -33,8 +33,9 @@ func (s *Server) postVoice(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"speaking": s.thr.Voice.Live(now)})
 }
 
-// postVoiceHush: a double tap on a card's "Waiting to speak" — the line goes,
-// the card stays (notify.Hush).
+// postVoiceHush: a double tap on a card's "Waiting to speak" or "Speaking" —
+// the line goes (the Mac's voice stops within a second), the card stays
+// (notify.Hush), and its "speaking" mark ends at once.
 func (s *Server) postVoiceHush(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Card string `json:"card"`
@@ -47,5 +48,6 @@ func (s *Server) postVoiceHush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Push.Hush(in.Card)
+	s.thr.Voice.EndCard(in.Card)
 	w.WriteHeader(204)
 }

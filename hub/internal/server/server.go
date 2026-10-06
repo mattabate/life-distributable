@@ -27,7 +27,6 @@ import (
 	"life/hub/internal/obs"
 	"life/hub/internal/recs"
 	"life/hub/internal/sched"
-	"life/hub/internal/sessions"
 	"life/hub/internal/spend"
 	"life/hub/internal/syncruns"
 	"life/hub/internal/threads"
@@ -75,7 +74,6 @@ var consoleBuild = func() string {
 type Server struct {
 	cfg   *config.Config
 	token string
-	sess  *sessions.Manager
 	acts  *actions.Queue
 	sch   *sched.Scheduler
 	goals *goals.Store
@@ -123,8 +121,8 @@ type Server struct {
 // in 4 h of parallel sessions shipping hub changes).
 func (s *Server) Draining() { s.stopOnce.Do(func() { close(s.stopping) }) }
 
-func New(cfg *config.Config, token string, sess *sessions.Manager, acts *actions.Queue, sch *sched.Scheduler, gs *goals.Store, os_ *obs.Store, thr *threads.Manager) *Server {
-	s := &Server{cfg: cfg, token: token, sess: sess, acts: acts, sch: sch, goals: gs, obs: os_, thr: thr, mux: http.NewServeMux(), usage: spend.NewCache(cfg.ClaudeProjectsDir), quota: spend.NewQuotaFetcher(), stopping: make(chan struct{})}
+func New(cfg *config.Config, token string, acts *actions.Queue, sch *sched.Scheduler, gs *goals.Store, os_ *obs.Store, thr *threads.Manager) *Server {
+	s := &Server{cfg: cfg, token: token, acts: acts, sch: sch, goals: gs, obs: os_, thr: thr, mux: http.NewServeMux(), usage: spend.NewCache(cfg.ClaudeProjectsDir), quota: spend.NewQuotaFetcher(), stopping: make(chan struct{})}
 	s.register()
 	if os_ != nil {
 		s.registerKinds()

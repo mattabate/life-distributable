@@ -31,7 +31,7 @@ func newThreadOut(t threads.Thread, model string) threadOut {
 }
 
 func (s *Server) listThreads(w http.ResponseWriter, r *http.Request) {
-	ts, err := s.thr.List(r.URL.Query().Get("archived") == "1")
+	ts, err := s.thr.Find(r.URL.Query().Get("q"), r.URL.Query().Get("archived") == "1")
 	if err != nil {
 		jsonErr(w, 500, err.Error())
 		return

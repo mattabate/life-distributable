@@ -563,6 +563,9 @@ const askInstallLink = detail =>
   ((detail || '').match(/https:\/\/[^\s)\]>"',;]+/) || (detail || '').match(/itms-services:\/\/[^\s)\]>"',;]+/) || [])[0];
 const askDetailShown = detail =>
   (detail || '').split('\n').filter(l => !/https:\/\/|itms-services:\/\//.test(l)).join('\n').trim();
+// Which device an install card is for (2026-09-30): the hub's `target`
+// ("phone" | "mac"), or — a calendar row, an older hub — the title's word.
+const askInstallTarget = a => a.target || (/^install (desktop|mac) build \d+/i.test(a.title || '') ? 'mac' : 'phone');
 
 // askBody: a long detail folds the way a long chat message does (isLongText)
 // — a screen's worth, faded, and a "Show all · N lines" button that opens it
@@ -636,7 +639,7 @@ function cardHTML(c, opened) {
       ${head}${titled ? `<div class="t">${mdInline(c.title)}</div>` : ''}
       ${said}${body}
       ${c.meta ? `<div class="row small muted">${c.meta}</div>` : ''}
-      <div class="acts">${c.closed ? `<span class="small muted">${c.closed}</span>` : acts}</div>${c.trail || ''}</div>`;
+      <div class="acts">${c.closed ? `<span class="small muted">${c.closed}</span>` : ''}${acts}</div>${c.trail || ''}</div>`;
 }
 // Markdown compared as words: links to their text, marks and a cut title's
 // "…" dropped. Used to spot a body line that only repeats the title.
@@ -663,8 +666,25 @@ function outcomeBtns(outcomes, arm) {
 // hub's word for its one outcome; a read closed by a reply carries the
 // reply's first line instead and stays a full card above the reply). What a
 // card wants from the owner, in one word, is the ask's own `verb` (store.AskVerb).
+// The paused card: a session limit is a wait with an end, so it is not the grey error: amber like "waiting", ⏸ and
+// PAUSED on the head line, and the wait itself as a bar from the moment it
+// stopped to the reset (hub `resumes_at`), the two clocks and what is left
+// under it. The hub resumes it at the reset; Resume now is the Restart.
+const PAUSE_MARK = '⏸︎';
+const pauseRe = /hit your (?:[a-z0-9 ]{0,24} )?limit[^\n]*?resets\s/i;
+const isPauseText = s => pauseRe.test(s || '');
+const clockShort = d => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+function pauseBarHTML(a) {
+  const from = new Date(a.created_at).getTime(), to = new Date(a.resumes_at).getTime(), now = Date.now();
+  const pct = to > from ? Math.max(0, Math.min(100, (now - from) / (to - from) * 100)) : 100;
+  const mins = Math.ceil((to - now) / 60000);
+  const left = mins <= 0 ? 'resuming…' : mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`;
+  return `<div class="pause-bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+    <div class="pause-foot"><span>${clockShort(new Date(from))}</span><span>${clockShort(new Date(to))} · ${left}</span></div>`;
+}
+
 function askHTML(a, opened) {
-  const id = esc(a.id), err = a.kind === 'error';
+  const id = esc(a.id), err = a.kind === 'error', paused = err && !!a.resumes_at;
   const open = !a.closed, answered = open && !a.open;
   // A read card is blue, never red: it asks the owner to read an answer, not
   // to unblock anything — red is for a stopped session. Replying to one does
@@ -673,14 +693,18 @@ function askHTML(a, opened) {
   // Install button IS the OTA link (the https form; the phone rewrites it),
   // and the link line leaves the detail.
   const read = a.kind === 'read' && open, install = a.kind === 'install' && open;
-  const link = install && askInstallLink(a.detail);
+  // The desktop app's build (2026-09-30, `target` mac): no link — Install
+  // runs the hub's `mac` lane, which builds if it must and restarts the app.
+  const mac = install && askInstallTarget(a) === 'mac';
+  const link = install && !mac && askInstallLink(a.detail);
   const dismiss = { label: 'Dismiss', js: `cardFold('ask','${id}')` };
   const respond = { label: 'Respond', js: `openRespond('${id}')`, primary: true };
-  const acts = a.folded ? [{ label: 'Reopen', js: `cardFold('ask','${id}',true)` }]
-    : !open ? []
-    // An error is a run that wants starting again.
-    : err ? [{ label: 'Restart', js: `retryAsk('${id}')`, primary: true }, dismiss]
-    : install ? [link ? { label: 'Install', href: link, primary: true } : respond, dismiss]
+  // A closed card carries Reopen when the hub says so (`reopen`: every kind
+  // but an install) — the done ones too, not just a fold.
+  const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('ask','${id}',true)` }] : [])
+    // An error is a run that wants starting again (2026-08-24).
+    : err ? [{ label: paused ? 'Resume now' : 'Restart', js: `retryAsk('${id}')`, primary: true }, dismiss]
+    : install ? [mac ? { label: 'Install', js: `macInstall('${id}')`, primary: true } : link ? { label: 'Install', href: link, primary: true } : respond, dismiss]
     // A read: Respond arms the reply (sending closes it, words or not); Read
     // is its silent close — done, "Read it", wakes nothing.
     : read ? [respond, { label: 'Read', js: `resolveAsk('${id}','done','${esc(((a.outcomes || [])[0] || {}).label || '')}')` }]
@@ -690,9 +714,9 @@ function askHTML(a, opened) {
     : (a.outcomes && a.outcomes.length ? outcomeBtns(a.outcomes, v => `openRespond('${id}','${v}')`) : [respond]).concat(dismiss);
   return cardHTML({
     ref: 'ask', id: a.id, title: a.title, verb: a.verb || 'for you',
-    tint: err ? 'err-card' : read ? 'read' : install ? 'install' : '',
-    mark: answered ? '⏳ ' : !open ? '✓ ' : err ? '⚠︎ ' : read ? '🔵 ' : install ? '📲 ' : '🔴 ',
-    body: err ? '' : askBody(install ? askDetailShown(a.detail) : (a.detail || ''), 'ask:' + a.id),
+    tint: paused && open ? 'paused' : err ? 'err-card' : read ? 'read' : install ? 'install' : '',
+    mark: answered ? '⏳ ' : !open ? '✓ ' : paused ? PAUSE_MARK + ' ' : err ? '⚠︎ ' : read ? '🔵 ' : install ? '📲 ' : '🔴 ',
+    body: paused && open ? pauseBarHTML(a) : err ? '' : askBody(install && !mac ? askDetailShown(a.detail) : (a.detail || ''), 'ask:' + a.id),
     said: a.said, thread: a.thread_id, acts, closed: open ? '' : esc(a.state),
     folded: a.folded === 'dismissed' ? '✕ dismissed' : a.folded ? '✓ read' : '',
   }, opened);
@@ -734,15 +758,14 @@ function actionHTML(a, opened) {
        <pre class="io mono">${esc(typeof a.exec_payload === 'string' ? a.exec_payload : JSON.stringify(a.exec_payload, null, 2))}</pre></details>`
     : '';
   const arm = v => a.thread_id ? `armActionReply('${id}','${v}')` : `decideAction('${id}',${v === 'approved'})`;
-  const acts = dismissed ? [{ label: 'Reopen', js: `cardFold('action','${id}',true)` }]
-    : !open ? [] : outcomeBtns(a.outcomes, arm).concat({ label: 'Dismiss', js: `cardFold('action','${id}')` });
+  const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('action','${id}',true)` }] : []) : outcomeBtns(a.outcomes, arm).concat({ label: 'Dismiss', js: `cardFold('action','${id}')` });
   return cardHTML({
     ref: 'action', id: a.id, title: a.title, tint: '', verb: 'approve',
     mark: open ? '🔴 ' : (a.state === 'denied' || a.state === 'failed') ? '✕ ' : '✓ ',
     body: askBody(a.detail || '', 'action:' + a.id) + payload,
     said: a.said, thread: a.thread_id,
     meta: `${pill(a.kind, kindPill[a.kind])} ${job ? pill('⚙ ' + job + ' job') : ''} ${a.project ? esc(a.project) : ''} <span>${ago(a.created_at)}</span>`,
-    acts, closed: open ? '' : esc(a.state), folded: dismissed ? '✕ dismissed' : '', trail: eventsHTML(a.events),
+    acts, closed: open ? '' : `${esc(a.state)}${a.decided_via ? ' via ' + esc(a.decided_via) : ''}${a.decided_at ? ' · ' + ago(a.decided_at) : ''}`, folded: dismissed ? '✕ dismissed' : '', trail: eventsHTML(a.events),
   }, opened);
 }
 
@@ -769,8 +792,7 @@ function recHTML(r, opened) {
   const id = esc(r.id), open = !r.closed;
   const dismissed = r.folded === 'dismissed';
   const note = r.decision_note ? ' — ' + mdInline(r.decision_note, false) : '';
-  const acts = dismissed ? [{ label: 'Reopen', js: `cardFold('rec','${id}',true)` }]
-    : !open ? [] : outcomeBtns(r.outcomes, v => `armRecReply('${id}','${v}')`).concat({ label: 'Dismiss', js: `cardFold('rec','${id}')` });
+  const acts = !open ? (r.reopen ? [{ label: 'Reopen', js: `cardFold('rec','${id}',true)` }] : []) : outcomeBtns(r.outcomes, v => `armRecReply('${id}','${v}')`).concat({ label: 'Dismiss', js: `cardFold('rec','${id}')` });
   return cardHTML({
     ref: 'rec', id: r.id, title: r.title, tint: 'rec', verb: 'rec',
     mark: open ? '💡 ' : r.status === 'declined' ? '✕ ' : '✓ ',

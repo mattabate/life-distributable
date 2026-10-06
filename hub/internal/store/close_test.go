@@ -25,15 +25,19 @@ func TestStandingIsTheClientsOldLists(t *testing.T) {
 		want                        Standing
 	}{
 		{"physical", "step", "open", "", "", true, Standing{Open: true, Lane: "chores"}},
-		{"physical", "step", "done", "", "hub", true, Standing{Closed: true, Lane: "chores"}},
+		{"physical", "step", "done", "", "hub", true, Standing{Closed: true, Lane: "chores", Reopen: true}},
 		{"decision", "", "open", "", "", false, Standing{Open: true, Lane: "mine"}},
 		{"decision", "", "answered", "", "", false, Standing{Lane: "mine"}},
-		{"decision", "", "done", "Read it", "app", false, Standing{Closed: true, Lane: "mine"}},
-		{"read", "", "done", "Read it", "web", false, Standing{Closed: true, Folded: "read", Lane: "mine"}},
-		{"read", "", "done", "thanks", "claude:thread:t", false, Standing{Closed: true, Lane: "agents"}},
-		{"read", "", "dismissed", "", "app", false, Standing{Closed: true, Folded: "dismissed", Lane: "mine"}},
+		{"decision", "", "done", "Read it", "app", false, Standing{Closed: true, Lane: "mine", Reopen: true}},
+		{"read", "", "done", "Read it", "web", false, Standing{Closed: true, Folded: "read", Lane: "mine", Reopen: true}},
+		{"read", "", "done", "thanks", "claude:thread:t", false, Standing{Closed: true, Lane: "agents", Reopen: true}},
+		{"read", "", "dismissed", "", "app", false, Standing{Closed: true, Folded: "dismissed", Lane: "mine", Reopen: true}},
 		{"install", "", "superseded", "", "claude:thread:t", false, Standing{Closed: true, Lane: "agents"}},
-		{"physical", "practice", "done", "", "app", false, Standing{Closed: true, Lane: "homework"}},
+		// An install card is closed by the phone's build check, not by the
+		// owner: the one closed ask with no Reopen.
+		{"install", "", "done", "tapped Install", "app", false, Standing{Closed: true, Lane: "mine"}},
+		{"decision", "", "superseded", "", "claude:thread:t", false, Standing{Closed: true, Lane: "agents"}},
+		{"physical", "practice", "done", "", "app", false, Standing{Closed: true, Lane: "homework", Reopen: true}},
 	} {
 		if got := AskStanding(c.kind, c.class, c.state, c.res, c.by, c.chore); got != c.want {
 			t.Errorf("AskStanding(%s,%s,%s,%q,%s) = %+v, want %+v", c.kind, c.class, c.state, c.res, c.by, got, c.want)
@@ -42,7 +46,7 @@ func TestStandingIsTheClientsOldLists(t *testing.T) {
 	for st, want := range map[string]Standing{
 		"proposed":  {Open: true, Lane: "mine"},
 		"approved":  {Closed: true, Lane: "mine"},
-		"dismissed": {Closed: true, Folded: "dismissed", Lane: "mine"},
+		"dismissed": {Closed: true, Folded: "dismissed", Lane: "mine", Reopen: true},
 	} {
 		if got := ActionStanding(st, "web"); got != want {
 			t.Errorf("ActionStanding(%s) = %+v, want %+v", st, got, want)
@@ -57,9 +61,10 @@ func TestStandingIsTheClientsOldLists(t *testing.T) {
 	}{
 		{"proposed", "", Standing{Open: true, Lane: "recs"}},
 		{"deferred", "", Standing{Lane: "recs"}},
-		{"accepted", "", Standing{Closed: true, Lane: "recs"}},
-		{"expired", RecDismissed, Standing{Closed: true, Folded: "dismissed", Lane: "recs"}},
-		{"expired", "", Standing{Closed: true, Lane: "recs"}},
+		{"accepted", "", Standing{Closed: true, Lane: "recs", Reopen: true}},
+		{"expired", RecDismissed, Standing{Closed: true, Folded: "dismissed", Lane: "recs", Reopen: true}},
+		{"expired", "", Standing{Closed: true, Lane: "recs", Reopen: true}},
+		{"superseded", "", Standing{Closed: true, Lane: "recs"}},
 	} {
 		if got := RecStanding(c.status, c.note); got != c.want {
 			t.Errorf("RecStanding(%s,%q) = %+v, want %+v", c.status, c.note, got, c.want)

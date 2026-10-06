@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"life/hub/internal/notify"
+	"life/hub/internal/spend"
 	"life/hub/internal/store"
 )
 
@@ -143,6 +144,10 @@ type Ask struct {
 	// speak", and a double tap drops the line, never the card (POST
 	// /voice/hush).
 	WaitingToSpeak bool `json:"waiting_to_speak,omitempty"`
+	// Speaking: this card's line is in the owner's ears right now
+	// (Voice.CardSpeaking). Play reads "Speaking" instead, and a double tap
+	// stops it.
+	Speaking bool `json:"speaking,omitempty"`
 	// CalID/CalDay: the calendar item that minted this ask, if any. A dated
 	// step ("renew the passport on the 27th") is a CALENDAR entry that happens
 	// to need the owner, not a session checking in. Both surfaces use these to badge the card with its date and drop the
@@ -180,6 +185,16 @@ type Ask struct {
 	Closed bool   `json:"closed"`
 	Folded string `json:"folded,omitempty"`
 	Lane   string `json:"lane"`
+	Reopen bool   `json:"reopen,omitempty"`
+	// Target: which device an install card updates — "phone" (the OTA link
+	// is the button) or "mac" (the button asks the hub to swap the staged
+	// desktop build in, 2026-09-30). Empty on every other kind.
+	Target string `json:"target,omitempty"`
+	// ResumesAt: a session-limit card (an error whose detail names the reset,
+	// spend.ResetAt) — when the hub starts the turn again by itself
+	// (ResumePaused). Both surfaces draw it as the paused card: amber, the
+	// wait as a bar toward this time, Resume now. Nil on every other card.
+	ResumesAt *time.Time `json:"resumes_at,omitempty"`
 	// Window: when it is owed — now (a card), or a step's on | by its day, or
 	// soon (store.ItemStampSet, the item's own `win`).
 	Window string `json:"window"`
@@ -193,7 +208,7 @@ func (a Ask) Step() bool { return a.CalID != "" && a.CalID == a.ID }
 func (a *Ask) stand() {
 	chore := a.Class == ClassStep && store.Chore("owner", a.CalDay, a.ThreadID)
 	s := store.AskStanding(a.Kind, a.Class, a.State, a.Resolution, a.ResolvedBy, chore)
-	a.Open, a.Closed, a.Folded, a.Lane = s.Open, s.Closed, s.Folded, s.Lane
+	a.Open, a.Closed, a.Folded, a.Lane, a.Reopen = s.Open, s.Closed, s.Folded, s.Lane, s.Reopen
 }
 
 // Outcome is one answer chip: the prompts `outcome` it posts ("" = words only,
@@ -255,6 +270,72 @@ func (m *Manager) SetAskKind(id, kind string) (Ask, error) {
 		return Ask{}, err
 	}
 	store.StampItem(m.db, id)
+	return m.GetAsk(id)
+}
+
+// RewordAsk rewrites an open card's words in place — title, the message it
+// leads with (`said`; a dated step's `say` until it fires), its steps — so a
+// card the owner's later words made stale reads true again instead of being
+// closed and raised anew. Quiet: no push, no wake; the row keeps its state and
+// the trail records the rewrite. "" leaves a field as it is. A closed card
+// keeps its words (they are what the owner answered), and an error card is the
+// hub's, not an agent's.
+func (m *Manager) RewordAsk(id, title, detail, say, by string) (Ask, error) {
+	a, err := m.GetAsk(id)
+	if err != nil {
+		return Ask{}, errors.New("no such ask")
+	}
+	if a.State != "open" && a.State != "answered" {
+		return Ask{}, errors.New("a closed card keeps its words")
+	}
+	if a.Kind == "error" {
+		return Ask{}, errors.New("an error card is the hub's")
+	}
+	title, detail, say = strings.TrimSpace(title), strings.TrimSpace(detail), strings.TrimSpace(say)
+	if title == "" && detail == "" && say == "" {
+		return Ask{}, errors.New("nothing to change: give --title, --say or --detail")
+	}
+	now := ts(time.Now())
+	sets, args, changed := []string{"updated_at=?"}, []any{now}, []string{}
+	if title != "" {
+		if len(title) > 200 {
+			title = title[:200]
+		}
+		sets, args, changed = append(sets, "title=?"), append(args, title), append(changed, "title")
+	}
+	if detail != "" {
+		sets, args, changed = append(sets, "detail=?"), append(args, detail), append(changed, "detail")
+	}
+	if say != "" {
+		if a.Step() && a.State != "open" {
+			sets, args = append(sets, "say=?"), append(args, say)
+		} else {
+			// The card leads with `said` on both surfaces and Play speaks it;
+			// a fired step is a card like any other.
+			sets, args = append(sets, "said=?, say=?"), append(args, say, say)
+		}
+		changed = append(changed, "message")
+	}
+	args = append(args, id)
+	tx, err := m.db.Begin()
+	if err != nil {
+		return Ask{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE items SET `+strings.Join(sets, ", ")+` WHERE id=?`, args...); err != nil {
+		return Ask{}, err
+	}
+	if err := store.StampItem(tx, id); err != nil {
+		return Ask{}, err
+	}
+	if _, err := tx.Exec(`INSERT INTO item_events (item_id, ts, actor, from_state, to_state, note) VALUES (?,?,?,?,?,?)`,
+		id, now, by, a.State, a.State, "reworded: "+strings.Join(changed, ", ")); err != nil {
+		return Ask{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Ask{}, err
+	}
+	log.Printf("ask %s: reworded (%s) by %s", id, strings.Join(changed, ", "), by)
 	return m.GetAsk(id)
 }
 
@@ -326,6 +407,9 @@ func (m *Manager) AddAskSaid(threadID, runID, title, detail, kind, check, surfac
 // spokenFallback is what a card with no `--say` speaks: notify.Spoken over
 // the card's title and its session's name with their markdown taken out.
 func spokenFallback(kind, class, title, thread string) string {
+	if t := installTarget(kind, title); t != "" && kind == "install" {
+		return notify.InstallSpoken(t, askBuild(kind, title))
+	}
 	return notify.Spoken(kind, class, plainTitle(title), plainTitle(thread))
 }
 
@@ -366,11 +450,12 @@ func (m *Manager) addAsk(threadID, runID, title, detail, kind, check, surface, c
 	// supersede same-titled active asks on this thread — and, for
 	// "Install app build N" asks, every active install ask with N or lower on
 	// ANY thread: `make ship` serves one .ipa (the newest), so only the newest
-	// install card may ever show. EQUAL counts too: two sessions shipping the
-	// same tree minutes apart both number it by the commit count, and the
-	// later .ipa overwrites the first on the OTA route, so two "build N" cards
-	// would be one install shown twice.
-	newBuild := askBuild(kind, title)
+	// install card may ever show (per target: phone and desktop each have
+	// their own). EQUAL counts too: two sessions shipping the same tree
+	// minutes apart both number it by the commit count, and the later .ipa
+	// overwrites the first on the OTA route, so two "build N" cards would be
+	// one install shown twice.
+	newBuild, newTarget := askBuild(kind, title), installTarget(kind, title)
 	rows, err := m.db.Query(`SELECT id, thread_id, title, kind, state FROM items WHERE src='ask' AND (thread_id=? OR ?) AND state IN ('open','answered')`, threadID, newBuild > 0)
 	if err != nil {
 		return Ask{}, err
@@ -384,7 +469,9 @@ func (m *Manager) addAsk(threadID, runID, title, detail, kind, check, surface, c
 		ob := askBuild(kd, tt)
 		switch {
 		case tid == threadID && normTitle(tt) == normTitle(title):
-		case newBuild > 0 && ob > 0 && ob <= newBuild:
+		// The phone's card and the Mac's card are two installs, not one:
+		// a desktop build never retires a phone build or the other way round.
+		case newBuild > 0 && ob > 0 && ob <= newBuild && installTarget(kd, tt) == newTarget:
 		default:
 			continue
 		}
@@ -420,7 +507,7 @@ func (m *Manager) addAsk(threadID, runID, title, detail, kind, check, surface, c
 	// An install card below a newer one (open, or already tapped) is born
 	// superseded and never buzzes: only the newest may show.
 	if newBuild > 0 {
-		if _, newest := m.keepNewestInstall(); newBuild < newest {
+		if _, newest := m.keepNewestInstall(newTarget); newBuild < newest {
 			return m.GetAsk(a.ID)
 		}
 	}
@@ -499,7 +586,14 @@ func (m *Manager) announce(a Ask, t Thread, say string) {
 	// the lane (card, To read, NEEDS YOU) — the same funnel a proposal and a
 	// calendar nag take.
 	if strings.TrimSpace(say) == "" {
-		say = spokenFallback(kind, class, title, t.Title)
+		// A chore's card is a practice like homework's, but it is spoken as a
+		// chore: "reminder to <title>" (the lane is stamped before a step is
+		// raised).
+		spokenAs, lane := class, ""
+		if m.db.QueryRow(`SELECT lane FROM items WHERE id=?`, a.ID).Scan(&lane); lane == "chores" {
+			spokenAs = "chore"
+		}
+		say = spokenFallback(kind, spokenAs, title, t.Title)
 	}
 	if said, _ := notify.Card(m.Notifier, kind, line, say, threadID, a.ID); said != "" {
 		// Keep the words the owner heard ON the card they open. This
@@ -535,6 +629,7 @@ func scanAsk(r scanner) (Ask, error) {
 	a.CalID, a.CalDay = calID.String, calDay.String
 	a.ThreadRunning = tStatus.String == "running"
 	a.Outcomes, a.Verb = OutcomesFor(a.Kind), store.AskVerb(a.Kind)
+	a.Target = installTarget(a.Kind, a.Title)
 	if a.Class = class.String; a.Class == "" {
 		a.Class = ClassFor(a.Kind)
 	}
@@ -546,6 +641,11 @@ func scanAsk(r scanner) (Ask, error) {
 	a.ThreadTitle, a.RunID, a.GoalID, a.ResolvedBy, a.SupersededBy = tt.String, run.String, goal.String, rBy.String, sup.String
 	a.MessageID = mid.Int64
 	a.Detail = ListifyDetail(a.Detail) // old rows written as one paragraph still render as lists
+	if a.Kind == "error" {
+		if at, ok := spend.ResetAt(a.Detail, a.CreatedAt); ok {
+			a.ResumesAt, a.Verb = &at, "paused"
+		}
+	}
 	if rAt.Valid {
 		x, _ := time.Parse(time.RFC3339Nano, rAt.String)
 		a.ResolvedAt = &x
@@ -557,7 +657,18 @@ func scanAsk(r scanner) (Ask, error) {
 func (m *Manager) GetAsk(id string) (Ask, error) {
 	a, err := scanAsk(m.db.QueryRow(`SELECT `+askCols+` FROM `+askFrom+` WHERE a.id=? AND `+askIs, id))
 	a.WaitingToSpeak = err == nil && m.Voice.CardWaiting(a.ID)
+	a.Speaking = err == nil && m.Voice.CardSpeaking(a.ID, time.Now())
 	return a, err
+}
+
+// WroteSince: whether the owner wrote into the session after `t`. A card's
+// line that is still waiting when they do has nothing left to say: they have
+// moved the session on, and a held line speaking after their reply would be
+// stale.
+func (m *Manager) WroteSince(thread string, t time.Time) bool {
+	var n int
+	m.db.QueryRow(`SELECT COUNT(*) FROM thread_messages WHERE thread_id=? AND role='owner' AND ts>?`, thread, store.TS(t)).Scan(&n)
+	return n > 0
 }
 
 // Row projects one ask into the shared read-model row (store.Dated, Phase 5) —
@@ -696,13 +807,14 @@ func (m *Manager) ListAsks(state, threadID string, limit int) ([]Ask, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []Ask{}
+	out, now := []Ask{}, time.Now()
 	for rows.Next() {
 		a, err := scanAsk(rows)
 		if err != nil {
 			return nil, err
 		}
 		a.WaitingToSpeak = m.Voice.CardWaiting(a.ID)
+		a.Speaking = m.Voice.CardSpeaking(a.ID, now)
 		out = append(out, a)
 	}
 	return out, rows.Err()
@@ -1069,7 +1181,7 @@ func (m *Manager) backfillAskRun() {
 // install kind existed say "physical" and would keep drawing as the red
 // Respond cell. One idempotent retag; closed cards are history and stay put.
 func (m *Manager) backfillAskInstall() {
-	res, err := m.db.Exec(`UPDATE items SET kind='install' WHERE src='ask' AND title LIKE 'Install app build %' AND kind NOT IN ('install','read') AND state IN ('open','answered')`)
+	res, err := m.db.Exec(`UPDATE items SET kind='install' WHERE src='ask' AND (title LIKE 'Install app build %' OR title LIKE 'Install desktop build %') AND kind NOT IN ('install','read') AND state IN ('open','answered')`)
 	if err != nil {
 		return
 	}
@@ -1223,17 +1335,65 @@ func (m *Manager) VerifierDue(last time.Time) bool {
 }
 
 var installTitle = regexp.MustCompile(`(?i)^install app build (\d+)`)
-var anyBuild = regexp.MustCompile(`(?i)\bbuild (\d+)\b`)
 
-// installBuild returns N for an "Install app build N" title, else 0. This is
-// the strict form: it is what retags a card to kind install, so it must not
-// fire on a read or physical card that merely mentions a build.
+// installMacTitle: the desktop app's install card, "Install desktop build N":
+// tapping Install builds it in the background and restarts it. Same kind,
+// same teal cell, same pills, same newest-only rule — per target, since the
+// phone and the Mac each run their own build.
+var installMacTitle = regexp.MustCompile(`(?i)^install (?:desktop|mac) build (\d+)`)
+var anyBuild = regexp.MustCompile(`(?i)\bbuild (\d+)\b`)
+var macWord = regexp.MustCompile(`(?i)\b(desktop|mac)\b`)
+
+// installBuild returns N for an "Install app build N" / "Install desktop
+// build N" title, else 0. This is the strict form: it is what retags a card
+// to kind install, so it must not fire on a read or physical card that merely
+// mentions a build.
 func installBuild(title string) int {
 	mm := installTitle.FindStringSubmatch(title)
+	if mm == nil {
+		mm = installMacTitle.FindStringSubmatch(title)
+	}
 	if mm == nil {
 		return 0
 	}
 	n, _ := strconv.Atoi(mm[1])
+	return n
+}
+
+// installTarget: which device an install card is for — "phone" or "mac" —
+// and "" for anything that is not an install. The strict Mac title, else a
+// kind=install card that says desktop/Mac anywhere in its title; every other
+// install is the phone's, as it always was.
+func installTarget(kind, title string) string {
+	return InstallTarget(kind, title)
+}
+
+// InstallTarget is installTarget for the board: which device a card updates,
+// so each app lists only the build it can install itself (2026-10-01).
+func InstallTarget(kind, title string) string {
+	if installMacTitle.MatchString(title) {
+		return "mac"
+	}
+	if askBuild(kind, title) == 0 {
+		return ""
+	}
+	if kind == "install" && !installTitle.MatchString(title) && macWord.MatchString(title) {
+		return "mac"
+	}
+	return "phone"
+}
+
+// Mac build: the desktop app reports the build it runs on every launch
+// (POST /api/v1/app/mac) and it is kept as a setting, the way the phone's is
+// a row in devices — the Mac reconciler reads it every minute.
+const macBuildKey = "mac_build"
+
+func (m *Manager) SetMacBuild(n int) error {
+	return m.db.SetSetting(macBuildKey, strconv.Itoa(n))
+}
+
+func (m *Manager) MacBuild() int {
+	n, _ := strconv.Atoi(m.db.Setting(macBuildKey))
 	return n
 }
 
@@ -1271,15 +1431,29 @@ func askBuild(kind, title string) int {
 // has not reported yet (0 = none): the caller sends a silent wake push so
 // the freshly installed build registers itself and closes the card.
 func (m *Manager) ReconcileInstalls(maxBuild int) (pending int) {
-	rs, newest := m.keepNewestInstall()
+	return m.reconcileInstalls("phone", maxBuild, "phone reports build %d",
+		"[Install did not take: tapped %s ago, phone still reports build %d. Tap Install again, accept the iOS prompt, wait for the icon to finish.]")
+}
+
+// ReconcileMacInstalls is ReconcileInstalls for the desktop app's cards,
+// against the build the Mac last reported (MacBuild). Runs on every report
+// (the app's launch) and on the same minute timer. A clicked card whose
+// build has not come up in 10 min reopens with the reason in its detail.
+func (m *Manager) ReconcileMacInstalls(macBuild int) (pending int) {
+	return m.reconcileInstalls("mac", macBuild, "the desktop app reports build %d",
+		"[Install did not take: clicked %s ago, the desktop app still reports build %d. Click Install again; if the app never comes back, open it from /Applications.]")
+}
+
+func (m *Manager) reconcileInstalls(target string, maxBuild int, doneNote, backNote string) (pending int) {
+	rs, newest := m.keepNewestInstall(target)
 	for _, r := range rs {
 		n := askBuild(r.kind, r.title)
 		if n == 0 || n < newest {
-			continue // an older card stays closed, whatever the phone reports
+			continue // an older card stays closed, whatever the device reports
 		}
 		switch {
 		case r.state != "done" && n <= maxBuild:
-			m.ResolveAsk(r.id, "done", "hub", fmt.Sprintf("phone reports build %d", maxBuild))
+			m.ResolveAsk(r.id, "done", "hub", fmt.Sprintf(doneNote, maxBuild))
 		case r.state == "done" && r.by == "app" && n > maxBuild:
 			t, err := time.Parse(time.RFC3339Nano, r.at)
 			if err != nil {
@@ -1294,7 +1468,7 @@ func (m *Manager) ReconcileInstalls(maxBuild int) (pending int) {
 			m.ResolveAsk(r.id, "open", "hub", "")
 			// Mark it so it is not reopened again and again; the detail says why it is back.
 			m.db.Exec(`UPDATE items SET resolved_by='hub', detail = ? || char(10) || detail WHERE id=?`,
-				fmt.Sprintf("[Install did not take: tapped %s ago, phone still reports build %d. Tap Install again, accept the iOS prompt, wait for the icon to finish.]", time.Since(t).Round(time.Minute), maxBuild), r.id)
+				fmt.Sprintf(backNote, time.Since(t).Round(time.Minute), maxBuild), r.id)
 		}
 	}
 	return pending
@@ -1302,22 +1476,25 @@ func (m *Manager) ReconcileInstalls(maxBuild int) (pending int) {
 
 type installRow struct{ id, tid, title, kind, state, by, at string }
 
-// keepNewestInstall enforces the one-install-card rule on the whole table:
-// only the highest-numbered install card ever raised may be active, so every
-// open/answered card below it is superseded, on any thread. It returns the
-// live install rows (open/answered/done) and that highest number, so
+// keepNewestInstall enforces the one-install-card rule on the whole table,
+// per target (phone / mac): only the highest-numbered install card ever
+// raised for that device may be active, so every open/answered card below it
+// is superseded, on any thread. It returns the live install rows
+// (open/answered/done) of that target and that highest number, so
 // ReconcileInstalls never reopens an older card either. AddAsk's supersede
 // alone only saw OPEN cards: a tapped (done) older card slipped past a newer
 // raise and the reconciler reopened it — two install cards side by side.
-func (m *Manager) keepNewestInstall() (rs []installRow, newest int) {
-	rows, err := m.db.Query(`SELECT id, thread_id, title, kind, state, COALESCE(resolved_by,''), COALESCE(resolved_at,'') FROM items WHERE src='ask' AND (kind='install' OR title LIKE 'Install app build %') AND state IN ('open','answered','done')`)
+func (m *Manager) keepNewestInstall(target string) (rs []installRow, newest int) {
+	rows, err := m.db.Query(`SELECT id, thread_id, title, kind, state, COALESCE(resolved_by,''), COALESCE(resolved_at,'') FROM items WHERE src='ask' AND (kind='install' OR title LIKE 'Install app build %' OR title LIKE 'Install desktop build %') AND state IN ('open','answered','done')`)
 	if err != nil {
 		return nil, 0
 	}
 	for rows.Next() {
 		var r installRow
 		rows.Scan(&r.id, &r.tid, &r.title, &r.kind, &r.state, &r.by, &r.at)
-		rs = append(rs, r)
+		if installTarget(r.kind, r.title) == target {
+			rs = append(rs, r)
+		}
 	}
 	rows.Close()
 	newestID := ""

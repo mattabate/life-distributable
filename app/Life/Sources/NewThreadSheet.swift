@@ -1,6 +1,7 @@
 // Starting a session: NewThreadSheet, the Draft it types into and the
 // Composer bar (shared with ThreadDetail).
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// A NEW SESSION IS AN EMPTY CHAT: no goal link or check-back fields — the
 /// owner says those in the prompt. Nothing above the composer but what
@@ -22,6 +23,12 @@ struct NewThreadSheet: View {
     var initialFiles: [AttachedFile] = []
     var initialImages: [UIImage] = []
     let onCreated: () async -> Void
+    /// The desktop's Sessions page with no session open: this empty chat sits
+    /// in the right pane instead of a sheet (the console's `#/sessions`), so
+    /// there is nothing to close, and the session the message starts is
+    /// handed to the page to open like any other (`started`).
+    var embedded = false
+    var started: ((Thread) -> Void)? = nil
     /// Same object the thread composer uses, for the same reason: dictation
     /// partials land many times a second and must not invalidate this sheet.
     @State private var draft = Draft()
@@ -47,14 +54,89 @@ struct NewThreadSheet: View {
         NavigationStack {
             if let t = created {
                 ThreadDetail(thread: t)
+                    #if targetEnvironment(macCatalyst)
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Close") } }
+                    #else
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+                    #endif
             } else {
                 composing
             }
         }
     }
 
-    /// The empty chat: what they attached (if anything), then the composer.
+    #if targetEnvironment(macCatalyst)
+    /// The console's empty chat (threads.js, `#/sessions`):
+    /// the head — "New session" in bold, the model line small under it — the
+    /// greeting centred in the white pane, and the composer's box along the
+    /// bottom with anything attached as chips inside it, "Start session" on
+    /// the blue button.
+    private var composing: some View {
+        VStack(spacing: 0) {
+            if embedded {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(isSnap ? "Session from this screen" : "New session")
+                        .font(.system(size: 15, weight: .semibold)).tracking(-0.18).lineLimit(1)
+                    if let startLine {
+                        Text(startLine).font(.system(size: 12.5)).foregroundStyle(Web.muted).lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .leading)
+                .background(Web.panel)
+                .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
+            }
+            VStack(spacing: 12) {
+                if let error { ErrorBanner(message: error) }
+                Text("Ready when you are.")
+                    .font(.system(size: 26, weight: .semibold)).tracking(-0.65)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .padding(.top, 24).padding(.bottom, 18).padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Web.panel)
+            if !embedded, let startLine {
+                Text(startLine).font(.system(size: 12.5)).foregroundStyle(Web.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.bottom, 6).background(Web.panel)
+            }
+            Composer(draft: draft, attachments: attachments,
+                     placeholder: attachments.isEmpty ? "What do you want done?" : (isSnap ? "About this screen (optional)" : attachments.images.isEmpty ? "What to do with it? (optional)" :"About these photos (optional)"),
+                     sending: busy, send: start, sendLabel: "Start session")
+        }
+        // The whole pane takes a Finder drop, the empty chat included, not
+        // only the bar along the bottom.
+        .dropsFiles(into: attachments)
+        .onAppear {
+            if let initialImage, attachments.isEmpty, !snapRemoved { attachments.add(initialImage) }
+            if attachments.files.isEmpty, attachments.images.count == (initialImage == nil ? 0 : 1) {
+                for img in initialImages { attachments.add(img) }
+                for f in initialFiles { attachments.add(f) }
+            }
+            // Focused on arrival, as the console's box is.
+            draft.focusRequest += 1
+            Task {
+                guard let q = try? await hub.quota(), let model = q.next_model, !model.isEmpty else { return }
+                let reason = q.next_reason ?? ""
+                startLine = "Starts on \(shortModel(model))" + (reason.isEmpty ? "" : " — \(reason)")
+            }
+        }
+        // The snap's chip is its ✕ now: removing the first picture of a snap
+        // drops the snap preamble too.
+        .onChange(of: attachments.images.count) { _, n in if initialImage != nil, n == 0 { snapRemoved = true } }
+        .navigationTitle(isSnap ? "Session from this screen" : "New session")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(embedded ? .hidden : .automatic, for: .navigationBar)
+        .toolbar {
+            // The Mac draws this corner as a round glass button, and
+            // "Cancel" came out "C…" in it.
+            if !embedded {
+                ToolbarItem(placement: .cancellationAction) { Button { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel") }
+            }
+        }
+    }
+    #else
+    /// The empty chat: what the owner attached (if anything), then the composer.
     private var composing: some View {
             VStack(spacing: 0) {
                 ScrollView {
@@ -149,7 +231,9 @@ struct NewThreadSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-            }    }
+            }
+    }
+    #endif
 
     /// What goes above whatever was typed on a snap. The text must match the
     /// hub's `snapPreamble` (threads.go) byte for byte. The first line is the one
@@ -174,7 +258,7 @@ struct NewThreadSheet: View {
                 // chat (the message is the first bubble, the reply streams in
                 // under it). The list behind refreshes on its own time — this
                 // Task is unstructured, so the refresh still lands.
-                created = t
+                if let started { started(t) } else { created = t }
                 Task { await onCreated() }
                 await PhotoCleanup.offerDeletingScreenshots(ids)
             } catch { self.error = error.localizedDescription; busy = false }
@@ -194,6 +278,13 @@ struct NewThreadSheet: View {
     /// message visible when the keyboard shrinks the viewport.
     var keyboardOpen = false
     var binding: Binding<String> { Binding(get: { self.text }, set: { self.text = $0 }) }
+    #if targetEnvironment(macCatalyst)
+    /// Every box alive on screen, so the desktop's Update can ask before it
+    /// quits over unsent words (MacUpdateButton).
+    @ObservationIgnored static let live = NSHashTable<Draft>.weakObjects()
+    static var anyUnsent: Bool { live.allObjects.contains { $0.text.contains { !$0.isWhitespace } } }
+    init() { Self.live.add(self) }
+    #endif
 }
 
 /// Bottom bar of a session: attachments, the draft box, dictation, send.
@@ -212,6 +303,11 @@ struct Composer: View {
     /// The new-session sheet shows the attachment full width in its body, so
     /// it turns the thumbnail strip off rather than showing the same photo twice.
     var showAttachments = true
+    /// The desktop only (the phone ignores both): the send button's word —
+    /// the console's "Start session" on a new chat — and a strip drawn inside
+    /// the box over the text, where the console puts its reply-strip.
+    var sendLabel = "Send"
+    var banner: AnyView? = nil
 
     /// Drives the text view's first-responder state (see ComposerField); it
     /// reports back here when the keyboard goes away on its own.
@@ -237,6 +333,68 @@ struct Composer: View {
     }
 
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        macBody
+            .onChange(of: draft.focusRequest) { _, _ in editing = true; focused = true }
+            .onChange(of: focused) { _, f in draft.keyboardOpen = f }
+        #else
+        phoneBody
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// The console's composer (app.css "ONE box, three bands"), the same
+    /// layout as the console's. The box runs wall to wall under a strong
+    /// hairline that turns blue while typing; inside it the reply-strip
+    /// (`banner`), the body — chips, then the text — and the bar: Attach on
+    /// the left, the blue Send on the right. Words, not icons, as the
+    /// console's buttons are.
+    private var macBody: some View {
+        VStack(spacing: 0) {
+            if let banner { banner }
+            VStack(alignment: .leading, spacing: 8) {
+                if showAttachments, !attachments.isEmpty { AttachBar(draft: attachments, compact: true) }
+                macField
+            }
+            .padding(.top, 9).padding(.horizontal, 16).padding(.bottom, 6)
+            HStack(spacing: 8) {
+                AttachBar.Menu(draft: attachments, label: "Attach")
+                Spacer(minLength: 8)
+                Button { send() } label: { Text(sending ? "Sending…" : sendLabel) }
+                    .buttonStyle(WebSendStyle())
+                    .disabled(!canSend)
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .accessibilityLabel(sendLabel)
+            }
+            .padding(.vertical, 8).padding(.leading, 16).padding(.trailing, 14)
+            .overlay(alignment: .top) { Rectangle().fill(Web.line).frame(height: 1) }
+        }
+        .background(Web.panel)
+        .overlay(alignment: .top) {
+            Rectangle().fill(focused ? Web.accent.opacity(0.6) : Web.lineStrong).frame(height: 1)
+        }
+        // A file dropped anywhere on the box, the bar and the chips included
+        // (the text takes its own drops, PasteTextView).
+        .dropsFiles(into: attachments)
+    }
+
+    /// The textarea: ONE view, 15pt, at least 44 tall, focused on arrival as
+    /// the console's is. The phone swaps a plain Text in while unfocused so
+    /// dictation cannot summon its keyboard; the Mac has no keyboard to keep
+    /// away, and the swap showed two boxes — a 15pt Text of the last 400
+    /// characters that became a 13pt field on a click. The field holds every
+    /// word, at one size.
+    private var macField: some View {
+        ComposerField(text: $draft.text, placeholder: placeholder, maxLines: 12, focused: $focused,
+                             onPasteImages: { imgs in for i in imgs { attachments.add(i) } },
+                             onPasteFiles: { files in for f in files { attachments.add(f, picturesAsImages: true) } })
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minHeight: 44, alignment: .topLeading)
+            .onAppear { editing = true; focused = true }
+    }
+    #endif
+
+    private var phoneBody: some View {
         VStack(spacing: 6) {
             if showAttachments, !attachments.isEmpty { AttachBar(draft: attachments, compact: true).padding(.horizontal, 4) }
             HStack(alignment: .bottom, spacing: 8) {
@@ -247,7 +405,8 @@ struct Composer: View {
                         // A pasted screenshot becomes an attachment, not text —
                         // the same thing ⌘V does in the console's composer.
                         ComposerField(text: $draft.text, placeholder: hint, focused: $focused,
-                                      onPasteImages: { imgs in for i in imgs { attachments.add(i) } })
+                                      onPasteImages: { imgs in for i in imgs { attachments.add(i) } },
+                                      onPasteFiles: { files in for f in files { attachments.add(f, picturesAsImages: true) } })
                             // Same as the unfocused Text below: claim the whole
                             // row minus the buttons, so tapping the box does not
                             // narrow it.
@@ -280,3 +439,39 @@ struct Composer: View {
         .onChange(of: focused) { _, f in draft.keyboardOpen = f }
     }
 }
+
+#if targetEnvironment(macCatalyst)
+/// The console's `.composer .bar button.sm` as a label (Attach's menu): a
+/// word in a hairline box, 13pt, radius 8; `on` draws it white on red.
+struct WebSmallButton: View {
+    let text: String
+    var on = false
+    @State private var hover = false
+    var body: some View {
+        Text(text).font(.system(size: 13, weight: .medium)).lineLimit(1)
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            .foregroundStyle(on ? Color.white : Color.primary)
+            .background(on ? Color.red : (hover ? Web.code : Web.panel), in: RoundedRectangle(cornerRadius: 8))
+            .overlay { if !on { RoundedRectangle(cornerRadius: 8).strokeBorder(Web.lineStrong, lineWidth: 1) } }
+            .contentShape(Rectangle())
+            .onHover { hover = $0 }
+    }
+}
+
+/// The bar's primary: the filled blue Send, 6×16, semibold white.
+struct WebSendStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    @State private var hover = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
+            .padding(.horizontal, 16).padding(.vertical, 6)
+            .foregroundStyle(Color.white)
+            .background(Web.accent, in: RoundedRectangle(cornerRadius: 8))
+            .brightness(hover || configuration.isPressed ? 0.06 : 0)
+            .opacity(enabled ? 1 : 0.45)
+            .contentShape(Rectangle())
+            .onHover { hover = $0 }
+    }
+}
+#endif

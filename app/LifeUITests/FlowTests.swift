@@ -17,6 +17,8 @@
 //   tap <text>          first hittable element whose label/id contains <text>
 //   tapid <identifier>  exact accessibility identifier
 //   type <text>         type into whatever has keyboard focus
+//   copy <text>         put text on the device clipboard (for a Paste button)
+//   alert <button>      tap a button on a system sheet ("Allow Paste")
 //   swipe <up|down|left|right>[ xN]
 //   back                the navigation bar's back button
 //   wait <seconds>
@@ -118,6 +120,19 @@ final class FlowTests: XCTestCase {
                 .first { $0.frame.minX < bar.frame.minX + bar.frame.width * 0.15 }
             if let b = leading, b.exists { b.tap(); log("back") } else { log("back → no leading nav bar button") }
             settle()
+        case "copy":
+            // The Simulator's clipboard is one per device, so what the runner
+            // copies is what the app's Paste buttons read — and because it
+            // came from another app, iOS asks before the app may read it,
+            // the same sheet the phone shows after a copy in Passwords.
+            UIPasteboard.general.string = arg
+            log("copy \(arg.prefix(40))")
+        case "alert":
+            // A system sheet (Allow Paste, a permission) belongs to
+            // SpringBoard, not the app, so `tap` never finds its buttons.
+            let b = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons[arg]
+            if b.waitForExistence(timeout: 4) { b.tap(); log("alert \(arg)") } else { log("alert \(arg) → NOT SHOWN") }
+            settle()
         case "wait":
             Thread.sleep(forTimeInterval: Double(arg) ?? 1)
             log("wait \(arg)s")
@@ -162,7 +177,9 @@ final class FlowTests: XCTestCase {
     private func best(matching arg: String, exactID: Bool) -> (XCUIElement, String)? {
         let p = exactID
             ? NSPredicate(format: "identifier == %@", arg)
-            : NSPredicate(format: "label CONTAINS[c] %@ OR identifier CONTAINS[c] %@", arg, arg)
+            // placeholderValue: an empty field in a labelled row is named only
+            // by its placeholder ("paste from Apple Passwords").
+            : NSPredicate(format: "label CONTAINS[c] %@ OR identifier CONTAINS[c] %@ OR placeholderValue CONTAINS[c] %@", arg, arg, arg)
         // ONE query over every element type. Asking type by type meant asking
         // a type nothing on screen has (.link in SwiftUI), and resolving a
         // snapshot for an empty query fails the whole test rather than

@@ -220,7 +220,7 @@ func TestApprovalKeepsWhatItSpoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Hey, I need your approval. Move $500 to the brokerage."
+	want := "Hey, Move $500 to the brokerage. It's waiting for your approval."
 	if a.Said != want {
 		t.Errorf("said %q, want %q", a.Said, want)
 	}

@@ -97,9 +97,37 @@ struct ChatRequest: Identifiable {
 @MainActor func captureKeyWindow() -> UIImage? {
     guard let window = UIApplication.shared.connectedScenes
         .compactMap({ $0 as? UIWindowScene }).flatMap(\.windows).first(where: \.isKeyWindow) else { return nil }
-    return UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
-        window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+    return hidingSecrets {
+        UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
     }
+}
+
+/// A decider code showing in a text box is never photographed. A snap goes to
+/// a session and is kept as a blob every session can read, and the code is
+/// the one thing no session may hold: on 2026-09-30 a snap of Settings, taken
+/// to show a failed save with the code revealed, carried it, and the code had
+/// to be rotated. Any plain text field whose words have the code's shape is
+/// hidden for the length of the drawing — its row stays, the box is blank.
+@MainActor func hidingSecrets<T>(_ draw: () -> T) -> T {
+    var roots: [UIView] = []
+    for w in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows) {
+        roots.append(w)
+        var vc = w.rootViewController?.presentedViewController
+        while let v = vc { if let view = v.viewIfLoaded { roots.append(view) }; vc = v.presentedViewController }
+    }
+    var fields: [UITextField] = []
+    func walk(_ v: UIView) {
+        if let f = v as? UITextField, !f.isHidden, !f.isSecureTextEntry,
+           SettingsView.looksLikeDeciderCode(HubClient.normalizeDecider(f.text ?? "")),
+           !fields.contains(where: { $0 === f }) { fields.append(f) }
+        v.subviews.forEach(walk)
+    }
+    roots.forEach(walk)
+    fields.forEach { $0.isHidden = true }
+    defer { fields.forEach { $0.isHidden = false } }
+    return draw()
 }
 
 /// Window snapshot cropped to a component's frame (global coordinates), with a

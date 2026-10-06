@@ -72,6 +72,7 @@ type Action struct {
 	Closed bool   `json:"closed"`
 	Folded string `json:"folded,omitempty"`
 	Lane   string `json:"lane"`
+	Reopen bool   `json:"reopen,omitempty"`
 	// Window: when it is owed — now: a proposal waits on the owner the moment it
 	// lands (the item's own `win`).
 	Window string `json:"window"`
@@ -81,7 +82,7 @@ type Action struct {
 func (a *Action) stamp() {
 	a.Outcomes = store.ActionOutcomes(a.ThreadID != "")
 	s := store.ActionStanding(a.State, a.DecidedVia)
-	a.Open, a.Closed, a.Folded, a.Lane = s.Open, s.Closed, s.Folded, s.Lane
+	a.Open, a.Closed, a.Folded, a.Lane, a.Reopen = s.Open, s.Closed, s.Folded, s.Lane, s.Reopen
 }
 
 // Event: one line of an action's audit trail (proposed → approved/denied →

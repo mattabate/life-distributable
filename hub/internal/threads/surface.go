@@ -37,8 +37,12 @@ var laptopWords = []string{":8443/#/", "on the mac", "on your mac", "at the mac"
 // Unsure is "any" on purpose: hiding an ask from the board is the expensive
 // mistake, showing it on both is the cheap one.
 func InferSurface(kind, title, detail string) string {
-	// An install IS phone work by definition — the phone is what gets updated.
+	// An install is done on the device it updates: the phone's card on the
+	// phone, the desktop app's card at the Mac (2026-09-30).
 	if kind == "install" {
+		if installTarget(kind, title) == "mac" {
+			return "web"
+		}
 		return "mobile"
 	}
 	t := strings.ToLower(title + "\n" + detail)

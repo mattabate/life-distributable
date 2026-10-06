@@ -59,6 +59,9 @@ func TestAttachments(t *testing.T) {
 func TestAttachedDocument(t *testing.T) {
 	m, _, _ := setup(t)
 	m.BlobPath = func(ref string) (string, error) { return "/data/blobs/" + ref, nil }
+	// The hub saved the upload under its own name in the intake's in-box
+	// (obs.PutIntake, 2026-10-05): the prompt names that copy beside the blob.
+	m.IntakePath = func(ref string) string { return "/data/imports/intake/Bank Statement September 2026.pdf" }
 	th, err := m.Create("", "life", "", "", "", "", []string{"sha256/cd/cde.pdf"})
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +76,7 @@ func TestAttachedDocument(t *testing.T) {
 	}
 	rows.Close()
 	p, _ := os.ReadFile(strings.TrimSuffix(out, ".out") + ".prompt")
-	for _, want := range []string{"/data/blobs/sha256/cd/cde.pdf", "1 file(s)", "pages=", "app/upload", "sent a file with no message"} {
+	for _, want := range []string{"/data/blobs/sha256/cd/cde.pdf — saved as /data/imports/intake/Bank Statement September 2026.pdf", "1 file(s)", "pages=", "app/upload", "data/imports/intake/", "sent a file with no message"} {
 		if !strings.Contains(string(p), want) {
 			t.Fatalf("prompt missing %q: %s", want, p)
 		}
