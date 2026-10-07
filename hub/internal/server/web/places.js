@@ -35,9 +35,12 @@ const PLACES = {
   // has Day only: a week of columns was unreadable at 390pt.)
   calendar: { label: 'Calendar', view: 'views/calendar.js', phone: 'CalendarView.swift',
     also: ['views/calgrid.js', 'CalendarGrid.swift'] },
+  // The fourth tab: the plan and its limits, the goals, the data sources.
+  // Spend and Goals are pages behind it (app.js lights the tab for them).
+  config: { label: 'Configuration', view: 'views/config.js', phone: 'ConfigView.swift' },
   spend: { label: 'Spend', view: 'views/spend.js', phone: 'SpendView.swift' },
   goals: { label: 'Goals', view: 'views/goals.js', phone: 'GoalsView.swift' },
-  sources: { label: 'Sources', view: 'views/sources.js', phone: 'SourcesView.swift' },
+  sources: { label: 'Source', view: 'views/sources.js', phone: 'SourceDetail.swift' },
   runs: { label: 'Job run', view: 'views/runs.js', phone: '',
     why: 'console only: the raw transcript of one scheduled job run, opened from a hub log line; what a run finds reaches the phone as an ask or a card' },
 };

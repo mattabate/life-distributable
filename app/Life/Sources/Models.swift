@@ -107,6 +107,30 @@ struct Quota: Codable {
     var next_reason: String?
     var error: String?
     var windows: [QuotaWindow]
+    /// The plan the sessions run on (`quota.plan`): its name, what runs it,
+    /// its price when the hub has found one, and this month's spend.
+    var plan: ClaudePlan?
+}
+
+/// `spend/quota.plan` — the Configuration page's "Powered by" card.
+struct ClaudePlan: Codable {
+    var name: String
+    var via: String
+    var usd: Double?
+    var period: String?
+    var charged_on: String?
+    var month_usd: Double
+    var brand: BrandMark?
+}
+
+/// A provider's small tile: its letters on its colour, or a logo path
+/// (SVG `d`, 24×24) drawn in the ink colour. Sent with every source and
+/// with the plan.
+struct BrandMark: Codable, Hashable {
+    var mark: String
+    var color: String
+    var ink: String
+    var logo: String?
 }
 
 struct APIError: Codable, Error, LocalizedError {
@@ -1209,7 +1233,7 @@ struct CalItem: Codable, Identifiable, Hashable {
     var window: String?
 }
 
-// GET /api/v1/sources — data-source inventory (Sources tab).
+// GET /api/v1/sources — data-source inventory (the Configuration tab's cards).
 struct SourceKindCount: Codable, Identifiable, Hashable {
     var kind: String
     var n: Int
@@ -1254,6 +1278,8 @@ struct SourceEntry: Codable, Identifiable, Hashable {
     var summary: String?
     var kinds: [SourceKindCount]
     var accounts: [SourceAccount] = []
+    /// The provider's tile on the Configuration card.
+    var brand: BrandMark?
 
     /// What the folded row says it is connected to.
     var shortTo: String { summary ?? accounts.first?.label ?? "" }
@@ -1261,11 +1287,11 @@ struct SourceEntry: Codable, Identifiable, Hashable {
     // A `= []` default is NOT applied by Swift's synthesized decoder, and the
     // hub sends `"accounts": null` for a source with none (no omitempty), so
     // both the null and a cached payload from before the field existed would
-    // throw and blank the whole Sources page. Decode it leniently.
+    // throw and blank the whole Configuration page. Decode it leniently.
     /// Spelled out because three keys are snake_case on the wire and there is no
     /// key strategy on the decoder (HubClient.decoder reads keys verbatim).
     enum CodingKeys: String, CodingKey {
-        case id, title, from, storage, status, last, error, total, summary, kinds, accounts
+        case id, title, from, storage, status, last, error, total, summary, kinds, accounts, brand
         case lastOK = "last_ok"
         case failingSince = "failing_since"
         case fails
@@ -1287,6 +1313,7 @@ struct SourceEntry: Codable, Identifiable, Hashable {
         summary = try c.decodeIfPresent(String.self, forKey: .summary)
         kinds = try c.decodeIfPresent([SourceKindCount].self, forKey: .kinds) ?? []
         accounts = try c.decodeIfPresent([SourceAccount].self, forKey: .accounts) ?? []
+        brand = try c.decodeIfPresent(BrandMark.self, forKey: .brand)
     }
 }
 
@@ -1295,6 +1322,10 @@ struct SourceGroup: Codable, Identifiable, Hashable {
     var title: String
     var blurb: String
     var note: String?
+    /// The section the group's cards sit under on the Configuration page,
+    /// and its colour — groups sharing a tag share a section.
+    var tag: String?
+    var color: String?
     var sources: [SourceEntry]
 }
 

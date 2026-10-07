@@ -1,0 +1,12 @@
+# Console: Configuration — the plan and its limits, the goals, the data
+# sources; then one source's page under it, and back.
+#   make browse FLOW=ops/flows/config.txt
+goto #/config
+wait 1500
+shot config-console
+click .scard
+wait 800
+shot source-console
+click text=Configuration
+wait 800
+shot config-console-back

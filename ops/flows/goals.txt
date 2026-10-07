@@ -1,11 +1,11 @@
-# Console: Goals — the list (no New goal form), one goal's head panel (name,
-# statement, active switch, Edit), the edit form in place, parallel to
-# ops/flows/goals-phone.txt (parity, conventions.md 11).
+# Console: Goals (a page behind the Configuration tab) — the list (no New
+# goal form), one goal's head panel (name, statement, active switch, Edit),
+# the edit form in place; the first goal tile is the one opened.
 #   make browse FLOW=ops/flows/goals.txt
 goto #/goals
 wait 1500
 shot goals-console
-click text=Make more art
+click .goal-tile
 wait 1000
 shot goal-detail-console
 click text=Edit

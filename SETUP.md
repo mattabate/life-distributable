@@ -3,8 +3,12 @@
 You are setting up a personal life hub for the person you are talking to
 (below: **the owner**). Work through the steps in order. Each step ends with
 a **Verify**: run it and see it pass before starting the next. The owner is
-probably not an engineer: say what each step is for in one sentence, then
-give them the exact clicks.
+probably not an engineer, and they were promised they would never type a
+command. Keep that promise.
+
+Tell them up front, in these words: *"This takes about two hours, and most
+of it is waiting on Apple and on a big download. I run everything in the
+Terminal. Your part is clicking where I tell you."*
 
 The order is set by the clock. Apple's developer enrollment and the Xcode
 download are the two slow things, so both start in step 1, and everything
@@ -12,11 +16,24 @@ else happens while they run.
 
 Rules for the whole install:
 
+- **Plain words.** Before each thing they do by hand, say what it is for
+  in one sentence a non-technical friend would follow. No jargon. When a
+  word can't be avoided (Terminal, Tailscale, token), say what it means
+  the first time, in a few words.
+- **The owner never types a command.** You run every command yourself.
+  When a command has to show something only they should see (a code, a
+  key, a passphrase) or needs their Mac password, open it in its own
+  Terminal window for them:
+  `osascript -e 'tell application "Terminal" to do script "cd ~/life && <command>"' -e 'tell application "Terminal" to activate'`
+  Then tell them what will appear in that window and exactly what to do
+  with it: copy this line, paste it there, type your Mac password (it
+  stays invisible while you type, that's normal), press Return. Pasting a
+  value and typing their password are fine. Typing a command is not.
 - **Every step the owner does by hand is a numbered list**: the exact URL,
   the literal button and menu labels, every form field with the value to
   type ("leave blank" included), and what they should see when it worked.
 - **Secrets never pass through this chat.** Tokens, keys and passphrases go
-  from a Terminal window the owner runs into Apple Passwords (or a file under
+  from a Terminal window you opened for them into Apple Passwords (or a file under
   `ops/secrets/`). Never ask them to paste one to you, never print one, never
   `cat` a file under `ops/secrets/`. If they paste one anyway, tell them to
   rotate it and continue.
@@ -43,14 +60,15 @@ Rules for the whole install:
 
 | What | Cost | Needed for |
 |---|---|---|
-| Claude Pro ([claude.com/pricing](https://claude.com/pricing)) | $20/mo | Everything. Max ($100/mo) is recommended for a hub that runs sessions all day |
+| Claude Pro ([claude.com/pricing](https://claude.com/pricing)) | $20/mo | Everything. Max ($100 or $200/mo) is recommended for a hub that runs sessions all day |
 | Apple Developer Program ([developer.apple.com/programs](https://developer.apple.com/programs/)) | $99/yr | The iPhone app with push, and signing the desktop app |
 | Tailscale ([tailscale.com/pricing](https://tailscale.com/pricing)) | free (Personal) | Reaching the hub from their phone and other computers, privately |
 | Backblaze B2 ([backblaze.com/cloud-storage/pricing](https://www.backblaze.com/cloud-storage/pricing)) | cents a month | Nightly encrypted backup |
 | A Mac that stays on | they have one | The hub. A Mac mini is ideal |
 
 Say plainly: the hub runs Claude on their subscription; every session uses
-their plan's usage. The Spend tab shows what it costs, live.
+their plan's usage. The Configuration tab shows the plan, how much of each
+limit is left, and what this month has cost, live.
 
 If they chose only `web`, skip the Apple Developer row and steps 1.1, 7
 and 8.
@@ -74,12 +92,16 @@ Store shows Xcode downloading.
 
 ## 2. Prepare the Mac
 
-1. **Homebrew** (the Mac's package manager): open **Terminal** (Spotlight:
-   Cmd-Space, type `Terminal`), paste the line from [brew.sh](https://brew.sh),
-   press Return, type the Mac login password when asked. At the end it prints
-   two "Next steps" lines starting with `echo` and `eval`; paste and run those
-   too.
-2. You then install the tools (the owner does not need to):
+1. **Homebrew** (an installer for the free tools the hub is built from):
+   you open its installer in its own Terminal window (the install line from
+   [brew.sh](https://brew.sh), in the window form above). Tell them: "A
+   window opened. When it asks for your password, type your Mac login
+   password and press Return. When it says *Press RETURN to continue*,
+   press Return. Then wait about five minutes, until it says *Installation
+   successful*." Then you add Homebrew to the PATH yourself: append the
+   `eval "$(/opt/homebrew/bin/brew shellenv)"` line it printed to
+   `~/.zprofile` and run it in your own shell.
+2. You then install the tools (the owner does nothing):
    `brew install go tmux restic xcodegen node gh sqlite`
 3. **Never sleep**: **System Settings → Energy**: turn on **Prevent
    automatic sleeping when the display is off** and **Start up automatically
@@ -104,17 +126,19 @@ from upstream are pulled only when they ask.
 1. If they have no GitHub account: [github.com/signup](https://github.com/signup)
    → **Email**, **Password**, **Username** (this becomes part of the app's
    bundle id: letters, digits and hyphens), then the email code.
-2. You run `gh auth login` in a Terminal window **they** watch: choose
-   **GitHub.com**, **HTTPS**, **Yes** (authenticate Git), **Login with a web
-   browser**; they copy the one-time code shown, press Return, paste the code
-   on the page that opens and click **Authorize github**.
+2. Sign this Mac in to GitHub. You open, in its own window,
+   `gh auth login --hostname github.com --git-protocol https --web`. Tell
+   them: "The window shows a code like `ABCD-1234`. Copy it, press Return,
+   paste it on the GitHub page that opens, click **Continue**, then
+   **Authorize github**." If the window asks *Authenticate Git with your
+   GitHub credentials?*, they press Return for **Yes**.
 3. Put the repo at `~/life` (if this session cloned it elsewhere, move it
    there) and re-point the remotes:
    - `git remote rename origin upstream`
    - `gh repo create <their-username>/life --private --source ~/life --remote origin --push`
 
 **Verify:** `gh auth status` shows their username; `git remote -v` shows
-`origin` = their private repo and `upstream` = life-distributable;
+`origin` = their private repo and `upstream` = mattabate/life-distributable;
 the repo page on github.com says **Private**.
 
 ## 4. Tailscale: a private network for their devices
@@ -158,15 +182,20 @@ over Tailscale, which only their own devices can join.
    in step 7.
 5. `ops/hub.sh install` starts the hub under launchd (it restarts on
    crash and at login) plus keep-awake and certificate renewal.
-6. Trust the repo for Claude sessions: in a Terminal, `cd ~/life && claude`,
-   answer **Yes, proceed** to the trust question, then `/exit`. Hub sessions
-   run in this folder.
-7. **The decider code**: the second credential that approvals need, so no
-   session can approve its own proposal. The owner runs `ops/decider-set.sh` in
-   Terminal and saves the printed code in Apple Passwords (title
-   `life decider code`). You never see it.
-8. **Open the console.** The owner (not you) runs `ops/hub.sh url` in
-   Terminal. It prints the console address with the hub token in it. They:
+6. Trust the folder for Claude, so the hub's sessions can work in it. You
+   open `claude` in its own window (the window form above already starts in
+   `~/life`). Tell them: "Claude asks whether you trust this folder. Press
+   Return on **Yes, proceed**, then close the window (Cmd-W, then
+   **Terminate**)."
+7. **The decider code**: a second password that only they hold, needed to
+   approve anything that spends money, deletes, contacts someone, shares
+   data or commits code, so no session can approve its own request. You
+   open `ops/decider-set.sh` in its own window. Tell them: "The window
+   shows a code. Save it in the Passwords app with the title
+   `life decider code`, then close the window." You never see it.
+8. **Open the console** (the web version of the app). You open
+   `ops/hub.sh url` in its own window. It shows the console address with
+   the hub's password (the token) in it. Tell them:
    1. Open **Passwords** (the Apple app) → **+** → **Title** `life hub`,
       **Website** the address up to and including `:8443`, **Username**
       leave blank, **Password** the part after `token=` → **Save**.
@@ -179,6 +208,13 @@ says the console shows **Sessions**. Tell them this is the first
 milestone: the hub is running. Until the apps arrive, the console is how
 they reach it (on the phone too: Safari, the `life hub` address, then
 **Share → Add to Home Screen**).
+
+**Star ask, first time.** Right after the milestone, ask once, plainly:
+*"Your hub is up. This is a free project by one person, and a GitHub star
+is how he knows it's working for people. If you like it so far, open
+[github.com/mattabate/life-distributable](https://github.com/mattabate/life-distributable)
+and click **Star** at the top right."* Never star it for them, not even
+with their login.
 
 ## 6. Backups
 
@@ -196,16 +232,20 @@ this Mac can erase their backups.
    - click **Create a Bucket**.
 3. You run `ops/py.sh setup.py backup --bucket <that name>`.
 4. **Account → Application Keys → Generate New Master Application Key**
-   (confirm). Keep that page open. The owner runs `ops/b2-mint-keys.sh` in
-   Terminal and pastes the **keyID** and **applicationKey** from the page when
-   asked. It mints a write-only nightly key and a separate prune key, and
+   (confirm). Keep that page open. You open `ops/b2-mint-keys.sh` in its
+   own window; when it asks, they copy the **keyID** and then the
+   **applicationKey** from the Backblaze page and paste each one into the
+   window, pressing Return after each. It mints a write-only nightly key and a separate prune key, and
    makes the backup passphrase. They save what it prints in Apple Passwords
    (entries `life backup prune key` and `life backup passphrase`).
 5. You run `ops/backup.sh init`, then `ops/backup.sh` (first snapshot), then
    `ops/hub.sh install-backup` (nightly at 03:30).
 6. **Restore test**: a backup that was never restored is a hope. It reads
-   the passphrase, so the owner runs it in Terminal, not you:
-   `cd ~/life/ops && set -a && source secrets/restic.env && restic snapshots && restic restore latest --target /tmp/life-restore-test --include '*/life.db' && ls -la /tmp/life-restore-test`
+   the passphrase, so it runs in its own window, not in your shell. You
+   open this in the window form above:
+   `cd ops && set -a && source secrets/restic.env && restic snapshots && restic restore latest --target /tmp/life-restore-test --include '*/life.db' && ls -la /tmp/life-restore-test`
+   Tell them: "Wait for the window to stop, then tell me whether the last
+   lines mention `life.db`." They only read it.
 
 **Verify:** `ops/b2-key-check.sh` prints `SAFE`; the owner reports a snapshot
 listed and a restored `life.db`. Once a month they run `ops/b2-prune.sh`:
@@ -217,8 +257,9 @@ add a monthly `--kind owner` calendar item for it
 Do this when Apple's welcome email has arrived and Xcode has finished. If
 one hasn't, do step 9 (first goals) now and come back.
 
-1. Open Xcode once and let it install its components, then you run
-   `sudo xcodebuild -license accept` (the owner types the Mac password).
+1. They open Xcode once (Launchpad → **Xcode**) and click **Install** if it
+   offers components. Then you open `sudo xcodebuild -license accept` in
+   its own window; they type their Mac password there and press Return.
 2. [developer.apple.com/account](https://developer.apple.com/account) →
    **Membership details** → copy the **Team ID** (10 characters; not a secret).
 3. **Xcode → Settings… → Accounts**: **+** → **Apple Account** → sign in.
@@ -277,7 +318,8 @@ buzzes the phone. Tell them: this is done.
 
 ## 9. First goals
 
-An empty Goals tab makes every session guess. Interview the owner, one
+An empty Goals block (on the Configuration tab) makes every session guess.
+Interview the owner, one
 question at a time, 3 to 5 goals: what they are working toward, by when,
 and how they would know it is going well. For each:
 `lifectl goal new "<short title>" "<one-paragraph statement in their words>" --horizon ongoing|year|quarter|month`.
@@ -292,17 +334,28 @@ CLAUDE.md (data first, a page only when they ask for one).
 Do this every time, as the last thing, even if the owner seems in a hurry.
 It takes one message.
 
-1. **Star.** Ask once, plainly: "This is a free project by one person. A
-   GitHub star is how the maintainer knows it's being used. Want me to
-   star it for you?" Only on a yes, star the `upstream` repo
-   (github.com/mattabate/life-distributable) with
-   `gh api -X PUT user/starred/<owner>/<repo>`, and tell them it goes out
-   from their own GitHub login. A no is final: never ask again.
-2. **What was hard.** Ask what was confusing or broken in the setup. If
+1. **Updates, every week.** Create the session that brings new things from
+   upstream to them as cards. Tell them first, in these words: *"Once a
+   week I'll check the project for anything new and show you each one as a
+   card. Nothing changes in your copy unless you say yes."* Then:
+   1. `lifectl thread new "Check upstream for new addenda" --title "Updates from upstream" --schedule "weekly@Mon 09:00"`
+   2. `lifectl thread <its id> schedule "weekly@Mon 09:00" @ops/addenda-check.md`
+      (the standing prompt it runs each week).
+   3. Write the newest entry id in `ADDENDA.md` (today that is `add-0001`)
+      to `data/addenda-seen.txt`, so the first check only shows what is
+      new after today.
+   **Verify:** `lifectl threads` lists **Updates from upstream** with its
+   weekly schedule.
+2. **Star, last time.** If they have not said they starred it after the
+   first milestone (step 5), ask once more, in one sentence, with the link
+   [github.com/mattabate/life-distributable](https://github.com/mattabate/life-distributable).
+   Whatever they answer, drop it: never ask a third time, and never star
+   it for them.
+3. **What was hard.** Ask what was confusing or broken in the setup. If
    anything was, offer to open an issue with it: draft the title and body,
    show them, and run
-   `gh issue create --repo github.com/mattabate/life-distributable` only
+   `gh issue create --repo mattabate/life-distributable` only
    after they say yes. The body has no names, paths, tokens or
    personal details. It describes the step and what went wrong.
-3. **Tell them how to pass it on.** One sentence: a friend installs it by
+4. **Tell them how to pass it on.** One sentence: a friend installs it by
    pasting the one sentence from the README into Claude Code on their Mac.

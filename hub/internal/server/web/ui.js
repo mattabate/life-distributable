@@ -148,6 +148,13 @@ const usd = n => {
   return moneySign(v, cents >= 10000 || cents % 100 === 0 ? Math.round(a).toLocaleString('en-US') : (cents / 100).toFixed(2));
 };
 const usd0 = n => { const v = Number(n) || 0; return moneySign(v, Math.round(Math.abs(v)).toLocaleString('en-US')); };
+// A provider's tile as the hub serves it (internal/brand): the logo path in
+// its ink when there is one, else the letters, on the provider's colour.
+function brandMark(b) {
+  b = b || {};
+  const inner = b.logo ? `<svg viewBox="0 0 24 24" aria-label="${esc(b.mark || '')}"><path fill="currentColor" d="${esc(b.logo)}"/></svg>` : esc(b.mark || '·');
+  return `<span class="bmark${b.logo ? ' logo' : ''}" style="background:${esc(b.color || 'var(--muted)')};color:${esc(b.ink || '#fff')}">${inner}</span>`;
+}
 const usdSigned = n => { const s = usd(n); return s[0] === '−' ? s : '+' + s; };
 const usd0Signed = n => { const s = usd0(n); return s[0] === '−' ? s : '+' + s; };
 const usdShort = n => {

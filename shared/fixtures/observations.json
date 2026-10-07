@@ -3,42 +3,42 @@
     "id": 1,
     "source": "health",
     "kind": "steps",
-    "ts": "2026-10-06T04:43:16.046358Z",
+    "ts": "2026-10-07T06:52:37.101908Z",
     "tz": "America/New_York",
     "payload": {
       "count": 8000,
-      "day": "2026-10-06",
+      "day": "2026-10-07",
       "key": "s0"
     },
-    "ingested_at": "2026-10-06T04:43:16.074039Z",
+    "ingested_at": "2026-10-07T06:52:37.125806Z",
     "schema_version": 1
   },
   {
     "id": 2,
     "source": "health",
     "kind": "steps",
-    "ts": "2026-10-05T04:43:16.046358Z",
+    "ts": "2026-10-06T06:52:37.101908Z",
     "tz": "America/New_York",
     "payload": {
       "count": 8500,
-      "day": "2026-10-05",
+      "day": "2026-10-06",
       "key": "s1"
     },
-    "ingested_at": "2026-10-06T04:43:16.074382Z",
+    "ingested_at": "2026-10-07T06:52:37.126272Z",
     "schema_version": 1
   },
   {
     "id": 3,
     "source": "health",
     "kind": "steps",
-    "ts": "2026-10-04T04:43:16.046358Z",
+    "ts": "2026-10-05T06:52:37.101908Z",
     "tz": "America/New_York",
     "payload": {
       "count": 9000,
-      "day": "2026-10-04",
+      "day": "2026-10-05",
       "key": "s2"
     },
-    "ingested_at": "2026-10-06T04:43:16.074716Z",
+    "ingested_at": "2026-10-07T06:52:37.126738Z",
     "schema_version": 1
   }
 ]

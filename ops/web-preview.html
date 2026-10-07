@@ -129,6 +129,8 @@
   }
 
   function fixture(path) {
+    // &demo=1: ops/demo-fixtures.js (the README's fictional owner) answers first.
+    if (window.DEMO) { const d = window.DEMO(path); if (d !== undefined) return d; }
     const clean = path.split('?')[0];
     if (FIX[clean]) return FIX[clean];
     const s = shared(clean);
@@ -157,6 +159,10 @@
   const cerr = console.error.bind(console);
   console.error = (...a) => { cerr(...a); showErr({ message: a.map(x => (x && x.stack) || String(x)).join(' ') }); };
   if (!location.hash) location.hash = '#/sessions';
+  if (params.get('demo')) {
+    document.write(`<scr` + `ipt src="demo-fixtures.js"></scr` + `ipt>`);
+    document.addEventListener('DOMContentLoaded', () => { const b = document.getElementById('build'); if (b) b.textContent = ''; });
+  }
   // &open=1 — expand every <details> before the screenshot, so a collapsed
   // editor or activity block can be looked at too.
   if (params.get('open')) setInterval(() => document.querySelectorAll('details').forEach(d => { d.open = true; }), 250);
@@ -172,9 +178,7 @@
     <a href="#/sessions" data-tab="sessions">Sessions <span class="badge" id="badge-sessions"></span></a>
     <a href="#/recs" data-tab="recs">Recs <span class="badge" id="badge-recs"></span></a>
     <a href="#/calendar" data-tab="calendar">Calendar <span class="badge" id="badge-calendar"></span></a>
-    <a href="#/spend" data-tab="spend">Spend</a>
-    <a href="#/goals" data-tab="goals">Goals</a>
-    <a href="#/sources" data-tab="sources">Sources</a>
+    <a href="#/config" data-tab="config">Configuration</a>
   </div>
   <div class="more">
     <button class="navmore" id="navmore" onclick="navMoreToggle(event)" hidden><span class="label">More</span><span class="badge" id="badge-more"></span><span class="caret">▾</span></button>
@@ -191,7 +195,7 @@
   // missing here reads "Couldn't load sessions" for every chat.
   for (const f of ['ui.js', 'tip.js', 'places.js', 'composer.js', 'views/asks.js', 'views/threads.js',
                    'views/calgrid.js', 'views/calendar.js', 'views/spend.js', 'views/goals.js', 'views/recs.js',
-                   'views/sources.js', 'views/runs.js', 'app.js']) {
+                   'views/config.js', 'views/sources.js', 'views/runs.js', 'app.js']) {
     document.write(`<scr` + `ipt src="${WEB}/${f}"></scr` + `ipt>`);
   }
 </script>

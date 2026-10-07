@@ -5,7 +5,7 @@
 # half-screen window, and the nav's last tabs were off the right edge).
 #
 # Usage: make web-widths [ROUTES='#/recs #/money']     default: the chat of the newest
-#        session, Sessions, Recs, Calendar, Money, Engagement, Sources
+#        session, Sessions, Recs, Calendar, Configuration
 # Output: ops/logs/web/widths/<width>/NN-<route>.png (git-ignored).
 # Each width is one headless Chrome (ops/browse.js --size); pictures are the
 # viewport only, so what is off screen stays off screen, as it is for you.
@@ -19,7 +19,7 @@ WIDTHS="${WIDTHS:-1500 980 820 720 480}"
 routes=("$@")
 if [ ${#routes[@]} -eq 0 ]; then
   tid="$(ops/bin/lifectl threads | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)"
-  routes=("#/sessions/$tid" "#/sessions" "#/recs" "#/calendar" "#/money" "#/engagement" "#/sources")
+  routes=("#/sessions/$tid" "#/sessions" "#/recs" "#/calendar" "#/config")
 fi
 
 for w in $WIDTHS; do

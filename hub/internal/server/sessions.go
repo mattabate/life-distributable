@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"life/hub/internal/brand"
 	"life/hub/internal/budget"
 	"life/hub/internal/spend"
 )
@@ -116,6 +117,10 @@ func (s *Server) spendQuota(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	q := s.quota.Quota(r.Context(), us, now)
+	// The Configuration page's "Powered by" block. The price is left out:
+	// the hub has no billing API and no card feed to read it from; an
+	// owner's agent that adds one fills `USD`/`ChargedOn` here.
+	q.Plan = &spend.Plan{Name: "Claude", Via: "Claude Code", MonthUSD: spend.MonthUSD(us, now), Brand: brand.ForSource("anthropic", "Anthropic")}
 	if s.picker != nil {
 		q.NextModel, q.NextReason = s.picker.Explain(r.Context(), now)
 		// The fable day cap outranks the plan meters: past it the next

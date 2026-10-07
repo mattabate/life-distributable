@@ -71,7 +71,7 @@ func places(t *testing.T) (pairs []surfacePair, only map[string]string, deep []s
 	}
 	src := string(b)
 	rows := placeRow.FindAllStringSubmatch(src, -1)
-	if len(rows) < 6 { // v0: Sessions, Recs, Calendar, Spend, Goals, Sources (+ console-only rows)
+	if len(rows) < 6 { // v0: Sessions, Recs, Calendar, Configuration + its Spend, Goals, Source pages (+ console-only rows)
 		t.Fatalf("only %d rows parsed out of %s — the table's shape has drifted from placeRow", len(rows), placesFile)
 	}
 	only = map[string]string{}
