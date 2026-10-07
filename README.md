@@ -88,9 +88,18 @@ you have to babysit. You don't need to be technical. You need:
 |---|---|
 | ![The Recs page of the personal AI assistant: move a house fund to a 4.4% savings account, new running shoes, a weekly Spanish class, each with evidence and Accept or Decline](docs/img/recs.png) | ![The life calendar week view: Spanish lessons each morning, training runs, a dentist call and a birthday dinner, with overdue and due-soon lists](docs/img/calendar.png) |
 
-| **iPhone: an approval.** The same card, in your pocket. | **iPhone: Sessions.** Every card waiting on you. | **iPhone: a goal.** Each one knows where it stands. |
-|---|---|---|
-| ![The life iPhone app at phone width showing the car insurance approval card](docs/img/phone-approval.png) | ![The life iPhone app Sessions list with cards waiting on the owner](docs/img/phone-sessions.png) | ![The life iPhone app goal page for Run a half marathon: week 5 of 16, 31 miles this week, notes the agent filed](docs/img/phone-goal.png) |
+<table>
+<tr>
+<th align="left"><strong>iPhone: an approval.</strong> The same card, in your pocket.</th>
+<th align="left"><strong>iPhone: Sessions.</strong> Every card waiting on you.</th>
+<th align="left"><strong>iPhone: Calendar.</strong> Overdue, due today, do soon.</th>
+</tr>
+<tr>
+<td valign="top"><img src="docs/img/phone-approval.png" alt="The life iPhone app: a session chat with the car insurance approval card, Approve, Deny, Reply and Dismiss buttons"></td>
+<td valign="top"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions tab: Your turn, 5 cards in 4 sessions, each session with its red cards"></td>
+<td valign="top"><img src="docs/img/phone-calendar.png" alt="The life iPhone app Calendar tab: an overdue passport renewal, two steps due today, one to do soon, a session waiting"></td>
+</tr>
+</table>
 
 All screenshots use a made-up owner and made-up data.
 
