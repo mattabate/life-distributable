@@ -138,6 +138,12 @@ screens: app-build-sim
 screens-dark: app-build-sim
 	APPEARANCE=dark bash ops/screens.sh $(TABS)
 
+# The same app showing the README's demo world (ops/demo-fixtures.js served by
+# ops/demo-hub.js), never your hub: the phone pictures in docs/img/ come
+# from here (ops/logs/demo/). Needs the simulator build already made.
+demo-screens:
+	bash ops/demo-screens.sh $(TABS)
+
 # ship = THE command after app/ changes (paid tier, 2026-08-22): ad-hoc
 # archive + export, .ipa + manifest served by the hub at /ota/<token>/, you
 # install from Safari anywhere on the tailnet (no LAN, no cable). Then raise
