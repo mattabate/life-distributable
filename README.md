@@ -34,10 +34,6 @@ in [ADDENDA.md](ADDENDA.md), and your agent brings each one to you.
 
 <p align="center"><img src="docs/img/configuration.png" alt="The life console's Configuration page: a Powered by card with the Claude Max plan, $23 spent this month, 69% of the 5 hour limit and 36% of the 7 day limit left, the model picker; a Goals card with four goals; and data source cards for Apple Health, Google Calendar, Mail, a bank via SimpleFIN, GitHub and the Life app, each with its row count and last sync" width="900"></p>
 
-**Configuration, on the phone.** The same page in your pocket: plan and limits at the top, then your goals, then each source under its group.
-
-<p align="center"><img src="docs/img/phone-configuration.png" alt="The life iPhone app's Configuration screen at phone width: the Claude Max plan with both limits, the model picker, four goals, and the data sources grouped as Health, Calendar and mail, Money, Code and Phone" width="260"></p>
-
 ## Is this for me?
 
 Yes, if you want an AI agent that actually does things, not a chat window
@@ -84,33 +80,17 @@ you have to babysit. You don't need to be technical. You need:
 
 ## Screenshots
 
-**Approvals.** The agent proposes, you approve.
+| **Approvals.** The agent proposes, you approve. | **Sessions.** It asks one clear question at a time. |
+|---|---|
+| ![A session chat in the life console with an approval card: switch car insurance and save $312 a year, old $148 a month, new $122 a month, tagged money](docs/img/approval.png) | ![A session planning a birthday dinner: the agent asks which of two restaurants to book and proposes an email to the restaurant for approval](docs/img/chat.png) |
 
-<p align="center"><img src="docs/img/approval.png" alt="A session chat in the life console with an approval card: switch car insurance and save $312 a year, old $148 a month, new $122 a month, tagged money" width="900"></p>
+| **Recs.** Suggestions with evidence and a price. | **Calendar.** Your steps and the agent's runs. |
+|---|---|
+| ![The Recs page of the personal AI assistant: move a house fund to a 4.4% savings account, new running shoes, a weekly Spanish class, each with evidence and Accept or Decline](docs/img/recs.png) | ![The life calendar week view: Spanish lessons each morning, training runs, a dentist call and a birthday dinner, with overdue and due-soon lists](docs/img/calendar.png) |
 
-**Sessions.** It asks one clear question at a time.
-
-<p align="center"><img src="docs/img/chat.png" alt="A session planning a birthday dinner: the agent asks which of two restaurants to book and proposes an email to the restaurant for approval" width="900"></p>
-
-**Recs.** Suggestions with evidence and a price.
-
-<p align="center"><img src="docs/img/recs.png" alt="The Recs page of the personal AI assistant: move a house fund to a 4.4% savings account, new running shoes, a weekly Spanish class, each with evidence and Accept or Decline" width="900"></p>
-
-**Calendar.** Your steps and the agent's runs.
-
-<p align="center"><img src="docs/img/calendar.png" alt="The life calendar week view: Spanish lessons each morning, training runs, a dentist call and a birthday dinner, with overdue and due-soon lists" width="900"></p>
-
-**Goals.** Each one knows where it stands.
-
-<p align="center"><img src="docs/img/goal.png" alt="A goal page for Run a half marathon: week 5 of 16, 31 miles this week, notes the agent filed from the training session" width="900"></p>
-
-**iPhone: an approval.** The same card, in your pocket.
-
-<p align="center"><img src="docs/img/phone-approval.png" alt="The life iPhone app at phone width showing the car insurance approval card" width="260"></p>
-
-**iPhone: Sessions.** Every card waiting on you, in one list.
-
-<p align="center"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions list with cards waiting on the owner" width="260"></p>
+| **iPhone: an approval.** The same card, in your pocket. | **iPhone: Sessions.** Every card waiting on you. | **iPhone: a goal.** Each one knows where it stands. |
+|---|---|---|
+| ![The life iPhone app at phone width showing the car insurance approval card](docs/img/phone-approval.png) | ![The life iPhone app Sessions list with cards waiting on the owner](docs/img/phone-sessions.png) | ![The life iPhone app goal page for Run a half marathon: week 5 of 16, 31 miles this week, notes the agent filed](docs/img/phone-goal.png) |
 
 All screenshots use a made-up owner and made-up data.
 
