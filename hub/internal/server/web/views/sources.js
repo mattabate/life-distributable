@@ -1,12 +1,9 @@
-// life hub — laptop console: Sources ("what am I connected to right now?").
-// views.sources. One compact table per section, one row per source, one line
-// per thing that source is pointed at (every connected account is listed).
-// A row is a SOURCE, not a subject — so finance is SimpleFin, the Drive
-// folder with its folders listed under it, and the tables that came from
-// neither. Unconnected sources are not in the payload at all. The catalog
-// prose (how it gets in, where it lands, rows by kind) is a PAGE behind each
-// row, `#/sources/<group>/<id>`, not an in-place fold — the same as the
-// phone's SourceDetail.
+// life hub — laptop console: one source's page, `#/sources/<group>/<id>`.
+// views.sources. The sources themselves are cards on Configuration
+// (views/config.js), and a bare #/sources lands there (app.js render). A
+// source is a SOURCE, not a subject, and its page carries the catalog prose —
+// how it gets in, where it lands, rows by kind — the same sections the
+// phone's SourceDetail draws.
 'use strict';
 // ================= sources =================
 
@@ -14,9 +11,7 @@
 // Not a pill — a wall of grey pills looks bad; on a white card the name alone
 // carries it.
 function sourceChip(a) {
-  // The link is its own click (a repo name opens GitHub, not the source's
-  // page); everywhere else on the row is the row's.
-  const label = a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.label)}</a>` : esc(a.label);
+  const label = a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.label)}</a>` : esc(a.label);
   const bits = [];
   if (a.detail) bits.push(esc(a.detail));
   if (a.last) bits.push(esc(ago(a.last)));
@@ -28,12 +23,12 @@ function sourceStatus(s) {
   return `<span class="dot src-dot ${cls}" title="${esc(s)}"></span>`;
 }
 
-// What a failing connector says on its row (2026-09-01). "Connected" used to
-// mean only that a credential existed, and the Newest column is the newest row
-// of ANY kind — including rows the hub writes without asking the upstream
-// anything — so X read "connected · 2m ago" for two days while every X call
-// came back 402 and the follower curve sat frozen at Aug 30. The point of the
-// line is not that there is an error: it is HOW OLD the numbers below it are.
+// What a failing connector says. "Connected" used to mean only that a
+// credential existed, and the newest row is the newest of ANY kind —
+// including rows the hub writes without asking the upstream anything — so a
+// connector can read "connected · 2m ago" while every call comes back
+// refused. The point of the line is not that there is an error: it is HOW
+// OLD the numbers are.
 function sourceFailBits(s) {
   const n = s.fails || 1; // absent means one, and `fails` is omitted at zero
   const bits = [`${n} ${n === 1 ? 'try' : 'tries'} failed`];
@@ -51,102 +46,9 @@ function sourceHash(g, s) {
   return `#/sources/${encodeURIComponent(g.id)}/${encodeURIComponent(s.id)}`;
 }
 
-// Every row starts folded to one line, so every source is in view at once:
-// dot, name, what it is connected to in a few words (the hub's `summary`),
-// rows, newest. The name is the door to the source's page; anywhere else on
-// the row unfolds the full "connected to" list in place. Which rows are open
-// survives a redraw.
-const srcOpen = new Set();
-
-function srcToggle(tr) {
-  const k = tr.dataset.k, open = !srcOpen.has(k);
-  if (open) srcOpen.add(k); else srcOpen.delete(k);
-  tr.classList.toggle('open', open);
-  const list = tr.querySelector('.src-accts');
-  if (list) list.hidden = !open;
-}
-
-function sourceRow(g, s) {
-  const as = s.accounts || [];
-  const k = `${g.id}/${s.id}`, open = srcOpen.has(k);
-  const summary = s.summary || (as[0] && as[0].label) || '';
-  // A failing row is in the "Not syncing" section, whose heading already says
-  // so: the row says how stale, in the same red.
-  const fail = s.status === 'failing' ? `<span class="src-fail-inline">${esc(sourceFailBits(s))}</span>` : '';
-  // One thing to be connected to is not a list (unfolded, it only repeats its
-  // own summary): no chevron, the one name (its link, when it
-  // has one) in the summary's place, and the row is the door to the page.
-  const folds = as.length > 1;
-  const one = as.length === 1 && as[0].url
-    ? `<a href="${esc(as[0].url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(as[0].label)}</a>`
-    : esc(as.length === 1 ? as[0].label : '');
-  const to = folds
-    ? `<span class="src-chev"></span><span class="src-sum">${esc(summary)}</span>${fail}<div class="src-accts"${open ? '' : ' hidden'}>${as.map(sourceChip).join('')}</div>`
-    : as.length ? `<span class="src-chev none"></span><span class="src-sum">${one}</span>${fail}`
-    : `<span class="muted">—</span>${fail}`;
-  const click = folds ? 'srcToggle(this)' : `location.hash='${sourceHash(g, s)}'`;
-  return `<tr class="src-row click${open ? ' open' : ''}" data-k="${esc(k)}" onclick="${click}">
-      <td class="src-name">${sourceStatus(s.status)}<a class="src-link" href="${sourceHash(g, s)}" onclick="event.stopPropagation()">${esc(s.title || s.id)}</a></td>
-      <td class="src-to">${to}</td>
-      <td class="n small muted">${s.total != null ? num(s.total) : ''}</td>
-      <td class="n small muted src-last">${s.last ? esc(ago(s.last)) : ''}</td>
-    </tr>`;
-}
-
-// Column widths are declared, not measured: the table is `table-layout: fixed`
-// so long prose in one cell cannot push the columns around — opening X /
-// Twitter used to shift the whole header. 33% is wide enough
-// that no source name wraps ("Semantic Scholar (citation context)").
-const SRC_COLGROUP = '<colgroup><col style="width:33%"><col><col style="width:76px"><col style="width:92px"></colgroup>';
-
-const srcByTitle = (a, b) => (a.s.title || a.s.id).toLowerCase().localeCompare((b.s.title || b.s.id).toLowerCase());
-
-// A section is one white card: its own header (the note kept to one line),
-// then the table inside it. `pairs` are {g, s}: the "Not syncing" section
-// holds rows from every group, and each still opens under its own group.
-// Only the first card carries the column names: the columns are declared, so
-// they line up down the page, and ten repeats of them were a third of its
-// height (2026-09-30: "I can tell it's too big").
-function sourceSectionHTML(title, note, pairs, head = true) {
-  const rows = pairs.slice().sort(srcByTitle).map(p => sourceRow(p.g, p.s)).join('');
-  const thead = head ? '<thead><tr><th>Source</th><th>Connected to</th><th class="n">Rows</th><th class="n">Newest</th></tr></thead>' : '';
-  return `<section class="src-card">
-    <header class="src-head">
-      <h3>${esc(title)}</h3>
-      ${note ? `<span class="small muted src-note" title="${esc(note)}">${esc(note)}</span>` : ''}
-    </header>
-    <table class="src-table">${SRC_COLGROUP}${thead}
-      <tbody>${rows || '<tr><td colspan="4" class="muted small">Nothing connected.</td></tr>'}</tbody></table>
-  </section>`;
-}
-
-function sourceGroupHTML(g) {
-  return sourceSectionHTML(g.title, g.note, (g.sources || []).map(s => ({ g, s })));
-}
-
-// The list page: each group's working sources, alphabetical; then every
-// source that is not syncing, from whatever group, in one section at the
-// bottom.
-function sourcesListHTML(groups) {
-  const all = groups.flatMap(g => g.sources.map(s => ({ g, s })));
-  const bad = all.filter(p => p.s.status === 'failing');
-  const cards = groups.map(g => ({ g, ok: g.sources.filter(s => s.status !== 'failing') }))
-    .filter(x => x.ok.length)
-    .map((x, i) => sourceSectionHTML(x.g.title, x.g.note, x.ok.map(s => ({ g: x.g, s })), i === 0)).join('');
-  // The count led with "N connected" — which is the claim this page was making
-  // wrongly. It counts sources; whether they WORK is the red half of the legend.
-  const head = bad.length ? `${all.length} sources · ${bad.length} not syncing` : `${all.length} sources`;
-  return `<div class="pane wide">
-    <div class="spread"><h2>Sources</h2>
-      <span class="small muted src-legend">${head}<span class="dot src-dot ok"></span>live feed${bad.length ? '<span class="dot src-dot bad"></span>refusing us' : ''}<span class="dot src-dot manual"></span>you maintain it</span></div>
-    ${cards}
-    ${bad.length ? sourceSectionHTML('Not syncing', '', bad, !cards) : ''}
-  </div>`;
-}
-
-// One source's page: the same sections the phone's SourceDetail draws, in the
-// same order — status (with what the service said, when it is refusing us),
-// what it is connected to, where it comes from, where it lands, rows by kind.
+// One source's page: status (with what the service said, when it is refusing
+// us), what it is connected to, where it comes from, where it lands, rows by
+// kind.
 function sourcePageHTML(g, s) {
   const as = s.accounts || [];
   const kinds = (s.kinds || []).map(k => `<tr><td class="mono">${esc(k.kind)}</td><td class="small muted">${esc(k.note || '')}</td>
@@ -157,7 +59,7 @@ function sourcePageHTML(g, s) {
     `<div class="small muted mt6">${s.total != null ? num(s.total) + ' rows' : ''}${s.last ? ` · newest row ${esc(ago(s.last))}` : ''}${s.last_ok ? ` · last worked ${esc(ago(s.last_ok))}` : ''}</div>`,
   ].join('');
   return `<div class="pane wide">
-    <div class="spread"><h2><a href="#/sources">Sources</a> / ${esc(s.title || s.id)}</h2><span class="small muted">${esc(g.title)}</span></div>
+    <div class="spread"><h2><a href="#/config">Configuration</a> / ${esc(s.title || s.id)}</h2><span class="small muted">${esc(g.tag || g.title)}</span></div>
     <section class="src-card"><div class="src-page">
       ${status}
       ${as.length ? `<h4>Connected to</h4>${as.map(sourceChip).join('')}` : ''}
@@ -170,15 +72,12 @@ function sourcePageHTML(g, s) {
 
 async function drawSources(view, rest) {
   const d = await get('/sources');
-  const groups = (d.groups || []).filter(g => (g.sources || []).length);
-  if (rest && rest.length >= 2 && rest[1]) {
-    const gid = decodeURIComponent(rest[0]), sid = decodeURIComponent(rest[1]);
-    const g = groups.find(x => x.id === gid);
-    const s = g && g.sources.find(x => x.id === sid);
-    if (s) { view.innerHTML = sourcePageHTML(g, s); return; }
-    // Gone from the payload (a connector the owner disconnected): back to the list.
-  }
-  view.innerHTML = sourcesListHTML(groups);
+  const gid = decodeURIComponent(rest?.[0] || ''), sid = decodeURIComponent(rest?.[1] || '');
+  const g = (d.groups || []).find(x => x.id === gid);
+  const s = g && (g.sources || []).find(x => x.id === sid);
+  // Gone from the payload (a connector the owner disconnected): back to the cards.
+  if (!s) { location.replace('#/config'); return; }
+  view.innerHTML = sourcePageHTML(g, s);
 }
 
 views.sources = { draw: drawSources, redraw: () => render() };

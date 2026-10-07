@@ -1,7 +1,7 @@
 {
   "id": "rec-00000001",
-  "created_at": "2026-10-06T04:43:16.071755Z",
-  "updated_at": "2026-10-06T04:43:16.071755Z",
+  "created_at": "2026-10-07T06:52:37.123749Z",
+  "updated_at": "2026-10-07T06:52:37.123749Z",
   "title": "Try Semantic Scholar's API key",
   "detail": "free tier",
   "goal_id": "get-smarter",
@@ -15,8 +15,8 @@
   "confidence": 70,
   "because": "rate limits",
   "expect": "fewer 429s",
-  "act_by": "2026-10-13",
-  "review_on": "2026-11-05",
+  "act_by": "2026-10-14",
+  "review_on": "2026-11-06",
   "status": "proposed",
   "model": "claude-opus-5",
   "thread_running": true,
@@ -43,5 +43,5 @@
   "window": "soon",
   "cost_label": "$11/mo",
   "days_left": 7,
-  "dates_label": "act by Oct 13 (7d) · review Nov 5"
+  "dates_label": "act by Oct 14 (7d) · review Nov 6"
 }

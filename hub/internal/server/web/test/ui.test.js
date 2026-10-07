@@ -475,108 +475,123 @@ test('select renders the current option selected', () => {
     '<label class="field" style="flex:1;min-width:150px"><span>Kind</span><select id="k">\n    <option value="a">a</option><option value="b" selected>b</option></select></label>');
 });
 
-// ---- views/sources.js: a row is a door, the page behind it says everything ----
-// Loaded into this same context (a classic script, like ui.js), which already
-// declares `views` and `ago`. Only the pure markup builders are exercised —
-// drawSources needs a browser.
-vm.runInThisContext(fs.readFileSync(path.join(__dirname, '..', 'views', 'sources.js'), 'utf8'), { filename: 'sources.js' });
+// ---- views/sources.js + views/config.js: a card is a door, the page behind it says everything ----
+// Loaded into this same context (classic scripts, like ui.js), which already
+// declares `views` and `ago`; goals.js for the goal emblem config.js draws.
+// Only the pure markup builders are exercised — the draw* need a browser.
+for (const f of ['goals.js', 'sources.js', 'config.js']) {
+  vm.runInThisContext(fs.readFileSync(path.join(__dirname, '..', 'views', f), 'utf8'), { filename: f });
+}
 
-test('sources: a row opens the source\'s own page, which carries the prose', () => {
-  const g = { id: 'code', title: 'Code', sources: [
+test('sources: the source\'s own page carries the prose, under Configuration', () => {
+  const g = { id: 'code', title: 'Code', tag: 'Code', color: '#64748B', sources: [
     { id: 'gh', title: 'GitHub', status: 'connected', total: 108, from: 'GitHub API daily',
       storage: 'observations table', summary: '2 handles',
       accounts: [{ label: '@handle', via: 'API', url: 'https://github.com/handle' }, { label: '@other' }],
       kinds: [{ kind: 'repo-stats', note: 'one row per sync', n: 27, first: '2026-08-23T05:58:27Z', last: '2026-09-26T04:05:11Z' }] },
   ] };
-  const list = sourceGroupHTML(g);
-  // The name is a link to #/sources/<group>/<id>, a page deeper, and the row
-  // holds none of the prose.
-  assert.match(list, /<a class="src-link" href="#\/sources\/code\/gh" onclick="event.stopPropagation\(\)">GitHub<\/a>/);
-  assert.doesNotMatch(list, /GitHub API daily|src-detail/);
-  // Folded by default: the summary shows, the account lines are in the row
-  // but hidden until the row is clicked.
-  assert.match(list, /<tr class="src-row click" data-k="code\/gh" onclick="srcToggle\(this\)">/);
-  assert.match(list, /<span class="src-chev"><\/span><span class="src-sum">2 handles<\/span><div class="src-accts" hidden>/);
-  // One thing connected is not a list: no chevron, nothing to unfold, the one name (its own link) on the row, the row a door.
-  const one = sourceGroupHTML({ id: 'a', title: 'A', sources: [{ id: 's', title: 'S', status: 'live', summary: 'Scholar profile',
-    accounts: [{ label: 'Scholar profile', url: 'https://scholar.example/u' }] }] });
-  assert.match(one, /<tr class="src-row click" data-k="a\/s" onclick="location.hash='#\/sources\/a\/s'">/);
-  assert.match(one, /<span class="src-chev none"><\/span><span class="src-sum"><a href="https:\/\/scholar.example\/u" target="_blank" rel="noopener" onclick="event.stopPropagation\(\)">Scholar profile<\/a><\/span>/);
-  assert.doesNotMatch(one, /src-accts|srcToggle/);
-  // Account links keep working as links: that click must not also fold the row.
-  assert.match(list, /<a href="https:\/\/github.com\/handle" target="_blank" rel="noopener" onclick="event.stopPropagation\(\)">@handle<\/a>/);
-  assert.doesNotMatch(list, /<td onclick/);
-  // A row with nothing to unfold is still a door to its page.
-  assert.match(sourceGroupHTML({ id: 'h', title: 'H', sources: [{ id: 'z', title: 'Z', status: 'live' }] }),
-    /onclick="location.hash='#\/sources\/h\/z'"/);
   const page = sourcePageHTML(g, g.sources[0]);
-  assert.match(page, /<h2><a href="#\/sources">Sources<\/a> \/ GitHub<\/h2>/);
+  assert.match(page, /<h2><a href="#\/config">Configuration<\/a> \/ GitHub<\/h2><span class="small muted">Code<\/span>/);
   assert.match(page, /GitHub API daily/);
   assert.match(page, /observations table/);
   assert.match(page, /<td class="mono">repo-stats<\/td><td class="small muted">one row per sync<\/td>/);
   assert.match(page, /2026-08-23 → 2026-09-26/);
   assert.match(page, /href="https:\/\/github.com\/handle"/);
+  assert.equal(sourceHash(g, g.sources[0]), '#/sources/code/gh');
 });
 
-// The row has to contradict itself out loud (2026-09-01): a connector read
-// "connected · 2m ago" for two days while every call came back 402, because
-// `last` is the newest row of any kind — including rows the hub writes itself.
-// The Newest column still says 2m; the red line under the name is what makes
-// that legible, and it leads with how old the numbers are, not with the error.
-test('sources: a failing source says how stale it is, on the row', () => {
-  const g = { id: 'code', title: 'Code', sources: [
+// The card has to contradict itself out loud: a connector can read
+// "connected · 2m ago" while every call comes back refused, because `last`
+// is the newest row of any kind — including rows the hub writes itself. The
+// red line leads with how old the numbers are, not with the error.
+test('sources: a failing source says how stale it is, on the card and its page', () => {
+  const g = { id: 'code', title: 'Code', tag: 'Code', color: '#64748B', sources: [
     { id: 'gh', title: 'GitHub', status: 'failing', total: 150,
       error: 'gh: HTTP 402: credits depleted', fails: 4,
       failing_since: new Date(Date.now() - 16 * 3600e3).toISOString(),
       last_ok: new Date(Date.now() - 45 * 3600e3).toISOString(),
       last: new Date(Date.now() - 120e3).toISOString() },
   ] };
-  const h = sourceGroupHTML(g);
-  assert.match(h, /<span class="dot src-dot bad"/);
-  // The row sits under the "Not syncing" heading, so it says only how stale.
-  assert.match(h, /src-fail-inline">4 tries failed · since 16h ago · last worked 2d ago/);
-  assert.match(h, /src-last">2m ago<\/td>/); // the contradiction, now visible
+  const card = cfgSourceCard(g, g.sources[0]);
+  assert.match(card, /<a class="scard bad" href="#\/sources\/code\/gh" style="--c:#64748B">/);
+  assert.match(card, /sfail clamp1">4 tries failed · since 16h ago · last worked 2d ago</);
+  assert.match(card, /150 rows · 2m ago/); // the contradiction, now visible
   // The error itself is on the source's page, under the same red line.
   const page = sourcePageHTML(g, g.sources[0]);
   assert.match(page, /Not syncing — 4 tries failed · since 16h ago · last worked 2d ago/);
   assert.match(page, /What the service said: <code>gh: HTTP 402: credits depleted<\/code>/);
   // One failure, and one that has never worked at all.
-  const once = sourceGroupHTML({ ...g, sources: [{ id: 'y', title: 'Y', status: 'failing' }] });
-  assert.match(once, /src-fail-inline">1 try failed · never worked/);
-  // Everything else keeps its quiet row.
-  assert.doesNotMatch(sourceGroupHTML({ ...g, sources: [{ id: 'z', title: 'Z', status: 'connected' }] }), /src-fail|src-dot bad/);
+  assert.match(cfgSourceCard(g, { id: 'y', title: 'Y', status: 'failing' }), /1 try failed · never worked/);
+  // Everything else keeps its quiet card: the summary line, no red.
+  const ok = cfgSourceCard(g, { id: 'z', title: 'Z', status: 'connected', summary: '3 repos' });
+  assert.doesNotMatch(ok, /sfail|scard bad/);
+  assert.match(ok, /muted clamp1">3 repos</);
 });
 
-// Alphabetical in each section, and every source that is not syncing pulled
-// out of its section into one at the bottom.
-test('sources: sections sort by name and the failing ones go to the bottom', () => {
+// A section per group, its name in the group's colour; groups that share a
+// tag are one section; cards alphabetical inside it.
+test('config: sources are sections of cards, by tag, each edged in its colour', () => {
   const groups = [
-    { id: 'code', title: 'Code', sources: [
-      { id: 'yt', title: 'YouTube', status: 'connected' },
-      { id: 'x', title: 'Weather', status: 'failing' },
-      { id: 'gh', title: 'GitHub', status: 'connected' },
+    { id: 'code', title: 'Code', tag: 'Code', color: '#181717', sources: [
+      { id: 'yt', title: 'YouTube', status: 'connected', brand: { mark: '▶', color: '#FF0000', ink: '#FFFFFF' } },
+      { id: 'gh', title: 'GitHub', status: 'connected', brand: { mark: 'GH', color: '#181717', ink: '#FFFFFF', logo: 'M12 .297c-6.63 0-12 5.373-12 12' } },
     ] },
-    { id: 'home', title: 'Home', note: 'a long note', sources: [{ id: 'w', title: 'Thermostat', status: 'failing' }] },
+    { id: 'repos', title: 'Repos', tag: 'Code', color: '#181717', sources: [{ id: 'gl', title: 'GitLab', status: 'connected' }] },
+    { id: 'home', title: 'Home', sources: [{ id: 'w', title: 'Thermostat', status: 'failing' }] },
   ];
-  const h = sourcesListHTML(groups);
-  assert.ok(h.indexOf('>GitHub<') < h.indexOf('>YouTube<'));
-  assert.ok(h.indexOf('<h3>Not syncing</h3>') > h.indexOf('>YouTube<'));
-  assert.ok(h.indexOf('>Thermostat<') < h.indexOf('>Weather<'));
-  assert.ok(h.indexOf('>Weather<') > h.indexOf('<h3>Not syncing</h3>'));
-  // A section left with nothing working is not drawn at all; its failing row
-  // still opens under its own group.
-  assert.doesNotMatch(h, /<h3>Home<\/h3>/);
-  assert.match(h, /href="#\/sources\/home\/w"/);
-  assert.match(h, /4 sources · 2 not syncing/);
-  // The column names once, on the first card; the declared widths line the rest up.
-  assert.equal(h.split('<thead>').length - 1, 1);
+  const h = cfgSourcesHTML(groups);
+  assert.equal(h.split('<section class="sgroup"').length - 1, 2);
+  assert.match(h, /<section class="sgroup" style="--c:#181717;--n:3">\s*<h4>Code<span class="muted">3<\/span><\/h4>/);
+  assert.ok(h.indexOf('>GitHub<') < h.indexOf('>GitLab<') && h.indexOf('>GitLab<') < h.indexOf('>YouTube<'));
+  // No tag: the title on slate.
+  assert.match(h, /<section class="sgroup" style="--c:#64748B;--n:1">\s*<h4>Home<span class="muted">1<\/span><\/h4>/);
+  // The tile: letters on the provider's colour, or its logo path in its ink.
+  assert.match(h, /<span class="bmark" style="background:#FF0000;color:#FFFFFF">▶<\/span>/);
+  assert.match(h, /<span class="bmark logo" style="background:#181717;color:#FFFFFF"><svg viewBox="0 0 24 24" aria-label="GH"><path fill="currentColor" d="M12 .297c-6.63 0-12 5.373-12 12"\/><\/svg><\/span>/);
+  assert.match(brandMark(null), /class="bmark" style="background:var\(--muted\);color:#fff">·</);
+  assert.match(cfgSourcesHTML([]), /Nothing connected\./);
 });
 
-test('sources: column widths are declared, so opening a row cannot move them', () => {
-  const g = { id: 'health', title: 'Health', sources: [
-    { id: 'health', title: 'Apple Health', status: 'live', total: 22635, accounts: [{ label: "Alex's iPhone" }] },
-  ] };
-  assert.match(sourceGroupHTML(g), /<table class="src-table"><colgroup><col style="width:33%"><col><col style="width:76px"><col style="width:92px"><\/colgroup>/);
+// Powered by: the plan, this month's spend, a meter per limit with its clock
+// tick, a red alert for a limit nearly out, and the model ladder.
+test('config: the plan block says what runs the sessions and how much is left', () => {
+  const q = { available: true, next_model: 'claude-opus-5',
+    plan: { name: 'Claude', via: 'Claude Code', usd: 100, period: 'monthly', charged_on: '2026-10-01', month_usd: 23.4,
+      brand: { mark: 'A', color: '#D97757', ink: '#FFFFFF' } },
+    windows: [
+      { key: 'five_hour', label: 'All models · 5 hours', utilization: 18, elapsed_pct: 40, tone: '', foot: '3 h left · resets 4:00 PM' },
+      { key: 'seven_day', label: 'All models · 7 days', utilization: 93, elapsed_pct: 55, tone: 'warn', foot: '3 d left · resets Oct 11 12:00 AM' },
+    ] };
+  const m = { default_model: 'claude-opus-5', starts_on: 'claude-opus-5', explicit: false,
+    rungs: [{ model: 'claude-opus-5', open: true }, { model: 'claude-sonnet-5', open: false, why: 'day cap' }] };
+  const h = cfgPlanHTML(q, m);
+  assert.match(h, /<strong>Claude<\/strong><span class="small muted">Claude Code · \$100\/mo · charged Oct 1<\/span>/);
+  assert.match(h, /<a class="cfg-month" href="#\/spend"><span class="n">\$23<\/span><span class="small muted">this month<\/span><\/a>/);
+  assert.match(h, /<span class="small">All models · 5 hours<\/span>\s*<span class="small n">82% left<\/span>\s*<div class="meter "><div style="width:18%"><\/div><i class="tick" style="left:40%"><\/i><\/div>/);
+  // 7% left: red, named at the top with the hub's own reset words.
+  assert.match(h, /<div class="cfg-alert">\s*<strong>All models · 7 days nearly out<\/strong><span>7% left · resets Oct 11 12:00 AM<\/span>/);
+  assert.match(h, /<div class="cfg-lim low">\s*<span class="small">All models · 7 days<\/span>\s*<span class="small n" style="color:var\(--red\)">7% left<\/span>\s*<div class="meter bad">/);
+  // The ladder: the rung new sessions start on filled, the shut one struck through, auto on.
+  assert.match(h, /<button class="sm on" onclick="setDefaultModel\('claude-opus-5'\)">opus 5<\/button>/);
+  assert.match(h, /<button class="sm" disabled title="day cap" style="text-decoration:line-through;opacity:.5">sonnet 5<\/button>/);
+  assert.match(h, /<button class="sm on" onclick="setDefaultModel\(''\)">auto<\/button>/);
+  // No price known: the plan line is just what it runs through.
+  const bare = cfgPlanHTML({ available: false, error: 'no token', plan: { name: 'Claude', via: 'Claude Code', month_usd: 0 } }, null);
+  assert.match(bare, /<strong>Claude<\/strong><span class="small muted">Claude Code<\/span>/);
+  assert.match(bare, /<div class="small err">no token<\/div>/);
+  assert.doesNotMatch(bare, /cfg-model/);
+  assert.match(cfgPlanHTML({}, null), /the plan/);
+});
+
+test('config: goals are the active ones as tiles, each the door to its page', () => {
+  const h = cfgGoalsHTML([
+    { id: 'run', title: 'Run a half marathon', status: 'active', emblem: { hue: 10, symbol: 'health' } },
+    { id: 'old', title: 'Done with this', status: 'done', emblem: { hue: 100 } },
+  ]);
+  assert.match(h, /<a class="cfg-goal" href="#\/goals\/run" style="--h:10">\s*<span class="emblem" style="--h:10">/);
+  assert.match(h, /Run a half marathon/);
+  assert.doesNotMatch(h, /Done with this/);
+  assert.match(cfgGoalsHTML([]), /No active goals\./);
 });
 
 // ---- composer.js: the one box every surface writes back through ----

@@ -49,6 +49,17 @@ one endpoint's contract.
 8. **Shipping**: hub changed → `ops/hub.sh restart`. App changed →
    `make ship`, then one ask with the install link.
 
+## The pages that ship
+
+Four tabs, the same on the console, the phone and the desktop app:
+**Sessions · Recs · Calendar · Configuration**. Sessions, Recs and
+Calendar are the defaults the owner lives in. Configuration holds the
+goals, the spend limits (the plan, its windows, the model new sessions
+start on) and the data sources; Goals (`#/goals`), Spend (`#/spend`) and
+one source's page sit behind it and light its tab. Domain pages (money, a
+training log, a reading list) are goal pages an agent builds for the owner
+when a goal needs one; none ships.
+
 ## Recipe: a page for a goal
 
 Pages are made for a goal when it truly needs one — they don't ship. Data
@@ -72,16 +83,28 @@ meals.
 4. **Only if the owner asks for a page**: `GET /api/v1/fitness/summary`
    (contract + test + `make generate` for its fixture), then
    - console: `hub/internal/server/web/views/fitness.js` registering
-     `views.fitness`, a nav entry, a test in `web/test/`;
+     `views.fitness`, a nav entry in `web/index.html` (the heartbeat's
+     `pages` count follows it), a test in `web/test/`;
    - phone: `app/Life/Sources/FitnessView.swift` + its model in
-     `Models.swift` + a row under **More**, and a decode test against the
-     fixture;
+     `Models.swift` + a `MoreDest` case in `RootView.swift` (the row
+     under **More**, after Configuration) and a `MacTopBar.pages` entry,
+     and a decode test against the fixture;
    - `web/places.js`: `fitness: { label: 'Fitness', view: 'views/fitness.js', phone: 'FitnessView.swift' }`.
 5. `make check`, screenshots of both surfaces (look at them), commit,
    `ops/hub.sh restart`, `make ship`.
 
 ## Pulling updates
 
-`upstream` is the public life-distributable repo; `origin` is the owner's
-private copy. Pull upstream only when the owner asks:
-`git fetch upstream && git merge upstream/main`, resolve, `make check`.
+`upstream` is the public repo, github.com/mattabate/life-distributable; `origin`
+is the owner's private copy. The copy is theirs: upstream is read-only, and
+nothing from it lands without the owner's yes.
+
+- **Weekly check-back.** The "Updates from upstream" session (SETUP.md
+  step 10) runs `ops/addenda-check.md` every Monday: `git fetch upstream`,
+  read `upstream/main:ADDENDA.md`, raise one read card per entry newer than
+  the id in `data/addenda-seen.txt`, then store the newest id there.
+  Nothing new means no card.
+- **Applying one.** Only on the owner's yes on its card: follow the
+  entry's **How**. A merge is `git merge upstream/main`, conflicts resolved
+  in favour of the owner's own changes, then `make check`.
+- **When the owner just asks to update:** the same merge, same gate.

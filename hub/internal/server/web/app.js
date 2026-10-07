@@ -197,8 +197,13 @@ async function render() {
   // `#/open/<id>` is an address, not a page: it is swapped for where the
   // thing lives, so Back never lands on it.
   if (name === 'open') { location.replace(await openRef(rest[0] || '')); return; }
+  // The sources are cards on Configuration; a bare #/sources is that page.
+  if (name === 'sources' && !rest.filter(Boolean).length) { location.replace('#/config'); return; }
   const page = views[name] || views.sessions;
-  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.tab === (views[name] ? name : 'sessions')));
+  // Goals, Spend and a source's page live behind the Configuration tab, so
+  // it stays lit while the owner is on any of them.
+  const tab = ['sources', 'goals', 'spend'].includes(name) ? 'config' : views[name] ? name : 'sessions';
+  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
   // The page the owner is on may be behind the fold — More takes its name; and the
   // menu closes, this being the click that opened it landing.
   const navmenu = document.getElementById('navmenu');
@@ -296,7 +301,7 @@ function setBadge(tab, n) {
 }
 
 // The nav order is the order in index.html and NOTHING reorders it: Sessions,
-// Recs, Calendar, Spend, Goals, Sources. A badge
+// Recs, Calendar, Configuration. A badge
 // colours a tab; it never moves one, so every tab is always where it was. The
 // phone's tab bar and its More list are the same list in the same order with
 // the same labels (RootView.swift `MoreDest`), so a change here is a change

@@ -8,8 +8,8 @@
 // step list lives in the caller (ops/app-ui.sh) and this file never changes
 // when the flow does.
 //
-// Run it with `make app-ui STEPS='tab more; tap Spend; shot spend; tap
-// Goals; shot goals'` — never directly; the wrapper passes the hub
+// Run it with `make app-ui STEPS='tab more; tap Configuration; shot config;
+// tap Goals; shot goals'` — never directly; the wrapper passes the hub
 // token, the output directory and the steps as TEST_RUNNER_* variables.
 //
 // Steps (verb + argument):

@@ -102,7 +102,7 @@ app-test:
 	cd app && xcodebuild -project Life.xcodeproj -scheme Life -destination 'platform=iOS Simulator,name=$(SIM)' -derivedDataPath build -only-testing:LifeTests CODE_SIGNING_ALLOWED=NO test -quiet
 
 # WALK the phone app: tap, type, swipe, screenshot each step.
-# STEPS='tab more; tap Spend; shot spend; tap Goals; shot goals' or
+# STEPS='tab more; tap Configuration; shot config; tap Goals; shot goals' or
 # FLOW=ops/flows/<name>.txt. SIM=/APPEARANCE= pick device and light/dark.
 # Output: ops/logs/screens/ui/.
 app-ui:

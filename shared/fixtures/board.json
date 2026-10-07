@@ -8,13 +8,13 @@
       "id": "",
       "title": "Proposed by a scheduled job",
       "n": 1,
-      "first": "20261006-044316-00000001",
+      "first": "20261007-065237-00000001",
       "running": false,
       "actions": [
         {
-          "id": "20261006-044316-00000001",
-          "created_at": "2026-10-06T04:43:16.060795Z",
-          "updated_at": "2026-10-06T04:43:16.060795Z",
+          "id": "20261007-065237-00000001",
+          "created_at": "2026-10-07T06:52:37.114917Z",
+          "updated_at": "2026-10-07T06:52:37.114917Z",
           "project": "",
           "kind": "money",
           "title": "move $5",
@@ -54,8 +54,8 @@
       "asks": [
         {
           "id": "ask-00000003",
-          "created_at": "2026-10-06T04:43:16.057829Z",
-          "updated_at": "2026-10-06T04:43:16.057829Z",
+          "created_at": "2026-10-07T06:52:37.112308Z",
+          "updated_at": "2026-10-07T06:52:37.112308Z",
           "thread_id": "water-the-plants-00000002",
           "thread_title": "Water the plants",
           "goal_id": "get-smarter",
@@ -100,11 +100,11 @@
       "asks": [
         {
           "id": "ask-00000005",
-          "created_at": "2026-10-06T04:43:16.059553Z",
-          "updated_at": "2026-10-06T04:43:16.059553Z",
+          "created_at": "2026-10-07T06:52:37.113568Z",
+          "updated_at": "2026-10-07T06:52:37.113568Z",
           "thread_id": "split-my-brokerage-cash-sensibly-00000004",
           "thread_title": "Split my brokerage cash sensibly",
-          "run_id": "20261006-004316-00000006",
+          "run_id": "20261007-025237-00000006",
           "title": "Read this",
           "detail": "a finding",
           "kind": "read",
@@ -139,7 +139,7 @@
   },
   "installs": {},
   "first": {
-    "": "20261006-044316-00000001",
+    "": "20261007-065237-00000001",
     "split-my-brokerage-cash-sensibly-00000004": "ask-00000005",
     "water-the-plants-00000002": "ask-00000003"
   },

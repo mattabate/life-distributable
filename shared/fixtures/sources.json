@@ -11,15 +11,15 @@
           "from": "The app reads HealthKit whenever it is open (Sources › Apple Health) — everything Health already holds on the first sync, then the last few days on every launch",
           "storage": "observations table in data/life.db (SQLite, append-only): one row per metric per day (steps, distance, energy, exercise, heart rate, resting HR, HRV, VO2max, weight, body fat), one per night of sleep, one per workout",
           "status": "live",
-          "last": "2026-10-06T04:43:16.046358Z",
+          "last": "2026-10-07T06:52:37.101908Z",
           "total": 3,
           "summary": "iPhone (Life app)",
           "kinds": [
             {
               "kind": "steps",
               "n": 3,
-              "first": "2026-10-04T04:43:16.046358Z",
-              "last": "2026-10-06T04:43:16.046358Z",
+              "first": "2026-10-05T06:52:37.101908Z",
+              "last": "2026-10-07T06:52:37.101908Z",
               "note": "one row per day — the day's total"
             }
           ],
@@ -27,17 +27,27 @@
             {
               "label": "iPhone (Life app)",
               "via": "phone",
-              "last": "2026-10-06T04:43:16.046358Z"
+              "last": "2026-10-07T06:52:37.101908Z"
             }
-          ]
+          ],
+          "brand": {
+            "mark": "♥",
+            "color": "#FF2D55",
+            "ink": "#FFFFFF",
+            "logo": "M12 21.6 10.5 20.2C5.2 15.4 1.7 12.2 1.7 8.3 1.7 5.1 4.2 2.6 7.4 2.6c1.8 0 3.5.8 4.6 2.2 1.1-1.4 2.8-2.2 4.6-2.2 3.2 0 5.7 2.5 5.7 5.7 0 3.9-3.5 7.1-8.8 11.9z"
+          }
         }
-      ]
+      ],
+      "tag": "Health",
+      "color": "#DC2626"
     },
     {
       "id": "phone",
       "title": "From the phone",
       "blurb": "What you send the app directly.",
-      "sources": []
+      "sources": [],
+      "tag": "Phone",
+      "color": "#0D9488"
     }
   ]
 }

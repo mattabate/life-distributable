@@ -3,7 +3,8 @@
 # launch of the fresh build with LIFE_TAB=<page>, and the app draws its own
 # window into ops/logs/screens/mac/<page>.png and quits (MacShot.swift).
 # Git-ignored: they show the owner's data. Usage: ops/mac-screens.sh [page ...]
-#   pages: sessions recs calendar goals spend sources settings,
+#   pages: sessions recs calendar config settings (goals and spend are pages
+#          behind Configuration and take a LIFE_TAB of their own),
 #          thread:<id> (Sessions with that chat open), goal:<id> (that goal's
 #          page), open:<id> (rec-…, cal-…, ask-…: its tab with that thing
 #          open, as after a tap on it in a card).
@@ -19,7 +20,7 @@ OUT="$ROOT/ops/logs/screens/mac"; mkdir -p "$OUT"
 # /Applications, and never a quit of the installed app.
 BIN="$ROOT/app/build-mac/Build/Products/Debug-maccatalyst/life.app/Contents/MacOS/life"
 [ -x "$BIN" ] || { echo "no desktop build; run: make mac (or make mac-build)" >&2; exit 1; }
-PAGES=("$@"); [ ${#PAGES[@]} -gt 0 ] || PAGES=(sessions recs calendar goals spend sources settings)
+PAGES=("$@"); [ ${#PAGES[@]} -gt 0 ] || PAGES=(sessions recs calendar config settings)
 for p in "${PAGES[@]}"; do
   tab="$p"; name="$p"; thread=""; goal=""; open=""
   case "$p" in

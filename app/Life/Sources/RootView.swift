@@ -186,7 +186,7 @@ struct RootView: View {
         case "calendar": CalendarView()
         case "goals": NavigationStack { GoalsView() }.macColumn()
         case "spend": SpendView().macColumn()
-        case "sources": NavigationStack { SourcesView() }.macColumn()
+        case "config": NavigationStack { ConfigView() }.macColumn()
         case "settings": NavigationStack { SettingsView() }.macColumn()
         default: ThreadsView()
         }
@@ -195,7 +195,7 @@ struct RootView: View {
     private var tabs: some View {
         TabView(selection: $tab) {
             // The bar is the console's nav, in the console's order: Sessions,
-            // Recs, Calendar, then More (Spend, Goals, Sources, Settings).
+            // Recs, Calendar, then More (Configuration, Settings).
             //
             // Sessions = the agents working for the owner, every past thread,
             // AND what needs them: its first group is Your turn, each row
@@ -252,8 +252,7 @@ struct MacTopBar: View {
     @Environment(SnapState.self) private var snap
 
     static let pages: [(key: String, title: String)] = [
-        ("sessions", "Sessions"), ("recs", "Recs"), ("calendar", "Calendar"),
-        ("goals", "Goals"), ("spend", "Spend"), ("sources", "Sources"),
+        ("sessions", "Sessions"), ("recs", "Recs"), ("calendar", "Calendar"), ("config", "Configuration"),
     ]
     /// The file Ask names as "the screen the owner was on", as `.askButton()` did.
     private var file: String {
@@ -263,7 +262,7 @@ struct MacTopBar: View {
         case "calendar": "Life/CalendarView.swift"
         case "goals": "Life/GoalsView.swift"
         case "spend": "Life/SpendView.swift"
-        case "sources": "Life/SourcesView.swift"
+        case "config": "Life/ConfigView.swift"
         default: "Life/SettingsView.swift"
         }
     }
@@ -377,7 +376,7 @@ let appVersionLabel: String = {
     return "\(v) (\(b))"
 }()
 
-/// Our own "More": Spend, Goals, Sources, Settings.
+/// Our own "More": Configuration, Settings.
 ///
 /// iOS's automatic More tab wraps the tab's root view in a navigation
 /// controller of its own, and every screen here brings its own
@@ -394,18 +393,15 @@ let appVersionLabel: String = {
 /// after Calendar, with the console's labels. Nothing slides — see
 /// `MoreView.rows`.
 enum MoreDest: String, Hashable, CaseIterable {
-    case spend, goals, sources, settings
+    case config, settings
     var title: String {
         switch self {
-        case .goals: "Goals"; case .spend: "Spend"
-        case .sources: "Sources"; case .settings: "Settings"
+        case .config: "Configuration"; case .settings: "Settings"
         }
     }
     var icon: String {
         switch self {
-        case .spend: "chart.bar.fill"
-        case .goals: "target"
-        case .sources: "externaldrive.connected.to.line.below"; case .settings: "gearshape.fill"
+        case .config: "slider.horizontal.3"; case .settings: "gearshape.fill"
         }
     }
 }
@@ -452,9 +448,7 @@ struct MoreView: View {
             .askButton()
             .navigationDestination(for: MoreDest.self) { d in
                 switch d {
-                case .goals: GoalsView()
-                case .spend: SpendView(pushed: true)
-                case .sources: SourcesView()
+                case .config: ConfigView()
                 case .settings: SettingsView()
                 }
             }

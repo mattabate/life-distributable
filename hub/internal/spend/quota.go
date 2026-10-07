@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"life/hub/internal/brand"
 	"life/hub/internal/format"
 	"life/hub/internal/httpx"
 )
@@ -122,6 +123,35 @@ type Quota struct {
 	NextModel   string          `json:"next_model,omitempty"`  // what a new session will run on
 	NextReason  string          `json:"next_reason,omitempty"` // why, when it is not the top rung
 	Extra       json.RawMessage `json:"extra,omitempty"`       // extra_usage object verbatim, if present
+	// The subscription the sessions run on, for the Configuration page's
+	// "Powered by" block. Filled by the server, not the fetch.
+	Plan *Plan `json:"plan,omitempty"`
+}
+
+// Plan is the provider block on Configuration: the subscription's name, what
+// runs on it, its price when the hub knows it, and this month's list-price
+// spend. One block per provider, so a second provider is a second Plan.
+type Plan struct {
+	Name      string     `json:"name"`                 // "Claude"
+	Via       string     `json:"via"`                  // "Claude Code"
+	USD       float64    `json:"usd,omitempty"`        // the subscription's price, 0 when unknown
+	Period    string     `json:"period,omitempty"`     // "monthly"
+	ChargedOn string     `json:"charged_on,omitempty"` // YYYY-MM-DD of the newest charge, when known
+	MonthUSD  float64    `json:"month_usd"`            // list-price $ of every transcript since the 1st
+	Brand     brand.Mark `json:"brand"`
+}
+
+// MonthUSD: list-price dollars of every usage since the first of now's month.
+func MonthUSD(us []Usage, now time.Time) float64 {
+	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	t := 0.0
+	for _, u := range us {
+		if !u.TS.Before(start) {
+			c, _ := u.Cost()
+			t += c
+		}
+	}
+	return t
 }
 
 // TokenSource returns the OAuth access token. Swappable for tests.

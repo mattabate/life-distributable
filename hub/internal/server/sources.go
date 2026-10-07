@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"life/hub/internal/brand"
 	"life/hub/internal/obs"
 	"life/hub/internal/syncruns"
 )
@@ -67,6 +68,9 @@ type Source struct {
 	Summary  string          `json:"summary,omitempty"`
 	Kinds    []SourceKind    `json:"kinds"`
 	Accounts []SourceAccount `json:"accounts"`
+	// The card's tile on Configuration (brand.ForSource): the source's own
+	// mark, else initials on slate. Both surfaces draw it as served.
+	Brand brand.Mark `json:"brand"`
 }
 
 type SourceGroup struct {
@@ -75,6 +79,19 @@ type SourceGroup struct {
 	Blurb   string   `json:"blurb"`
 	Note    string   `json:"note,omitempty"` // live facts about the group's lanes
 	Sources []Source `json:"sources"`
+	// The one-word section name and colour the Configuration page draws the
+	// group's cards under (sourceTags); Title when the group has no tag.
+	Tag   string `json:"tag"`
+	Color string `json:"color"`
+}
+
+// sourceTags: the section a group's cards sit under on Configuration and the
+// colour its name is drawn in. A group with no row here is its own title on
+// slate. A new group an owner's agent adds (a bank feed, mail) gets a row.
+var sourceTags = map[string][2]string{
+	"health": {"Health", "#DC2626"},
+	"phone":  {"Phone", "#0D9488"},
+	"other":  {"Other", "#64748B"},
 }
 
 type SourcesView struct {
@@ -203,6 +220,11 @@ func (s *Server) sources(w http.ResponseWriter, r *http.Request) {
 func sortSources(groups []SourceGroup) {
 	for gi := range groups {
 		g := &groups[gi]
+		if t, ok := sourceTags[g.ID]; ok {
+			g.Tag, g.Color = t[0], t[1]
+		} else {
+			g.Tag, g.Color = g.Title, "#64748B"
+		}
 		sort.Slice(g.Sources, func(i, j int) bool {
 			return strings.ToLower(g.Sources[i].Title) < strings.ToLower(g.Sources[j].Title)
 		})
@@ -221,6 +243,7 @@ func sortSources(groups []SourceGroup) {
 				})
 			}
 			g.Sources[si].Summary = sourceSummary(g.Sources[si])
+			g.Sources[si].Brand = brand.ForSource(g.Sources[si].ID, g.Sources[si].Title)
 		}
 	}
 }

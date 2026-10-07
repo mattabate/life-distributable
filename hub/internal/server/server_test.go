@@ -1355,7 +1355,7 @@ func TestUsageSwitch(t *testing.T) {
 		return w
 	}
 	s.thr.CreateIdle("th-private", "A private title", "life")
-	if w := do("GET", "/api/v1/usage", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"on":false`) || !strings.Contains(w.Body.String(), `"pages":6`) || strings.Contains(w.Body.String(), "private") {
+	if w := do("GET", "/api/v1/usage", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"on":false`) || !strings.Contains(w.Body.String(), `"pages":4`) || strings.Contains(w.Body.String(), "private") {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	if w := do("PUT", "/api/v1/usage", `{}`); w.Code != 400 {
@@ -1601,7 +1601,11 @@ func TestSources(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	b := w.Body.String()
-	for _, want := range []string{`"title":"Apple Health"`, `"total":2`, `"note":"one row per day — the day's total"`, `"id":"other"`, `"id":"garden"`} {
+	// Each group carries its Configuration section (tag + colour) and each
+	// source its tile: the catalogued health source its own heart, an
+	// uncatalogued one its initial on slate.
+	for _, want := range []string{`"title":"Apple Health"`, `"total":2`, `"note":"one row per day — the day's total"`, `"id":"other"`, `"id":"garden"`,
+		`"tag":"Health"`, `"color":"#DC2626"`, `"tag":"Other"`, `"brand":{"mark":"♥","color":"#FF2D55","ink":"#FFFFFF","logo":"M12`, `"brand":{"mark":"G","color":"#64748B","ink":"#FFFFFF"}`} {
 		if !strings.Contains(b, want) {
 			t.Fatalf("missing %s in %s", want, b)
 		}

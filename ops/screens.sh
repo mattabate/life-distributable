@@ -54,7 +54,7 @@ for tab in "${TABS[@]}"; do
   # "sent:<id>" opens that same sheet as it is AFTER Send — turned into the
   # session's chat. A home screen in the picture means the sheet crashed.
   case "$tab" in sent:*) compose="${tab#sent:}"; tab=sessions; name="sent-$compose";; esac
-  # "more:<dest>" (money|spend|goals|engagement|sources|settings) opens the More tab
+  # "more:<dest>" (config|settings) opens the More tab
   # already pushed into that screen — they are two taps deep, so a plain tab
   # screenshot can never show one.
   more=""
