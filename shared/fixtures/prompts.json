@@ -1,10 +1,10 @@
 [
   {
     "id": "p-00000001",
-    "created_at": "2026-10-07T06:52:37.119437Z",
+    "created_at": "2026-10-08T21:16:56.804395Z",
     "author": "hub",
     "target": "new-or:split-my-brokerage-cash-sensibly-00000002",
-    "not_before": "2026-10-08T14:00:00Z",
+    "not_before": "2026-10-09T14:00:00Z",
     "in_reply_to": "cal:cal-00000003",
     "replies": [
       {
@@ -17,10 +17,10 @@
   },
   {
     "id": "p-00000004",
-    "created_at": "2026-10-07T06:52:37.115627Z",
+    "created_at": "2026-10-08T21:16:56.799608Z",
     "author": "owner",
     "target": "split-my-brokerage-cash-sensibly-00000002",
-    "not_before": "2026-10-10T13:00:00Z",
+    "not_before": "2026-10-11T13:00:00Z",
     "in_reply_to": "ask:ask-00000005",
     "outcome": "done",
     "replies": [

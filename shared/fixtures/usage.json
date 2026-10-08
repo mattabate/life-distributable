@@ -5,7 +5,7 @@
   "payload": {
     "active_days": 1,
     "goals": 1,
-    "pages": 6,
+    "pages": 4,
     "sessions_started": 2,
     "token_bucket": "unknown",
     "version": "0.1.0"

@@ -44,6 +44,7 @@ it tells you. You never type a command.
 
 ⭐ **[Star it][repo]** to get developer addenda: new features and fixes land
 in [ADDENDA.md](ADDENDA.md), and your agent brings each one to you.
+**Check back often:** updates from the developer's own copy land here every week.
 
 <p align="center"><img src="docs/img/sessions.png" alt="The life desktop app: the Sessions board with four cards waiting on the owner, an approval to buy $500 of VTI on Thursday, a honeymoon decision, an app build to install and today's tweet to pick, a Gmail expense scan the agent is running, and a new session ready to start" width="900"></p>
 
@@ -184,6 +185,12 @@ Your data lives on your Mac. The hub listens only on your private
   Change anything.
 - **Upstream is read-only.** Nothing from this repo lands in your copy
   without your yes.
+- **New every week.** The developer runs this same app daily. Each week the
+  fixes and new pieces from that copy are ported here, so check back often.
+- **Your app can drift.** Your copy will grow its own pages and look. Each
+  update is written so your agent can fit it into what you have, not
+  overwrite it. Optional add-ons (like voice) arrive the same way, off
+  until you opt in.
 - **Your agent checks weekly.** It reads [ADDENDA.md](ADDENDA.md) every
   Monday and shows each new entry as a card on your phone.
 - **Nothing merges without you.** Say yes on a card and it applies that

@@ -64,7 +64,7 @@ struct ApprovalCard: View {
     var body: some View {
         Card(tint: .red,
              mark: isOpen ? "hand.raised.fill" : (a.state == "denied" || a.state == "failed") ? "xmark" : "checkmark",
-             caption: isOpen ? "approval" : a.state, id: a.id, right: shortAgo(a.created_at),
+             caption: isOpen ? "approval" : a.state, right: shortAgo(a.created_at),
              title: a.title, text: a.detail, said: a.said ?? "", thread: a.thread_id ?? "",
              extra: payload, meta: AnyView(metaRow),
              closed: !isOpen && !dismissed, line: decidedLine,

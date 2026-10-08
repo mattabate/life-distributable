@@ -212,6 +212,38 @@ function when(iso) {
                  : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
                    d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
+// A chat row's clock, the day said in words: "today 3:15 PM", "yesterday
+// 12:53 AM", "Mon 9:15 AM" inside the week, "Oct 1 4:02 PM" past it, the
+// year once it differs. `when` drops the day for today, so a row read the
+// next day would show a bare time that looks like today's. The phone's
+// `dayClock` (Format.swift) says the same.
+function dayWhen(iso, now) {
+  if (!iso) return '';
+  const d = new Date(iso); now = now || new Date();
+  const clock = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const days = Math.round((day(now) - day(d)) / 86400000);
+  if (days === 0) return 'today ' + clock;
+  if (days === 1) return 'yesterday ' + clock;
+  if (days > 1 && days < 7) return d.toLocaleDateString([], { weekday: 'short' }) + ' ' + clock;
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleDateString([], sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + clock;
+}
+
+// The turn in flight in a finished turn's words: "23 tool calls · today
+// 10:09 PM · $1.12", its tool calls, when the newest of them was made (the
+// clock moves with the count), its dollars so far (the hub's turn_tools / turn_at / turn_cost_usd). The chat's working
+// line and the session card both print it, where a raw step label used to
+// sit; a step label reads as noise, and a clock shows a hung turn as old.
+// `tools` false leaves the count to a run block already showing it; `cost`
+// false leaves the dollars to the session card's state line. The phone's
+// `turnFacts` (Format.swift).
+function turnFacts(t, tools, cost) {
+  if (!t) return '';
+  const n = t.turn_tools || 0;
+  return [tools !== false && n ? n + ' tool call' + (n === 1 ? '' : 's') : '',
+    t.turn_at ? dayWhen(t.turn_at) : '', cost !== false && t.turn_cost_usd ? usd(t.turn_cost_usd) : ''].filter(Boolean).join(' · ');
+}
 
 // The Markdown subset the agents are told to write (docs: preamble spec):
 // bullets, numbered lists, # headings, **bold**, `code`, links, pipe tables,
@@ -425,10 +457,10 @@ function md(src) {
   return out;
 }
 
-// The fold line: past this a chat bubble clamps behind a
-// "Show all · N lines" button. Counted on the text, not the rendered height,
-// so the same message folds the same on both surfaces and in a test; the
-// phone's isLongText (StyledText.swift) is the same rule.
+// The fold line: past this a chat bubble MAY fold. This is the cheap gate,
+// counted on the text so both surfaces and a test agree; the phone's
+// isLongText (StyledText.swift) is the same rule. Whether it does fold is
+// fitFolds' call, on the rendered height.
 const LONG_LINES = 18, LONG_CHARS = 1600;
 const longLineCount = t => String(t || '').split('\n').filter(l => l.trim() !== '').length;
 const isLongText = t => longLineCount(t) > LONG_LINES || String(t || '').length > LONG_CHARS;
@@ -575,20 +607,64 @@ const askDetailShown = detail =>
 const askInstallTarget = a => a.target || (/^install (desktop|mac) build \d+/i.test(a.title || '') ? 'mac' : 'phone');
 
 // askBody: a long detail folds the way a long chat message does (isLongText)
-// — a screen's worth, faded, and a "Show all · N lines" button that opens it
+// — a screen's worth, faded, and a "Show N more lines" button that opens it
 // to full height — never a nested scroll box, and never a card long enough to
 // swallow the session. `key` ("ask:<id>") keeps the fold across redraws.
-// The fold's one button, under a chat bubble and a card alike: "Show all · N
-// lines" shut, "Show less" open; `onclick` is the surface's own toggle.
-const foldLabel = (open, n) => open ? 'Show less' : `Show all · ${n} lines`;
-const foldButtonHTML = (text, open, onclick) =>
-  `<button type="button" class="fold small" data-n="${longLineCount(text)}" onclick="${onclick}">${foldLabel(open, longLineCount(text))}</button>`;
+// The fold's one button, under a chat bubble and a card alike: "Show N more
+// lines" shut, "Show less" open; `onclick` is the surface's own toggle. Shut,
+// it is drawn hidden and fitFolds shows it with its number, or never does.
+//
+// The fold's second rule: a short message that wraps to many lines would
+// otherwise offer "Show 2 more lines", which reveals almost nothing. Past
+// isLongText the body clamps with its fade, but the button exists only when
+// opening it would show at least FOLD_MIN_LINES more lines, and says how
+// many. Measured on the rendered box (scrollHeight against the clamp, in
+// line-heights) because the text's newlines say nothing about how many lines
+// it wraps to. Under the line the body is shown whole (`.fits`). The phone's
+// FoldedText is the same rule.
+const FOLD_MIN_LINES = 5;
+const foldLabel = (open, n) => open ? 'Show less' : `Show ${n} more lines`;
+const foldButtonHTML = (open, onclick) =>
+  `<button type="button" class="fold small"${open ? '' : ' hidden'} onclick="${onclick}">${foldLabel(open, 0)}</button>`;
+function fitFolds(root) {
+  const sel = '.body.long:not(.open):not([data-fit]), .ask-long:not(.open):not([data-fit])';
+  for (const el of (root || document).querySelectorAll(sel)) {
+    if (!el.clientHeight) continue;            // not laid out (a hidden pane): a later pass
+    const cs = getComputedStyle(el);
+    const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45;
+    const n = Math.round((el.scrollHeight - el.clientHeight) / lh);
+    el.dataset.fit = n;
+    const btn = el.nextElementSibling;
+    if (!btn || !btn.classList.contains('fold')) continue;
+    if (n < FOLD_MIN_LINES) { el.classList.add('fits'); btn.hidden = true; continue; }
+    btn.dataset.n = n;
+    btn.textContent = foldLabel(false, n);
+    btn.hidden = false;
+  }
+}
+// Every paint is fitted once a frame: the chat redraws every 5 s and cards
+// come and go on every page, so one observer watches the whole document
+// rather than each painter remembering to call it. Fitting marks the nodes
+// (`data-fit`), so the pass its own edits trigger finds nothing to do.
+if (typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') {
+  let fitQueued = false;
+  const queueFit = () => {
+    if (fitQueued) return;
+    fitQueued = true;
+    requestAnimationFrame(() => { fitQueued = false; fitFolds(); });
+  };
+  document.addEventListener('DOMContentLoaded', () => {
+    new MutationObserver(queueFit).observe(document.body, { childList: true, subtree: true });
+    queueFit();
+  });
+  addEventListener('resize', queueFit);
+}
 const cardLongOpen = new Set();
 function askBody(detail, key) {
   if (!isLongText(detail)) return md(detail);
   const open = cardLongOpen.has(key);
   return `<div class="ask-long${open ? ' open' : ''}">${md(detail)}</div>
-    ${foldButtonHTML(detail, open, `toggleCardLong(this,'${esc(key)}')`)}`;
+    ${foldButtonHTML(open, `toggleCardLong(this,'${esc(key)}')`)}`;
 }
 function toggleCardLong(btn, key) {
   const open = !cardLongOpen.delete(key);

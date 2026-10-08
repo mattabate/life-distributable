@@ -1324,8 +1324,16 @@ func TestETagAndChanges(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	// a restart: a parked feed answers at once, so Shutdown is not held
-	w = do("GET", "/api/v1/changes", "")
-	json.Unmarshal(w.Body.Bytes(), &feed)
+	// (on a version that has settled: the turn sent above is still writing)
+	for i, prev := 0, ""; i < 50; i++ {
+		w = do("GET", "/api/v1/changes", "")
+		json.Unmarshal(w.Body.Bytes(), &feed)
+		if feed.Version == prev {
+			break
+		}
+		prev = feed.Version
+		time.Sleep(100 * time.Millisecond)
+	}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		s.Draining()
@@ -1335,6 +1343,10 @@ func TestETagAndChanges(t *testing.T) {
 	w = do("GET", "/api/v1/changes?since="+feed.Version+"&wait=5", "")
 	if w.Code != 200 || time.Since(start) > 2*time.Second {
 		t.Fatal(w.Code, w.Body.String(), time.Since(start))
+	}
+	// …and says so, the app's cue to drop its connection pool.
+	if !strings.Contains(w.Body.String(), `"restarting":true`) || !strings.Contains(w.Body.String(), `"changed":false`) {
+		t.Fatal("drain answer should carry restarting:true", w.Body.String())
 	}
 	// the list preview is a prefix, never the whole reply
 	s.thr.Send(th.ID, strings.Repeat("x", 2000))
@@ -1418,12 +1430,12 @@ func TestRewordAskAndFindThreads(t *testing.T) {
 		return w
 	}
 	var th struct{ ID string }
-	json.Unmarshal(do("POST", "/api/v1/threads", `{"prompt":"Sort out the Lemurs brief.","title":"Face and supplements"}`).Body.Bytes(), &th)
+	json.Unmarshal(do("POST", "/api/v1/threads", `{"prompt":"Sort out the Acme brief.","title":"Face and supplements"}`).Body.Bytes(), &th)
 	var a struct{ ID string }
-	json.Unmarshal(do("POST", "/api/v1/asks", `{"thread_id":"`+th.ID+`","title":"Hand over the Lemurs AI email","kind":"physical"}`).Body.Bytes(), &a)
+	json.Unmarshal(do("POST", "/api/v1/asks", `{"thread_id":"`+th.ID+`","title":"Hand over the Acme email","kind":"physical"}`).Body.Bytes(), &a)
 
-	w := do("POST", "/api/v1/asks/"+a.ID+"/reword", `{"title":"Forward the Lemurs email","say":"Hey, forward the Lemurs email.","by":"claude:thread:other"}`)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"title":"Forward the Lemurs email"`) || !strings.Contains(w.Body.String(), `"said":"Hey, forward the Lemurs email."`) || !strings.Contains(w.Body.String(), `"state":"open"`) {
+	w := do("POST", "/api/v1/asks/"+a.ID+"/reword", `{"title":"Forward the Acme email","say":"Hey, forward the Acme email.","by":"claude:thread:other"}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"title":"Forward the Acme email"`) || !strings.Contains(w.Body.String(), `"said":"Hey, forward the Acme email."`) || !strings.Contains(w.Body.String(), `"state":"open"`) {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	if w := do("POST", "/api/v1/asks/"+a.ID+"/reword", `{}`); w.Code != 409 {
@@ -1434,7 +1446,7 @@ func TestRewordAskAndFindThreads(t *testing.T) {
 	}
 	do("POST", "/api/v1/threads", `{"prompt":"Draft today's tweet.","title":"Daily tweet draft"}`)
 	var found []struct{ ID string }
-	json.Unmarshal(do("GET", "/api/v1/threads?q=lemurs+supplements", "").Body.Bytes(), &found)
+	json.Unmarshal(do("GET", "/api/v1/threads?q=acme+supplements", "").Body.Bytes(), &found)
 	if len(found) != 1 || found[0].ID != th.ID {
 		t.Fatalf("%+v", found)
 	}

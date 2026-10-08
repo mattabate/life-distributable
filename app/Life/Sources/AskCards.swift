@@ -96,7 +96,6 @@ struct AskCard: View {
         Card(tint: tint,
              mark: closed ? closedIcon : paused ? "pause.circle" : a.kind == "read" || a.kind == "install" ? kindIcon : "hand.raised.fill",
              caption: closed ? a.state : a.state == "answered" ? "waiting on agent" : kindLabel,
-             id: a.id,
              right: a.goal_id.map { g in goals.first { $0.id == g }?.title ?? g } ?? "",
              title: a.title,
              text: a.detailWithoutLinks,

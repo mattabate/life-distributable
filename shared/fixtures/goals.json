@@ -1,15 +1,15 @@
 [
   {
     "id": "get-smarter",
-    "created_at": "2026-10-07T06:52:37.102018Z",
-    "updated_at": "2026-10-07T06:52:37.102223Z",
+    "created_at": "2026-10-08T21:16:56.780379Z",
+    "updated_at": "2026-10-08T21:16:56.780716Z",
     "title": "Get smarter",
     "statement": "Learn a thing a week",
     "horizon": "year",
     "cadence": "weekly",
     "status": "active",
     "sources": "learn",
-    "last_reviewed_at": "2026-10-07T06:52:37.102693Z",
+    "last_reviewed_at": "2026-10-08T21:16:56.781159Z",
     "note_count": 1,
     "emblem": {
       "symbol": "learn",

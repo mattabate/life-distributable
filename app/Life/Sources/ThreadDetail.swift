@@ -33,9 +33,12 @@ struct ThreadDetail: View {
     /// cell: a reply row draws only as the "turn ended" line).
     @State private var openReplies: Set<Int> = []
     /// Long messages the owner has unfolded. Closed, a bubble past `isLongText` clamps to a screen's
-    /// worth behind "Show all · N lines". Same fold as the console's
-    /// `.body.long` (views/threads.js msgHTML).
+    /// worth behind "Show N more lines" when there are five or more behind
+    /// it (FoldedText). Same fold as the console's `.body.long` (views/threads.js msgHTML).
     @State private var openLong: Set<Int> = []
+    func openLongBinding(_ id: Int) -> Binding<Bool> {
+        Binding(get: { openLong.contains(id) }, set: { if $0 { openLong.insert(id) } else { openLong.remove(id) } })
+    }
     /// The hub's step count per message — the headline of every run block.
     /// The phone holds only the events it DRAWS (the newest page, what
     /// streams in, and any block the owner opens), so a count must not come from
@@ -105,6 +108,9 @@ struct ThreadDetail: View {
     @State private var confirmArchive = false
     @State private var sendTarget: RespondTarget = .thisSession
     @State private var sendWhen: RespondWhen = .now
+    /// This session's queued wakes, soonest first, for the "Coming up" strip
+    /// over the composer (ComingUpStrip). Refilled on every `load()`.
+    @State private var queuedPrompts: [Prompt] = []
     @State private var pickingWhen = false
     @State private var pickWhenDate = Date().addingTimeInterval(3600)
     /// The drawn rows, rebuilt only when the data behind them changes.
@@ -186,6 +192,12 @@ struct ThreadDetail: View {
     /// behind "Show earlier"; a target further up (an ask card that was tapped) pulls
     /// the window back to cover it, see `widen`.
     var visibleRows: [TurnRow] { rows.count <= shown ? rows : Array(rows.suffix(shown)) }
+
+    /// The newest session row: the one whose end line says "turn ended"
+    /// (the console's `lastTurnID`, views/threads.js).
+    var lastTurnID: Int? {
+        messages.last { $0.role != "owner" && $0.role != "system" && $0.kind != "schedule" }?.id
+    }
 
     /// Make sure a given message is inside the drawn window — the row the
     /// thread scrolls to on open, and any ask still waiting on the owner, which
@@ -479,29 +491,30 @@ struct ThreadDetail: View {
                             // Stop is right here while it works:
                             // kills the tool chain mid-turn; the conversation
                             // stays resumable with the next message.
-                            // THE rule for "is it working", same as the web
-                            // console's `showWorking` (views/threads.js) —
-                            // keep them in step. A live run block already says
-                            // it ("starting…" / "3 tool calls · now: …" with
-                            // the dot), so this row is then just the Stop
-                            // button; "working…" only when there is no block
-                            // yet, never both at once. The whole row
-                            // is inside `status == "running"`, so a stopped
-                            // session shows neither.
+                            // THE working line, same as the web console's
+                            // `paintWorking` (views/threads.js); keep them in
+                            // step. A running turn ends the chat the way a
+                            // finished one does: its block, then "working ·
+                            // today 10:09 PM · $1.12" where "turn ended · …"
+                            // will go; with no live block yet the count rides
+                            // here too, behind the dot. The clock is the
+                            // turn's last output, so a hung turn shows an old
+                            // time. The whole row is inside
+                            // `status == "running"`, so a stopped session
+                            // shows none of it.
                             let liveBlock = rows.contains { $0.live } || !orphanLive.isEmpty
+                            let working = (["working", thread.turnFacts(withCalls: !liveBlock)].filter { !$0.isEmpty }).joined(separator: " · ")
                             #if targetEnvironment(macCatalyst)
                             // The desktop's Stop is the head's running pill,
-                            // as on the console (the owner 2026-09-29): here only
-                            // its "working…" line, a pulsing dot, no block yet.
-                            if !liveBlock {
-                                HStack(spacing: 7) {
-                                    LiveDot(color: Web.accent, size: 6)
-                                    Text("working…").font(.system(size: 12.5)).foregroundStyle(Web.muted)
-                                }.padding(.horizontal)
-                            }
+                            // as on the console: here only the working line.
+                            HStack(spacing: 7) {
+                                if !liveBlock { LiveDot(color: Web.accent, size: 6) }
+                                Text(working).font(.system(size: 12.5)).foregroundStyle(Web.muted).monospacedDigit()
+                            }.padding(.horizontal)
                             #else
                             HStack(spacing: 8) {
-                                if !liveBlock { ProgressView(); Text("working…").font(.caption).foregroundStyle(.secondary) }
+                                if !liveBlock { ProgressView() }
+                                Text(working).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
                                 Spacer()
                                 Button { stop() } label: { Label("Stop", systemImage: "stop.fill").font(.caption.weight(.semibold)) }
                                     .buttonStyle(.bordered).tint(.orange).controlSize(.small).disabled(stopping)
@@ -587,6 +600,9 @@ struct ThreadDetail: View {
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 .background(Web.panel)
             }
+            // The console's `details.queued` strip, between the transcript and
+            // the box (threads.js queuedHTML).
+            ComingUpStrip(prompts: queuedPrompts, cancel: cancelPrompt)
             Composer(draft: draft, attachments: attachments,
                      placeholder: replyPlaceholder,
                      sending: sending, send: { send() }, allowEmpty: replies.contains { !$0.outcome.isEmpty },
@@ -596,6 +612,7 @@ struct ThreadDetail: View {
             VStack(spacing: 6) {
                 if let error { ErrorBanner(message: error) }
                 if let sendError { sendFailedBanner(sendError) }
+                ComingUpStrip(prompts: queuedPrompts, cancel: cancelPrompt)
                 // A reply is now + this session, so the route line steps aside.
                 if replies.isEmpty { sendOptions } else { replyBanner }
                 Composer(draft: draft, attachments: attachments,
@@ -745,6 +762,16 @@ struct ThreadDetail: View {
                 }
                 await load()
             }
+        }
+    }
+
+    /// Take a queued wake back from the strip (the hub's `cancel`; a standing
+    /// row's Turn off is the schedule going off). The list refills from the
+    /// hub rather than being edited here, so the bar never disagrees with it.
+    func cancelPrompt(_ p: Prompt) {
+        Task {
+            do { _ = try await hub.cancelPrompt(p.id); await load() }
+            catch { self.error = error.localizedDescription }
         }
     }
 
@@ -976,15 +1003,41 @@ struct ThreadDetail: View {
     }
 
     /// Green card: the agent set (or cleared) standing instructions here —
-    /// when it checks back and what it is for.
+    /// when it checks back and what it is for. It says the job's name and the
+    /// time; the whole instruction (often a long prompt) stays behind a tap.
     func scheduleCard(_ m: ThreadMessage) -> some View {
         let lines = m.text.components(separatedBy: "\n\n")
+        let body = lines.dropFirst().joined(separator: "\n\n")
+        let open = openReplies.contains(m.id)
         return VStack(alignment: .leading, spacing: 6) {
             Label(lines.first ?? "", systemImage: "clock.badge.checkmark").font(.subheadline.weight(.semibold)).foregroundStyle(.green)
-            if lines.count > 1 {
-                StyledText(text: lines.dropFirst().joined(separator: "\n\n"), color: .primary)
+            if !body.isEmpty {
+                Text(thread.title).font(.subheadline.weight(.semibold))
+                // Open, the instructions read as a quoted document, not more
+                // card: a small grey inset under its own label, so the job's
+                // name above stays the headline.
+                if open {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("INSTRUCTIONS").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                        StyledText(text: body, style: .footnote, color: .secondary)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(uiColor: .systemBackground).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+                }
             }
-            Text(m.ts, style: .time).font(.caption2).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                Text(m.ts, style: .time)
+                if !body.isEmpty {
+                    Text("· \(open ? "Hide" : "Instructions")")
+                    Image(systemName: open ? "chevron.up" : "chevron.down")
+                }
+            }.font(.caption2).foregroundStyle(.secondary)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !body.isEmpty else { return }
+            if open { openReplies.remove(m.id) } else { openReplies.insert(m.id) }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1011,13 +1064,15 @@ struct ThreadDetail: View {
             // only. Same as the console's `.msg.end` (views/threads.js msgHTML).
             let hasOld = !paused && (!m.text.isEmpty || !(m.attachments ?? []).isEmpty)
             let open = openReplies.contains(m.id)
+            // Day, time, dollars; no tokens (the session total stays in the
+            // head), and "turn ended" only on the newest reply row, since
+            // repeating it on every row says nothing. The console's msgHTML `last`.
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 4) {
-                    Text(paused ? "turn paused · session limit" : "turn ended")
-                    Text("·")
-                    Text(m.ts, style: .time)
+                    if paused { Text("turn paused · session limit ·") }
+                    else if m.id == lastTurnID { Text("turn ended ·") }
+                    Text(dayClock(m.ts))
                     if m.cost_usd > 0 { Text("· " + usd(m.cost_usd)) }
-                    if let n = m.tokens, n > 0 { Text("· \(tokenCount(n)) tok") }
                     if hasOld { Text(open ? "· hide" : "· text").opacity(0.7) }
                     Spacer()
                 }
@@ -1066,34 +1121,22 @@ struct ThreadDetail: View {
                 ForEach(refs.indices, id: \.self) { i in BlobAttachment(ref: refs[i], maxHeight: 240) }
                 if !m.text.isEmpty {
                     let color: Color = m.kind == "error" ? .red : mine ? .white : .primary
-                    let long = isLongText(m.text)
-                    let open = openLong.contains(m.id)
-                    if long && !open {
-                        StyledText(text: m.text, color: color)
-                            .frame(maxHeight: 320, alignment: .top)
-                            .clipped()
-                            .overlay(alignment: .bottom) {
-                                LinearGradient(colors: [.clear, mine ? Color.accentColor : Color(.secondarySystemBackground)],
-                                               startPoint: .top, endPoint: .bottom)
-                                    .frame(height: 64).allowsHitTesting(false)
-                            }
+                    if isLongText(m.text) {
+                        FoldedText(text: m.text, open: openLongBinding(m.id), color: color,
+                                   fadeTo: mine ? Color.accentColor : Color(.secondarySystemBackground)) { label, tap in
+                            Button(label, action: tap)
+                                .font(.caption.weight(.semibold))
+                                .buttonStyle(.bordered)
+                                .tint(mine ? .white : .accentColor)
+                                .controlSize(.small)
+                        }
                     } else {
                         StyledText(text: m.text, color: color)
                     }
-                    if long {
-                        Button(open ? "Show less" : "Show all · \(longLineCount(m.text)) lines") {
-                            if open { openLong.remove(m.id) } else { openLong.insert(m.id) }
-                        }
-                        .font(.caption.weight(.semibold))
-                        .buttonStyle(.bordered)
-                        .tint(mine ? .white : .accentColor)
-                        .controlSize(.small)
-                    }
                 }
                 HStack {
-                    Text(m.ts, style: .time)
+                    Text(dayClock(m.ts))
                     if m.cost_usd > 0 { Text("· " + usd(m.cost_usd)) }
-                    if let n = m.tokens, n > 0 { Text("· \(tokenCount(n)) tok") }
                     if m.queued == true { Label("queued · delivered when it's ready", systemImage: "clock").lineLimit(1) }
                     if m.steered == true { Label("steered in mid-turn", systemImage: "arrow.turn.right.down").lineLimit(1) }
                     if let by = sentBy(m) {
@@ -1217,6 +1260,8 @@ struct ThreadDetail: View {
             // Reopen inside (2026-09-18), a decided one its grey card (09-30).
             async let p = hub.actions(state: "", thread: thread.id)
             async let rc = hub.threadRecs(thread.id)
+            // The wakes still to come, for the strip over the composer.
+            async let qp = hub.prompts(state: "queued", thread: thread.id)
             // The conversation is drawn as soon as the MESSAGES land. The
             // event stream is by far the biggest response (hundreds of KB of
             // tool output on a long session) and awaiting it first left the
@@ -1264,6 +1309,13 @@ struct ThreadDetail: View {
             // A rec moves under its reply when that lands, and changes
             // without a message when the owner decides it from the Recs page.
             if let rc = try? await rc, rc != recs || (msgsMoved && !rc.isEmpty) { placeRecs(rc) }
+            // Soonest first: the hub lists prompts newest-CREATED first, and
+            // the folded bar names the next one, so its order is the list's.
+            // A failed fetch keeps the strip as it was.
+            if let qp = try? await qp {
+                let soon = qp.filter(\.pending).sorted { ($0.not_before ?? .distantPast) < ($1.not_before ?? .distantPast) }
+                if soon != queuedPrompts { queuedPrompts = soon }
+            }
             if let f = focusCard, !focusLanded, asks.contains(where: { $0.id == f }) || actions.contains(where: { $0.id == f }) {
                 focusLanded = true
             }
@@ -1429,23 +1481,12 @@ extension ThreadDetail {
                 let refs = m.attachments ?? []
                 ForEach(refs.indices, id: \.self) { i in BlobAttachment(ref: refs[i], maxHeight: 180) }
                 if !m.text.isEmpty {
-                    let open = openLong.contains(m.id)
-                    if long && !open {
-                        StyledText(text: m.text, color: .primary)
-                            .frame(maxHeight: 320, alignment: .top)
-                            .clipped()
-                            .overlay(alignment: .bottom) {
-                                LinearGradient(colors: [.clear, Web.code], startPoint: .top, endPoint: .bottom)
-                                    .frame(height: 64).allowsHitTesting(false)
-                            }
+                    if long {
+                        FoldedText(text: m.text, open: openLongBinding(m.id), color: .primary, fadeTo: Web.code) { label, tap in
+                            Button(label, action: tap).buttonStyle(WebButtonStyle(small: true))
+                        }
                     } else {
                         StyledText(text: m.text, color: .primary)
-                    }
-                    if long {
-                        Button(open ? "Show less" : "Show all · \(longLineCount(m.text)) lines") {
-                            if open { openLong.remove(m.id) } else { openLong.insert(m.id) }
-                        }
-                        .buttonStyle(WebButtonStyle(small: true))
                     }
                 }
                 HStack(spacing: 8) {
@@ -1475,11 +1516,11 @@ extension ThreadDetail {
         .padding(.top, 14).padding(.bottom, 4)
     }
 
-    /// The block's foot: when, and what that turn cost if it did.
+    /// The block's foot: the day and time, and what that turn cost if it did
+    /// (no tokens).
     func macMeta(_ m: ThreadMessage) -> String {
-        var s = m.ts.formatted(date: .omitted, time: .shortened)
+        var s = dayClock(m.ts)
         if m.cost_usd > 0 { s += " · " + usd(m.cost_usd) }
-        if let n = m.tokens, n > 0 { s += " · " + tokens(n) }
         return s
     }
 
@@ -1601,7 +1642,7 @@ struct HeadPill: View {
 /// thinking and interim text, in order. ALWAYS collapsed to its one-line
 /// summary until the owner taps it — live or finished. A live run used to open itself,
 /// so opening a working session buried the conversation under its steps; the
-/// folded headline still reads "N tool calls · now: <step>" with the dot.
+/// folded headline reads "N tool calls" behind the dot.
 struct RunActivity: View {
     let events: [ThreadEvent]
     let live: Bool
@@ -1631,19 +1672,11 @@ struct RunActivity: View {
         if parts.isEmpty { parts.append("\(all) step\(all == 1 ? "" : "s")") }
         return parts.joined(separator: " · ")
     }
-    /// The step in flight: the last tool call still waiting for its result;
-    /// once every call has answered the model is thinking or writing.
-    var now: String? {
-        guard live, !events.isEmpty else { return nil }
-        if let p = rows.last(where: { $0.0.kind == "tool_use" && $0.1 == nil }) {
-            let s = p.0.summary ?? ""
-            return s.isEmpty ? p.0.title : s
-        }
-        return "thinking"
-    }
+    /// No "now: <step>" behind the count: a raw step label reads as noise.
+    /// The working line under the chat carries the turn's clock and dollars,
+    /// as the console's activityHTML does.
     var headline: String {
         if live && events.isEmpty && (count?.steps ?? 0) == 0 { return "starting…" }
-        if let now { return summary + " · now: " + now }
         return summary
     }
     /// Steps the hub counted that this screen has not read yet — shown as one
@@ -1672,10 +1705,13 @@ struct RunActivity: View {
                 // The console's `.run > summary` (skin.css), the owner 2026-09-29:
                 // a faint ▸/▾, the headline in 12.5 grey, no gear; hovered, a
                 // grey wash behind the row.
+                // One mark leads the row: the pulse while the turn runs and
+                // the block is shut, ▾ open, ▸ finished. The whole row is the button.
                 HStack(spacing: 6) {
-                    Text(isOpen ? "▾" : "▸").opacity(0.55)
+                    Group {
+                        if live && !isOpen { LiveDot(color: Web.muted, size: 6) } else { Text(isOpen ? "▾" : "▸").opacity(0.55) }
+                    }.frame(width: 8)
                     Text(headline).lineLimit(1)
-                    if live { LiveDot(color: Web.muted, size: 6) }
                 }
                 .font(.system(size: 12.5)).foregroundStyle(Web.muted)
                 .padding(.vertical, 3).padding(.leading, 6).padding(.trailing, 8)
@@ -1684,11 +1720,16 @@ struct RunActivity: View {
                 .contentShape(Rectangle())
                 .onHover { summaryHover = $0 }
                 #else
+                // The same one mark on the phone: the pulse leads a live shut
+                // block, the chevron and gear the rest.
                 HStack(spacing: 6) {
-                    Image(systemName: isOpen ? "chevron.down" : "chevron.right").font(.caption2.weight(.semibold))
-                    Image(systemName: "gearshape.2").font(.caption)
+                    if live && !isOpen {
+                        LiveDot(color: .secondary, size: 6).frame(width: 12)
+                    } else {
+                        Image(systemName: isOpen ? "chevron.down" : "chevron.right").font(.caption2.weight(.semibold))
+                        if !live { Image(systemName: "gearshape.2").font(.caption) }
+                    }
                     Text(headline).font(.caption).lineLimit(1)
-                    if live { LiveDot(color: .secondary, size: 5) }
                     Spacer()
                 }.foregroundStyle(.secondary)
                 #endif
@@ -1744,7 +1785,8 @@ struct RunActivity: View {
 /// cannot say it (an edit's lines), then the output in grey — its first
 /// `fold` lines, the rest behind "… N more lines" — or the error in red,
 /// whole ("the error is good"). A body that is still the input's JSON
-/// (stored before 10-05) is not shown: the title already says it.
+/// (stored before 10-05) is not shown: the title already says it. What the
+/// agent said mid-turn folds like the thought: two lines shut, all of it open.
 struct EventRow: View {
     let e: ThreadEvent
     let result: ThreadEvent?
@@ -1786,7 +1828,10 @@ struct EventRow: View {
             Button { withAnimation { open.toggle() } } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: icon).font(.caption2).frame(width: 14)
-                    Text(headline).font(.caption).lineLimit(open ? nil : (e.kind == "text" ? 6 : 1)).multilineTextAlignment(.leading)
+                    // Shut: a tool call or thought is one line, what the
+                    // agent said mid-turn two (the console's `.ev.said`);
+                    // open, all of it.
+                    Text(headline).font(.caption).lineLimit(open ? nil : (e.kind == "text" ? 2 : 1)).multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
                     if result != nil, !open { Image(systemName: "checkmark").font(.caption2).foregroundStyle(result?.title == "error" ? Self.red : Self.green) }
                 }.foregroundStyle(tint)
@@ -1953,6 +1998,84 @@ extension Prompt {
         if let t = title, !t.isEmpty { return t }
         if !text.isEmpty { return text }
         return outcome ?? (standing ? "the default check-in" : "")
+    }
+}
+
+/// "Coming up · 2 · next in 28m · <its words>" over the composer: this
+/// session's queued wakes (a message the owner queued for the morning, the
+/// check-back the session set itself), the console's `details.queued` strip
+/// (threads.js queuedHTML). Without it a session that said "retrying in half
+/// an hour" left no trace of that on the chat bar; only Session settings
+/// listed it. Folded at rest and remembered under the console's key
+/// (queuedOpen); shut it is the count, when the next one fires and its
+/// words; open, every wake with Cancel (Turn off on a standing row).
+/// Nothing queued = no strip.
+struct ComingUpStrip: View {
+    let prompts: [Prompt]
+    let cancel: (Prompt) -> Void
+    @AppStorage("queuedOpen") private var open = false
+
+    var body: some View {
+        if let next = prompts.first {
+            VStack(alignment: .leading, spacing: 0) {
+                Button { open.toggle() } label: {
+                    HStack(spacing: 8) {
+                        Text(open ? "▾" : "▸").font(.system(size: 10)).foregroundStyle(.secondary)
+                        Text("Coming up · \(prompts.count)").font(small.weight(.semibold)).foregroundStyle(.secondary)
+                            .fixedSize()
+                        pill("next " + next.whenLabel)
+                        Text(next.rowLabel).font(small).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Coming up, \(prompts.count), next \(next.whenLabel)")
+                if open {
+                    ForEach(prompts) { p in
+                        HStack(spacing: 8) {
+                            if p.standing { pill(scheduleLabel(p.repeat ?? "")) }
+                            pill((p.standing ? "next " : "") + p.whenLabel)
+                            if p.target == "new" { pill("new session") }
+                            (Text(p.rowLabel) + Text(" · from " + from(p)).foregroundStyle(.secondary))
+                                .font(small).lineLimit(1).truncationMode(.tail)
+                            Spacer(minLength: 0)
+                            Button(p.standing ? "Turn off" : "Cancel") { cancel(p) }
+                                .font(small).buttonStyle(.borderless)
+                        }
+                        .padding(.top, 6)
+                    }
+                }
+            }
+            #if targetEnvironment(macCatalyst)
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Web.panel)
+            .overlay(alignment: .top) { Rectangle().fill(Web.line).frame(height: 1) }
+            #else
+            .padding(.horizontal, 4).padding(.vertical, 2)
+            #endif
+        }
+    }
+
+    private var small: Font {
+        #if targetEnvironment(macCatalyst)
+        .system(size: 12.5)
+        #else
+        .caption
+        #endif
+    }
+
+    /// The console's grey `.pill`.
+    private func pill(_ s: String) -> some View {
+        Text(s).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary).monospacedDigit()
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 5))
+            .fixedSize()
+    }
+
+    private func from(_ p: Prompt) -> String {
+        p.author == "owner" ? "you" : p.author == "hub" ? "the hub" : "this session"
     }
 }
 

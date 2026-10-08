@@ -1,18 +1,16 @@
 import SwiftUI
 
-/// More → Recommendations: the list the owner browses when they are in the
-/// mood to spend money, pick a tool or change a habit.
+/// Recs: the list the owner browses when they are in the mood to spend
+/// money, pick a tool or change a habit.
 ///
-/// It lives under More and NOT on the tab bar on purpose (the bar stays
-/// uncrowded), and it must never PUSH. That is the whole distinction the
-/// object exists to draw: an ask is push — their turn, now — and a rec is
-/// pull, welcome only in the moment they came looking. Nothing in this file
-/// may ever touch PushState or a notification.
+/// It must never PUSH. That is the whole distinction the object exists to
+/// draw: an ask is push — their turn, now — and a rec is pull, welcome only
+/// in the moment they came looking. Nothing in this file may ever touch
+/// PushState or a notification.
 ///
-/// It DOES carry a count, on the More row and folded into the More tab, the
-/// same way the web app does. A number seen only once the app is already
-/// open is still pull — it is what is sitting there undecided, not a tap on
-/// the shoulder.
+/// Its tab carries a count, the console's oval: a number seen only once the
+/// app is already open is still pull — it is what is sitting there
+/// undecided, not a tap on the shoulder.
 ///
 /// The one interaction that gets extra room is THE OWNER'S NOTE. It is taste,
 /// taste is expensive to learn twice, and a note hidden behind a second tap
@@ -45,8 +43,8 @@ struct RecsView: View {
         #if targetEnvironment(macCatalyst)
         // The desktop is the console's page, not the phone's list (the owner
         // 2026-09-29: "I want the same exact layout within the desktop app"):
-        // the heading and the domain select on one line, every open rec a
-        // white card with its decide box, the All recommendations line last.
+        // the heading, every open rec a white card with its chat bar, the
+        // All recommendations line last.
         pageModifiers(macPage.toolbar(.hidden, for: .navigationBar))
         #else
         pageModifiers(phoneList)
@@ -54,24 +52,23 @@ struct RecsView: View {
     }
 
     #if targetEnvironment(macCatalyst)
+    /// The heading, every open rec a card ending in its chat bar, the All
+    /// recommendations line last, in a column with room either side. No
+    /// domain select: the open list is meant to stay short enough that
+    /// sorting it buys nothing.
     private var macPage: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Recommendations").font(.system(size: 17, weight: .semibold))
-                    Spacer()
-                    Picker("", selection: $domain) {
-                        ForEach(Self.domains, id: \.self) { Text($0.isEmpty ? "all domains" : $0).tag($0) }
-                    }.pickerStyle(.menu).labelsHidden().fixedSize()
-                }
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Recommendations").font(.system(size: 17, weight: .semibold))
                 if let e = list.error { ErrorBanner(message: e) }
                 if recs.isEmpty {
                     Group {
-                        if list.loaded { Text("Nothing open\(domain.isEmpty ? "" : " in \(domain)").").foregroundStyle(Web.muted) } else { ProgressView() }
+                        if list.loaded { Text("Nothing open.").foregroundStyle(Web.muted) } else { ProgressView() }
                     }.frame(maxWidth: .infinity).padding(.vertical, 30)
                 }
                 ForEach(recs) { r in
-                    MacRecCard(rec: r, open: { openRec = r }, openChat: { t in openThread = t }, done: { await load() })
+                    MacRecCard(rec: r, open: { openRec = r }, done: { await load() })
+                        .id(r.id)
                 }
                 if !every.isEmpty {
                     Button { showAll = true } label: {
@@ -86,7 +83,10 @@ struct RecsView: View {
                         .contentShape(Rectangle())
                     }.buttonStyle(.plain).padding(.top, 2)
                 }
-            }.padding(16)
+            }
+            .frame(maxWidth: MacRecLayout.column, alignment: .leading)
+            .padding(.horizontal, 32).padding(.vertical, 24)
+            .frame(maxWidth: .infinity)
         }
     }
     #endif
@@ -145,7 +145,7 @@ struct RecsView: View {
     private func pageModifiers(_ page: some View) -> some View {
         page
         .navigationTitle("Recommendations")
-        .navigationDestination(isPresented: $showAll) { AllRecsView(recs: every, domain: $domain, onChange: { await load() }) }
+        .navigationDestination(isPresented: $showAll) { AllRecsView(recs: every, onChange: { await load() }) }
         .askButton()
         .toolbar {
             Menu {
@@ -188,8 +188,6 @@ struct RecsView: View {
 /// a phone list. Each row wears its domain and where it ended up (RecRow).
 struct AllRecsView: View {
     let recs: [Rec]
-    /// The page's domain select (the console draws it on both views).
-    @Binding var domain: String
     var onChange: () async -> Void
     @State private var query = ""
     private var shown: [Rec] {
@@ -202,8 +200,8 @@ struct AllRecsView: View {
     @State private var openRec: Rec?
 
     /// The console's #/recs/all (the owner 2026-09-29: the desktop is the web's
-    /// layout): ‹ Recommendations, the heading with its count, the find box
-    /// and the domain select on its right, then ONE card holding a table —
+    /// layout): ‹ Recommendations, the heading with its count, the find box on
+    /// its right, then ONE card holding a table —
     /// Recommendation · Domain · where it ended up · When · Cost.
     var body: some View {
         ScrollView {
@@ -216,9 +214,6 @@ struct AllRecsView: View {
                     Spacer()
                     TextField("Find a rec…", text: $query).textFieldStyle(.roundedBorder).frame(maxWidth: 240)
                         .onChange(of: query) { limit = 20 }
-                    Picker("", selection: $domain) {
-                        ForEach(RecsView.domains, id: \.self) { Text($0.isEmpty ? "all domains" : $0).tag($0) }
-                    }.pickerStyle(.menu).labelsHidden().fixedSize()
                 }.padding(.bottom, 6)
                 VStack(alignment: .leading, spacing: 0) {
                     if shown.isEmpty {
@@ -522,12 +517,14 @@ struct RecDetail: View {
 
     #if targetEnvironment(macCatalyst)
     @Environment(\.dismiss) private var dismiss
+    @Environment(RefNav.self) private var nav
 
-    /// The console's #/recs/<id> (the owner 2026-09-29: the desktop is the web's
-    /// layout): ‹ Recommendations, the title as the heading with its cost on
-    /// the right, the pill line, the chat button, then each part of the record
-    /// under its caps heading in a white card — the decide box its own card
-    /// between the argument and the Decision.
+    /// One rec, read top to bottom: ‹ back, the title and its cost, one muted
+    /// line of facts, the chat bar (chips over the composer) right under it so
+    /// answering is the first thing on the page, then the record under plain
+    /// headings (The recommendation · Why · If it works · Decision · Outcome)
+    /// as text in a column with room either side, no boxes: a run of boxed
+    /// sections read as dense.
     private var macPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -537,41 +534,36 @@ struct RecDetail: View {
                     Text(md(rec.title)).font(.system(size: 17, weight: .semibold)).textSelection(.enabled)
                     Spacer(minLength: 12)
                     Text(rec.costLabel).font(.system(size: 12.5)).monospacedDigit()
-                }.padding(.top, 6).padding(.bottom, 10)
+                }.padding(.top, 10).padding(.bottom, 8)
                 FlowRow(spacing: 8) {
                     MacRecPills(rec: rec, status: true)
-                    Text("\(rec.effort) effort · \(rec.confidence)% confident when filed")
                     if !recDates(rec).isEmpty { Text(recDates(rec)).foregroundStyle(recDatesColor(rec) ?? Web.muted) }
                     if let g = rec.goal_id, !g.isEmpty { Text(g).foregroundStyle(Web.accent) }
-                }.font(.system(size: 12.5)).foregroundStyle(Web.muted).padding(.bottom, 12)
-                if let error { ErrorBanner(message: error).padding(.bottom, 8) }
-                if rec.sourceThreadID != nil {
-                    Button(openingSource ? "Opening…" : "Open the chat that filed this ›") { Task { await openSource() } }
-                        .buttonStyle(WebButtonStyle(small: true)).disabled(openingSource).padding(.bottom, 12)
-                }
-                macField("What it is", rec.detail)
-                macField("Why — the evidence behind it", rec.because)
-                macField("What should change if it works", rec.expect)
-                if !rec.isClosed {
-                    MacRecDecideBox(rec: rec) { t in
-                        await reload(); await onChange()
-                        if let t { openThread = t }
+                    if rec.sourceThreadID != nil {
+                        Button(openingSource ? "Opening…" : "its chat ›") { Task { await openSource() } }
+                            .buttonStyle(.plain).foregroundStyle(Web.accent).disabled(openingSource)
                     }
-                    .background(Web.panel, in: RoundedRectangle(cornerRadius: 10))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Web.line, lineWidth: 1) }
-                    .padding(.top, 8)
+                }.font(.system(size: 12.5)).foregroundStyle(Web.muted)
+                if let error { ErrorBanner(message: error).padding(.top, 8) }
+                if !rec.isClosed {
+                    MacRecReplyBox(rec: rec) { await reload(); await onChange() }
+                        .id(rec.id + rec.status)
+                        .padding(.top, 18)
                 }
-                macSection("Decision") {
-                    if rec.status == "proposed" {
-                        Text("Not decided yet.").foregroundStyle(Web.muted)
-                    } else {
+                macField("The recommendation", rec.detail)
+                macField("Why", rec.because)
+                macField("If it works", rec.expect)
+                // Undecided says nothing the chat bar above does not.
+                if rec.status != "proposed" {
+                    macSection("Decision") {
                         (Text(rec.status == "deferred" ? "later — back on \(dayLabel(rec.review_on ?? ""))" : rec.status).bold()
                          + Text((rec.decided_at.map { " · " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "")
                                 + (rec.decided_by.map { $0.isEmpty ? "" : " · by \($0)" } ?? "")).foregroundColor(Web.muted))
                         if let n = rec.decision_note, !n.isEmpty { StyledText(text: n, style: .body).padding(.top, 6) }
                     }
                 }
+                // Unscored and undecided: the review day is on the facts line.
+                if rec.outcome?.isEmpty == false || rec.status == "accepted" || rec.status == "done" {
                 macSection("Outcome") {
                     if let o = rec.outcome, !o.isEmpty {
                         Text(o).bold() + Text(rec.outcome_at.map { " · " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "").foregroundColor(Web.muted)
@@ -589,6 +581,7 @@ struct RecDetail: View {
                             .lineLimit(1...5).textFieldStyle(.roundedBorder).padding(.top, 8)
                     }
                 }
+                }
                 if let links = rec.links, !links.isEmpty {
                     macSection(rec.status == "deferred" ? "What deferring it minted" : "What accepting it minted") {
                         Text(links.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " · "))
@@ -600,21 +593,26 @@ struct RecDetail: View {
                 }
                 Text("\(rec.id) · filed \(rec.created_at.formatted(date: .abbreviated, time: .shortened)) by \(rec.source.isEmpty ? "unknown" : rec.source)"
                      + (rec.model.map { " · \($0)" } ?? ""))
-                    .font(.system(size: 12.5)).foregroundStyle(Web.muted).textSelection(.enabled).padding(.top, 10)
-            }.padding(16)
+                    .font(.system(size: 12.5)).foregroundStyle(Web.muted).textSelection(.enabled).padding(.top, 28)
+            }
+            .frame(maxWidth: MacRecLayout.column, alignment: .leading)
+            .padding(.horizontal, 32).padding(.vertical, 24)
+            .frame(maxWidth: .infinity)
         }
     }
 
-    /// `field()`: an h3 over a white card of markdown, nothing when empty.
+    /// One part of the record as text under its heading, nothing when empty.
     @ViewBuilder private func macField(_ label: String, _ body: String?) -> some View {
-        if let body, !body.isEmpty { macSection(label) { StyledText(text: body, style: .body) } }
+        if let body, !body.isEmpty { macSection(label) { StyledText(text: body, style: .body).lineSpacing(3) } }
     }
 
+    /// A plain heading over plain text: the page's sections are paragraphs,
+    /// not white boxes.
     private func macSection<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            WebHeading(label)
-            VStack(alignment: .leading, spacing: 2) { content() }.font(.system(size: 13.5)).webCard()
-        }.padding(.top, 20)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(.system(size: 13.5, weight: .semibold))
+            VStack(alignment: .leading, spacing: 2) { content() }.font(.system(size: 13.5))
+        }.padding(.top, 26)
     }
     #endif
 
@@ -724,7 +722,15 @@ struct RecDetail: View {
     private func openSource() async {
         guard let id = rec.sourceThreadID else { return }
         openingSource = true; defer { openingSource = false }
-        do { openThread = try await hub.thread(id); error = nil }
+        do {
+            let t = try await hub.thread(id)
+            #if targetEnvironment(macCatalyst)
+            macOpenSession(t, nav: nav)
+            #else
+            openThread = t
+            #endif
+            error = nil
+        }
         catch { self.error = error.localizedDescription }
     }
 
@@ -758,7 +764,7 @@ enum MacRecPill {
     }
 }
 
-/// The pill run of a rec, the console's order: domain, kind, model, where it
+/// The pill run of a rec, the console's order: kind, model, where it
 /// stands (the list skips "proposed" — every card on it is), how it turned
 /// out, and "running" while its session has a turn in flight.
 struct MacRecPills: View {
@@ -766,7 +772,6 @@ struct MacRecPills: View {
     /// Draw the status even when proposed (the rec's own page does).
     var status = false
     var body: some View {
-        WebTag(rec.domain, tint: MacRecPill.domain(rec.domain))
         WebTag(rec.kind)
         if let m = rec.modelShort { WebTag(m) }
         if status || rec.status != "proposed" {
@@ -783,15 +788,18 @@ struct MacRecPills: View {
     }
 }
 
-/// One open rec, the console's THREE BANDS (recs.js recCard): the tinted head
-/// — bold title and its cost, the pill line with "its chat ›" and "details ›"
-/// at its end, why in two lines — then the owner's note, then the footer with the
-/// answers. A decided rec's note sits where the box would.
+/// The Recs pages' column: room either side of the cards and the text, so a
+/// wide window does not stretch a line edge to edge.
+enum MacRecLayout { static let column: CGFloat = 860 }
+
+/// One open rec: bold title and its cost, the pill line with "its chat ›"
+/// and "details ›" at its end, why in two lines, then its chat bar
+/// (MacRecReplyBox). A decided rec's note sits where the bar would.
 struct MacRecCard: View {
     @Environment(HubClient.self) private var hub
+    @Environment(RefNav.self) private var nav
     let rec: Rec
     let open: () -> Void
-    let openChat: (Thread) -> Void
     let done: () async -> Void
     @State private var error: String?
 
@@ -822,21 +830,16 @@ struct MacRecCard: View {
                 }
                 if let error { Text(error).font(.system(size: 12.5)).foregroundStyle(.red).padding(.top, 6) }
             }
-            .padding(.horizontal, 16).padding(.top, 13).padding(.bottom, 11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Web.code.opacity(0.45))
-            .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
             if rec.status != "proposed", let n = rec.decision_note, !n.isEmpty {
                 (Text("your note: ").foregroundColor(Web.muted) + Text(md(n)))
-                    .font(.system(size: 12.5)).padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 14)
+                    .font(.system(size: 12.5)).padding(.top, 12)
             }
             if !rec.isClosed {
-                MacRecDecideBox(rec: rec) { t in
-                    await done()
-                    if let t { openChat(t) }
-                }
+                MacRecReplyBox(rec: rec) { await done() }.padding(.top, 14)
             }
         }
+        .padding(.horizontal, 18).padding(.top, 15).padding(.bottom, 16)
         .background(Web.panel)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Web.line, lineWidth: 1) }
@@ -844,84 +847,43 @@ struct MacRecCard: View {
 
     private func chat() async {
         guard let id = rec.sourceThreadID else { return }
-        do { openChat(try await hub.thread(id)); error = nil } catch { self.error = error.localizedDescription }
+        do { macOpenSession(try await hub.thread(id), nav: nav); error = nil } catch { self.error = error.localizedDescription }
     }
 }
 
-/// The console's rec box (recs.js recDecideBox → composer.js replyBox): the
-/// words band, then the grey footer band with where the answer goes on the
-/// left and the hub's answers as buttons on the right — the first decisive
-/// one filled blue. Pressing a decisive answer over an empty box renames it
-/// "Send with no note" and waits for a second press; Reply needs words.
-struct MacRecDecideBox: View {
-    @Environment(HubClient.self) private var hub
+/// "its chat ›" leaves Recs for the Sessions page with that session open, as
+/// the calendar's "open session" does, never a chat pushed inside Recs (a
+/// second copy of the Sessions page with no sidebar).
+@MainActor func macOpenSession(_ t: Thread, nav: RefNav) {
+    nav.card = OpenAsk(thread: t, message: nil)
+    nav.tab = "sessions"
+}
+
+/// A rec's chat bar, the calendar step's shape: Accept · Decline · Reply as
+/// chips, then the session composer (+ and Send in it), as on every other
+/// card. Send with Accept or Decline lit decides the rec (words optional);
+/// Reply needs words and leaves it open. Either way the answer goes to the
+/// session that filed it, a new one when none did.
+struct MacRecReplyBox: View {
     let rec: Rec
-    /// The session the answer landed in, or nil when none got it.
-    let sent: (Thread?) async -> Void
-    @State private var note = ""
-    @State private var toSource = true
-    @State private var armed: String?
-    @State private var busy = false
-    @State private var error: String?
-
-    private var outcomes: [AskOutcome] {
-        rec.outcomes ?? [AskOutcome(value: "accepted", label: "Accept"), AskOutcome(value: "declined", label: "Decline"),
-                         AskOutcome(value: "", label: "Reply")]
+    let sent: () async -> Void
+    @State private var model: RespondModel
+    init(rec: Rec, sent: @escaping () async -> Void) {
+        self.rec = rec
+        self.sent = sent
+        _model = State(initialValue: RespondModel(RespondSubject(rec: rec)))
     }
-    private var hasSource: Bool { rec.sourceThreadID != nil }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            TextField("Your note — it is kept on the record and sent to the agent, whichever button you press.",
-                      text: $note, axis: .vertical)
-                .textFieldStyle(.plain).font(.system(size: 15)).lineLimit(2...14)
-                .frame(minHeight: 44, alignment: .topLeading)
-                .padding(.horizontal, 14).padding(.top, 11).padding(.bottom, 7)
-                .onChange(of: note) { armed = nil }
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    if hasSource {
-                        Picker("", selection: $toSource) {
-                            Text("Reply in its session").tag(true)
-                            Text("Reply in a new session").tag(false)
-                        }.pickerStyle(.menu).labelsHidden().fixedSize()
-                    } else {
-                        Text("Reply in a new session").font(.system(size: 13)).foregroundStyle(Web.muted)
-                    }
-                    Spacer(minLength: 8)
-                    ForEach(Array(outcomes.enumerated()), id: \.offset) { i, o in
-                        let isArmed = armed != nil && armed == o.value
-                        Button(isArmed ? "Send with no note" : o.label) { Task { await press(o) } }
-                            .buttonStyle(WebButtonStyle(primary: i == 0 && !o.value.isEmpty && !isArmed))
-                            .help(isArmed ? "press again to send it with no note" : (o.hint ?? o.label))
-                    }
-                }
-                if let error { Text(error).font(.system(size: 12.5)).foregroundStyle(.red) }
+        VStack(alignment: .leading, spacing: 8) {
+            RespondChips(model: model)
+            if let e = model.error { ErrorBanner(message: e) }
+            RespondBar(model: model) {
+                // A Reply leaves the rec open: a fresh box, not a spent one.
+                model = RespondModel(model.subject)
+                await sent()
             }
-            .disabled(busy)
-            .padding(.vertical, 8).padding(.leading, 12).padding(.trailing, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Web.code)
-            .overlay(alignment: .top) { Rectangle().fill(Web.line).frame(height: 1) }
-        }
-    }
-
-    private func press(_ o: AskOutcome) async {
-        let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        if o.value.isEmpty, text.isEmpty { error = "Type the note first — a reply with nothing in it goes nowhere."; return }
-        if !o.value.isEmpty, text.isEmpty, armed != o.value { armed = o.value; error = nil; return }
-        armed = nil
-        busy = true; defer { busy = false }
-        let deliver = toSource && hasSource ? "source" : "new"
-        do {
-            let out = o.value.isEmpty
-                ? try await hub.replyRec(rec.id, note: text, deliver: deliver)
-                : try await hub.decideRec(rec.id, status: o.value, note: text, deliver: deliver)
-            note = ""; error = out.delivery_error
-            let t: Thread? = if let s = out.session_id { try? await hub.thread(s) } else { nil }
-            await sent(t)
-        } catch {
-            self.error = error.localizedDescription
+            .background(Web.panel, in: RoundedRectangle(cornerRadius: 10))
+            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Web.line, lineWidth: 1) }
         }
     }
 }

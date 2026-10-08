@@ -42,3 +42,36 @@ Entry format:
   and I'll bring each one to you as a card. Nothing changes in your copy
   unless you say yes.
 - How: nothing to do. Write `add-0001` to `data/addenda-seen.txt`.
+
+## add-0002 · 2026-10-08 · Faster after a hub restart, self-healing login cards
+- For: everyone
+- Offer: The apps no longer stall for a minute or two after the hub
+  restarts, All sessions shows everything (fifty a page), and a "Claude
+  login expired" card restarts its session by itself once Claude works
+  again.
+- How: `git merge upstream/main`, conflicts resolved in favour of the
+  owner's own changes, then `make check`, `ops/hub.sh restart`, `make ship`.
+  If their copy has drifted too far to merge, port by hand: the feed's
+  `restarting:true` drain answer and the pool reset in `HubClient.swift`,
+  `turn_at` on threads, and the login retry in `threads/retry.go`.
+
+## add-0003 · 2026-10-08 · Cleaner sessions and chat
+- For: everyone
+- Offer: A running session card is one state line plus a "12 tool calls ·
+  1:03 AM" row whose clock moves with each tool call. In the chat, long
+  messages fold only when five or more lines are hidden, the agent's
+  mid-turn notes fold to two lines, times show the day, a "Coming up" strip
+  over the composer shows the session's next wake, and a schedule card
+  shows its name and time with the instructions behind a tap.
+- How: same merge as add-0002. By hand: `web/ui.js`, `views/threads.js`,
+  `ThreadRows.swift`, `ThreadDetail.swift`, then look at the result on the
+  owner's surfaces before shipping.
+
+## add-0004 · 2026-10-08 · Desktop: Recs answer in the chat bar
+- For: desktop owners
+- Offer: On the desktop app a rec now answers through the normal chat
+  bar (Accept · Decline · Reply), its page reads as plain text under its
+  title, "its chat ›" opens the session on Sessions, and pages open in
+  place without sliding in.
+- How: same merge as add-0002. By hand: `RecsView.swift`, `RecCard.swift`,
+  `RootView.swift`, `ConfigView.swift`.

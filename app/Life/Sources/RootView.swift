@@ -356,6 +356,10 @@ extension View {
     func macColumn() -> some View {
         self.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Web.page)
+            // A page opens in place, as a console route does: no slide in
+            // from the side. Only an un-animated change loses its motion; a
+            // withAnimation keeps it.
+            .transaction { if $0.animation == nil { $0.disablesAnimations = true } }
     }
 }
 #endif

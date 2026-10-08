@@ -182,7 +182,7 @@ function sessionCardHTML(t, o) {
       <a class="sess-t${t.unread > 0 ? ' unread' : ''}" href="${href}">${mdInline(t.title || t.id, false)}</a>
       ${o.cells || ''}
       ${failed ? `<div class="small wrap2 err mt6">${failedPreview(t.last_message)}</div>` : ''}
-      ${running && t.activity ? `<div class="small trunc" style="color:var(--accent);margin-top:6px">${esc(t.activity)}</div>` : ''}
+      ${running && turnFacts(t, true, false) ? `<div class="sess-run small trunc">${esc(turnFacts(t, true, false))}</div>` : ''}
       <div class="small muted sess-foot">${o.pills || ''}${t.model ? `<span class="pill" title="${esc(t.model)}">${esc(t.model_label || modelShort(t.model))}</span>` : ''}<span>${ago(t.last_message_at || t.updated_at)}${t.schedule ? ' · ' + esc(t.schedule_label || cadenceWords(t.schedule)) : ''}${t.cost_usd ? ' · ' + usd(t.cost_usd) : ''}</span></div>
     </div>`;
 }
@@ -231,10 +231,11 @@ const runningOnly = (b, t) => livePillsHTML((b.pills || {})[t.id]);
 // Where Recent went, for finding something done previously: every session,
 // newest first, and a box that narrows it by name as you type. It draws in
 // the chat's pane, so the list of what is waiting stays beside it. A TABLE,
-// twenty rows at a time (a grid of hundreds of cards looked bad): one line
-// per session — name, state, model, when, dollars — and the shared pager.
+// fifty rows at a time (a grid of hundreds of cards looked bad, and twenty
+// was too few to find anything by eye): one line per session — name, state,
+// model, when, dollars — and the shared pager.
 let allQuery = '';
-const allPager = makePager('sessions', 20);
+const allPager = makePager('sessions', 50);
 async function drawAllSessions() {
   const gen = route.gen;
   const [threads, b] = await Promise.all([get('/threads'), board || loadBoard().catch(() => EMPTY_BOARD)]);
@@ -271,7 +272,7 @@ async function drawAllSessions() {
       ${allPager.html(rows.length, shown.length)}`;
   };
   const q = document.getElementById('all-q');
-  // A new search starts from the first twenty again.
+  // A new search starts from the first fifty again.
   q.oninput = () => { allQuery = q.value; allPager.reset(); paintAll(); };
   allPager.reset();
   paintAll();
@@ -839,8 +840,10 @@ async function refreshThread(id, first) {
     paintChatPills(t);
     if (evKey !== chatState.lastEvKey) {
       chatState.lastEvKey = evKey;
-      drawActivity(ordered, events, running);
+      drawActivity(ordered, events, running, t);
       restoreChatAnchor(msgsEl, anchor);
+    } else {
+      paintWorking(running, chatState.liveBlock, t); // the clock and dollars move between steps
     }
     return;
   }
@@ -890,6 +893,7 @@ async function refreshThread(id, first) {
   // decided one is the grey line that says what the owner chose.
   const recByMsg = {}, recById = {}, tailRecs = [];
   const msgIDs = new Set(ordered.map(m => m.id));
+  const lastTurn = lastTurnID(ordered);
   for (const r of recs) {
     recById[r.id] = r;
     if (r.message_id && msgIDs.has(r.message_id)) (recByMsg[r.message_id] ||= []).push(r); else tailRecs.push(r);
@@ -912,17 +916,17 @@ async function refreshThread(id, first) {
       ].filter(Boolean).join(' · ')}</div>
     </div>
     <div class="msgs" id="msgs">
-      ${ordered.map(m => msgHTML(m, askByMsg[m.id], actByMsg[m.id], askById, recByMsg[m.id], recById) + runSlot(m)).join('')}
+      ${ordered.map(m => msgHTML(m, askByMsg[m.id], actByMsg[m.id], askById, recByMsg[m.id], recById, m.id === lastTurn) + runSlot(m)).join('')}
       ${tailAsks.map(chatAskHTML).join('')}
       ${tail.map(chatActionHTML).join('')}
       ${tailRecs.map(chatRecHTML).join('')}
       <div id="run-orphan"></div>
-      <div class="working small muted" id="run-working" hidden><span class="dot pulse"></span> working…</div>
+      <div class="working small muted" id="run-working" hidden></div>
     </div>
     ${queuedHTML(queued)}
     <div class="composer-wrap">${composerHTML('chat', chatComposerSpec(running))}</div>`;
 
-  drawActivity(ordered, events, running);
+  drawActivity(ordered, events, running, t);
   const box = document.getElementById('msgs');
   // Opening a chat places the reader on the newest message; after that the
   // chat never scrolls for them — a redraw puts back what they were reading. `first`
@@ -1012,13 +1016,26 @@ function replyOneHTML(threadID, ref, label, askById, recById) {
 }
 const calTitleCache = {};
 
-function msgHTML(m, asks, acts, askById, recs, recById) {
+// The newest session row: the one end line that says "turn ended".
+// Repeating it on every reply says nothing, so every earlier reply row is its
+// day, time and cost alone. The phone's `lastTurnID` (ThreadDetail) picks
+// the same row.
+function lastTurnID(ordered) {
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    const m = ordered[i];
+    if (m.role !== 'owner' && m.role !== 'system' && m.kind !== 'schedule') return m.id;
+  }
+  return null;
+}
+
+function msgHTML(m, asks, acts, askById, recs, recById, last) {
   const role = m.role === 'owner' ? 'owner' : m.role === 'system' ? 'system' : 'claude';
   const cls = m.kind === 'error' ? ' error' : m.kind === 'read' ? ' read' : '';
   const atts = (m.attachments || []).map(attachHTML).join('');
   const askCards = (asks || []).map(chatAskHTML).join('') + (acts || []).map(chatActionHTML).join('')
     + (recs || []).map(chatRecHTML).join('');
-  const meta = `${when(m.ts)}${m.cost_usd ? ' · ' + usd(m.cost_usd) : ''}${m.tokens ? ' · ' + tokens(m.tokens) : ''}`;
+  // Day, time, dollars; no tokens. The session's token total stays in the head.
+  const meta = `${dayWhen(m.ts)}${m.cost_usd ? ' · ' + usd(m.cost_usd) : ''}`;
   // THERE IS NO WHITE CELL: anything the owner must read or do is in one of
   // the card cells.
   // A session's reply is the turn ENDING, never a text bubble: the cards the
@@ -1034,7 +1051,7 @@ function msgHTML(m, asks, acts, askById, recs, recById) {
     return `<div class="msg ${role} end paused" id="msg-${esc(String(m.id))}"><div><span class="end-line">turn paused · session limit · ${meta}</span></div></div>${askCards}`;
   }
   if (role === 'claude' && m.kind !== 'error') {
-    const line = `<span class="end-line">turn ended · ${meta}</span>`;
+    const line = `<span class="end-line">${last ? 'turn ended · ' : ''}${meta}</span>`;
     const old = (m.text || '').trim() || atts;
     const body = old
       ? `<details class="old-reply"><summary>${line}</summary><div class="bubble">${md(m.text)}${atts ? `<div class="atts">${atts}</div>` : ''}</div></details>`
@@ -1043,14 +1060,15 @@ function msgHTML(m, asks, acts, askById, recs, recById) {
   }
   // A long message folds, so a big paste cannot fill the pane. Past LONG_LINES lines or LONG_CHARS
   // characters the body clamps to a screen's worth with a fade and a "Show
-  // all · N lines" button; open, it is a scroll box no taller than the pane,
+  // N more lines" button if N is five or more once it is drawn, else it is
+  // shown whole (ui.js fitFolds); open, it is a scroll box no taller than the pane,
   // wide tables scroll sideways and their header row stays pinned while the
   // rows go by. The fold survives the 5 s redraw (chatState.open, key
   // "long:<id>"). The phone folds the same way (ThreadDetail.chatBubbleBox).
   const long = isLongText(m.text);
   const openLong = long && chatState.open.get('long:' + m.id) === true;
   const bodyCls = long ? ` class="body long${openLong ? ' open' : ''}"` : ' class="body"';
-  const fold = long ? foldButtonHTML(m.text, openLong, `toggleLong(${+m.id})`) : '';
+  const fold = long ? foldButtonHTML(openLong, `toggleLong(${+m.id})`) : '';
   return `<div class="msg ${role}${cls}${long ? ' has-long' : ''}">
     <div class="bubble">
       ${m.kind === 'checkin' ? '<div class="small muted">⏰ scheduled check-in</div>' : ''}
@@ -1132,7 +1150,7 @@ function runSlot(m) {
   return startsRun(m) ? `<div class="activity" id="${runSlotID(m)}"></div>` : '';
 }
 
-function drawActivity(ordered, events, running) {
+function drawActivity(ordered, events, running, t) {
   const byRun = {};
   for (const e of (events || [])) (byRun[e.run_id || ''] ||= []).push(e);
   // The run in flight = the newest starter message whose reply has not landed.
@@ -1172,24 +1190,25 @@ function drawActivity(ordered, events, running) {
     orphan = running && !live ? (events || []).filter(e => !known.has(e.run_id)) : [];
     orphanEl.innerHTML = orphan.length ? activityHTML(orphan, true, 'run:live') : '';
   }
-  const footer = document.getElementById('run-working');
-  if (footer) footer.hidden = !showWorking(running, !!live || orphan.length > 0);
+  chatState.liveBlock = !!live || orphan.length > 0;
+  paintWorking(running, chatState.liveBlock, t);
 }
 
-// THE rule for "is it working", one line, same on both surfaces (the phone
-// spells it out in ThreadDetail.swift — keep them in step). A live run block
-// (pulsing dot, "starting…" until the first step lands, then the count and the
-// step in flight) already says it, so the bare "working…" footer is only for a
-// running session with no block yet — a wake whose message has not landed.
-// Two lines at once ("starting" and "working") read as two different states;
-// a footer left on a stopped session reads as a session that never finished.
-const showWorking = (running, liveBlock) => running && !liveBlock;
-
-// The step in flight = the last tool call still waiting for its result; once
-// every call has answered the model is thinking or writing its reply.
-function currentStep(evs) {
-  const pending = pairRows(evs).findLast(p => p[0].kind === 'tool_use' && !p[1]);
-  return pending ? (pending[0].summary || pending[0].title) : (evs.length ? 'thinking' : '');
+// THE working line, same on both surfaces (the phone spells it out in
+// ThreadDetail.swift; keep them in step). A running turn ends the chat the
+// way a finished one does: its fold, then one line of facts. "turn ended ·
+// today 10:06 PM · $7.27" becomes "working · today 10:09 PM · $1.12", the
+// clock being the turn's last output, so a hung turn shows an old time. With
+// no live block yet the count rides on this line too, behind the pulse. A
+// line left on a stopped session reads as one that never finished.
+const showWorking = running => !!running;
+function paintWorking(running, liveBlock, t) {
+  const el = document.getElementById('run-working');
+  if (!el) return;
+  el.hidden = !showWorking(running);
+  if (el.hidden) return;
+  const line = ['working', turnFacts(t, !liveBlock)].filter(Boolean).join(' · ');
+  el.innerHTML = `${liveBlock ? '' : '<span class="dot pulse"></span> '}${esc(line)}`;
 }
 
 // One run block, cut at the cards the agent raised while it ran. The hub gives the cut and each piece's own count
@@ -1248,19 +1267,20 @@ function activityHTML(evs, live, key, count, msgID) {
   if (tools) parts.push(tools + ' tool call' + (tools === 1 ? '' : 's'));
   if (thoughts) parts.push(thoughts + ' thought' + (thoughts === 1 ? '' : 's'));
   if (!parts.length) parts.push(all ? all + ' step' + (all === 1 ? '' : 's') : 'starting…');
-  const now = live ? currentStep(evs) : '';
-  if (now) parts.push('now: ' + now);
+  // No "now: <step>" behind the count: a raw step label reads as noise. The
+  // working line under the chat carries the turn's clock and dollars
+  // (paintWorking), and the steps are one click away.
   // ALWAYS folded until the owner clicks it, live or not. A running turn used
   // to open itself, so entering a session landed the reader in the middle of
-  // a wall of steps instead of on the conversation. The headline still
-  // carries "N tool calls · now: <step>", so one folded line says what it is
-  // doing. `data-def` lets the toggle handler tell the owner's click apart
+  // a wall of steps instead of on the conversation. `data-def` lets the toggle handler tell the owner's click apart
   // from the open state we ourselves rendered.
   const open = chatState.open.get(key) ?? false;
   // Opened but not all of it is here yet: say so rather than showing a short
   // list that looks like the whole run.
   const missing = all > evs.length ? `<div class="ev flat"><span class="hl muted">loading ${all - evs.length} earlier step${all - evs.length === 1 ? '' : 's'}…</span></div>` : '';
-  return `<details class="run" data-k="${esc(key)}" data-msg="${msgID || 0}" data-def="${open ? 1 : 0}"${open ? ' open' : ''}>
+  // One mark leads the row: the pulse while the turn runs and the block is
+  // shut, ▾ open, ▸ ⚙ finished. `.run.live` (app.css) hides the other.
+  return `<details class="run${live ? ' live' : ''}" data-k="${esc(key)}" data-msg="${msgID || 0}" data-def="${open ? 1 : 0}"${open ? ' open' : ''}>
     <summary>${live ? '<span class="dot pulse"></span>' : '<span class="gear">⚙</span>'} <span class="hl">${esc(parts.join(' · '))}</span></summary>
     <div class="evs">${missing}${pairRows(evs).map(evRowHTML).join('')}</div></details>`;
 }
@@ -1288,6 +1308,9 @@ const firstLine = s => String(s || '').split('\n').find(l => l.trim()) || '';
 // — its first OUT_FOLD lines, the rest behind "… N more lines" — or the error
 // in red, whole ("the error is good"). A body that is still the input's JSON
 // (stored before 10-05) is not shown: the title already says it.
+// An interim text step (what the agent said mid-turn, 💬) folds like the
+// thought: shut, its first two lines and an ellipsis (`.ev.said .hl`); open,
+// all of it. A long one on a single nowrap line could not be read at all.
 const OUT_FOLD = 12;
 function evRowHTML([e, r]) {
   const icon = { thinking: '✻', tool_use: '⌘', text: '💬' }[e.kind] || '↳';
@@ -1301,6 +1324,9 @@ function evRowHTML([e, r]) {
   };
   if (e.kind === 'thinking') {
     return `${fold('ev think', '')}<summary><span class="ic">${icon}</span><span class="hl one">Thinking · ${esc(firstLine(e.body))}</span><span class="hl all">${esc(e.body)}</span></summary></details>`;
+  }
+  if (e.kind === 'text' && e.body) {
+    return `${fold('ev said', '')}<summary><span class="ic">${icon}</span><span class="hl">${esc(e.body)}</span></summary></details>`;
   }
   const head = `<span class="ic">${icon}</span><span class="hl">${esc(e.kind === 'tool_use' ? (e.summary || e.title) : (firstLine(e.body) || e.title || e.kind))}</span>${tick}`;
   if (e.kind !== 'tool_use') return `<div class="ev flat">${head}</div>`;

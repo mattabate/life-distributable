@@ -200,7 +200,15 @@ type Thread struct {
 	// plain English); only set while status=running: working cards say what
 	// is going on, not "working…".
 	Activity string `json:"activity,omitempty"`
-	NeedsYou int    `json:"needs_you"`
+	// The turn in flight, only while status=running: its tool calls, its
+	// dollars so far, and when it last did anything. Both surfaces print them
+	// where a finished turn prints "turn ended · today 10:06 PM · $7.27" (on
+	// the chat's working line and the session card) instead of a bare
+	// "working…" or a raw step label nobody can read.
+	TurnTools   int        `json:"turn_tools,omitempty"`
+	TurnCostUSD float64    `json:"turn_cost_usd,omitempty"`
+	TurnAt      *time.Time `json:"turn_at,omitempty"`
+	NeedsYou    int        `json:"needs_you"`
 	// Speaking: its card is being read aloud right now (Voice). Stamped on
 	// the list, the brief list and one thread.
 	Speaking bool `json:"speaking,omitempty"`
@@ -1071,6 +1079,22 @@ func (m *Manager) systemPreamble(t Thread) string {
 // reads $0.00 — the CLI reports dollars only when a turn ends.
 const costCol = `t.cost_usd + COALESCE((SELECT SUM(r.live_cost_usd) FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL),0)`
 
+// turnCols: the turn in flight (Thread.TurnTools/TurnCostUSD/TurnAt). The
+// live run's current turn id is `<run>` for turn 1 and `<run>-tN` after
+// (run.turnID), its dollars are the run's live estimate (zeroed when a turn
+// settles), its time is the turn's NEWEST TOOL CALL, so the clock on the row
+// moves exactly when the count does (the turn's start until the first call).
+// The run's last output would also creep forward on thinking and text with
+// the count standing still. CASE keeps the sub-selects off every session
+// that is not running. scan() reads them in this order.
+const turnCols = `CASE WHEN t.status='running' THEN (SELECT COUNT(*) FROM thread_runs r JOIN thread_events e ON e.thread_id=r.thread_id
+		AND e.run_id=(CASE WHEN r.turns<=1 THEN r.id ELSE r.id||'-t'||r.turns END)
+		WHERE r.thread_id=t.id AND r.finished_at IS NULL AND e.kind='tool_use') ELSE 0 END,
+	CASE WHEN t.status='running' THEN (SELECT COALESCE(SUM(r.live_cost_usd),0) FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL) ELSE 0 END,
+	CASE WHEN t.status='running' THEN (SELECT MAX(COALESCE((SELECT MAX(e.ts) FROM thread_events e WHERE e.thread_id=r.thread_id
+		AND e.run_id=(CASE WHEN r.turns<=1 THEN r.id ELSE r.id||'-t'||r.turns END) AND e.kind='tool_use'), r.last_output))
+		FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL) END`
+
 // tokCols: settled tokens plus what the turn in flight has burned so far, so
 // a running session's number climbs while it works instead of jumping when it
 // finishes. Kept next to cost_usd in both thread queries; scan() reads them in
@@ -1104,7 +1128,8 @@ func (m *Manager) Get(id string) (Thread, error) {
 		(SELECT ts FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
 		`+openAsksCol+`,
 		(SELECT COALESCE(NULLIF(e.summary,''), e.title) FROM thread_events e WHERE e.thread_id=t.id AND e.kind='tool_use' ORDER BY e.id DESC LIMIT 1),
-		(SELECT kind FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1)
+		(SELECT kind FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
+		`+turnCols+`
 		FROM threads t WHERE t.id=?`, id)
 	t, err := scan(row)
 	if err != nil {
@@ -1196,7 +1221,8 @@ func (m *Manager) List(includeArchived bool) ([]Thread, error) {
 		(SELECT ts FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
 		` + openAsksCol + `,
 		(SELECT COALESCE(NULLIF(e.summary,''), e.title) FROM thread_events e WHERE e.thread_id=t.id AND e.kind='tool_use' ORDER BY e.id DESC LIMIT 1),
-		(SELECT kind FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1)
+		(SELECT kind FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
+		` + turnCols + `
 		FROM threads t ` + where + ` ORDER BY COALESCE((SELECT MAX(ts) FROM thread_messages m WHERE m.thread_id=t.id), t.updated_at) DESC, t.updated_at DESC`)
 	if err != nil {
 		return nil, err
@@ -1285,7 +1311,67 @@ func (m *Manager) Messages(id string, limit int) ([]Message, error) {
 		return nil, err
 	}
 	m.labelReplies(out)
-	return out, nil
+	return m.oneScheduleCard(id, out), nil
+}
+
+// oneScheduleCard keeps a single green check-in card in the chat: only the
+// next check-in matters, and an edited schedule replaces the old card where
+// the edit happened (a long-lived session otherwise stacked one card per
+// edit). Every schedule change still appends a row (append-only); the
+// conversation shows only the newest, at the later of where it was written
+// and the end of the latest check-in run (the handoff: once a check-in has
+// run, the next one is what matters), with its "next" time read live off
+// the standing prompt.
+func (m *Manager) oneScheduleCard(id string, msgs []Message) []Message {
+	var card Message
+	var t string
+	if m.db.QueryRow(`SELECT id, ts, text FROM thread_messages WHERE thread_id=? AND kind='schedule' ORDER BY id DESC LIMIT 1`, id).Scan(&card.ID, &t, &card.Text) != nil {
+		return msgs
+	}
+	card.ThreadID, card.Role, card.Kind, card.Attachments = id, "system", "schedule", []string{}
+	card.TS, _ = time.Parse(time.RFC3339Nano, t)
+	card.Author = authorOf(card)
+	out, held := msgs[:0:0], false
+	for _, x := range msgs {
+		if x.Kind == "schedule" {
+			if x.ID == card.ID {
+				card, held = x, true
+			}
+			continue
+		}
+		out = append(out, x)
+	}
+	// The latest check-in run that started after the card was written.
+	run := ""
+	for _, x := range out {
+		if x.Kind == "checkin" && x.ID > card.ID && x.RunID != "" {
+			run = x.RunID
+		}
+	}
+	if run != "" {
+		for _, x := range out {
+			if x.RunID == run && !x.TS.Before(card.TS) {
+				card.TS = x.TS.Add(time.Millisecond)
+			}
+		}
+	} else if !held && len(out) > 0 && card.ID < out[0].ID {
+		return out // written before the window: not drawn, like any old message
+	}
+	if p, ok := m.Standing(id); ok && !p.NotBefore.IsZero() && strings.HasPrefix(card.Text, "Checks back ") {
+		head, rest, _ := strings.Cut(card.Text, "\n")
+		if i := strings.Index(head, " · next "); i >= 0 {
+			head = head[:i]
+		}
+		card.Text = head + " · next " + p.NotBefore.Local().Format("Mon Jan 2 15:04")
+		if rest != "" {
+			card.Text += "\n" + rest
+		}
+	}
+	i := len(out)
+	for i > 0 && out[i-1].TS.After(card.TS) {
+		i--
+	}
+	return append(out[:i], append([]Message{card}, out[i:]...)...)
 }
 
 // labelReplies stamps each reply's verdict word (store.ReplyLabel). An ask's
@@ -1639,10 +1725,16 @@ type scanner interface{ Scan(...any) error }
 func scan(r scanner) (Thread, error) {
 	var t Thread
 	var c, u string
-	var goal, sid, nextRun, last, lastMsg, lastTS, activity, lastKind sql.NullString
+	var goal, sid, nextRun, last, lastMsg, lastTS, activity, lastKind, turnAt sql.NullString
 	if err := r.Scan(&t.ID, &c, &u, &t.Title, &t.Project, &goal, &t.ModelClass, &t.Status, &sid, &t.Schedule, &t.SchedulePrompt, &nextRun, &last, &t.Unread, &t.CostUSD,
-		&t.Tokens.In, &t.Tokens.Out, &t.Tokens.CacheRead, &t.Tokens.CacheWrite, &lastMsg, &lastTS, &t.NeedsYou, &activity, &lastKind); err != nil {
+		&t.Tokens.In, &t.Tokens.Out, &t.Tokens.CacheRead, &t.Tokens.CacheWrite, &lastMsg, &lastTS, &t.NeedsYou, &activity, &lastKind,
+		&t.TurnTools, &t.TurnCostUSD, &turnAt); err != nil {
 		return t, err
+	}
+	if t.Status == "running" && turnAt.Valid {
+		if x := parseTS(turnAt.String); !x.IsZero() {
+			t.TurnAt = &x
+		}
 	}
 	t.Tokens.sum()
 	t.LastMessageKind = lastKind.String

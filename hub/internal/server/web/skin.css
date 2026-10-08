@@ -54,9 +54,11 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .sess-t { order: 0; font-size: 14.5px; font-weight: 600; line-height: 1.35; }
 .sess-t.unread { font-weight: 700; }
 .sess-foot { order: 1; margin-top: 7px; gap: 5px; font-size: 12px; font-variant-numeric: tabular-nums; }
-.card.sess > .small.trunc[style] { order: 2; margin-top: 8px !important; color: var(--muted) !important; font-size: 12.5px; }
-.card.sess > .small.trunc[style]::before { content: ''; display: inline-block; width: 6px; height: 6px; margin: 0 7px 1px 1px;
-  border-radius: 50%; background: var(--accent); vertical-align: middle; }
+/* a running card's current turn: a railed row under the state line, so the card says one state, not two */
+.card.sess > .sess-run { order: 2; margin: 10px -14px 0; padding: 9px 14px 9px 13px; border-top: 1px solid var(--line);
+  border-left: 3px solid var(--accent); color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.card.sess:not(:has(> .ask.mini)) > .sess-run { margin-bottom: -12px; border-radius: 0 0 0 9px; }
+.card.sess:has(> .sess-run) > .ask.mini:first-of-type { margin-top: 0; }
 .card.sess > .ask.mini, .card.sess > .more-cards { order: 3; }
 /* its open cards: rows under a hairline, a tint rail each — not boxes in a box */
 .card.sess > .ask.mini { margin: 10px -14px 0; padding: 9px 14px 9px 13px; border: 0; border-radius: 0;

@@ -42,8 +42,11 @@ func (s *Server) changes(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-s.stopping:
-			// The hub is restarting: answer now so Shutdown is not held.
-			writeJSON(w, 200, map[string]any{"version": v, "changed": false})
+			// The hub is restarting: answer now so Shutdown is not held, and
+			// SAY so. An app's pooled connection to the old hub would go on
+			// taking requests for minutes after a restart; `restarting` is
+			// its cue to drop the pool and connect afresh (HubClient.changes).
+			writeJSON(w, 200, map[string]any{"version": v, "changed": false, "restarting": true})
 			return
 		case <-time.After(changesTick):
 		}

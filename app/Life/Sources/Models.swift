@@ -498,6 +498,13 @@ struct Thread: Codable, Identifiable, Hashable {
     /// print it as the session's answer. nil on an older hub.
     var last_message_kind: String?
     var activity: String?
+    /// The turn in flight (running only): its tool calls, dollars so far and
+    /// the time of its newest tool call (the turn's start before the first).
+    /// The chat's working line and the session card print them
+    /// as `turnFacts`. nil from an older hub.
+    var turn_tools: Int?
+    var turn_cost_usd: Double?
+    var turn_at: Date?
     var needs_you: Int
     /// The model the session runs on — its live run's, else the newest run
     /// that named one (list and single GET only; nil when it never ran with
@@ -997,6 +1004,9 @@ struct ThreadMessage: Codable, Identifiable, Hashable {
 struct ChangeFeed: Codable, Hashable {
     var version: String
     var changed: Bool
+    /// The hub answered because it is shutting down: the pool of connections
+    /// to it is about to go dead, so HubClient.changes drops it.
+    var restarting: Bool?
 }
 
 /// One streamed step of a session run: a tool call, its result, a thinking

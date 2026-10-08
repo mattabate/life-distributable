@@ -283,6 +283,12 @@ struct NewThreadSheet: View {
     /// quits over unsent words (MacUpdateButton).
     @ObservationIgnored static let live = NSHashTable<Draft>.weakObjects()
     static var anyUnsent: Bool { live.allObjects.contains { $0.text.contains { !$0.isWhitespace } } }
+    /// The unsent words themselves, quoted in the Update dialog so the owner
+    /// can tell which box they are in.
+    static var unsentPreview: String {
+        let texts = live.allObjects.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return texts.map { "\u{201C}\($0.count > 80 ? String($0.prefix(80)) + "…" : $0)\u{201D}" }.joined(separator: "\n")
+    }
     init() { Self.live.add(self) }
     #endif
 }
