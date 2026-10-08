@@ -1617,6 +1617,36 @@ func TestSources(t *testing.T) {
 	}
 }
 
+// Once a goal lists sources, Configuration groups them under that goal's
+// title in blue, and what no goal reads goes last under "No goal".
+func TestSourcesGroupedByGoal(t *testing.T) {
+	s := newTest(t)
+	for _, src := range []string{"health", "garden"} {
+		if _, err := s.obs.Insert(obs.Observation{Source: src, Kind: "k", TS: time.Now(), Payload: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	made, err := s.goals.Create(goals.Goal{Title: "Make me healthier", Status: "active", Sources: "health, calendar"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := s.do(t, "GET", "/api/v1/sources", nil)
+	var v SourcesView
+	if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Groups) != 2 {
+		t.Fatalf("groups = %+v", v.Groups)
+	}
+	g, rest := v.Groups[0], v.Groups[1]
+	if g.Tag != "Make me healthier" || g.Color != goalHex(made.Emblem.Hue) || len(g.Sources) != 1 || g.Sources[0].ID != "health" {
+		t.Fatalf("goal group = %+v", g)
+	}
+	if rest.Tag != "No goal" || len(rest.Sources) != 1 || rest.Sources[0].ID != "garden" {
+		t.Fatalf("rest = %+v", rest)
+	}
+}
+
 // A rec filed by a session must carry the model that wrote it. The hub reads it off the session's run; a thread that has
 // never run has none, so the body has to say it — and then it filters.
 func TestRecsCarryTheirModel(t *testing.T) {

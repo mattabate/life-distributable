@@ -141,6 +141,7 @@ func main() {
 		log.Fatal(err)
 	}
 	thr.OwnerName = cfg.OwnerName
+	thr.Surfaces = cfg.Surfaces
 	thr.BlobPath = ob.BlobPath
 	thr.IntakePath = ob.IntakePath
 	thr.AutoCompactWindow = cfg.AutoCompactWindow

@@ -316,7 +316,8 @@ struct ConfigView: View {
 
     /// A section per group — the console's cfgSourcesHTML. Groups sharing a
     /// tag are one section; the hub's group order is the section order,
-    /// inside a section by name.
+    /// inside a section by name. Each section is a row of its own on every
+    /// surface: two goals side by side read as one list.
     private struct Section: Identifiable {
         var tag: String
         var color: String
@@ -339,15 +340,7 @@ struct ConfigView: View {
     @ViewBuilder private func sources(_ groups: [SourceGroup]) -> some View {
         let secs = sections(groups)
         if secs.isEmpty { Text("Nothing connected.").font(.system(size: 13)).foregroundStyle(muted) }
-        if mac {
-            // Side by side, each as wide as its cards want, so a group of one
-            // shares a row instead of taking it (app.css .sgroups).
-            SectionFlow(unit: 215, inner: 8, gap: 16, rowGap: 14) {
-                ForEach(secs) { section($0).layoutValue(key: SectionCards.self, value: min($0.refs.count, 4)) }
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 14) { ForEach(secs) { section($0) } }
-        }
+        VStack(alignment: .leading, spacing: 14) { ForEach(secs) { section($0) } }
     }
 
     private func section(_ s: Section) -> some View {
@@ -363,6 +356,7 @@ struct ConfigView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func card(_ r: SourceRef) -> some View {
@@ -426,57 +420,5 @@ extension Color {
         let s = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
         let v = s.count == 6 ? (UInt32(s, radix: 16) ?? 0x64748B) : 0x64748B
         self.init(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
-    }
-}
-
-/// How many cards a source section holds (capped at 4): its flex weight.
-private struct SectionCards: LayoutValueKey { static let defaultValue = 1 }
-
-/// The console's `.sgroups` flex-wrap: each section's basis is `n` cards
-/// wide, sections fill a row while their bases fit, then the row's spare
-/// width is shared out by `n` (flex-grow) so the row ends flush.
-private struct SectionFlow: Layout {
-    var unit: CGFloat, inner: CGFloat, gap: CGFloat, rowGap: CGFloat
-
-    private func basis(_ n: Int) -> CGFloat { CGFloat(n) * unit + CGFloat(n - 1) * inner }
-
-    /// Rows of (index, width).
-    private func rows(_ subviews: Subviews, width: CGFloat) -> [[(Int, CGFloat)]] {
-        var rows: [[Int]] = [[]]
-        var used: CGFloat = 0
-        for i in subviews.indices {
-            let b = basis(subviews[i][SectionCards.self])
-            if !rows[rows.count - 1].isEmpty, used + gap + b > width { rows.append([]); used = 0 }
-            used += (rows[rows.count - 1].isEmpty ? 0 : gap) + b
-            rows[rows.count - 1].append(i)
-        }
-        return rows.map { r in
-            let ns = r.map { subviews[$0][SectionCards.self] }
-            let spare = max(0, width - ns.map(basis).reduce(0, +) - gap * CGFloat(r.count - 1))
-            let weight = CGFloat(ns.reduce(0, +))
-            return zip(r, ns).map { ($0, min(width, basis($1) + spare * CGFloat($1) / weight)) }
-        }
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let w = proposal.width ?? 1000
-        let h = rows(subviews, width: w).map { r in
-            r.map { subviews[$0.0].sizeThatFits(ProposedViewSize(width: $0.1, height: nil)).height }.max() ?? 0
-        }
-        return CGSize(width: w, height: h.reduce(0, +) + rowGap * CGFloat(max(0, h.count - 1)))
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var y = bounds.minY
-        for r in rows(subviews, width: bounds.width) {
-            var x = bounds.minX, rowH: CGFloat = 0
-            for (i, w) in r {
-                let p = ProposedViewSize(width: w, height: nil)
-                subviews[i].place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: p)
-                rowH = max(rowH, subviews[i].sizeThatFits(p).height)
-                x += w + gap
-            }
-            y += rowH + rowGap
-        }
     }
 }

@@ -144,6 +144,11 @@ screens-dark: app-build-sim
 demo-screens:
 	bash ops/demo-screens.sh $(TABS)
 
+# The desktop app showing the same demo world: the desktop pictures in
+# docs/img/ come from here (ops/logs/demo/mac-*.png). Needs `make mac-build`.
+demo-mac-screens:
+	bash ops/demo-mac-screens.sh $(PAGES)
+
 # ship = THE command after app/ changes (paid tier, 2026-08-22): ad-hoc
 # archive + export, .ipa + manifest served by the hub at /ota/<token>/, you
 # install from Safari anywhere on the tailnet (no LAN, no cable). Then raise
