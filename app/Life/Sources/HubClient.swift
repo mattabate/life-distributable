@@ -88,6 +88,14 @@ final class HubClient {
         // A screenshot run can put a made-up code in the Settings box
         // (LIFE_DECIDER_SHOT=AAAAA-…), to prove a snap leaves it out.
         if ProcessInfo.processInfo.environment["LIFE_SHOT"] != nil, let d = ProcessInfo.processInfo.environment["LIFE_DECIDER_SHOT"] { decider = Self.normalizeDecider(d) }
+        // A shot run can point the desktop app at another hub (ops/demo-mac-screens.sh:
+        // the README's demo hub on a loopback port, LIFE_HUB_URL + LIFE_HUB_TOKEN).
+        // Set here in init, so the didSet above never writes it into the
+        // installed app's defaults.
+        if ProcessInfo.processInfo.environment["LIFE_SHOT"] != nil {
+            if let u = ProcessInfo.processInfo.environment["LIFE_HUB_URL"], !u.isEmpty { baseURL = u }
+            if let t = ProcessInfo.processInfo.environment["LIFE_HUB_TOKEN"], !t.isEmpty { token = t }
+        }
         #endif
         #if targetEnvironment(simulator)
         // ops/screens.sh launches the simulator build with the hub token in the

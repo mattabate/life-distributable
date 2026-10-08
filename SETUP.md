@@ -54,7 +54,9 @@ Rules for the whole install:
    approvals), a desktop app for this Mac, and a web console for any
    browser on your private network. Most people take all three. Which do
    you want?"* Default: all three. Remember the answer as `--surfaces`
-   (comma list of `phone`, `desktop`, `web`).
+   (comma list of `phone`, `desktop`, `web`). Tell them what it means:
+   every change they ask for later is built for the apps they picked, and
+   the others wait until they ask for them (fewer apps, faster changes).
 2. Show the costs and ask which they're signing up for. Continue only after
    they say yes.
 

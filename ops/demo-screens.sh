@@ -13,7 +13,7 @@ OUT="$ROOT/ops/logs/demo"; mkdir -p "$OUT"
 PORT="${PORT:-8787}"
 source "$ROOT/ops/app-identity.sh"
 BUNDLE=$LIFE_BUNDLE_ID
-TABS=("$@"); [ ${#TABS[@]} -gt 0 ] || TABS=(sessions "thread:car-insurance-renewal-b7d2" "goal:run-a-half-marathon")
+TABS=("$@"); [ ${#TABS[@]} -gt 0 ] || TABS=(sessions "thread:weekly-investing-a4d1" calendar)
 
 APP="$(ls -d build/Build/Products/Debug-iphonesimulator/Life.app 2>/dev/null || true)"
 if [ -z "$APP" ]; then echo "no simulator build; run: make app-build-sim" >&2; exit 1; fi
@@ -32,6 +32,9 @@ xcrun simctl ui "$UDID" appearance "${APPEARANCE:-light}" >/dev/null 2>&1 || tru
 xcrun simctl install "$UDID" "$APP"
 # The app reads its hub address from UserDefaults once, at launch.
 xcrun simctl spawn "$UDID" defaults write "$BUNDLE" hub.baseURL "http://127.0.0.1:$PORT" >/dev/null
+# The Calendar tab opens on the Day grid, the view an owner lives in (it
+# remembers the last mode; CAL_MODE=schedule shoots the list instead).
+xcrun simctl spawn "$UDID" defaults write "$BUNDLE" cal.mode "${CAL_MODE:-day}" >/dev/null
 
 for tab in "${TABS[@]}"; do
   thread=""; more=""; goal=""; name="$tab"

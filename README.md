@@ -2,13 +2,29 @@
 
 # life
 
-**One prompt to Claude Code builds you *life*: a personal AI agent with apps on your iPhone, Mac and web.**
+**An AI personal assistant with editable apps on iPhone, Mac and web.**
 
-*life* is a self-hosted AI assistant built on [Claude Code][claude-code]. It
-runs on a Mac you own, works on your goals day and night, and reaches you
-through its own iPhone app, a desktop app and a web console. Think apps you
-can edit like dashboards, plus an agent that connects to your data sources
-and does the work. A very powerful personal assistant, and it's yours.
+*life* is a self-hosted AI assistant built on [Claude Code][claude-code].
+It will help you meet your goals, whatever they are.
+
+Your Mac (a Mac mini, or a laptop that stays on) runs the agents. It
+connects to your iPhone over a private [Tailscale](https://tailscale.com)
+VPN, and you talk to the agent from an iPhone app, a desktop app or a web
+app. Nothing is on the public internet. Only your devices can reach it.
+
+The assistant can change its apps to make you new pages, add
+data sources, or modify itself and the way it interacts with you.
+Nothing about the app you start with is set in stone; tell the agent
+your desired changes through the app.
+
+As you work with the assistant, it learns about you and your goals. 
+It can make recommendations, or take actions on your behalf.
+It connects safely to your data sources, and the data you share is 
+saved on the computer.
+
+**Setup takes about 2 hours,** but it is mostly following simple steps the
+agent gives you. Your only job at the start is to open Claude Code and
+give it the prompt below.
 
 **You need:** a personal computer that is always on (a Mac), an
 [Apple Developer membership][apple-dev] ($99 a year, for the iPhone and
@@ -17,22 +33,23 @@ Claude Code (about $20 to $200 a month, depending on plan).
 
 ## Install: paste one sentence
 
+The only step: open Claude Code on your Mac and give it this prompt.
+
 ```
 Clone github.com/mattabate/life-distributable and set up my life agent. Follow its SETUP.md.
 ```
 
-Setup takes **about 2 hours**, mostly waiting on Apple and the Xcode
-download. The agent runs the Terminal for you. Your part is clicking where
+Most of the 2 hours is waiting on Apple and the Xcode download. The agent runs the Terminal for you. Your part is clicking where
 it tells you. You never type a command.
 
 ⭐ **[Star it][repo]** to get developer addenda: new features and fixes land
 in [ADDENDA.md](ADDENDA.md), and your agent brings each one to you.
 
-<p align="center"><img src="docs/img/sessions.png" alt="The life web console: the Sessions board with cards waiting on the owner, including an approval to switch car insurance and save $312 a year, a dinner booking email to approve, a Spanish lesson, and a half marathon plan the agent is working on" width="900"></p>
+<p align="center"><img src="docs/img/sessions.png" alt="The life desktop app: the Sessions board with four cards waiting on the owner, an approval to buy $500 of VTI on Thursday, a honeymoon decision, an app build to install and today's tweet to pick, a Gmail expense scan the agent is running, and a new session ready to start" width="900"></p>
 
-**Configuration.** What it is connected to, what it may spend, and what you are working toward: the Claude plan and how much of each limit is left, the model new sessions start on, your goals, and every data source with its last sync.
+**Configuration.** What it is connected to, what it may spend, and what you are working toward: the Claude plan and how much of each limit is left, the model new sessions start on, your goals, and every data source under the goal it serves.
 
-<p align="center"><img src="docs/img/configuration.png" alt="The life console's Configuration page: a Powered by card with the Claude Max plan, $23 spent this month, 69% of the 5 hour limit and 36% of the 7 day limit left, the model picker; a Goals card with four goals; and data source cards for Apple Health, Google Calendar, Mail, a bank via SimpleFIN, GitHub and the Life app, each with its row count and last sync" width="900"></p>
+<p align="center"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: a Powered by card with the Claude Max 20x plan, $728 spent this month, 60% of the 5 hour limit, 86% of the 7 day limit and 79% of the Fable limit left, and the model picker; a Goals card with seven goals; and data sources grouped under the goals Grow my audience, Make more money, Build agent and Make me healthier, most sources first, each goal on its own row in its colour, every source with its logo, row count and last sync" width="900"></p>
 
 ## Is this for me?
 
@@ -70,38 +87,44 @@ you have to babysit. You don't need to be technical. You need:
   every goal has a living "where this stands".
 - **Recommends, with receipts.** Every suggestion goes in a ledger with its
   evidence and the price, so you can see later whether it worked.
-- **Four pages, on the web and on the phone.** Sessions, Recs and Calendar
+- **Four pages, on iPhone, Mac and web.** Sessions, Recs and Calendar
   are the pages you live in. Configuration holds your goals, your spend
-  limits and the data sources it is connected to.
+  limits and each data source, grouped under the goal it serves. You pick
+  the apps you want at setup, and every change you ask for later is built
+  for those. The others wait until you ask for them.
 - **Grows with you.** Ask for a new data source, a page or an automation,
   and it builds it in your own copy of the code. A page for a part of your
   life (money, a training log, a reading list) is something your agent
   builds for a goal when that goal needs one. None ships in the box.
 
-## Screenshots
+## Example app layout
+
+### Desktop app
 
 | **Approvals.** The agent proposes, you approve. | **Sessions.** It asks one clear question at a time. |
 |---|---|
-| ![A session chat in the life console with an approval card: switch car insurance and save $312 a year, old $148 a month, new $122 a month, tagged money](docs/img/approval.png) | ![A session planning a birthday dinner: the agent asks which of two restaurants to book and proposes an email to the restaurant for approval](docs/img/chat.png) |
+| ![The Weekly investing session in the life desktop app: the agent checks cash and price, then raises an approval card to buy $500 of VTI on Thursday, tagged money](docs/img/approval.png) | ![A session in the life desktop app planning a honeymoon: the agent asks which of six beach and spa plans to pick, St. Lucia and Costa Rica first, each with flight time and total](docs/img/chat.png) |
 
 | **Recs.** Suggestions with evidence and a price. | **Calendar.** Your steps and the agent's runs. |
 |---|---|
-| ![The Recs page of the personal AI assistant: move a house fund to a 4.4% savings account, new running shoes, a weekly Spanish class, each with evidence and Accept or Decline](docs/img/recs.png) | ![The life calendar week view: Spanish lessons each morning, training runs, a dentist call and a birthday dinner, with overdue and due-soon lists](docs/img/calendar.png) |
+| ![The Recs page of the life desktop app: get to bed by 11:30 on weeknights, send the first newsletter, destroy an idle $6 a month server, import an art portfolio, each with evidence and Accept or Decline](docs/img/recs.png) | ![The life desktop app's Calendar: supplements as a daily chore, Fenaroli practice in the evenings, the Gmail expense scan and weekly agent runs, with due, do-soon and sessions-waiting lists](docs/img/calendar.png) |
+
+### iPhone app
 
 <table>
 <tr>
-<th align="left"><strong>iPhone: an approval.</strong> The same card, in your pocket.</th>
-<th align="left"><strong>iPhone: Sessions.</strong> Every card waiting on you.</th>
-<th align="left"><strong>iPhone: Calendar.</strong> Overdue, due today, do soon.</th>
+<th align="left"><strong>An approval.</strong> In your pocket.</th>
+<th align="left"><strong>Sessions.</strong> Cards waiting on you.</th>
+<th align="left"><strong>Calendar.</strong> Your day at a glance.</th>
 </tr>
 <tr>
-<td valign="top"><img src="docs/img/phone-approval.png" alt="The life iPhone app: a session chat with the car insurance approval card, Approve, Deny, Reply and Dismiss buttons"></td>
-<td valign="top"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions tab: Your turn, 5 cards in 4 sessions, each session with its red cards"></td>
-<td valign="top"><img src="docs/img/phone-calendar.png" alt="The life iPhone app Calendar tab: an overdue passport renewal, two steps due today, one to do soon, a session waiting"></td>
+<td valign="top"><img src="docs/img/phone-approval.png" alt="The life iPhone app: a session chat with the approval card to buy $500 of VTI, Approve, Deny, Reply and Dismiss buttons"></td>
+<td valign="top"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions tab: Your turn, 4 cards in 4 sessions, three red cards to approve or decide and one teal card to install an app build"></td>
+<td valign="top"><img src="docs/img/phone-calendar.png" alt="The life iPhone app Calendar tab on the Day view: today's hours with a walk after lunch, the weekly recs score and the gym, the investing run, and the due and do-soon tray"></td>
 </tr>
 </table>
 
-All screenshots use a made-up owner and made-up data.
+The screenshots are the maker's own hub, with private details changed.
 
 ## What it costs
 
@@ -117,7 +140,8 @@ All screenshots use a made-up owner and made-up data.
 
 The agent follows [SETUP.md](SETUP.md). Here is the timeline.
 
-1. **Pick your apps, see the costs** (2 min). iPhone, desktop, web, or all three.
+1. **Pick your apps, see the costs** (2 min). iPhone, desktop, web, or all
+   three. Later changes are built for the ones you picked.
 2. **Start the slow things** (10 min, then waiting). Apple developer
    enrollment and the Xcode download start first. Apple usually answers
    within hours.

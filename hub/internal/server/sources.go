@@ -3,12 +3,14 @@ package server
 import (
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
 	"life/hub/internal/brand"
+	"life/hub/internal/goals"
 	"life/hub/internal/obs"
 	"life/hub/internal/syncruns"
 )
@@ -210,8 +212,88 @@ func (s *Server) sources(w http.ResponseWriter, r *http.Request) {
 	if len(other.Sources) > 0 {
 		view.Groups = append(view.Groups, other)
 	}
+	if s.goals != nil {
+		gs, err := s.goals.List("active")
+		if err != nil {
+			log.Printf("sources: goals: %v", err) // the page still answers, grouped by kind
+		} else {
+			view.Groups = byGoal(view.Groups, gs)
+		}
+	}
 	sortSources(view.Groups)
 	writeJSON(w, 200, view)
+}
+
+// goalHex is a goal's emblem hue as the section colour: the same hue the
+// Goals card draws, at a lightness that reads as text on white.
+func goalHex(hue int) string {
+	h, s, l := float64(((hue%360)+360)%360), 0.60, 0.42
+	c := (1 - math.Abs(2*l-1)) * s
+	x := c * (1 - math.Abs(math.Mod(h/60, 2)-1))
+	m := l - c/2
+	var r, g, b float64
+	switch {
+	case h < 60:
+		r, g, b = c, x, 0
+	case h < 120:
+		r, g, b = x, c, 0
+	case h < 180:
+		r, g, b = 0, c, x
+	case h < 240:
+		r, g, b = 0, x, c
+	case h < 300:
+		r, g, b = x, 0, c
+	default:
+		r, g, b = c, 0, x
+	}
+	to := func(v float64) int { return int(math.Round((v + m) * 255)) }
+	return fmt.Sprintf("#%02X%02X%02X", to(r), to(g), to(b))
+}
+
+// byGoal regroups the sources under the goals that read them (a goal's
+// `sources` list, set with `lifectl goal new|set … --sources a,b`), each in
+// its goal's colour, the goal with the most sources first (a tie in the
+// Goals card's order). A source listed by two goals sits under the first.
+// When no goal lists any source the page stays grouped by kind; otherwise
+// the sources no goal reads go last, under "No goal".
+func byGoal(groups []SourceGroup, gs []goals.Goal) []SourceGroup {
+	all := map[string]Source{}
+	var order []string
+	for _, g := range groups {
+		for _, src := range g.Sources {
+			all[src.ID] = src
+			order = append(order, src.ID)
+		}
+	}
+	placed := map[string]bool{}
+	var out []SourceGroup
+	for _, g := range gs {
+		grp := SourceGroup{ID: g.ID, Title: g.Title, Blurb: g.Statement, Tag: g.Title, Color: goalHex(g.Emblem.Hue), Sources: []Source{}}
+		for _, id := range strings.Split(g.Sources, ",") {
+			id = strings.TrimSpace(id)
+			if src, ok := all[id]; ok && !placed[id] {
+				placed[id] = true
+				grp.Sources = append(grp.Sources, src)
+			}
+		}
+		if len(grp.Sources) > 0 {
+			out = append(out, grp)
+		}
+	}
+	if len(out) == 0 {
+		return groups
+	}
+	sort.SliceStable(out, func(a, b int) bool { return len(out[a].Sources) > len(out[b].Sources) })
+	rest := SourceGroup{ID: "other", Title: "No goal", Blurb: "Sources no goal reads yet.", Tag: "No goal", Color: "#64748B", Sources: []Source{}}
+	for _, id := range order {
+		if !placed[id] {
+			rest.Sources = append(rest.Sources, all[id])
+		}
+	}
+	if len(rest.Sources) > 0 {
+		out = append(out, rest)
+	}
+	return out
 }
 
 // The page is a list to look something up in, not a ranking. So: rows are alphabetical by title, and so are
@@ -220,10 +302,12 @@ func (s *Server) sources(w http.ResponseWriter, r *http.Request) {
 func sortSources(groups []SourceGroup) {
 	for gi := range groups {
 		g := &groups[gi]
-		if t, ok := sourceTags[g.ID]; ok {
-			g.Tag, g.Color = t[0], t[1]
-		} else {
-			g.Tag, g.Color = g.Title, "#64748B"
+		if g.Tag == "" { // a goal's group already has its own (byGoal)
+			if t, ok := sourceTags[g.ID]; ok {
+				g.Tag, g.Color = t[0], t[1]
+			} else {
+				g.Tag, g.Color = g.Title, "#64748B"
+			}
 		}
 		sort.Slice(g.Sources, func(i, j int) bool {
 			return strings.ToLower(g.Sources[i].Title) < strings.ToLower(g.Sources[j].Title)

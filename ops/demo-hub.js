@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // A stand-in hub for the README's phone screenshots: serves the demo world
-// in ops/demo-fixtures.js (owner "Sam") on http://127.0.0.1:<port>/api/v1/…
-// so the real iPhone app in the Simulator can be photographed showing
-// invented data. Reads nothing from any real hub; every write answers
+// in ops/demo-fixtures.js (the maker's own hub, scrubbed) on
+// http://127.0.0.1:<port>/api/v1/… so the real iPhone app in the Simulator
+// can be photographed showing it. Reads nothing from any real hub; every write answers
 // {ok:true} and changes nothing. Routes the demo lacks fall back to
 // shared/fixtures/<path_with_underscores>.json; anything else is [].
 //
@@ -45,7 +45,7 @@ const fill = {
       ? JSON.stringify(a.exec_payload, null, 2) : a.exec_payload }),
   goal: g => Object.assign({ statement: '', horizon: 'year', cadence: 'weekly', status: 'active', sources: '', note_count: 0,
     emblem: { symbol: 'goal', hue: 200 } }, g),
-  note: n => Object.assign({ kind: 'note', author: 'owner' }, n, { by: n.by || (n.author === 'owner' ? 'Sam' : n.author) }),
+  note: n => Object.assign({ kind: 'note', author: 'owner' }, n, { by: n.by || (n.author === 'owner' ? 'you' : n.author) }),
   rec: r => Object.assign({ created_at: ago(600), updated_at: r.created_at || ago(600), source: r.thread_id ? 'claude:thread:' + r.thread_id : 'owner',
     domain: 'other', kind: 'try', cost_cents: 0, effort: 'low', confidence: 50, status: 'proposed', lane: 'mine', window: 'soon' }, r),
   message: (m, tid) => Object.assign({ thread_id: tid, kind: m.role === 'owner' ? 'owner' : 'reply', cost_usd: 0 }, m),

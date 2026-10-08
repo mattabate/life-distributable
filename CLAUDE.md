@@ -38,9 +38,14 @@ one endpoint's contract.
    reads go through `ops/db.sh "select …"`, writes through the hub.
 4. **Append-only data.** Tables record events and observations; state is
    derived. A migration appends to its package's `Schema`, never edits one.
-5. **Surface parity.** Every console page has a phone screen with the same
-   API, numbers and words, or says why not in `web/places.js`;
-   `parity_test.go` fails on an unpaired page.
+5. **Surface parity, on the owner's surfaces.** Every console page has a
+   phone screen with the same API, numbers and words, or says why not in
+   `web/places.js`; `parity_test.go` fails on an unpaired page. But a change
+   the owner asks for is built for the apps they chose at setup (`surfaces`
+   in `ops/hub.json`: phone, desktop, web; the session preamble names
+   them) and shipped there; an app they did not pick waits until they ask
+   for it. Three apps per change is a lot of tool calls for a page nobody
+   opens.
 6. **Look at what you changed.** Any UI change is rendered and looked at
    before it ships: `make browse` / `make web-shot` for the console,
    `make screens` for the app.

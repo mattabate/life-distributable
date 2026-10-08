@@ -94,11 +94,10 @@ function cfgSourceCard(g, s) {
   </a>`;
 }
 
-// A section per group: the group's name in its colour over its own cards.
-// The sections flow side by side, each as wide as its cards want (--n), so a
-// group of one shares a row instead of taking it. Groups sharing a tag are
-// one section. The hub's group order is the section order; inside a
-// section, by name.
+// A section per group: the group's name in its colour (the goal's hue) over
+// its own cards, each section on a row of its own (two goals side by side
+// read as one list). Groups sharing a tag are one section. The hub's group
+// order (most sources first) is the section order; inside a section, by name.
 function cfgSourcesHTML(groups) {
   const secs = [];
   for (const g of groups) {
@@ -109,7 +108,7 @@ function cfgSourcesHTML(groups) {
   }
   if (!secs.length) return emptyHTML('Nothing connected.', 'card');
   const key = ([, s]) => (s.title || s.id).toLowerCase();
-  return `<div class="sgroups">${secs.map(sec => `<section class="sgroup" style="--c:${esc(sec.color || '#64748B')};--n:${Math.min(sec.cards.length, 4)}">
+  return `<div class="sgroups">${secs.map(sec => `<section class="sgroup" style="--c:${esc(sec.color || '#64748B')}">
       <h4>${esc(sec.tag)}<span class="muted">${sec.cards.length}</span></h4>
       <div class="scards">${sec.cards.sort((a, b) => key(a).localeCompare(key(b))).map(([g, s]) => cfgSourceCard(g, s)).join('')}</div>
     </section>`).join('')}</div>`;

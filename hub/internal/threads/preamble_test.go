@@ -128,6 +128,19 @@ func TestPreambleOwnerName(t *testing.T) {
 	if strings.Contains(p, "the owner's life hub") || strings.Contains(p, "Retired goal") {
 		t.Error("named preamble says the owner's life hub, or lists a goal that is not active")
 	}
+	// The apps the owner chose at setup (config surfaces) are named, so a
+	// session builds a change for those and leaves the rest until asked.
+	if !strings.Contains(p, "APPS IN USE: the iPhone app, the desktop app and the web console —") {
+		t.Errorf("preamble with no surfaces configured should name all three apps")
+	}
+	m.Surfaces = []string{"web", "phone"}
+	if p := m.systemPreamble(Thread{ID: "th-sam", Project: "life"}); !strings.Contains(p, "APPS IN USE: the iPhone app and the web console —") {
+		t.Errorf("preamble should name the chosen apps in a fixed order")
+	}
+	m.Surfaces = []string{"desktop"}
+	if p := m.systemPreamble(Thread{ID: "th-sam", Project: "life"}); !strings.Contains(p, "APPS IN USE: the desktop app only —") {
+		t.Errorf("one app reads as 'X only'")
+	}
 	// `go test -run TestPreambleOwnerName -args -preamble-sample=<file>` writes
 	// the rendered text for review.
 	if out := *preambleSample; out != "" {
