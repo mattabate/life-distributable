@@ -43,6 +43,9 @@ enum Fmt {
     static let numericDay = local("M/d/y")
     /// "Sep 25" for September 2025 — a month column's title.
     static let monthLabel = local("MMM yy")
+    /// "3:15 PM" / "Mon": the two halves of `dayClock`.
+    static let clock = local("h:mm a")
+    static let weekday = local("EEE")
     private static func local(_ format: String) -> DateFormatter {
         let d = DateFormatter()
         d.locale = Locale(identifier: "en_US_POSIX")
@@ -274,6 +277,42 @@ func shortAgo(_ d: Date, now: Date = Date()) -> String {
     if s < 86400 - 1800 { return "\(Int((s / 3600).rounded()))h ago" }
     if s < 86400 * 30 { return "\(Int((s / 86400).rounded()))d ago" }
     return Fmt.numericDay.string(from: d)
+}
+
+/// A chat row's clock with its day said in words, the console's `dayWhen`
+/// (ui.js) word for word: a bare time reads wrong a day later, so the row
+/// says "today 3:15 PM", "yesterday 12:53 AM", "Mon 9:15 AM" inside the
+/// week, "Oct 1 4:02 PM" past it, the year once it differs.
+func dayClock(_ d: Date, now: Date = Date()) -> String {
+    let clock = Fmt.clock.string(from: d)
+    let cal = Calendar.current
+    let days = cal.dateComponents([.day], from: cal.startOfDay(for: d), to: cal.startOfDay(for: now)).day ?? 0
+    if days == 0 { return "today " + clock }
+    if days == 1 { return "yesterday " + clock }
+    if days > 1 && days < 7 { return Fmt.weekday.string(from: d) + " " + clock }
+    let sameYear = cal.component(.year, from: d) == cal.component(.year, from: now)
+    return (sameYear ? Fmt.dayLabel : Fmt.shortDay).string(from: d) + " " + clock
+}
+
+/// The turn in flight in a finished turn's words, the console's `turnFacts`
+/// (ui.js) word for word: "23 tool calls · today 10:09 PM · $1.12" (its tool
+/// calls, when the newest of them was made, its dollars so far: the clock
+/// moves with the count). The chat's working line and
+/// the session card print it where a raw step label used to sit.
+/// `withCalls: false` leaves the count to a live run block that already shows it;
+/// `withCost: false` leaves the dollars to the card's state line.
+func turnFactsLine(calls n: Int?, at: Date?, cost: Double?, withCalls: Bool = true, withCost: Bool = true, now: Date = Date()) -> String {
+    var parts: [String] = []
+    if withCalls, let n, n > 0 { parts.append("\(n) tool call" + (n == 1 ? "" : "s")) }
+    if let at { parts.append(dayClock(at, now: now)) }
+    if withCost, let cost, cost > 0 { parts.append(usd(cost)) }
+    return parts.joined(separator: " · ")
+}
+
+extension Thread {
+    func turnFacts(withCalls: Bool = true, withCost: Bool = true) -> String {
+        turnFactsLine(calls: turn_tools, at: turn_at, cost: turn_cost_usd, withCalls: withCalls, withCost: withCost)
+    }
 }
 
 /// THE short model name, the console's `modelShort` (ui.js): "claude-fable-5[1m]"

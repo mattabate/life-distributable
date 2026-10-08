@@ -99,7 +99,7 @@ func TestPeersHeaderSaysWhatEachIsDoing(t *testing.T) {
 	m.db.Exec(`INSERT INTO thread_events (thread_id, run_id, ts, kind, title, summary) VALUES (?,?,?,?,?,?)`, busy.ID, "", "2026-10-02T12:00:00Z", "tool_use", "Bash", "ops/py.sh x-archive.py posts")
 	waiting, _ := m.Create("Face and supplements", "life", "", "Sort it.", "", "", nil)
 	complete(t, m, waiting.ID, "[end]")
-	m.AddAsk(waiting.ID, "", "Hand over the Lemurs AI email", "", "physical", "")
+	m.AddAsk(waiting.ID, "", "Hand over the Acme email", "", "physical", "")
 	standing, _ := m.Create("Weekly investing check-in", "life", "make-more-money", "Check.", "weekly@Sun 17:00", "", nil)
 	complete(t, m, standing.ID, "[end]")
 	done, _ := m.Create("Old errand", "life", "", "Do it.", "", "", nil)
@@ -108,7 +108,7 @@ func TestPeersHeaderSaysWhatEachIsDoing(t *testing.T) {
 	h := m.peersHeader(me.ID)
 	for _, want := range []string{
 		busy.ID + " (working, goal grow-my-audience): Daily tweet draft — now: ops/py.sh x-archive.py posts",
-		waiting.ID + " (waiting on the owner): Face and supplements — their card: Hand over the Lemurs AI email",
+		waiting.ID + " (waiting on the owner): Face and supplements — their card: Hand over the Acme email",
 		standing.ID + " (standing weekly@Sun 17:00, goal make-more-money): Weekly investing check-in",
 		"lifectl threads --q <word>",
 	} {
@@ -130,7 +130,7 @@ func TestPeersHeaderSaysWhatEachIsDoing(t *testing.T) {
 		t.Fatalf("%+v", ts)
 	}
 	// A card a session raised counts as its experience too.
-	if ts, _ := m.Find("lemurs", false); len(ts) != 1 || ts[0].ID != waiting.ID {
+	if ts, _ := m.Find("acme", false); len(ts) != 1 || ts[0].ID != waiting.ID {
 		t.Fatalf("%+v", ts)
 	}
 }
@@ -144,7 +144,7 @@ func TestBoardHeaderListsWhatIsOpenForTheOwnerEverywhere(t *testing.T) {
 	me, _ := m.Create("Cross-session coordination", "life", "", "Plan it.", "", "", nil)
 	mine, _ := m.AddAsk(me.ID, "", "Pick the block's shape", "", "decision", "")
 	other, _ := m.Create("Face and supplements", "life", "", "Sort it.", "", "", nil)
-	theirs, _ := m.AddAsk(other.ID, "", "Hand over the Lemurs AI email", "", "physical", "")
+	theirs, _ := m.AddAsk(other.ID, "", "Hand over the Acme email", "", "physical", "")
 	now := ts(time.Now())
 	today := time.Now().Format("2006-01-02")
 	for _, row := range [][]any{
@@ -163,7 +163,7 @@ func TestBoardHeaderListsWhatIsOpenForTheOwnerEverywhere(t *testing.T) {
 
 	h := m.boardHeader(me.ID)
 	for _, want := range []string{
-		theirs.ID + " (physical · Face and supplements): Hand over the Lemurs AI email",
+		theirs.ID + " (physical · Face and supplements): Hand over the Acme email",
 		"cal-soon (step soon): Book the string quartet",
 		"cal-today (step on " + today + " · chores): Go to the dry cleaner",
 		"cal-late (practice overdue 2026-01-01 · Face and supplements): Perfect pitch: one round",
@@ -193,8 +193,8 @@ func TestBoardHeaderListsWhatIsOpenForTheOwnerEverywhere(t *testing.T) {
 		t.Fatal("nothing to change must be refused")
 	}
 	before, _ := m.GetAsk(theirs.ID) // the message above marked it answered; rewording keeps that
-	a, err := m.RewordAsk(theirs.ID, "Forward the Lemurs email or drop the 9/9 doc", "1. Forward it.", "Hey Alex, forward the Lemurs email, or drop the doc in life intake.", "claude:thread:"+me.ID)
-	if err != nil || a.Title != "Forward the Lemurs email or drop the 9/9 doc" || a.Detail != "1. Forward it." || !strings.HasPrefix(a.Said, "Hey Alex, forward") || a.State != before.State || a.State == "" {
+	a, err := m.RewordAsk(theirs.ID, "Forward the Acme email or drop the 9/9 doc", "1. Forward it.", "Hey Alex, forward the Acme email, or drop the doc in life intake.", "claude:thread:"+me.ID)
+	if err != nil || a.Title != "Forward the Acme email or drop the 9/9 doc" || a.Detail != "1. Forward it." || !strings.HasPrefix(a.Said, "Hey Alex, forward") || a.State != before.State || a.State == "" {
 		t.Fatalf("%+v %v", a, err)
 	}
 	var note string

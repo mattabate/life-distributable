@@ -238,8 +238,12 @@ setTimeout(async () => {
       const end = msgs && msgs.querySelector('.msg.end.read .end-line');
       // (Reply 6 keeps its old words behind a closed fold — that bubble is
       // inside <details>, which is the point; the empty row has none at all.)
-      check('an empty reply is one "turn ended" line, not a bubble', !!end && end.textContent.startsWith('turn ended') && end.textContent.includes('$1.44') && !document.getElementById('msg-5').querySelector('.bubble'),
+      // Day, time, dollars, no tokens; "turn ended" only on the newest reply row.
+      check('an empty reply is one end line, not a bubble: day · time · $, no tokens', !!end && end.textContent.startsWith('today ') && end.textContent.includes('$1.44') && !end.textContent.includes('tok') && !end.textContent.startsWith('turn ended') && !document.getElementById('msg-5').querySelector('.bubble'),
         String(end && end.outerHTML));
+      const endLines = [...msgs.querySelectorAll('.msg.end .end-line')];
+      check('"turn ended" is said once, on the newest reply row', endLines.filter(e => e.textContent.startsWith('turn ended')).length === 1 && endLines[endLines.length - 1].textContent.startsWith('turn ended'),
+        endLines.map(e => e.textContent).join(' | '));
       const reply6 = document.getElementById('msg-6');
       // There is no white cell (2026-09-13): a reply row with text is still
       // the end line, its words behind a closed <details>, never an open bubble.
@@ -316,14 +320,23 @@ setTimeout(async () => {
   // Running, but the turn's message has not landed yet: the footer is the
   // only thing that can say so.
   THREAD.status = 'running';
+  // The turn's facts, as a finished turn prints its end line.
+  Object.assign(THREAD, { turn_tools: 23, turn_cost_usd: 1.12, turn_at: new Date().toISOString() });
   await redraw();
+  const workingText = () => (document.getElementById('run-working') || {}).textContent || '';
   check('a running session with no run block shows working…', workingShown() && !liveBlock(), 'shown: ' + workingShown());
+  check('the working line says the turn\'s calls, clock and dollars', /^\s*working · 23 tool calls · today \d+:\d\d [AP]M · \$1\.12$/.test(workingText()), workingText());
+  const sideFacts = sessionCardHTML({ ...THREAD, activity: 'Run the verify proof again' }, {});
+  check('the session card says the same facts, no step label', sideFacts.includes('23 tool calls · today') && sideFacts.includes('$1.12') && !sideFacts.includes('verify proof'), sideFacts);
 
-  // The run in flight: its block is the status line, so the footer goes.
+  // The run in flight: its block carries the count and the pulse; the line
+  // under it keeps the clock and dollars, like "turn ended · …".
   EXTRA = [{ id: 9, thread_id: 't-t3st', ts: new Date().toISOString(), role: 'owner', kind: 'message',
              text: 'and this one', attachments: [], run_id: 'r-live' }];
   await redraw();
-  check('a live run block replaces working…', !workingShown() && !!liveBlock(), 'shown: ' + workingShown() + ' block: ' + !!liveBlock());
+  check('a live run block keeps the working line, count and pulse in the block', workingShown() && !!liveBlock()
+    && !document.querySelector('#run-working .dot') && /^\s*working · today .* · \$1\.12$/.test(workingText()),
+    'shown: ' + workingShown() + ' block: ' + !!liveBlock() + ' line: ' + workingText());
   check('an empty live run says starting…', (liveBlock() || {}).textContent?.includes('starting…'), String((liveBlock() || {}).textContent));
 
   // …and once steps land it says what it is doing, not just that it is.
@@ -331,7 +344,7 @@ setTimeout(async () => {
               kind: 'tool_use', title: 'lifectl recs all', summary: 'Reading the rec ledger', body: '' }];
   await redraw();
   const head = (liveBlock() || {}).textContent || '';
-  check('a live run names the step in flight', head.includes('1 tool call') && head.includes('now: Reading the rec ledger'), head.trim());
+  check('a live run counts its calls, no raw step label', head.includes('1 tool call') && !head.includes('now:') && !head.includes('Reading the rec ledger'), head.trim());
 
   // ---- A steering message never eats the block above it (2026-08-28) ----
   // After a steering message, a block of 100 tool calls above it used to tick

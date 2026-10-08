@@ -1080,6 +1080,27 @@ func (m *Manager) tail(r run) run {
 				r.liveMsg = rememberMsg(r.liveMsg, id)
 			}
 			evs := parseEvents(line)
+			if len(evs) > 0 && r.busy == 0 {
+				// Output with no turn open: claude started a turn from a
+				// message we had assumed folded into the previous one, or on
+				// its own (a background task returning after the reply
+				// landed). When the current turn id already HAS its reply, this
+				// is a turn of its own and gets its own id BEFORE its steps
+				// are stored: under the answered id its steps and every message
+				// steered into it would hang off a finished turn, and both
+				// surfaces would draw a finished block under a bare "working".
+				// A turn a message opened at idle (deliver bumped it) has no
+				// reply yet and keeps its id.
+				r.busy = 1
+				var answered int
+				m.db.QueryRow(`SELECT COUNT(*) FROM thread_messages WHERE run_id=? AND (role='claude' OR kind='error')`, r.turnID()).Scan(&answered)
+				if answered > 0 {
+					r.turns++
+					r.lastBoundary = now
+					m.db.Exec(`UPDATE thread_runs SET turns=? WHERE id=?`, r.turns, r.id)
+				}
+				m.db.Exec(`UPDATE threads SET status='running', updated_at=? WHERE id=?`, ts(now), r.thread)
+			}
 			for _, ev := range evs {
 				res, _ := m.db.Exec(`INSERT INTO thread_events (thread_id, run_id, ts, kind, title, body, summary) VALUES (?,?,?,?,?,?,?)`, r.thread, r.turnID(), ts(now), ev.Kind, ev.Title, ev.Body, ev.Summary)
 				if ev.Kind == "tool_result" {
@@ -1090,12 +1111,6 @@ func (m *Manager) tail(r run) run {
 						go m.describeAsync(id, r.thread, ev.describe)
 					}
 				}
-			}
-			if len(evs) > 0 && r.busy == 0 {
-				// Output with no turn open: claude started a turn from a
-				// message we had assumed folded into the previous one.
-				r.busy = 1
-				m.db.Exec(`UPDATE threads SET status='running', updated_at=? WHERE id=?`, ts(now), r.thread)
 			}
 		}
 	}
@@ -1849,6 +1864,7 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 	if ok == 1 {
 		delete(m.retries, threadID) // a good turn refills the auto-restart budget
 		go m.autoTitle(threadID)
+		go m.ResumeAuthFailed()
 	}
 	return r
 }
@@ -1921,6 +1937,10 @@ func failureTitle(text string) string {
 		return "Session paused: plan limit reached on every model"
 	case spend.IsUnsupportedModelError(text):
 		return "Session stopped: the Claude CLI is too old for this model"
+	// A dead login: the card says what fixes it, and ResumeAuthFailed
+	// restarts it once any turn gets through again.
+	case authFailure(text):
+		return "Session stopped: Claude login expired · resumes once it works"
 	case strings.Contains(text, "went to sleep"):
 		return "Session interrupted: the Mac slept mid-answer"
 	case apiErrorCode(text) != "":

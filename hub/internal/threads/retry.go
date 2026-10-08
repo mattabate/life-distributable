@@ -192,6 +192,34 @@ func (m *Manager) ResumePaused(now time.Time) {
 	}
 }
 
+// authFailure: the CLI's Claude login is dead. Restart cannot fix that: the
+// replay dies in a second and raises a fresh card, so the card vanishes and
+// comes back and Restart looks broken.
+var authRe = regexp.MustCompile(`Failed to authenticate|OAuth session expired|OAuth token has expired|Please run /login|Invalid API key`)
+
+func authFailure(text string) bool { return authRe.MatchString(text) }
+
+// ResumeAuthFailed: a turn just finished ok, so the login works again;
+// every open login-failure card restarts its session by itself, the way a
+// session limit resumes at its reset. Takes m.mu via retryAsk: call it in a
+// goroutine from code that holds the lock.
+func (m *Manager) ResumeAuthFailed() {
+	open, err := m.ListAsks("active", "", 500)
+	if err != nil {
+		return
+	}
+	for _, a := range open {
+		if a.Kind != "error" || !a.Open || !authFailure(a.Detail) {
+			continue
+		}
+		if _, err := m.retryAsk(a.ID, "hub", "resumed once the Claude login worked again"); err != nil {
+			log.Printf("ask %s: resume after login: %v", a.ID, err)
+			continue
+		}
+		log.Printf("ask %s: session %s resumed after login", a.ID, a.ThreadID)
+	}
+}
+
 func (m *Manager) retryAsk(id, by, note string) (Thread, error) {
 	a, err := m.GetAsk(id)
 	if err != nil {

@@ -118,14 +118,16 @@ struct MacUpdateButton: View {
             .help("Build \(n) is ready: quit and reopen on it")
             // The reopened app starts with empty boxes: words typed
             // and not sent would go with the old one.
-            .confirmationDialog("A message box has words you haven't sent", isPresented: $asking) {
+            // On the Mac a dialog's title is hidden unless asked for: without
+            // .visible it showed bare buttons with no reason given.
+            .confirmationDialog("Updating restarts the app and clears a message you haven't sent", isPresented: $asking, titleVisibility: .visible) {
                 Button("Update anyway", role: .destructive) { update.apply() }
                 Button("Not now", role: .cancel) {}
-            }
-            .confirmationDialog("A message box has words you haven't sent", isPresented: $update.askBeforeApply) {
+            } message: { Text(Draft.unsentPreview) }
+            .confirmationDialog("Updating restarts the app and clears a message you haven't sent", isPresented: $update.askBeforeApply, titleVisibility: .visible) {
                 Button("Install anyway", role: .destructive) { update.apply() }
                 Button("Not now", role: .cancel) {}
-            }
+            } message: { Text(Draft.unsentPreview) }
         }
     }
 }

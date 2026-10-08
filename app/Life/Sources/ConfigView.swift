@@ -58,10 +58,13 @@ struct ConfigView: View {
                 if let e = load.error { ErrorBanner(message: e) }
                 if let d = load.value {
                     if mac {
+                        // One height, the taller one's, like the console's
+                        // grid row.
                         HStack(alignment: .top, spacing: 12) {
                             block("Powered by") { plan(d) }
                             block("Goals", opens: { GoalsView() }) { goals(d.goals) }
                         }
+                        .fixedSize(horizontal: false, vertical: true)
                     } else {
                         block("Powered by") { plan(d) }
                         block("Goals", opens: { GoalsView() }) { goals(d.goals) }
@@ -127,7 +130,7 @@ struct ConfigView: View {
             c()
         }
         .padding(EdgeInsets(top: 13, leading: 15, bottom: 14, trailing: 15))
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(panel, in: RoundedRectangle(cornerRadius: 12))
         .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(line, lineWidth: 1) }
     }

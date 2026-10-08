@@ -167,8 +167,25 @@ struct StyledText: View {
     /// continuation lines hang under its own start, not under column one.
     /// The header row is bold. No rules: a hairline would need attachments,
     /// and the alignment already reads as a table.
+    ///
+    /// A table wider than the phone's text column (five columns on a read
+    /// card ran the last one off the edge) stacks instead: each row's first
+    /// cell bold on its own line, the rest as "Header value · Header value"
+    /// under it, wrapping like prose.
     private static let cellCap: CGFloat = 150
     private static let cellGap: CGFloat = 14
+    /// The narrowest the last, wrapping column may be before the table stacks.
+    private static let lastMin: CGFloat = 110
+    /// The phone's text column inside a card; the Mac's columns are wide.
+    private static var tableBudget: CGFloat {
+        #if targetEnvironment(macCatalyst)
+        return .greatestFiniteMagnitude
+        #else
+        let w = UIApplication.shared.connectedScenes.lazy
+            .compactMap { ($0 as? UIWindowScene)?.screen.bounds.width }.first ?? 390
+        return w - 80
+        #endif
+    }
     private func table(_ rows: [[String]], header: Bool, base: UIFont, color: UIColor) -> [NSAttributedString] {
         let cols = rows.map(\.count).max() ?? 0
         guard cols > 0 else { return [] }
@@ -182,6 +199,10 @@ struct StyledText: View {
             let widest = cells.map { ceil($0[c].size().width) }.max() ?? 0
             x += min(widest, Self.cellCap) + Self.cellGap
             stops.append(x)
+        }
+        let lastWidest = cells.map { ceil($0[cols - 1].size().width) }.max() ?? 0
+        if cols > 1, x + min(lastWidest, Self.lastMin) > Self.tableBudget {
+            return stacked(rows, header: header, base: base, color: color)
         }
         return cells.map { row in
             let p = NSMutableParagraphStyle()
@@ -198,6 +219,43 @@ struct StyledText: View {
             line.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: line.length))
             return line
         }
+    }
+
+    /// The too-wide table, one record per row: first cell bold, then the
+    /// other cells after their header in the secondary colour.
+    private func stacked(_ rows: [[String]], header: Bool, base: UIFont, color: UIColor) -> [NSAttributedString] {
+        let heads = header ? rows[0] : []
+        let body = header ? Array(rows.dropFirst()) : rows
+        let label = UIColor.secondaryLabel
+        var out: [NSAttributedString] = []
+        for (r, row) in body.enumerated() {
+            let p = NSMutableParagraphStyle()
+            p.lineBreakMode = .byWordWrapping
+            p.paragraphSpacingBefore = r > 0 ? 6 : 0
+            let title = NSMutableAttributedString(attributedString: inline(row.first ?? "", base: base.bolded(), color: color))
+            title.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: title.length))
+            out.append(title)
+            let rest = NSMutableAttributedString()
+            for c in 1..<max(row.count, 1) where !row[c].isEmpty {
+                // No-break spaces: a line ends on the dot, never starts with
+                // it, and "Total -$12.00" never splits.
+                if rest.length > 0 { rest.append(NSAttributedString(string: "\u{00A0}\u{00A0}·  ", attributes: [.font: base, .foregroundColor: label])) }
+                if c < heads.count, !heads[c].isEmpty {
+                    rest.append(NSAttributedString(string: heads[c].replacingOccurrences(of: " ", with: "\u{00A0}") + "\u{00A0}",
+                                                   attributes: [.font: base, .foregroundColor: label]))
+                }
+                // A word joiner keeps "+$10.00" from breaking after the sign.
+                let value = ["+", "-", "−"].reduce(row[c]) { $0.replacingOccurrences(of: $1 + "$", with: $1 + "\u{2060}$") }
+                rest.append(inline(value, base: base, color: color))
+            }
+            if rest.length > 0 {
+                let q = NSMutableParagraphStyle()
+                q.lineBreakMode = .byWordWrapping
+                rest.addAttribute(.paragraphStyle, value: q, range: NSRange(location: 0, length: rest.length))
+                out.append(rest)
+            }
+        }
+        return out
     }
 
     /// Inline markdown, run by run, so every span carries a real UIFont
@@ -306,16 +364,82 @@ func escapingStrayAsterisks(_ s: String) -> String {
     return out
 }
 
-/// The fold line: past this a chat bubble clamps behind a
-/// "Show all · N lines" button. Counted on the text, not the rendered height,
-/// so the same message folds the same on both surfaces; the console's
-/// isLongText (ui.js) is the same rule: >18 non-blank lines or >1600 characters.
+/// The fold line: past this a chat bubble MAY fold. This is the cheap gate,
+/// counted on the text so both surfaces agree; the console's isLongText
+/// (ui.js) is the same rule: >18 non-blank lines or >1600 characters.
+/// Whether it does fold is FoldedText's call, on the rendered height.
 let longLines = 18, longChars = 1600
 func longLineCount(_ s: String) -> Int {
     s.split(separator: "\n", omittingEmptySubsequences: false)
         .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
 }
 func isLongText(_ s: String) -> Bool { longLineCount(s) > longLines || s.count > longChars }
+
+/// The fold's second rule: a short message that wraps to many lines would
+/// otherwise offer "Show 2 more lines", which reveals almost nothing. Past
+/// `isLongText` a body clamps to `foldClamp` points with its fade, but the
+/// button exists only when opening it would show at least `foldMinLines`
+/// more lines, and says how many. Measured on the rendered height (the
+/// text's own full height against the clamp, in line-heights) because the
+/// text's newlines say nothing about how many lines it wraps to. Under the
+/// line the body is shown whole. The console's fitFolds (ui.js) is the same rule.
+let foldMinLines = 5
+let foldClamp: CGFloat = 320
+
+/// A long body behind the fold: the clamped text, its fade, and (when there
+/// is enough behind it) the one button, drawn by the caller's `button` so a
+/// blue bubble, a grey one and a tinted card each keep their own style.
+/// `fadeTo` is the box's own colour; nil masks to clear (a tinted card).
+struct FoldedText<Fold: View>: View {
+    let text: String
+    @Binding var open: Bool
+    var style: UIFont.TextStyle = .callout
+    var color: Color = .primary
+    var macSize: CGFloat? = nil
+    var fadeTo: Color? = nil
+    @ViewBuilder var button: (_ label: String, _ tap: @escaping () -> Void) -> Fold
+    /// The whole text's height at this width; nil until the first layout,
+    /// and the fold is assumed until then so a long one never flashes open.
+    @State private var full: CGFloat? = nil
+
+    /// The font `StyledText.build` sets the body in, so a line is its line.
+    private var lineHeight: CGFloat {
+        #if targetEnvironment(macCatalyst)
+        if let macSize { return UIFont.systemFont(ofSize: macSize).lineHeight }
+        #endif
+        return UIFont.preferredFont(forTextStyle: style).lineHeight
+    }
+    /// Lines behind the fold once measured.
+    private var hidden: Int { full.map { Int((($0 - foldClamp) / lineHeight).rounded()) } ?? Int.max }
+    private var folds: Bool { hidden >= foldMinLines }
+    private var clamped: Bool { folds && !open }
+
+    var body: some View {
+        StyledText(text: text, style: style, color: color, macSize: macSize)
+            // The text view answers its own full height whatever the frame
+            // below proposes, so this is the whole body's height.
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { full = $0 }
+            .frame(maxHeight: clamped ? foldClamp : nil, alignment: .top)
+            .clipped()
+            .overlay(alignment: .bottom) {
+                if clamped, let fadeTo {
+                    LinearGradient(colors: [.clear, fadeTo], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 64).allowsHitTesting(false)
+                }
+            }
+            .mask {
+                if clamped, fadeTo == nil {
+                    LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.75), .init(color: .clear, location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                } else {
+                    Color.black
+                }
+            }
+        if folds {
+            button(open ? "Show less" : "Show \(hidden) more lines") { open.toggle() }
+        }
+    }
+}
 
 /// A pipe-table row "| a | b |" (outer pipes optional) → its trimmed cells,
 /// nil when the line has no pipe at all. Splits on pipes outside code spans,

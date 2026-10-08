@@ -7,8 +7,8 @@
 import SwiftUI
 
 /// Every session, newest activity first — for finding something done
-/// previously: a box that narrows it by name as you type, twenty rows at a time and
-/// "Show 20 more" under them (the console's ALL_PAGE), one compact line per
+/// previously: a box that narrows it by name as you type, fifty rows at a time and
+/// "Show 50 more" under them (the console's ALL_PAGE), one compact line per
 /// session — name, pills, model, when, dollars. Tapping a row lands in the
 /// chat on the card the board names first, like a session row.
 struct AllThreadsView: View {
@@ -18,7 +18,7 @@ struct AllThreadsView: View {
     @Environment(RefNav.self) private var nav
     @State private var find = ""
     @State private var shown = AllThreadsView.page
-    static let page = 20
+    static let page = 50
 
     var board: Board { store.board ?? .empty }
     /// The hub's /threads order is newest activity first already.
@@ -29,8 +29,47 @@ struct AllThreadsView: View {
     }
 
     var body: some View {
+        #if targetEnvironment(macCatalyst)
+        // The console's `.chat-head` (threads.js drawAllSessions): "All
+        // sessions · N" in bold at body size, the find box at the right, both
+        // on the list's own left edge. The system's large title and search
+        // drawer sat flush on the sidebar, out of line with the rows.
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                HStack(spacing: 5) {
+                    Text("All sessions").font(.system(size: 15, weight: .semibold))
+                    Text("· \(find.isEmpty ? total : "\(matching.count) of \(total)")").font(.system(size: 15)).foregroundStyle(.secondary)
+                }.lineLimit(1)
+                Spacer(minLength: 12)
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(.secondary)
+                    TextField("Find a session…", text: $find).textFieldStyle(.plain).font(.system(size: 13))
+                }
+                .padding(.horizontal, 9).padding(.vertical, 5)
+                .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.primary.opacity(0.12)))
+                .frame(maxWidth: 280)
+            }
+            .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 10)
+            list.contentMargins(.top, 0, for: .scrollContent)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .toolbar(.hidden, for: .navigationBar)
+        .onChange(of: find) { _, _ in shown = Self.page }
+        #else
+        list
+            .searchable(text: $find, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find a session…")
+            .onChange(of: find) { _, _ in shown = Self.page }
+            .navigationTitle("All sessions")
+            .askButton()
+        #endif
+    }
+
+    var total: String { "\(store.threads.count)" }
+
+    var list: some View {
         let rows = matching
-        List {
+        return List {
             if let error = store.error { Section { ErrorBanner(message: error) } }
             Section {
                 ForEach(rows.prefix(shown)) { t in row(t) }
@@ -41,16 +80,14 @@ struct AllThreadsView: View {
                     }.font(.subheadline)
                 }
             } header: {
-                Text(find.isEmpty ? "\(store.threads.count) sessions" : "\(rows.count) of \(store.threads.count)")
+                #if !targetEnvironment(macCatalyst)
+                Text(find.isEmpty ? "\(total) sessions" : "\(rows.count) of \(total)")
+                #endif
             }
             if rows.isEmpty && store.error == nil {
                 Section { Text(find.isEmpty ? "No sessions yet" : "Nothing called “\(find)”").font(.subheadline).foregroundStyle(.secondary) }
             }
         }
-        .searchable(text: $find, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find a session…")
-        .onChange(of: find) { _, _ in shown = Self.page }
-        .navigationTitle("All sessions")
-        .askButton()
         .refreshable { await load() }
     }
 
@@ -285,11 +322,16 @@ struct ThreadRow: View {
                 if let m = t.modelShort { WebPill(text: m) }
                 Text(footWords).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
             }.padding(.top, 7)
-            if t.status == "running", let a = t.activity, !a.isEmpty {
-                HStack(spacing: 7) {
-                    Circle().fill(Color.accentColor).frame(width: 6, height: 6)
-                    Text(a).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-                }.padding(.top, 8)
+            // The turn in flight, the console's `.sess-run` row: a railed row
+            // under the state line, so the card says one state, not two (the
+            // dollars stay in the foot).
+            if runRow {
+                Text(t.turnFacts(withCost: false)).font(.system(size: 12.5)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).truncationMode(.tail)
+                    .padding(.leading, 13).padding(.trailing, 14).padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
+                    .overlay(alignment: .leading) { Rectangle().fill(Color.accentColor).frame(width: 3) }
+                    .padding(.top, 10).padding(.horizontal, -14).padding(.bottom, cells.isEmpty ? -12 : 0)
             } else if t.last_message_kind == "error", let m = summaryLine(t.last_message) {
                 Text(md("Error: \(m)")).font(.system(size: 12.5)).foregroundStyle(.red).lineLimit(2).padding(.top, 6)
             }
@@ -308,7 +350,7 @@ struct ThreadRow: View {
                         }.buttonStyle(.plain)
                     }
                 }
-                .padding(.top, 10).padding(.horizontal, -14).padding(.bottom, -12)
+                .padding(.top, runRow ? 0 : 10).padding(.horizontal, -14).padding(.bottom, -12)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
@@ -320,6 +362,8 @@ struct ThreadRow: View {
         .contentShape(Rectangle())
         .onTapGesture { open(first) }
     }
+    /// A running card with something to say about its turn.
+    var runRow: Bool { t.status == "running" && !t.turnFacts(withCost: false).isEmpty }
     /// "20h ago · daily 08:00 · $47.92" — the console's foot span.
     var footWords: String {
         var s = t.last_message_at.map { shortAgo($0) } ?? ""
@@ -350,10 +394,12 @@ struct ThreadRow: View {
                 }
             }
             if t.status == "running" {
-                // Live: what it is doing right now, not the message it was sent.
+                // Live: the turn's calls, clock and dollars, the console's
+                // `turnFacts`, not the raw step label.
+                let f = t.turnFacts(withCost: false)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "arrow.turn.down.right").font(.caption2.weight(.semibold)).foregroundStyle(.blue)
-                    Text(t.activity ?? "starting…").font(.subheadline).foregroundStyle(.blue).lineLimit(2)
+                    Text(f.isEmpty ? "starting…" : f).font(.subheadline).foregroundStyle(.blue).monospacedDigit().lineLimit(2)
                 }
             } else if t.last_message_kind == "error", let m = summaryLine(t.last_message) {
                 // A dead turn is a fact about the session, not a description.

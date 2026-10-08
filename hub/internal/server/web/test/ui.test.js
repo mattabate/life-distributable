@@ -470,6 +470,32 @@ test('when / ago', () => {
   assert.equal(ago(new Date().toISOString()), 'just now');
 });
 
+// The chat row's clock always says the day; the phone's dayClock prints the
+// same words.
+test('dayWhen: today, yesterday, the weekday inside a week, the date past it', () => {
+  const now = new Date(2026, 9, 7, 21, 16); // Wed Oct 7 2026, 9:16 PM local
+  const at = (y, mo, d, h, mi) => new Date(y, mo, d, h, mi).toISOString();
+  assert.equal(dayWhen('', now), '');
+  assert.equal(dayWhen(at(2026, 9, 7, 0, 53), now), 'today 12:53 AM');
+  assert.equal(dayWhen(at(2026, 9, 7, 15, 15), now), 'today 3:15 PM');
+  assert.equal(dayWhen(at(2026, 9, 6, 23, 59), now), 'yesterday 11:59 PM');
+  assert.equal(dayWhen(at(2026, 9, 5, 9, 15), now), 'Mon 9:15 AM');
+  assert.equal(dayWhen(at(2026, 9, 1, 16, 2), now), 'Thu 4:02 PM');
+  assert.equal(dayWhen(at(2026, 8, 30, 16, 2), now), 'Sep 30 4:02 PM');
+  assert.equal(dayWhen(at(2025, 9, 1, 16, 2), now), 'Oct 1, 2025 4:02 PM');
+});
+
+test('turnFacts: the turn in flight in a finished turn\'s words', () => {
+  const at = new Date(); at.setHours(22, 9, 0, 0);
+  const t = { turn_tools: 23, turn_cost_usd: 1.12, turn_at: at.toISOString() };
+  assert.equal(turnFacts(t), '23 tool calls · today 10:09 PM · $1.12');
+  assert.equal(turnFacts(t, false), 'today 10:09 PM · $1.12');
+  assert.equal(turnFacts(t, true, false), '23 tool calls · today 10:09 PM');
+  assert.equal(turnFacts({ turn_tools: 1 }), '1 tool call');
+  assert.equal(turnFacts({}), '');
+  assert.equal(turnFacts(null), '');
+});
+
 test('select renders the current option selected', () => {
   assert.equal(select('k', 'Kind', ['a', 'b'], 'b'),
     '<label class="field" style="flex:1;min-width:150px"><span>Kind</span><select id="k">\n    <option value="a">a</option><option value="b" selected>b</option></select></label>');

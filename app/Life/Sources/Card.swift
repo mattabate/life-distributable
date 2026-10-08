@@ -97,15 +97,16 @@ struct Card: View {
     /// purple (rec). Grey when closed or folded.
     var tint: Color
     /// SF symbol + words on the caption line ("DECIDE", "APPROVAL",
-    /// "RECOMMENDATION", or the state word once closed), the id in tertiary.
+    /// "RECOMMENDATION", or the state word once closed). No id beside it: an
+    /// id means nothing to a person reading the card, and the console's head
+    /// line never drew one either.
     var mark: String
     var caption: String
-    var id: String = ""
     /// Anything else on the caption line's right (a goal, "23m ago", a cost).
     var right: String = ""
     var title: String
-    /// The body: markdown; past `isLongText` it folds behind Show all, like a
-    /// long bubble, and opens to full height (no inner scroll).
+    /// The body: markdown; past `isLongText` it folds behind "Show N more
+    /// lines", like a long bubble, and opens to full height (no inner scroll).
     /// `lines` caps it instead (a rec's `because` shows two).
     var text: String = ""
     var lines: Int? = nil
@@ -156,7 +157,6 @@ struct Card: View {
             HStack(spacing: 6) {
                 Image(systemName: mark)
                 Text(caption).textCase(.uppercase)
-                if !id.isEmpty { Text("· \(id)").foregroundStyle(.tertiary) }
                 Spacer()
                 if !right.isEmpty { Text(right).lineLimit(1).foregroundStyle(.tertiary) }
                 // Play sits at the caption line's far end, never beside the
@@ -246,16 +246,11 @@ struct Card: View {
             StyledText(text: text, style: .subheadline, color: .secondary, lines: lines, macSize: 13.5)
         } else if isLongText(text) {
             // Folds like a long chat bubble: a screen's worth fading out, then
-            // its full height — never a box scrolling inside the chat.
-            StyledText(text: text, style: .subheadline, color: .secondary)
-                .frame(maxHeight: bodyOpen ? nil : 320, alignment: .top)
-                .clipped()
-                .mask(LinearGradient(stops: [.init(color: .black, location: 0),
-                                             .init(color: .black, location: bodyOpen ? 1 : 0.75),
-                                             .init(color: bodyOpen ? .black : .clear, location: 1)],
-                                     startPoint: .top, endPoint: .bottom))
-            Button(bodyOpen ? "Show less" : "Show all · \(longLineCount(text)) lines") { bodyOpen.toggle() }
-                .font(.caption.weight(.semibold)).buttonStyle(.bordered).tint(tint)
+            // its full height — never a box scrolling inside the chat; whole
+            // when fewer than five lines were behind the fold (FoldedText).
+            FoldedText(text: text, open: $bodyOpen, style: .subheadline, color: .secondary) { label, tap in
+                Button(label, action: tap).font(.caption.weight(.semibold)).buttonStyle(.bordered).tint(tint)
+            }
         } else {
             StyledText(text: text, style: .subheadline, color: .secondary)
         }

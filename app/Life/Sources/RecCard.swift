@@ -31,7 +31,7 @@ struct RecCard: View {
 
     var body: some View {
         Card(tint: .purple, mark: open ? "lightbulb.fill" : "lightbulb",
-             caption: open ? "recommendation" : stateWord, id: rec.id, right: rec.costLabel,
+             caption: open ? "recommendation" : stateWord, right: rec.costLabel,
              title: rec.title, text: rec.because ?? rec.detail ?? "", lines: 3,
              meta: AnyView(chips),
              closed: !open && !dismissed,

@@ -130,16 +130,13 @@ final class HubClient {
     /// purpose) and the ETag handshake below (ours, on disk, not Foundation's
     /// in-memory one). `waitsForConnectivity` makes a request placed while the
     /// radio is asleep wait for the link instead of failing at once.
-    nonisolated static let session: URLSession = {
-        let c = URLSessionConfiguration.default
-        c.waitsForConnectivity = true
-        c.timeoutIntervalForRequest = 30
-        c.timeoutIntervalForResource = 120
-        c.urlCache = nil
-        c.requestCachePolicy = .reloadIgnoringLocalCacheData
-        c.httpMaximumConnectionsPerHost = 4
-        return URLSession(configuration: c)
-    }()
+    /// The one session is REPLACEABLE (`HubPool`): after a hub restart the
+    /// app kept its pooled connection to the OLD hub and every request queued
+    /// behind it for up to two minutes, so a page opened just after a restart
+    /// spun its spinner that long. The hub's drain answer on the change feed
+    /// is the cue to drop the pool (`changes` below).
+    nonisolated static var session: URLSession { HubPool.shared.current }
+    nonisolated static func resetPool(_ why: String) { HubPool.shared.reset(why) }
 
     /// What the hub last said, by request — the phone's local store.
     nonisolated static let cache = ResponseCache()
@@ -440,7 +437,25 @@ final class HubClient {
     /// (or `wait` seconds pass), then answers with the version to send next
     /// time. `since: ""` answers at once.
     func changes(since: String, thread: String = "", wait: Int = 25) async throws -> ChangeFeed {
-        try await request("GET", "/api/v1/changes?since=\(since)&wait=\(wait)&thread=\(thread)", cache: false, timeout: TimeInterval(wait) + 15)
+        do {
+            let f: ChangeFeed = try await request("GET", "/api/v1/changes?since=\(since)&wait=\(wait)&thread=\(thread)", cache: false, timeout: TimeInterval(wait) + 15)
+            if f.restarting == true {
+                // The hub is going down: the connections in the pool are
+                // about to die, and left there every request queues behind
+                // them for minutes. Drop the pool now and give the new hub
+                // its second or two before the caller's next request
+                // (dataRetryingRestart rides out a refused connect too).
+                Self.resetPool("hub restarting")
+                try? await Task.sleep(for: .seconds(2))
+            }
+            return f
+        } catch let e as URLError where e.code != .cancelled {
+            // A hub that went without draining (a crash, a kill, the Mac
+            // asleep through a restart) leaves the same dead pool, and the
+            // parked feed is the first request to find out.
+            Self.resetPool("feed \(e.code.rawValue)")
+            throw e
+        }
     }
     func threadEvents(_ id: String, ids: [Int]) async throws -> [ThreadEvent] { try await request("GET", "/api/v1/threads/\(id)/events?ids=\(ids.map(String.init).joined(separator: ","))", cache: false) }
     /// Start a session from the owner's words and pictures alone: no title
@@ -909,5 +924,43 @@ enum Keychain {
         var out: AnyObject?
         guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return nil }
         return String(data: d, encoding: .utf8)
+    }
+}
+
+/// The URLSession every hub request goes through, and the one way to replace
+/// it. `reset` hands the current session's in-flight tasks their own ending
+/// (`finishTasksAndInvalidate`: a POST already on the wire is not cut off)
+/// and every request from then on a fresh pool. Two feed loops (the root's
+/// and an open chat's) both see the same drain answer: one reset.
+final class HubPool: @unchecked Sendable {
+    static let shared = HubPool()
+    private let lock = NSLock()
+    private var session = HubPool.make()
+    private var lastReset = Date.distantPast
+
+    var current: URLSession {
+        lock.lock(); defer { lock.unlock() }
+        return session
+    }
+
+    func reset(_ why: String) {
+        lock.lock(); defer { lock.unlock() }
+        guard Date.now.timeIntervalSince(lastReset) > 5 else { return }
+        lastReset = .now
+        let old = session
+        session = HubPool.make()
+        old.finishTasksAndInvalidate()
+        Perf.event("hub pool reset: \(why)")
+    }
+
+    private static func make() -> URLSession {
+        let c = URLSessionConfiguration.default
+        c.waitsForConnectivity = true
+        c.timeoutIntervalForRequest = 30
+        c.timeoutIntervalForResource = 120
+        c.urlCache = nil
+        c.requestCachePolicy = .reloadIgnoringLocalCacheData
+        c.httpMaximumConnectionsPerHost = 4
+        return URLSession(configuration: c)
     }
 }

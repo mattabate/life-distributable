@@ -250,6 +250,85 @@ func TestLateMessageOpeningNextTurnIsNotSteered(t *testing.T) {
 	}
 }
 
+// The turn's clock is its newest tool call: it moves when the count moves and
+// stands still through thinking and text. Before the first call it is the
+// turn's start, so the line is never bare.
+func TestTurnAtIsTheNewestToolCall(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Do a thing.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	appendOut(t, out, `{"type":"system","subtype":"init","session_id":"s"}
+`)
+	m.Poll()
+	th, _ = m.Get(th.ID)
+	if th.Status != "running" || th.TurnTools != 0 || th.TurnAt == nil {
+		t.Fatalf("before the first call: %+v", th)
+	}
+	time.Sleep(5 * time.Millisecond)
+	appendOut(t, out, `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"ls"}}]}}
+`)
+	m.Poll()
+	th, _ = m.Get(th.ID)
+	evs, _ := m.Events(th.ID, 0, 0, 50)
+	call := evs[len(evs)-1]
+	if th.TurnTools != 1 || th.TurnAt == nil || !th.TurnAt.Equal(call.TS) || call.Kind != "tool_use" {
+		t.Fatalf("after the call: turn_at %v, call %v (%s): %+v", th.TurnAt, call.TS, call.Kind, th)
+	}
+	time.Sleep(5 * time.Millisecond)
+	appendOut(t, out, `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"a b"}]}}
+{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hmm"},{"type":"text","text":"still at it"}]}}
+`)
+	m.Poll()
+	th, _ = m.Get(th.ID)
+	if th.TurnTools != 1 || th.TurnAt == nil || !th.TurnAt.Equal(call.TS) {
+		t.Fatalf("thinking moved the clock: turn_at %v, want %v", th.TurnAt, call.TS)
+	}
+}
+
+// A turn claude opens on its own after its reply landed (a background task
+// returning) is a turn of its own: its steps and any message steered into it
+// carry a new turn id, and the thread reports that turn's calls, clock and
+// dollars. Under the answered id the chat drew a finished block and a bare
+// "working…" for as long as the new turn ran.
+func TestUnpromptedTurnGetsItsOwnID(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Do a thing.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	appendOut(t, out, `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"a b"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"[end]","total_cost_usd":0.02,"session_id":"s"}
+`)
+	m.Poll()
+	if th, _ = m.Get(th.ID); th.Status == "running" || th.TurnTools != 0 || th.TurnAt != nil {
+		t.Fatalf("settled: %+v", th)
+	}
+	msgs, _ := m.Messages(th.ID, 50)
+	first := msgs[0].RunID
+	appendOut(t, out, `{"type":"system","subtype":"init","session_id":"s"}
+{"type":"assistant","message":{"id":"m9","model":"claude-opus-5","usage":{"input_tokens":1000,"output_tokens":500},"content":[{"type":"tool_use","id":"tu2","name":"Bash","input":{"command":"pwd"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu2","content":"/x"}]}}
+{"type":"assistant","message":{"id":"m10","model":"claude-opus-5","content":[{"type":"tool_use","id":"tu3","name":"Bash","input":{"command":"date"}}]}}
+`)
+	m.Poll()
+	th, _ = m.Get(th.ID)
+	if th.Status != "running" || th.TurnTools != 2 || th.TurnAt == nil || th.TurnCostUSD <= 0 {
+		t.Fatalf("the new turn's facts: %+v", th)
+	}
+	evs, _ := m.Events(th.ID, 0, 0, 50)
+	if last := evs[len(evs)-1]; last.RunID != first+"-t2" {
+		t.Fatalf("new steps under %q, want %q", last.RunID, first+"-t2")
+	}
+	if err := m.Send(th.ID, "and this"); err != nil {
+		t.Fatal(err)
+	}
+	if msgs, _ = m.Messages(th.ID, 50); msgs[len(msgs)-1].RunID != first+"-t2" || !msgs[len(msgs)-1].Steered {
+		t.Fatalf("steered into the new turn: %+v", msgs[len(msgs)-1])
+	}
+	if l, _ := m.List(false); len(l) != 1 || l[0].TurnTools != 2 {
+		t.Fatalf("list: %+v", l)
+	}
+}
+
 // A turn that ends while a background task is pending is a progress line,
 // not the reply. The CLI re-enters a turn when the task notifies; every result until
 // the last one folds into the run block, and the reply carries the whole

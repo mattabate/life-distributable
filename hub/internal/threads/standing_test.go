@@ -2,6 +2,7 @@ package threads
 
 import (
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,68 @@ import (
 	"life/hub/internal/goals"
 	"life/hub/internal/store"
 )
+
+// One green card per session: a rewritten schedule replaces the old card
+// where the rewrite happened, and once a check-in has run the card moves
+// below that run — the next check-in is what matters.
+func TestOneScheduleCard(t *testing.T) {
+	m, _, _ := setup(t)
+	th, err := m.Create("", "life", "", "Watch the thing.", "every@6h", "look at the thing", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete(t, m, th.ID, EndSentinel)
+	m.Update(th.ID, map[string]string{"schedule_prompt": "look at the thing, v2"})
+	m.Send(th.ID, "hi")
+	complete(t, m, th.ID, EndSentinel)
+	m.Update(th.ID, map[string]string{"schedule_prompt": "look at the thing, v3"})
+	cards := func() (n int, at int, text string, msgs []Message) {
+		msgs, _ = m.Messages(th.ID, 50)
+		msgs = byRun(msgs)
+		for i, x := range msgs {
+			if x.Kind == "schedule" {
+				n, at, text = n+1, i, x.Text
+			}
+		}
+		return n, at, text, msgs
+	}
+	if n, at, text, msgs := cards(); n != 1 || !strings.HasSuffix(text, "v3") || at != len(msgs)-1 {
+		t.Fatalf("%d cards, at %d of %d: %q", n, at, len(msgs), text)
+	}
+	// A check-in runs: the card follows it, with the row's new next time.
+	m.DuePrompts(time.Now().Add(7 * time.Hour))
+	complete(t, m, th.ID, EndSentinel)
+	standing, _ := m.Standing(th.ID)
+	n, at, text, msgs := cards()
+	if n != 1 || at != len(msgs)-1 || !strings.Contains(text, "· next "+standing.NotBefore.Local().Format("Mon Jan 2 15:04")+"\n") {
+		t.Fatalf("%d cards, at %d of %d: %q", n, at, len(msgs), text)
+	}
+}
+
+// byRun orders a chat the way both surfaces draw it (ThreadDetail.ordered,
+// threads.js orderedMsgs): a run's messages at its start, else by time.
+func byRun(msgs []Message) []Message {
+	start := map[string]time.Time{}
+	for _, x := range msgs {
+		if s, ok := start[x.RunID]; x.RunID != "" && (!ok || x.TS.Before(s)) {
+			start[x.RunID] = x.TS
+		}
+	}
+	key := func(x Message) time.Time {
+		if s, ok := start[x.RunID]; ok {
+			return s
+		}
+		return x.TS
+	}
+	out := append([]Message(nil), msgs...)
+	sort.SliceStable(out, func(i, j int) bool {
+		if a, b := key(out[i]), key(out[j]); !a.Equal(b) {
+			return a.Before(b)
+		}
+		return out[i].TS.Before(out[j].TS)
+	})
+	return out
+}
 
 // One clock: a session's schedule is a standing prompt row. The
 // clock fires it by writing a one-shot child and delivering that; the

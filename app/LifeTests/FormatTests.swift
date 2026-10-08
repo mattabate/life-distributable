@@ -71,6 +71,28 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(num(.nan), "0")
     }
 
+    /// The chat row's clock says its day (ui.test.js `dayWhen`, same table).
+    func testDayClock() {
+        let cal = Calendar.current
+        func at(_ y: Int, _ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
+            cal.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi))!
+        }
+        let now = at(2026, 10, 7, 21, 16) // Wed
+        XCTAssertEqual(dayClock(at(2026, 10, 7, 0, 53), now: now), "today 12:53 AM")
+        XCTAssertEqual(dayClock(at(2026, 10, 7, 15, 15), now: now), "today 3:15 PM")
+        XCTAssertEqual(dayClock(at(2026, 10, 6, 23, 59), now: now), "yesterday 11:59 PM")
+        XCTAssertEqual(dayClock(at(2026, 10, 5, 9, 15), now: now), "Mon 9:15 AM")
+        XCTAssertEqual(dayClock(at(2026, 10, 1, 16, 2), now: now), "Thu 4:02 PM")
+        XCTAssertEqual(dayClock(at(2026, 9, 30, 16, 2), now: now), "Sep 30 4:02 PM")
+        XCTAssertEqual(dayClock(at(2025, 10, 1, 16, 2), now: now), "Oct 1, 2025 4:02 PM")
+        // The turn in flight, the console's turnFacts word for word.
+        XCTAssertEqual(turnFactsLine(calls: 23, at: at(2026, 10, 7, 22, 9), cost: 1.12, now: now), "23 tool calls · today 10:09 PM · $1.12")
+        XCTAssertEqual(turnFactsLine(calls: 23, at: at(2026, 10, 7, 22, 9), cost: 1.12, withCalls: false, now: now), "today 10:09 PM · $1.12")
+        XCTAssertEqual(turnFactsLine(calls: 23, at: at(2026, 10, 7, 22, 9), cost: 1.12, withCost: false, now: now), "23 tool calls · today 10:09 PM")
+        XCTAssertEqual(turnFactsLine(calls: 1, at: nil, cost: nil, now: now), "1 tool call")
+        XCTAssertEqual(turnFactsLine(calls: nil, at: nil, cost: 0, now: now), "")
+    }
+
     func testTokens() {
         XCTAssertEqual(tokenCount(1_250_000), "1.3M")
         XCTAssertEqual(tokens(1_250_000), "1.3M tok")

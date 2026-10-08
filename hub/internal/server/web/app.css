@@ -364,6 +364,10 @@ textarea { resize: vertical; }
 .msg.owner .bubble .body.long::after { background: linear-gradient(to bottom, transparent, var(--accent)); }
 .bubble .body.long.open { max-height: none; overflow-x: auto; overflow-y: hidden; }
 .bubble .body.long.open::after { display: none; }
+/* Fitted and found short (ui.js fitFolds): fewer than five lines were behind
+   the fold, so there is no fold: the body whole, no button. */
+.bubble .body.long.fits { max-height: none; }
+.bubble .body.long.fits::after { display: none; }
 .bubble .body.long.open .md-table { max-width: none; }
 .bubble .fold, .ask .fold { display: block; margin-top: 6px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
   font: 600 12px system-ui, sans-serif; color: inherit; background: transparent;
@@ -430,6 +434,10 @@ textarea { resize: vertical; }
 .run > summary:hover { background: var(--code); }
 .run > summary::before { content: '▸'; font-size: 10px; opacity: .7; }
 .run[open] > summary::before { content: '▾'; }
+/* One mark leads a live run's row: the pulse while the block is shut, the
+   open arrow once it is opened, never a dot at both ends. */
+.run.live:not([open]) > summary::before { display: none; }
+.run.live[open] > summary .dot { display: none; }
 .run .gear { opacity: .7; }
 .run .evs { margin: 4px 0 0 10px; padding-left: 10px; border-left: 2px solid var(--line); }
 .ev { font-size: 12.5px; color: var(--muted); margin: 1px 0; }
@@ -452,6 +460,12 @@ textarea { resize: vertical; }
    the whole thought open. */
 .ev.think .hl { color: var(--violet); }
 .ev.think[open] .hl.one, .ev.think:not([open]) .hl.all { display: none; }
+/* What the agent said mid-turn (💬): shut, two lines and an ellipsis; open,
+   the whole text with its line breaks. */
+.ev.said:not([open]) .hl {
+  white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.ev.said[open] .hl { white-space: pre-wrap; }
 .ev .io {
   margin: 2px 0 2px 19px; padding: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; line-height: 1.45;
@@ -498,7 +512,7 @@ textarea { resize: vertical; }
    fading out, Show all opens it to full height — no inner scroll box. */
 .ask .ask-long { max-height: 15lh; overflow: hidden;
   -webkit-mask-image: linear-gradient(to bottom, #000 75%, transparent); mask-image: linear-gradient(to bottom, #000 75%, transparent); }
-.ask .ask-long.open { max-height: none; -webkit-mask-image: none; mask-image: none; }
+.ask .ask-long.open, .ask .ask-long.fits { max-height: none; -webkit-mask-image: none; mask-image: none; }
 /* The head line: the mark and the card's word (READ · DO · DECIDE) in its
    tint. */
 .ask .card-h { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 13px; line-height: 1.2; }

@@ -89,6 +89,22 @@ struct RespondSubject {
         initial = outcomes.first { $0.value == first } ?? .none
     }
 
+    /// A rec on the desktop's Recs pages: Accept · Decline · Reply as the
+    /// chips over the chat bar, so a rec is answered like any other card. The
+    /// prompt carries `rec:<id>` with accepted|declined and the hub decides
+    /// the rec through that row (threads DecideRec); words go to the session
+    /// that filed it, a new one when none did.
+    init(rec r: Rec) {
+        ref = "rec:" + r.id
+        title = r.title
+        threadID = r.sourceThreadID ?? ""
+        newTitle = mdPlain(r.title)
+        outcomes = Self.chips(r.outcomes ?? [AskOutcome(value: "accepted", label: "Accept"),
+                                             AskOutcome(value: "declined", label: "Decline"),
+                                             AskOutcome(value: "", label: "Reply")])
+        initial = .none
+    }
+
     /// `first` is the card button tapped (the row is the hub's outcomes), so the sheet starts on that chip; "" = words alone.
     init(ask: Ask, first: String = "") {
         ref = "ask:" + ask.id
@@ -118,10 +134,10 @@ struct RespondOutcome: Hashable {
     static let none = RespondOutcome(value: "", label: "Reply")
     var closes: Bool { !value.isEmpty }
     var icon: String {
-        switch value { case "done": "checkmark"; case "wont": "xmark"; default: "bubble.left" }
+        switch value { case "done", "accepted": "checkmark"; case "wont", "declined": "xmark"; default: "bubble.left" }
     }
     var tint: Color {
-        switch value { case "done": .green; case "wont": .gray; default: .accentColor }
+        switch value { case "done", "accepted": .green; case "wont", "declined": .gray; default: .accentColor }
     }
 }
 
@@ -263,10 +279,11 @@ final class RespondModel {
                 // Always now, always the session that raised it ("new-or:" so
                 // an ended session does not swallow the answer — the hub
                 // starts a fresh one and spells the reference out).
-                try await hub.postPrompt(target: RespondTarget.thisSession.value(thread: subject.threadID),
+                // A rec no session filed has nowhere to "this session": new.
+                try await hub.postPrompt(target: subject.threadID.isEmpty ? "new" : RespondTarget.thisSession.value(thread: subject.threadID),
                                          text: text, re: subject.ref, outcome: outcome.value,
                                          inAfter: "", on: "", at: "",
-                                         title: "",
+                                         title: subject.newTitle,
                                          attachments: refs)
                 await finished()
             } catch {

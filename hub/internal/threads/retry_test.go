@@ -114,6 +114,30 @@ func TestRetryAskRefusesOrdinaryAsks(t *testing.T) {
 	}
 }
 
+// A dead Claude login: Restart could only fail again (the card vanished and
+// came back). The card says so, and once any turn gets through the hub
+// restarts it by itself.
+func TestAuthFailureResumesOnceLoginWorks(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Do a long thing.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	os.WriteFile(out+".err", []byte("Failed to authenticate: OAuth session expired and could not be refreshed"), 0o644)
+	os.WriteFile(out+".done", nil, 0o644)
+	m.Poll()
+	asks, _ := m.ListAsks("active", th.ID, 10)
+	if len(asks) != 1 || asks[0].Title != "Session stopped: Claude login expired · resumes once it works" {
+		t.Fatalf("%+v", asks)
+	}
+	m.ResumeAuthFailed()
+	a, _ := m.GetAsk(asks[0].ID)
+	if a.State != "done" || a.ResolvedBy != "hub" {
+		t.Fatalf("%+v", a)
+	}
+	if th, _ := m.Get(th.ID); th.Status != "running" {
+		t.Fatalf("%+v", th)
+	}
+}
+
 func TestFailureTitleSaysTheCode(t *testing.T) {
 	for text, want := range map[string]string{
 		"API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment.": "Session stopped: Claude API 529 (overloaded)",
