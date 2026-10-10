@@ -104,12 +104,6 @@ meals.
 is the owner's private copy. The copy is theirs: upstream is read-only, and
 nothing from it lands without the owner's yes.
 
-- **Weekly check-back.** The "Updates from upstream" session (SETUP.md
-  step 10) runs `ops/addenda-check.md` every Monday: `git fetch upstream`,
-  read `upstream/main:ADDENDA.md`, raise one read card per entry newer than
-  the id in `data/addenda-seen.txt`, then store the newest id there.
-  Nothing new means no card.
-- **Applying one.** Only on the owner's yes on its card: follow the
-  entry's **How**. A merge is `git merge upstream/main`, conflicts resolved
-  in favour of the owner's own changes, then `make check`.
-- **When the owner just asks to update:** the same merge, same gate.
+The weekly check and how to apply an entry are in the header of
+`ADDENDA.md`. When the owner just asks to update: `git merge upstream/main`,
+conflicts resolved in favour of their own changes, then `make check`.

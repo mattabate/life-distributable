@@ -341,7 +341,7 @@ It takes one message.
    week I'll check the project for anything new and show you each one as a
    card. Nothing changes in your copy unless you say yes."* Then:
    1. `lifectl thread new "Check upstream for new addenda" --title "Updates from upstream" --schedule "weekly@Mon 09:00"`
-   2. `lifectl thread <its id> schedule "weekly@Mon 09:00" @ops/addenda-check.md`
+   2. `lifectl thread <its id> schedule "weekly@Mon 09:00" "Check upstream: follow the header of ADDENDA.md."`
       (the standing prompt it runs each week).
    3. Write the newest entry id in `ADDENDA.md` (today that is `add-0001`)
       to `data/addenda-seen.txt`, so the first check only shows what is
