@@ -50,5 +50,5 @@ restic check --read-data-subset=5%
 # No prune here, deliberately: forget/prune is the only step that deletes, so
 # it is the only step that needs a key with delete rights — and any key on this
 # Mac is a key a rogue session can use. Prune by hand, with a separate key
-# (ops/b2-prune.sh). A key that could delete fails the run, so it gets an ask.
-if [[ "$RESTIC_REPOSITORY" == b2:* ]]; then ./b2-key-check.sh; fi
+# (ops/b2.sh prune). A key that could delete fails the run, so it gets an ask.
+if [[ "$RESTIC_REPOSITORY" == b2:* ]]; then ./b2.sh check; fi

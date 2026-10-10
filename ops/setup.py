@@ -135,7 +135,7 @@ def cmd_backup(a):
     fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(text)
-    print("wrote ops/secrets/restic.env for bucket %s; next: ops/b2-mint-keys.sh in Terminal" % a.bucket)
+    print("wrote ops/secrets/restic.env for bucket %s; next: ops/b2.sh mint in Terminal" % a.bucket)
 
 
 def cmd_show(_):

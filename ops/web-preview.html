@@ -129,8 +129,6 @@
   }
 
   function fixture(path) {
-    // &demo=1: ops/demo-fixtures.js (the README's fictional owner) answers first.
-    if (window.DEMO) { const d = window.DEMO(path); if (d !== undefined) return d; }
     const clean = path.split('?')[0];
     if (FIX[clean]) return FIX[clean];
     const s = shared(clean);
@@ -159,10 +157,6 @@
   const cerr = console.error.bind(console);
   console.error = (...a) => { cerr(...a); showErr({ message: a.map(x => (x && x.stack) || String(x)).join(' ') }); };
   if (!location.hash) location.hash = '#/sessions';
-  if (params.get('demo')) {
-    document.write(`<scr` + `ipt src="demo-fixtures.js"></scr` + `ipt>`);
-    document.addEventListener('DOMContentLoaded', () => { const b = document.getElementById('build'); if (b) b.textContent = ''; });
-  }
   // &open=1 — expand every <details> before the screenshot, so a collapsed
   // editor or activity block can be looked at too.
   if (params.get('open')) setInterval(() => document.querySelectorAll('details').forEach(d => { d.open = true; }), 250);

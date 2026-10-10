@@ -6,12 +6,41 @@
 #   ops/install-mac.sh            build + install + open
 #   ops/install-mac.sh --no-open  build + install only (screenshots, CI)
 #   ops/install-mac.sh --force    quit the open app and replace it now
+#   ops/install-mac.sh probe      can the build just made keep the decider code?
 # With the app open (and no --force) the build is staged instead: the app's
 # top bar shows Update, and ops/mac-swap.sh installs it once the app quits.
 # Needs: DEVELOPMENT_TEAM in app/local.xcconfig (setup writes it).
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT=$(cd .. && pwd)
+
+# probe: the build `make mac` just made saves a throwaway Keychain item the
+# way Settings saves the code, finds it, deletes it and exits before any
+# window (DeciderKeychain.probeIfAsked). The owner's own code is another item
+# and is never touched; nothing asks for Touch ID. Prints
+# "add=0 find=-25308 delete=0" and exits 0 when the build can keep the code;
+# add=-34018 = signed without keychain-access-groups / a provisioning profile
+# (Settings then says "could not save the code to the Keychain (-34018)").
+if [ "${1:-}" = "probe" ]; then
+  APP="$ROOT/app/build-mac/Build/Products/Debug-maccatalyst/life.app"
+  BIN="$APP/Contents/MacOS/life"
+  [ -x "$BIN" ] || { echo "no desktop build; run: make mac" >&2; exit 1; }
+  OUT=$(mktemp -t life-keychain-probe)
+  trap 'rm -f "$OUT"' EXIT
+  ApplePersistenceIgnoreState=YES LIFE_KEYCHAIN_PROBE="$OUT" "$BIN" >/dev/null 2>&1 &
+  pid=$!
+  ( sleep 20; kill "$pid" 2>/dev/null ) & dog=$!; disown "$dog"
+  wait "$pid" 2>/dev/null || true
+  kill "$dog" 2>/dev/null || true
+  echo "build $(defaults read "$APP/Contents/Info.plist" CFBundleVersion 2>/dev/null)"
+  [ -f "$APP/Contents/embedded.provisionprofile" ] && echo "profile: embedded" || echo "profile: NONE"
+  codesign -d --entitlements - "$APP" 2>/dev/null | grep -A2 -E "keychain-access-groups|application-identifier" || echo "entitlements: no keychain group"
+  R=$(cat "$OUT")
+  echo "${R:-the app wrote nothing (a build from before the probe?)}"
+  # find: 0, or -25308 "there, but behind Touch ID": both are a saved item.
+  case "$R" in "add=0 find=0 delete=0"|"add=0 find=-25308 delete=0") echo "✔ this build can keep the decider code";; *) echo "✘ this build cannot keep the decider code"; exit 1;; esac
+  exit 0
+fi
 # shellcheck disable=SC1091
 source ./app-identity.sh
 : "${LIFE_TEAM_ID:?set DEVELOPMENT_TEAM in app/local.xcconfig}"

@@ -25,15 +25,75 @@ rotate() {
   [[ -f $f ]] || return 0
   if (( $(stat -f%z "$f") > 20*1024*1024 )); then mv -f "$f" "$f.1"; fi
 }
-# The com.life.*.plist files are templates: __HOME__ becomes $HOME and
-# __CLAUDE_BIN_DIR__ the directory of hub.json claude_bin (launchd has no nvm
-# PATH, and an npm-installed claude needs its node next to it).
+# The four launchd agents, written here into ~/Library/LaunchAgents (never
+# load one by hand). hub: the server, kept alive, with the directory of
+# hub.json claude_bin on its PATH (launchd has no nvm PATH, and an
+# npm-installed claude needs its node next to it). keepawake: caffeinate -s,
+# no idle sleep while on AC power, so the hub and its sessions stay reachable
+# (on battery the Mac sleeps normally; no sudo, unlike pmset). renewcert:
+# Tailscale certs last ~90 days, so renew-cert.sh runs on the 1st at 04:00.
+# backup: backup.sh nightly at 03:30, loaded separately once restic.env exists.
+agent_body() { # $1 = label; the <dict> entries after Label
+  case "$1" in
+    com.life.hub) cat <<EOF
+  <key>ProgramArguments</key>
+  <array><string>$ROOT/ops/bin/hub</string><string>-config</string><string>$ROOT/ops/hub.json</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>$BINDIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key><string>$HOME</string>
+    <key>LANG</key><string>en_US.UTF-8</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>$ROOT/ops/logs/hub.log</string>
+  <key>StandardErrorPath</key><string>$ROOT/ops/logs/hub.log</string>
+EOF
+    ;;
+    com.life.keepawake) cat <<EOF
+  <key>ProgramArguments</key>
+  <array><string>/usr/bin/caffeinate</string><string>-s</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+EOF
+    ;;
+    com.life.renewcert) cat <<EOF
+  <key>ProgramArguments</key>
+  <array><string>$ROOT/ops/renew-cert.sh</string></array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Day</key><integer>1</integer><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>$ROOT/ops/logs/renew-cert.log</string>
+  <key>StandardErrorPath</key><string>$ROOT/ops/logs/renew-cert.log</string>
+EOF
+    ;;
+    com.life.backup) cat <<EOF
+  <key>ProgramArguments</key>
+  <array><string>$ROOT/ops/backup.sh</string></array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>
+  <key>StandardOutPath</key><string>$ROOT/ops/logs/backup.log</string>
+  <key>StandardErrorPath</key><string>$ROOT/ops/logs/backup.log</string>
+EOF
+    ;;
+    *) echo "hub.sh: no agent named $1" >&2; return 1 ;;
+  esac
+}
 render() { # $1 = label
-  local bindir
-  bindir=$(dirname "$(plutil -extract claude_bin raw -o - hub.json)")
-  bindir=${bindir/#\~/$HOME}
+  BINDIR=$(dirname "$(plutil -extract claude_bin raw -o - hub.json)")
+  BINDIR=${BINDIR/#\~/$HOME}
   mkdir -p "$AGENTS"
-  sed -e "s#__HOME__#$HOME#g" -e "s#__CLAUDE_BIN_DIR__#$bindir#g" "$1.plist" > "$AGENTS/$1.plist"
+  {
+    echo '<?xml version="1.0" encoding="UTF-8"?>'
+    echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+    echo '<plist version="1.0">'
+    echo '<dict>'
+    echo "  <key>Label</key><string>$1</string>"
+    agent_body "$1"
+    echo '</dict>'
+    echo '</plist>'
+  } > "$AGENTS/$1.plist"
+  plutil -lint -s "$AGENTS/$1.plist"
 }
 load() { # $1 = label
   render "$1"
