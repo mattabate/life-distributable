@@ -232,6 +232,14 @@ No. It's an independent open source project built on Claude Code.
 They're announced in [ADDENDA.md](ADDENDA.md). Your agent brings each one
 to you as a card, and you choose.
 
+**What's in the folders?**
+`hub/` is the server on your Mac and the web console it serves. `app/` is
+the iPhone and desktop app. `shared/` is the contract between them, so the
+two sides agree by test. `ops/` is the scripts that run one install: build
+and start the hub, back it up nightly, install the apps, screenshot the
+pages. Those scripts are the only commands a session may run, so that folder
+is also the list of what the agent can do to your Mac.
+
 ## Who made this
 
 [Matt Abate](https://mattabate.com). Questions and ideas:
