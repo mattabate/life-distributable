@@ -88,8 +88,8 @@ final class HubClient {
         // A screenshot run can put a made-up code in the Settings box
         // (LIFE_DECIDER_SHOT=AAAAA-…), to prove a snap leaves it out.
         if ProcessInfo.processInfo.environment["LIFE_SHOT"] != nil, let d = ProcessInfo.processInfo.environment["LIFE_DECIDER_SHOT"] { decider = Self.normalizeDecider(d) }
-        // A shot run can point the desktop app at another hub (ops/demo-mac-screens.sh:
-        // the README's demo hub on a loopback port, LIFE_HUB_URL + LIFE_HUB_TOKEN).
+        // A shot run can point the desktop app at another hub (LIFE_HUB_URL +
+        // LIFE_HUB_TOKEN: a stand-in hub on a loopback port, for pictures).
         // Set here in init, so the didSet above never writes it into the
         // installed app's defaults.
         if ProcessInfo.processInfo.environment["LIFE_SHOT"] != nil {
@@ -800,7 +800,7 @@ enum DeciderKeychain {
     /// not save the code to the Keychain (-34018)"). The fix is the
     /// signature, not the query: LifeMac carries `keychain-access-groups`
     /// (app/project.yml), which makes Xcode embed a provisioning profile;
-    /// `ops/mac-keychain-probe.sh` proves a build can save before the owner
+    /// `ops/install-mac.sh probe` proves a build can save before the owner
     /// is asked to paste anything.
     static func save(_ code: String) -> Bool {
         clear()
@@ -849,7 +849,7 @@ enum DeciderKeychain {
     }
 
     #if targetEnvironment(macCatalyst)
-    /// `LIFE_KEYCHAIN_PROBE=<file>` (ops/mac-keychain-probe.sh): save a
+    /// `LIFE_KEYCHAIN_PROBE=<file>` (ops/install-mac.sh probe): save a
     /// throwaway item the way `save` does, find it, delete it, write the
     /// three statuses to the file and exit before any window. The owner's code
     /// is a different account and is never touched. `add=0 find=-25308

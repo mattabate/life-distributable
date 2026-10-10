@@ -1,6 +1,6 @@
-# Console: Calendar — the pair to ops/flows/cal-phone.txt (parity is a rule
-# here, conventions.md 11). The page is a real calendar UI in the manner of
-# Google Calendar, plus a way of seeing the anytime tasks.
+# Console: Calendar (the phone draws the same page: CLAUDE.md convention 5).
+# The page is a real calendar UI in the manner of Google Calendar, plus a way
+# of seeing the anytime tasks.
 #   make browse FLOW=ops/flows/cal.txt
 # So the pictures are the four modes (Week, Day, Month, Schedule) and the
 # detail panel a click opens — the one that has to keep the full text and the

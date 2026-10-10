@@ -234,7 +234,7 @@ this Mac can erase their backups.
    - click **Create a Bucket**.
 3. You run `ops/py.sh setup.py backup --bucket <that name>`.
 4. **Account → Application Keys → Generate New Master Application Key**
-   (confirm). Keep that page open. You open `ops/b2-mint-keys.sh` in its
+   (confirm). Keep that page open. You open `ops/b2.sh mint` in its
    own window; when it asks, they copy the **keyID** and then the
    **applicationKey** from the Backblaze page and paste each one into the
    window, pressing Return after each. It mints a write-only nightly key and a separate prune key, and
@@ -249,10 +249,10 @@ this Mac can erase their backups.
    Tell them: "Wait for the window to stop, then tell me whether the last
    lines mention `life.db`." They only read it.
 
-**Verify:** `ops/b2-key-check.sh` prints `SAFE`; the owner reports a snapshot
-listed and a restored `life.db`. Once a month they run `ops/b2-prune.sh`:
+**Verify:** `ops/b2.sh check` prints `SAFE`; the owner reports a snapshot
+listed and a restored `life.db`. Once a month they run `ops/b2.sh prune`:
 add a monthly `--kind owner` calendar item for it
-(`lifectl cal add "Prune old backups (ops/b2-prune.sh)" --on <next month> --kind owner --repeat monthly`).
+(`lifectl cal add "Prune old backups (ops/b2.sh prune)" --on <next month> --kind owner --repeat monthly`).
 
 ## 7. Apple team and Xcode
 

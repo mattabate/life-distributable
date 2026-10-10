@@ -39,14 +39,6 @@ web-smoke:
 	chmod +x ops/web-smoke.sh
 	ops/web-smoke.sh
 
-# The console at every window width you use (full, a Magnet half, a third),
-# one PNG per route per width in ops/logs/web/widths/ — look at them before
-# shipping a layout change. ROUTES='recs money' narrows it (no `#/`: a bare
-# `#` starts a shell comment in the recipe).
-web-widths:
-	chmod +x ops/web-widths.sh
-	ops/web-widths.sh $(ROUTES)
-
 # Screenshots of the same two views (ops/logs/web/), for looking at a change.
 # ROUTE='#/calendar' shoots a third view (ops/logs/web/view.png). THREAD is
 # quoted: unquoted and empty it collapsed, so ROUTE slid into the thread-id
@@ -68,7 +60,8 @@ web-preview:
 # type, scroll, screenshot each step, and collect the page's own console
 # errors. STEPS='goto #/money; click text=Checking; shot account' or
 # FLOW=ops/flows/money.txt. Output: ops/logs/web/browse/NN-<name>.png.
-# NODE is nvm's node (no PATH assumptions from a session's shell).
+# SIZE=720x900 draws it in a narrow window (a half-screen layout is looked at
+# before it ships). NODE is nvm's node (no PATH assumptions from a session's shell).
 NODE ?= $(shell command -v node || ls $$HOME/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1)
 browse:
 	$(NODE) ops/browse.js $(if $(FLOW),--file $(FLOW),) $(if $(OUT),--out $(OUT),) $(if $(SIZE),--size $(SIZE),) $(BROWSE_FLAGS) '$(STEPS)'
@@ -123,7 +116,7 @@ mac-screens:
 # Can the build `make mac` just made keep the decider code? A throwaway
 # Keychain item, saved as Settings saves the code; -34018 = it cannot.
 mac-keychain:
-	bash ops/mac-keychain-probe.sh
+	bash ops/install-mac.sh probe
 
 mac-build:
 	cd app && xcodebuild -project Life.xcodeproj -scheme LifeMac -destination 'platform=macOS,variant=Mac Catalyst' -derivedDataPath build-mac CODE_SIGNING_ALLOWED=NO build -quiet
@@ -137,17 +130,6 @@ screens: app-build-sim
 # no switch, so no pass over this app had ever looked at dark mode.
 screens-dark: app-build-sim
 	APPEARANCE=dark bash ops/screens.sh $(TABS)
-
-# The same app showing the README's demo world (ops/demo-fixtures.js served by
-# ops/demo-hub.js), never your hub: the phone pictures in docs/img/ come
-# from here (ops/logs/demo/). Needs the simulator build already made.
-demo-screens:
-	bash ops/demo-screens.sh $(TABS)
-
-# The desktop app showing the same demo world: the desktop pictures in
-# docs/img/ come from here (ops/logs/demo/mac-*.png). Needs `make mac-build`.
-demo-mac-screens:
-	bash ops/demo-mac-screens.sh $(PAGES)
 
 # ship = THE command after app/ changes (paid tier, 2026-08-22): ad-hoc
 # archive + export, .ipa + manifest served by the hub at /ota/<token>/, you
