@@ -65,38 +65,8 @@ one source's page sit behind it and light its tab. Domain pages (money, a
 training log, a reading list) are goal pages an agent builds for the owner
 when a goal needs one; none ships.
 
-## Recipe: a page for a goal
-
-Pages are made for a goal when it truly needs one — they don't ship. Data
-comes first; a page only when the owner asks for one. Example: the owner's
-goal is *"Get stronger and eat better"* and they want to log workouts and
-meals.
-
-1. **Data first (always).** A package `hub/internal/fitness` with a
-   `Schema` of append-only tables — `workouts(id, day, kind, minutes,
-   notes, source, created_at)` and `meals(id, day, meal, protein_g, kcal,
-   notes, source, created_at)` — handed to `db.Migrate("fitness", Schema)`
-   in its constructor, wired in `hub/cmd/hub/main.go`. Add both tables to
-   `TestFreshSchema`'s inventory.
-2. **Write path**: `POST /api/v1/fitness/workouts` and `…/meals` (routes.go
-   row + api.md section + handler + a `server_test.go` test), and
-   `lifectl fitness log workout|meal …` so any session can record one.
-3. **The goal reads it**: set the goal's sources
-   (`lifectl goal new … --sources fitness`) and have its check-in session
-   summarise the week into the goal digest. Many goals stop here: the data,
-   a weekly digest, and cards when something needs the owner.
-4. **Only if the owner asks for a page**: `GET /api/v1/fitness/summary`
-   (contract + test + `make generate` for its fixture), then
-   - console: `hub/internal/server/web/views/fitness.js` registering
-     `views.fitness`, a nav entry in `web/index.html` (the heartbeat's
-     `pages` count follows it), a test in `web/test/`;
-   - phone: `app/Life/Sources/FitnessView.swift` + its model in
-     `Models.swift` + a `MoreDest` case in `RootView.swift` (the row
-     under **More**, after Configuration) and a `MacTopBar.pages` entry,
-     and a decode test against the fixture;
-   - `web/places.js`: `fitness: { label: 'Fitness', view: 'views/fitness.js', phone: 'FitnessView.swift' }`.
-5. `make check`, screenshots of both surfaces (look at them), commit,
-   `ops/hub.sh restart`, `make ship`.
+Building a page for a goal (data first, a page only when the owner asks):
+the recipe is in `hub/CLAUDE.md`, read it when that is the task.
 
 ## Pulling updates
 
