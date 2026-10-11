@@ -43,4 +43,22 @@ final class MarkdownTableTests: XCTestCase {
         XCTAssertEqual(mdSegments("```sh\nls -la"), [.code("ls -la", lang: "sh")])
         XCTAssertEqual(mdSegments("three ``` ticks in prose"), [.text("three ``` ticks in prose")])
     }
+
+    /// The console's 'md: a line that is only a hub file…' case (ui.test.js).
+    func testALineThatIsOnlyAHubFileIsTheFile() {
+        let ref = "sha256/a6/a620d8.png"
+        for line in ["![before](https://host.example.ts.net:8443/api/v1/blobs/\(ref))",
+                     "[shot](https://host:8443/api/v1/blobs/\(ref))",
+                     "https://host:8443/api/v1/blobs/\(ref)", "  /api/v1/blobs/\(ref)  "] {
+            XCTAssertEqual(blobLineRef(line), ref, line)
+        }
+        XCTAssertNil(blobLineRef("see ![x](https://h/api/v1/blobs/\(ref)) here"))
+        XCTAssertNil(blobLineRef("- ![x](https://h/api/v1/blobs/\(ref))"))
+        XCTAssertNil(blobLineRef("/api/v1/blobs/../secret"))
+        XCTAssertEqual(mdSegments("**Now**\n\n![now](https://h:8443/api/v1/blobs/\(ref))\n\nafter"),
+                       [.text("**Now**"), .files([MdFile(ref: ref, caption: "now")]), .text("after")])
+        // Files on lines in a row, blank lines between, are one strip.
+        XCTAssertEqual(mdSegments("![before](/api/v1/blobs/sha256/00/b.png)\n\n![after](/api/v1/blobs/sha256/00/a.png)\nend"),
+                       [.files([MdFile(ref: "sha256/00/b.png", caption: "before"), MdFile(ref: "sha256/00/a.png", caption: "after")]), .text("end")])
+    }
 }

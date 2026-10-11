@@ -182,6 +182,17 @@ func (b *Board) headings(ths []threads.Thread) {
 			// the list while it plays.
 			b.Section[t.ID] = "working"
 			workN++
+		case t.Status == "needs_you":
+			// Its status says the owner's turn, but every card it holds is the
+			// other device's build (hiddenInstall): on this surface it is off
+			// the list, and its row under All sessions wears the pill it would
+			// wear with no card at all - done, or idle for a standing one -
+			// never the thread's own status fallback.
+			rest := "done"
+			if t.Schedule != "" {
+				rest = "idle"
+			}
+			b.Pills[t.ID] = append(b.Pills[t.ID], threads.StatusPill(rest))
 		}
 	}
 	inSessions := func(cards, n int) string {
@@ -225,11 +236,10 @@ func Build(surface string, asks []threads.Ask, acts []actions.Action, ths []thre
 // a rec is pulled, never pushed, and a scheduled item is not waiting on the
 // owner until it fires and becomes its own card.
 //
-// An ask of class `practice` or `step` (the owner's own dated work — a daily
-// practice, an appointment) is listed under `calendar` and NOTHING else: not
-// counted, not a session's "for you", not the card a row opens on. Sessions
-// is where something is blocked on the owner; the Calendar tab already
-// counts those rows.
+// An ask of class `practice`, or a `step` with no session of its own (a daily
+// practice, a chore), is listed under `calendar` and NOTHING else: not
+// counted, not a session's "for you", not the card a row opens on. A fired
+// step IN a session counts like any card there (sessionStep).
 func BuildRows(surface string, rows []store.Dated, ths []threads.Thread) Board {
 	if surface != "mobile" && surface != "desktop" {
 		surface = "web"
@@ -255,7 +265,7 @@ func BuildRows(surface string, rows []store.Dated, ths []threads.Thread) Board {
 		// and the web console lists both. That is the ONE thing `surface`
 		// decides; every other card is on every board.
 		case r.Kind == "ask" && hiddenInstall(surface, r):
-		case r.Kind == "ask" && threads.OwnerClass(r.AskClass):
+		case r.Kind == "ask" && threads.OwnerClass(r.AskClass) && !sessionStep(r):
 			ownerRows = append(ownerRows, r)
 		case r.Kind == "ask":
 			askRows = append(askRows, r)
@@ -274,6 +284,14 @@ func BuildRows(surface string, rows []store.Dated, ths []threads.Thread) Board {
 	b.Badges.YourTurn = b.Count
 	b.headings(ths)
 	return b
+}
+
+// sessionStep: a fired step whose card sits in a real session's chat. It is
+// the owner's turn like any other card on that session. A practice (the hub's
+// calendar thread) and a chore (no thread, or `calendar`) stay calendar-only.
+// A step not yet due has no card at all - it is a scheduled item, not an ask.
+func sessionStep(r store.Dated) bool {
+	return r.AskClass == threads.ClassStep && r.ThreadID != "" && r.ThreadID != "calendar"
 }
 
 // hiddenInstall: an install card for the other device. `mobile` never lists

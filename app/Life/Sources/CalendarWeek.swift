@@ -202,11 +202,15 @@ struct CalWeekGrid: View {
     private func record(_ d: String) -> [CalEntry] { shown(d).filter { calIsRecord($0) && calMinutes($0.at) != nil } }
     /// The strip is reserved across the whole week or none of it.
     private var strip: Bool { days.contains { !record($0).isEmpty } }
-    private var openingHour: Int {
-        let ms = days.flatMap { timed($0) + record($0) }.compactMap { calMinutes($0.at) }
-        // Open near the morning: the earliest thing, but never past 8 AM.
-        guard let m = ms.min() else { return 7 }
-        return max(0, min(8, m / 60 - 1))
+    /// A day's band holds four rows; past four the open ones lead, three
+    /// show and the fourth says "+N more", opening the whole band as the pile
+    /// popout. `calBandHTML`.
+    private static let bandMax = 4
+    private func bandShown(_ d: String) -> (chips: [CalEntry], all: [CalEntry], more: Int) {
+        let es = band(d)
+        guard es.count > Self.bandMax else { return (es, es, 0) }
+        let sorted = es.filter { !$0.isClosed } + es.filter { $0.isClosed }
+        return (Array(sorted.prefix(Self.bandMax - 1)), sorted, sorted.count - (Self.bandMax - 1))
     }
 
     var body: some View {
@@ -224,10 +228,19 @@ struct CalWeekGrid: View {
                             ForEach(days, id: \.self) { d in column(d, colW: colW) }
                         }
                         .frame(height: Self.hourH * 24, alignment: .top)
+                        // 12 PM's line, what the grid opens centred on.
+                        .overlay(alignment: .top) {
+                            Color.clear.frame(height: 1).id("noon").padding(.top, Self.hourH * 12)
+                        }
                         .padding(.bottom, 12)
                     }
-                    .onAppear { proxy.scrollTo("h\(openingHour)", anchor: .top) }
-                    .onChange(of: start) { _, _ in proxy.scrollTo("h\(openingHour)", anchor: .top) }
+                    // Opens with 12 PM in the middle of the clock. The anchor
+                    // is the first layout's own, so it does not depend on an
+                    // onAppear scroll landing before the GeometryReader has a
+                    // size; the deferred scroll covers a reused grid.
+                    .defaultScrollAnchor(.center, for: .initialOffset)
+                    .onAppear { DispatchQueue.main.async { proxy.scrollTo("noon", anchor: .center) } }
+                    .onChange(of: start) { _, _ in proxy.scrollTo("noon", anchor: .center) }
                 }
             }
         }
@@ -264,16 +277,27 @@ struct CalWeekGrid: View {
     /// never a box of its own that scrolls — the console grows it the same
     /// way. "All day" sits right in the gutter at 12.5, grey.
     private func allDay(_ colW: CGFloat) -> some View {
-        let rows = max(1, days.map { band($0).count }.max() ?? 0)
+        let rows = max(1, days.map { min(Self.bandMax, band($0).count) }.max() ?? 0)
         let h = CGFloat(rows) * (Self.chipH + 2) + 8
         return HStack(alignment: .top, spacing: 0) {
             Text("All day").font(.system(size: 12.5)).foregroundStyle(Web.muted)
                 .padding(.horizontal, 6).padding(.top, 4)
                 .frame(width: Self.gutterW, alignment: .trailing)
             ForEach(days, id: \.self) { d in
+                let shown = bandShown(d)
                 VStack(spacing: 2) {
-                    ForEach(band(d)) { e in
+                    ForEach(shown.chips) { e in
                         CalChip(e: e).frame(height: Self.chipH).onTapGesture { onTap(e) }.help(e.title)
+                    }
+                    if shown.more > 0 {
+                        // `.cal-ev.chip.more`: grey 600 on no fill.
+                        Text("+\(shown.more) more")
+                            .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Web.muted)
+                            .padding(.horizontal, 5)
+                            .frame(maxWidth: .infinity, minHeight: Self.chipH, maxHeight: Self.chipH, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture { onTapGroup(shown.all) }
+                            .help(shown.all.suffix(shown.more).map(\.title).joined(separator: "\n"))
                     }
                 }
                 .padding(.horizontal, 3).padding(.top, 3).padding(.bottom, 1)

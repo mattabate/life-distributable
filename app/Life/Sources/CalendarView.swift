@@ -21,7 +21,6 @@ struct CalendarView: View {
     private var error: String? { actionError ?? cal.error }
     @State private var selected: CalEntry?
     /// A `rec` row (a deferred rec on its review day) opens the rec's own page.
-    @State private var openRec: Rec?
     /// A calendar id tapped in a card's text (Refs.swift) opens that item.
     @Environment(RefNav.self) private var nav
     @State private var showPast = false
@@ -88,7 +87,6 @@ struct CalendarView: View {
             }) { g in groupSheet(g) }
             .sheet(isPresented: $showFilters) { CalFiltersSheet(filters: filtersBinding) }
             .sheet(isPresented: $showAnytime) { anytimeSheet }
-            .navigationDestination(item: $openRec) { RecDetail(rec: $0, onChange: { await load() }) }
             .onChange(of: nav.cal, initial: true) { _, e in if let e { nav.cal = nil; picked = e.day; open(e) } }
             .alert("Move every check-in?", isPresented: Binding(get: { cadenceMove != nil }, set: { if !$0 { cadenceMove = nil } })) {
                 Button("Cancel", role: .cancel) { cadenceMove = nil }
@@ -402,7 +400,8 @@ struct CalendarView: View {
         let es = g.entries
         let lane = es.first.map(CalCals.of) ?? CalCals.agents
         let name = calGroupLabel(es)
-        let what = name.badge.hasPrefix("+") ? "\(es.count) \(lane.label.lowercased()) in one box" : "\(name.badge) in \(name.title)"
+        let what = es.allSatisfy({ calMinutes($0.at) == nil }) ? "\(es.count) all day"
+            : name.badge.hasPrefix("+") ? "\(es.count) \(lane.label.lowercased()) in one box" : "\(name.badge) in \(name.title)"
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 10) {
@@ -422,7 +421,7 @@ struct CalendarView: View {
                     ForEach(es) { e in
                         Button { pendingOpen = e; group = nil } label: {
                             HStack(spacing: 5) {
-                                Circle().fill(CalCals.color(e)).frame(width: 7, height: 7)
+                                Circle().fill(CalCals.shade(e)).frame(width: 7, height: 7)
                                 Text(e.at ?? "").monospacedDigit().opacity(0.7)
                                 Text(calGlyph(e) + e.label).strikethrough(calStruck(e)).lineLimit(1)
                                 Spacer(minLength: 0)
@@ -461,9 +460,9 @@ struct CalendarView: View {
         .presentationDetents([.medium, .large])
     }
 
-    private func open(_ e: CalEntry) {
-        if e.refKind == "rec", let id = e.refID { Task { openRec = try? await hub.rec(id) } } else { selected = e }
-    }
+    /// Every row, a rec's too, pops out as the card in the calendar; a rec's
+    /// card carries "open rec" to the Recs tab.
+    private func open(_ e: CalEntry) { selected = e }
 
     /// A drop: an item takes the new day/time; a repeating item asks one-or-
     /// all-future first; a check-in's drop is a cadence rewrite and asks first.
@@ -659,9 +658,8 @@ struct CalendarView: View {
     /// says the day too.
     private func row(_ e: CalEntry, day: String, dated: Bool = false) -> some View {
         Button {
-            // `ref` names what is behind the row; a rec opens its own page,
-            // everything else the entry sheet.
-            if e.refKind == "rec", let id = e.refID { Task { openRec = try? await hub.rec(id) } } else { selected = e }
+            // Every row opens the entry sheet; a rec's has "open rec" (`open`).
+            open(e)
         } label: {
             CalEntryRow(entry: e, goals: goals, dated: dated)
         }
@@ -789,11 +787,12 @@ extension CalEntry {
     /// the hub ticks it itself when the evidence lands. A chore no session is
     /// behind closes the same way: the hub's `tick`.
     var isHomework: Bool { isItem && (tick == true || kind == "homework") }
-    /// A reminder (`note`): a date to remember, nothing to do. It answers in
-    /// the homework box (the owner 2026-10-01: "why isn't there a normal chat bar
-    /// here?") — Read it ticks it quietly, words go to the session behind it.
+    /// A reminder (`note`): a date to remember, nothing to do. One of My
+    /// tasks, drawn like every other row, answering in the homework box with
+    /// the chat read card's pair - Respond · Read.
     var isNote: Bool { isItem && kind == "note" }
-    /// Answers with a tick box (Did it / Read it · Send), not a step's words.
+    /// Answers with a tick box (Did it · Skip · Send; Respond · Read), not a
+    /// step's words.
     var isTickBox: Bool { isHomework || isNote }
     /// The hub's word for one of the row's answers (`outcomes`), nil when it
     /// sent none for that value.
@@ -984,9 +983,24 @@ struct CalEntrySheet: View {
         #endif
     }
 
+    @Environment(RefNav.self) private var nav
+
+    /// "open rec": the rec on the Recs tab, as if tapped there - Recs lit,
+    /// the back link leads to Recs.
+    private func openRec() {
+        guard entry.refKind == "rec", let id = entry.refID else { return }
+        Task {
+            do {
+                let r = try await hub.rec(id)
+                shut()
+                nav.rec = r
+                nav.tab = "recs"
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
     #if targetEnvironment(macCatalyst)
     @Environment(\.openURL) private var openURL
-    @Environment(RefNav.self) private var nav
     @State private var macInstalling = false
     /// What the panel's text measures, and what its composer measures: the
     /// sheet is exactly their sum (see `macBody`).
@@ -1046,7 +1060,9 @@ struct CalEntrySheet: View {
                 if let r = respond {
                     VStack(alignment: .leading, spacing: 0) {
                         Web.line.frame(height: 1)
-                        RespondChips(model: r).padding(.horizontal, 16).padding(.top, 10)
+                        if !r.subject.outcomes.isEmpty {
+                            RespondChips(model: r).padding(.horizontal, 16).padding(.top, 10)
+                        }
                         RespondBar(model: r) { shut() }
                     }
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { macFootHeight = $0 }
@@ -1147,6 +1163,11 @@ struct CalEntrySheet: View {
                 }
                 .buttonStyle(.plain)
                 .help("Go to the Sessions page with this chat open on its card")
+            }
+            if entry.refKind == "rec" {
+                Button { openRec() } label: { Text("open rec").foregroundStyle(Web.accent) }
+                    .buttonStyle(.plain)
+                    .help("Go to the Recs page with this recommendation open")
             }
             ForEach(Array((entry.live ?? []).enumerated()), id: \.offset) { _, p in PillChip(pill: p) }
             Spacer(minLength: 8)
@@ -1269,6 +1290,11 @@ struct CalEntrySheet: View {
                         Button { Task { await resolve("scheduled") } } label: { Label("Reopen", systemImage: "arrow.uturn.backward.circle") }
                     }
                 }
+                if entry.refKind == "rec" {
+                    Section {
+                        Button { openRec() } label: { Label("Open rec", systemImage: "lightbulb") }
+                    }
+                }
                 if let t = thread {
                     Section {
                         // An action row lands ON its card in the session (the
@@ -1291,7 +1317,9 @@ struct CalEntrySheet: View {
                 // named for it. The owner's step closes only with words. Sent → this sheet goes.
                 if let r = respond {
                     VStack(alignment: .leading, spacing: 0) {
-                        RespondChips(model: r).padding(.horizontal, 12).padding(.top, 10)
+                        if !r.subject.outcomes.isEmpty {
+                            RespondChips(model: r).padding(.horizontal, 12).padding(.top, 10)
+                        }
                         RespondBar(model: r) { shut() }
                     }.background(.bar)
                 }

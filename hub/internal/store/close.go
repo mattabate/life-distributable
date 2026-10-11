@@ -95,13 +95,14 @@ func TickOutcomes(open bool) []Outcome {
 }
 
 // NoteOutcomes: a reminder (a `note` item) — a date to remember, nothing to
-// do. It had Done · Dismiss and no box, so there was nowhere to say anything
-// about it: now the homework box — Read it closes it quietly, words go to the
-// session behind it.
+// do. It wears the chat read card's pair in homework's box, Respond first,
+// Read second. Read closes it quietly; Respond (words) posts them to its
+// session and closes it as read too - a read card's reply is its close, so
+// both surfaces send `done` with the words.
 func NoteOutcomes() []Outcome {
 	return []Outcome{
-		{Value: "done", Label: "Read it", Hint: "closed as read — with words, they go to its session"},
-		{Value: "", Label: "Send", Hint: "it stays open — your words go to its session"},
+		{Value: "", Label: "Respond", Hint: "your words go to its session and it closes as read"},
+		{Value: "done", Label: "Read", Hint: "closed as read — with words, they go to its session"},
 	}
 }
 
@@ -275,10 +276,11 @@ func Wont(state string) bool {
 
 // CalMark: a calendar row's glyph in the one vocabulary both grids draw —
 // "wont" (✕ and the strike: refused or fell over), "done" (✓), "todo" (○, an
-// open row of the owner's lane), or "" (no glyph).
+// open row of the owner's lane), or "" (no glyph). A superseded rec is crossed
+// out - replaced, not refused, but nothing is left to do.
 func CalMark(state string, did bool, lane string) string {
 	switch {
-	case Wont(state):
+	case Wont(state), state == "superseded":
 		return "wont"
 	case state == "done" || state == "accepted" || did:
 		return "done"

@@ -374,6 +374,7 @@ struct BlobImage: View {
     var maxHeight: CGFloat = 220
     @State private var image: UIImage?
     @State private var failed = false
+    @State private var full: URL?
 
     fileprivate static let cache = NSCache<NSString, UIImage>()
 
@@ -394,6 +395,12 @@ struct BlobImage: View {
         // file over the whole window, Esc or a click closes (MacLightbox).
         .contentShape(Rectangle())
         .onTapGesture { if image != nil { MacLightbox.open(ref: ref, hub: hub) } }
+        #else
+        // The phone: the whole file in Quick Look, pinch to zoom - a picture
+        // drawn as a small tile in a reply is opened to be read.
+        .contentShape(Rectangle())
+        .onTapGesture { if image != nil { Task { full = await blobTempFile(ref, hub: hub) } } }
+        .quickLookPreview($full)
         #endif
         .task(id: ref) {
             if let c = Self.cache.object(forKey: ref as NSString) { image = c; return }
@@ -518,15 +525,22 @@ struct BlobDocument: View {
 
     private func fetch() async {
         fetching = true; defer { fetching = false }
-        guard let d = try? await hub.blob(ref) else { failed = true; return }
-        // Quick Look wants a file with the real name; blobs are immutable, so
-        // one copy per ref in the temp dir is right for the app's lifetime.
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("blobs", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent(name)
-        guard (try? d.write(to: url, options: .atomic)) != nil else { failed = true; return }
+        guard let url = await blobTempFile(ref, hub: hub) else { failed = true; return }
         local = url; preview = url
     }
+}
+
+/// A blob as a file Quick Look can open. Quick Look wants a file with the
+/// real name; blobs are immutable, so one copy per ref in the temp dir is
+/// right for the app's lifetime.
+@MainActor
+func blobTempFile(_ ref: String, hub: HubClient) async -> URL? {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("blobs", isDirectory: true)
+    let url = dir.appendingPathComponent(String(ref.split(separator: "/").last ?? "file"))
+    if FileManager.default.fileExists(atPath: url.path) { return url }
+    guard let d = try? await hub.blob(ref) else { return nil }
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return (try? d.write(to: url, options: .atomic)) != nil ? url : nil
 }
 
 /// A face: the same authenticated, cached blob fetch as `BlobImage`, drawn as a

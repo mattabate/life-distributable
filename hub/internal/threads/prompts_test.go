@@ -287,8 +287,14 @@ func TestReadCardClosesOnReplyAndNeverWakesTheSession(t *testing.T) {
 	if p.State != "cancelled" || p.Error == "" {
 		t.Fatalf("a wordless read answer is recorded, not delivered: %+v", p)
 	}
-	if msgs, _ := m.Messages(th.ID, 50); len(msgs) != n {
-		t.Fatalf("a wordless read answer must not wake the session: %+v", msgs[n:])
+	// It still shows as the owner's message, stored as sent rather than
+	// queued for the session.
+	msgs, _ := m.Messages(th.ID, 50)
+	if len(msgs) != n+1 {
+		t.Fatalf("a wordless read answer is one message in the chat: %+v", msgs[n:])
+	}
+	if last := msgs[n]; last.Text != "" || last.Queued || len(last.Replies) != 1 || last.Replies[0].Ref != "ask:"+r2.ID {
+		t.Fatalf("%+v", last)
 	}
 
 	// Words typed INTO the card: it closes, and they are delivered.
@@ -299,7 +305,7 @@ func TestReadCardClosesOnReplyAndNeverWakesTheSession(t *testing.T) {
 	if got, _ := m.GetAsk(r3.ID); got.State != "done" {
 		t.Fatalf("replying to a read card closes it: %+v", got)
 	}
-	msgs, _ := m.Messages(th.ID, 50)
+	msgs, _ = m.Messages(th.ID, 50)
 	if last := msgs[len(msgs)-1]; last.Text != "nice — keep watching it" || last.InReplyTo != "ask:"+r3.ID {
 		t.Fatalf("%+v", last)
 	}
@@ -493,8 +499,8 @@ func TestOneMessageAnswersSeveralCards(t *testing.T) {
 	if got, _ := m.GetAsk(r3.ID); got.State != "done" {
 		t.Fatalf("%+v", got)
 	}
-	if msgs, _ := m.Messages(th.ID, 50); len(msgs) != n {
-		t.Fatalf("two wordless reads must not wake the session: %+v", msgs[n:])
+	if msgs, _ := m.Messages(th.ID, 50); len(msgs) != n+1 || msgs[n].Queued || len(msgs[n].Replies) != 2 {
+		t.Fatalf("two wordless reads are one sent message, never queued: %+v", msgs[n:])
 	}
 	r4, _ := m.AddAsk(th.ID, "", "Note three", "", "read", "")
 	p, err = m.Queue(Prompt{Author: "owner", Target: th.ID, Replies: []Reply{{Ref: "ask:" + r4.ID, Outcome: "done"}, {Ref: "rec:rec-2", Outcome: "declined"}}})

@@ -682,6 +682,10 @@ func (m *Manager) launch(t Thread) error {
 	// carries the preamble, the goal notes pointer and a recap instead of
 	// `--resume` re-reading (and re-paying for) the whole conversation.
 	lean := res.Fresh && t.ClaudeSessionID != ""
+	if t.ClaudeSessionID != "" && !lean && !m.transcriptExists(t.ClaudeSessionID) {
+		log.Printf("thread %s: transcript %s pruned by the CLI, starting lean", t.ID, t.ClaudeSessionID)
+		lean = true
+	}
 	prompt, err := m.prompt(t, qs, false, t.ClaudeSessionID == "" || lean)
 	if err != nil {
 		return err
@@ -741,6 +745,16 @@ func (m *Manager) launch(t Thread) error {
 		return fmt.Errorf("record run: %w", err)
 	}
 	return nil
+}
+
+// transcriptExists reports whether the CLI still holds the session's
+// transcript (any project dir: the encoding of the cwd is the CLI's business).
+func (m *Manager) transcriptExists(id string) bool {
+	if m.Transcripts == "" {
+		return true
+	}
+	hits, _ := filepath.Glob(filepath.Join(m.Transcripts, "*", id+".jsonl"))
+	return len(hits) > 0
 }
 
 func (m *Manager) recordStart(runID, threadID string, qs []queuedMsg, now time.Time, base, model, effort string) error {
