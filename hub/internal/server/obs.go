@@ -131,8 +131,8 @@ func (s *Server) postObs(w http.ResponseWriter, r *http.Request) {
 }
 
 // postBlob: blob first, then refs. The raw body is stored content-addressed
-// and its ref comes back for the rows that name it (a batch of screenshots,
-// the Mac recorder's frames); `ext` names the file type. The same bytes
+// and its ref comes back for the rows that name it (a batch of
+// screenshots); `ext` names the file type. The same bytes
 // twice are one blob.
 func (s *Server) postBlob(w http.ResponseWriter, r *http.Request) {
 	ext := r.URL.Query().Get("ext")

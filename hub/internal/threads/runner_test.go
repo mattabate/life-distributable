@@ -174,6 +174,31 @@ func TestAutoCompactWindowOnRunEnv(t *testing.T) {
 	}
 }
 
+// The CLI prunes a transcript 30 days after its last write; `--resume` on it
+// fails every retry. A missing transcript starts lean instead; a present one
+// still resumes.
+func TestPrunedTranscriptStartsLean(t *testing.T) {
+	m, _, cmds := setup(t)
+	th, _ := m.Create("", "life", "", "Do a thing.", "", "", nil)
+	complete(t, m, th.ID, "[end]")
+	m.Transcripts = t.TempDir()
+	if err := m.Send(th.ID, "still there?"); err != nil {
+		t.Fatal(err)
+	}
+	if c := (*cmds)[len(*cmds)-1]; strings.Contains(c, "'--resume'") {
+		t.Fatalf("pruned transcript resumed: %s", c)
+	}
+	complete(t, m, th.ID, "[end]")
+	os.MkdirAll(filepath.Join(m.Transcripts, "-proj"), 0o755)
+	os.WriteFile(filepath.Join(m.Transcripts, "-proj", "sess-123.jsonl"), nil, 0o644)
+	if err := m.Send(th.ID, "and now?"); err != nil {
+		t.Fatal(err)
+	}
+	if c := (*cmds)[len(*cmds)-1]; !strings.Contains(c, "'--resume' 'sess-123'") {
+		t.Fatalf("present transcript not resumed: %s", c)
+	}
+}
+
 func TestLateMessageStartsNextTurn(t *testing.T) {
 	m, _, cmds := setup(t)
 	th, _ := m.Create("", "life", "", "Do a thing.", "", "", nil)

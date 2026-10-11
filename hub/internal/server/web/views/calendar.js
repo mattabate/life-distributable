@@ -71,8 +71,9 @@ function calEntryHTML(i, opts) {
   // pair. Homework is a COMPLETION, not a conversation: one tick, no words —
   // and the hub ticks it itself when the evidence lands (a full pitch round).
   // The hub's `tick` says which: no session waits on it (homework, a chore
-  // that needs no agent behind it). A reminder (`note`) takes the same box:
-  // Read it ticks it, words go to its session.
+  // that needs no agent behind it). A reminder (`note`) takes the same box
+  // with the chat read card's pair, Respond · Read, in place of Did it /
+  // Skip / Send.
   const homework = isItem && (i.tick || i.kind === 'homework' || i.kind === 'note');
   const ownerStep = isItem && i.kind === 'owner' && !homework;
   // An install ask is the same teal cell here as in the chat — its own kind
@@ -148,14 +149,19 @@ function calEntryHTML(i, opts) {
 // (calendar.go header: title, day, goal, detail) above them; Send with words
 // and no pick leaves the item open. The buttons
 // are the row's own `outcomes` (store.TickOutcomes: Did it · Skip · Send).
+// A reminder (`note`) wears the same box with the chat read card's pair
+// (store.NoteOutcomes: Respond · Read): Read over an empty box closes it with
+// no session; Respond's words go to its session and close it as read too, as
+// answering a read card in the chat does.
 function calHomeworkBox(i) {
-  // The tick's own word: Did it (homework), Read it (a reminder).
   const tick = ((i.outcomes || []).find(o => o.value === 'done') || {}).label || 'Did it';
   const note = i.kind === 'note';
+  // A reminder's words close it as read whichever chip sent them.
+  const outcome = p => note ? 'done' : p.outcome;
   return replyBox(calKey(i.id), { ref: 'cal', id: i.id, title: i.title || '' }, {
     outcomes: i.outcomes,
-    emptyMsg: `Type something first — or press ${tick} twice to just tick it.`,
-    placeholder: note ? `Anything to add? Words go to its session — or just press ${tick}.`
+    emptyMsg: `Type something first — or press ${tick} twice to just ${note ? 'mark it read' : 'tick it'}.`,
+    placeholder: note ? `Your reply goes to its session and it closes as read — or just press ${tick}.`
       : `How did it go? Words start a session about it — or just press ${tick}.`,
     redraw: () => pageRedraw(),
     after: async () => { await pageRedraw(); refreshBadges(); },
@@ -163,13 +169,13 @@ function calHomeworkBox(i) {
       close: async (p, words) => {
         if (words) return undefined;
         await post(`/calendar/${i.id}/resolve`, { outcome: p.outcome || 'done', by: 'owner' });
-        return p.outcome === 'wont' ? 'skipped' : 'done';
+        return p.outcome === 'wont' ? 'skipped' : note ? 'read' : 'done';
       },
       prompt: p => ({
         target: i.thread_id ? 'new-or:' + i.thread_id : 'new', title: i.title || '',
-        in_reply_to: calKey(i.id), ...(p.outcome ? { outcome: p.outcome } : {}),
+        in_reply_to: calKey(i.id), ...(outcome(p) ? { outcome: outcome(p) } : {}),
       }),
-      sent: p => (p.outcome === 'done' ? 'done — ' : p.outcome === 'wont' ? 'skipped — ' : '')
+      sent: p => (note ? 'read — ' : p.outcome === 'done' ? 'done — ': p.outcome === 'wont' ? 'skipped — ' : '')
         + (i.thread_id ? 'your words went to its session' : 'a session is starting about it'),
     }),
   });

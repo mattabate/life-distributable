@@ -193,7 +193,7 @@ function sessionCardHTML(t, o) {
 // the card in the chat read as one object.
 function sessionCards(bundle) {
   if (!bundle) return [];
-  const acts = (bundle.actions || []).map(a => ({ id: a.id, title: a.title, detail: a.detail, tint: '', mark: '🔴', verb: 'approve' }));
+  const acts = (bundle.actions || []).map(a => ({ id: a.id, title: a.title, tint: '', mark: '🔴', verb: 'approve' }));
   // …then the owner's dated steps that sit in this chat (`steps`, the
   // calendar's). An answered ask is never here: the board drops it.
   const asks = (bundle.asks || []).concat(bundle.steps || []).map(a => {
@@ -202,8 +202,6 @@ function sessionCards(bundle) {
       id: a.id, title: a.title, verb: a.verb || 'for you',
       tint: k === 'read' ? 'read' : k === 'install' ? 'install' : paused ? 'paused' : k === 'error' ? 'err-card' : '',
       mark: k === 'read' ? '🔵' : k === 'install' ? '📲' : paused ? PAUSE_MARK : k === 'error' ? '⚠︎' : '🔴',
-      // An install's title is the whole instruction; an error's body is a log.
-      detail: k === 'install' || k === 'error' ? '' : a.detail,
     };
   });
   return acts.concat(asks);
@@ -212,17 +210,10 @@ function sessionCards(bundle) {
 const ROW_CARDS = 2;
 
 // One open card as a cell on its session's card: the chat's `.ask` box, small.
-// The title is whole; the body is the first three lines of what the card says.
-// A card the hub minted from a reply has that reply's first line for a title
-// AND as the first line of its body; here, three lines tall, it is said once.
+// The title is whole and alone - no words under it; the chat holds the rest.
 function miniCardHTML(threadID, c) {
-  const lines = (c.detail || '').trim().split('\n');
-  const title = plainText(c.title);
-  if (lines.length > 1 && title && plainText(lines[0]).startsWith(title)) lines.shift();
-  const body = mdPreview(lines.join('\n').trim());
   return `<a class="ask mini ${c.tint}" href="#/sessions/${encodeURIComponent(threadID)}/${encodeURIComponent(c.id)}">
-      <div class="t"><span class="verb">${esc(c.verb)}</span>${c.mark} ${mdInline(c.title, false)}</div>
-      ${body ? `<div class="small muted wrap3">${body}</div>` : ''}</a>`;
+      <div class="t"><span class="verb">${esc(c.verb)}</span>${c.mark} ${mdInline(c.title, false)}</div></a>`;
 }
 // …and its SPEAKING pill, the one live fact a cell cannot carry (2026-09-25).
 const runningOnly = (b, t) => livePillsHTML((b.pills || {})[t.id]);
@@ -1101,19 +1092,8 @@ function sentByHTML(m) {
   return `<span class="by">sent by ${who}</span>`;
 }
 
-// Blobs are stored under their original extension, so an attachment that is a
-// picture can be shown as one instead of as the word "attachment" — the thumbnail links to the full file. HEIC only decodes in
-// Safari, hence the onerror fallback to a plain link.
-const isImageRef = r => /\.(png|jpe?g|gif|webp|heic|heif|avif)$/i.test(String(r || ''));
-function attachHTML(ref) {
-  const url = '/api/v1/blobs/' + esc(ref);
-  const name = esc(String(ref).split('/').pop());
-  if (!isImageRef(ref)) return `<a href="${url}" target="_blank" class="small att-file">📎 ${name}</a>`;
-  // Click opens it in the lightbox instead of a new tab — the href stays so
-  // ⌘-click and "open in new tab" still work.
-  return `<a href="${url}" target="_blank" class="att" onclick="return !openImage(this.href)"><img src="${url}" alt="${name}"
-    onerror="this.parentElement.outerHTML='<a href=\\'${url}\\' target=_blank class=\\'small att-file\\'>📎 ${name}</a>'"></a>`;
-}
+// (attachHTML, the picture-or-file of a blob, lives in ui.js: md() draws one
+// for a line that links a hub file.)
 
 // ---------- lightbox ----------
 // One overlay, as big as the window allows, click anywhere or Esc to close.

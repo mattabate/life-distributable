@@ -110,7 +110,10 @@ enum CalCals {
     /// The shade a bar, chip, mark or row icon is drawn in — its lane's
     /// colour, except the answered rec and the install cell. Same rule as
     /// `calShade` in `views/calgrid.js`.
-    static func shade(_ e: CalEntry) -> Color { recDone(e) ? recDone : e.isInstall ? install : color(e) }
+    /// A reminder (`note`) is dark blue the same way: still My tasks, akin to
+    /// the chat's read card. `#1e40af`, `CAL_NOTE`.
+    static let note = Color(red: 0.118, green: 0.251, blue: 0.686)
+    static func shade(_ e: CalEntry) -> Color { recDone(e) ? recDone : e.isInstall ? install : e.isNote ? note : color(e) }
     static func ink(_ e: CalEntry) -> Color { recDone(e) ? recInk : .white }
     /// A closed row fades — except the answered rec, whose shade IS its
     /// "closed": a faded pale purple would be a third purple.
@@ -437,14 +440,6 @@ struct CalTimeGrid: View {
     private var record: [CalEntry] { shown.filter { calIsRecord($0) && calMinutes($0.at) != nil } }
     private static let stripW: CGFloat = 22
 
-    /// The hour the grid opens on: an hour before the first thing of the day,
-    /// or 7 AM when the day has nothing timed in it. A day whose whole content
-    /// is the record counts — else the owner's marks open off-screen.
-    private var openingHour: Int {
-        guard let m = (timed + record).compactMap({ calMinutes($0.at) }).min() else { return 7 }
-        return max(0, m / 60 - 1)
-    }
-
     /// The band is as tall as its chips, up to four of them — then it scrolls,
     /// rather than pushing the clock off the screen or hiding rows behind a
     /// "+N more" that has nowhere left to open.
@@ -472,6 +467,8 @@ struct CalTimeGrid: View {
                                     Color.clear.frame(width: 1, height: Self.hourH).id("h\(h)")
                                 }
                             }
+                            // 12 PM's line, what the grid opens centred on.
+                            Color.clear.frame(width: 1, height: 1).id("noon").padding(.top, Self.hourH * 12)
                             lines(width: geo.size.width)
                             blocks(colW: planW)
                             strip(x: Self.gutterW + planW)
@@ -491,7 +488,9 @@ struct CalTimeGrid: View {
                     // Only on appear — the parent gives this view a new identity
                     // when the DAY changes, so a reload (or a tap that opens
                     // the sheet) leaves the scroll exactly where it was.
-                    .onAppear { proxy.scrollTo("h\(openingHour)", anchor: .top) }
+                    // 12 PM in the middle of the clock; deferred a turn so the
+                    // GeometryReader has its size first.
+                    .onAppear { DispatchQueue.main.async { proxy.scrollTo("noon", anchor: .center) } }
                 }
             }
             // The record column runs the whole height, band included, so it

@@ -145,6 +145,7 @@ func main() {
 	thr.BlobPath = ob.BlobPath
 	thr.IntakePath = ob.IntakePath
 	thr.AutoCompactWindow = cfg.AutoCompactWindow
+	thr.Transcripts = filepath.Join(home, ".claude", "projects")
 	if push != nil {
 		// A spoken card marks its session "speaking" on the Sessions list.
 		push.Voice = thr.Voice

@@ -414,6 +414,14 @@ func (m *Manager) Queue(p Prompt) (Prompt, error) {
 			const why = "read card closed; no words to deliver"
 			m.db.Exec(`UPDATE prompts SET state='cancelled', error=? WHERE id=?`, why, p.ID)
 			p.State, p.Error = "cancelled", why
+			// Still the owner's message in the chat, recorded as sent and
+			// never queued: the session is not woken for it.
+			if id, err := m.Reach(p.Target); err == nil && id != "" {
+				now := time.Now()
+				m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, attachments, queued, in_reply_to, outcome, replies, author, via) VALUES (?,?,?,?,?,'[]',0,?,?,?,?,?)`,
+					id, ts(now), p.role(), p.kind(), "", p.Replies[0].Ref, p.Replies[0].Outcome, encodeReplies(p.Replies), p.Author, p.Via)
+				m.db.Exec(`UPDATE threads SET updated_at=? WHERE id=?`, ts(now), id)
+			}
 			return p, nil
 		}
 	}

@@ -281,7 +281,9 @@ function trimBareURL(u) {
 }
 
 function mdInline(src, links = true) {
-  let s = esc(String(src ?? ''));
+  // A picture inside a sentence is its caption as a link: only a line of its
+  // own draws the picture (md, BLOB_LINE).
+  let s = esc(String(src ?? '').replace(/!\[([^\]]*)\]\(/g, (_, a) => `[${a || 'image'}](`));
   s = links
     ? s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
        .replace(/(^|[\s(])(https?:\/\/[^\s<\]]+)/g, (_, pre, u) => {
@@ -386,6 +388,39 @@ function mdCopy(btn) {
   else old();
 }
 
+// Blobs are stored under their original extension, so an attachment that is a
+// picture can be shown as one instead of as the word "attachment" - the
+// thumbnail links to the full file. HEIC only decodes in Safari, hence the
+// onerror fallback to a plain link.
+const isImageRef = r => /\.(png|jpe?g|gif|webp|heic|heif|avif)$/i.test(String(r || ''));
+function attachHTML(ref) {
+  const url = '/api/v1/blobs/' + esc(ref);
+  const name = esc(String(ref).split('/').pop());
+  if (!isImageRef(ref)) return `<a href="${url}" target="_blank" class="small att-file">📎 ${name}</a>`;
+  // Click opens it in the lightbox instead of a new tab - the href stays so
+  // ⌘-click and "open in new tab" still work.
+  return `<a href="${url}" target="_blank" class="att" onclick="return !openImage(this.href)"><img src="${url}" alt="${name}"
+    onerror="this.parentElement.outerHTML='<a href=\\'${url}\\' target=_blank class=\\'small att-file\\'>📎 ${name}</a>'"></a>`;
+}
+
+// A line that is only a hub file - `![caption](.../api/v1/blobs/<ref>)`,
+// `[name](...)` or the bare URL - is that file in the text: the picture
+// itself, or a 📎 chip for a PDF. Only the ref is kept, so the file loads from
+// whatever host serves the page. The StyledText twin is `blobLineRef`
+// (StyledText.swift).
+const BLOB_LINE = /^\s*(?:!?\[([^\]]*)\]\()?(?:https?:\/\/[^\s/)]+)?\/api\/v1\/blobs\/([\w.\/-]+)\)?\s*$/;
+function blobLine(l) {
+  const m = String(l || '').match(BLOB_LINE);
+  return m && !m[2].includes('..') ? { ref: m[2], caption: (m[1] || '').trim() } : null;
+}
+const blobLineRef = l => blobLine(l)?.ref ?? null;
+// Files on lines in a row (blank lines between are fine) draw as ONE strip of
+// small captioned tiles, a click opening the whole file.
+function filesHTML(files) {
+  return `<div class="md-files">${files.map(f =>
+    `<figure>${attachHTML(f.ref)}${f.caption ? `<figcaption>${esc(f.caption)}</figcaption>` : ''}</figure>`).join('')}</div>`;
+}
+
 function md(src) {
   const lines = String(src ?? '').split('\n');
   let out = '', list = null;
@@ -434,6 +469,21 @@ function md(src) {
       if (align) out += `<thead>${td(row0, 'th')}</thead>`; else rows.unshift(row0);
       if (rows.length) out += `<tbody>${rows.map(r => td(r, 'td')).join('')}</tbody>`;
       out += '</table>';
+      i = j - 1;
+      continue;
+    }
+    const blob = blobLine(l);
+    if (blob) {
+      close();
+      const files = [blob];
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        if (!lines[j].trim()) continue;
+        const f = blobLine(lines[j]);
+        if (!f) break;
+        files.push(f);
+      }
+      out += filesHTML(files);
       i = j - 1;
       continue;
     }

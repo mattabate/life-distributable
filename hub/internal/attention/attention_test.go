@@ -103,11 +103,11 @@ func TestBoardBothSurfaces(t *testing.T) {
 	}
 }
 
-// The owner's own dated work is not a session's turn: an ask of class
-// `practice` (a daily practice) or `step` (the dentist) is listed under
-// `calendar` and nowhere else — not counted, no "for you" on its session,
-// not the card its row opens on — on both surfaces. Sessions is where
-// something is BLOCKED on the owner; the Calendar tab counts these. And a
+// Sessionless work is not a session's turn: a `practice` (a daily practice)
+// or a chore (a step on the calendar thread) is listed under `calendar` and
+// nowhere else - not counted, no "for you", not the card a row opens on - on
+// both surfaces. A fired step IN a session is that session's turn like any
+// card. And a
 // row whose cards only ask the owner to install a build says so: `installs`
 // equal to `for_you` draws teal, never red.
 func TestHisWorkIsTheCalendarsNotASessions(t *testing.T) {
@@ -124,44 +124,47 @@ func TestHisWorkIsTheCalendarsNotASessions(t *testing.T) {
 		// a step the owner replied to (a8) is off its session's row and the
 		// calendar list.
 		{ID: "a8", ThreadID: "movie", Surface: "any", State: "answered", Kind: "physical", Class: "step", CalID: "cal-5", CalDay: "2026-09-10", Title: "Order the new computer"},
+		// A chore: a step on the calendar thread, no session of its own.
+		{ID: "a9", ThreadID: "calendar", Surface: "any", State: "open", Kind: "physical", Class: "step", CalID: "cal-6", CalDay: "2026-09-12", Title: "Wash your face"},
 	}
 	for _, surface := range []string{"web", "mobile"} {
 		b := Build(surface, asks, nil, ths)
-		if b.Count != 3 || b.Badges.YourTurn != 3 {
-			t.Fatalf("%s: only what blocks the owner counts: count=%d", surface, b.Count)
+		if b.Count != 5 || b.Badges.YourTurn != 5 {
+			t.Fatalf("%s: what blocks the owner and steps in sessions count: count=%d", surface, b.Count)
 		}
-		if b.ForYou["pitch"] != 0 || b.ForYou["calendar"] != 0 || b.ForYou["dentist"] != 0 || b.ForYou["movie"] != 2 || b.ForYou["ship"] != 1 {
+		if b.ForYou["pitch"] != 0 || b.ForYou["calendar"] != 0 || b.ForYou["dentist"] != 1 || b.ForYou["movie"] != 3 || b.ForYou["ship"] != 1 {
 			t.Fatalf("%s: for_you=%v", surface, b.ForYou)
 		}
-		if _, ok := b.First["dentist"]; ok || b.Todo["dentist"] != "" {
-			t.Fatalf("%s: a step is not the card a session row opens on: first=%v todo=%v", surface, b.First, b.Todo)
+		if b.First["dentist"] != "a2" {
+			t.Fatalf("%s: the dentist session opens on its step: first=%v", surface, b.First)
 		}
-		// The calendar list: the counted dated ask first (a5, no class = it
-		// unblocks a session), then the owner's own work oldest day first.
+		// The calendar list: the counted dated asks in the order raised, then
+		// the sessionless work oldest day first.
 		var got []string
 		for _, a := range b.Calendar {
 			got = append(got, a.ID)
 		}
-		if strings.Join(got, " ") != "a5 a2 a1 a6" {
+		if strings.Join(got, " ") != "a2 a5 a6 a1 a9" {
 			t.Fatalf("%s: calendar %v", surface, got)
 		}
-		// A step in a LISTED session's chat rides that row, uncounted: the row
-		// draws what the chat draws. It never lists a session.
 		for _, s := range b.Sessions {
-			if s.ID == "movie" && (len(s.Steps) != 1 || s.Steps[0].ID != "a6" || s.N != 2 || s.Asks[0].ID != "a5" || s.Asks[1].ID != "a7") {
-				t.Fatalf("%s: movie's step rides its row: %+v", surface, s)
+			if s.ID == "movie" && (len(s.Steps) != 0 || len(s.Asks) != 3 || s.Asks[0].ID != "a5" || s.Asks[1].ID != "a6" || s.Asks[2].ID != "a7") {
+				t.Fatalf("%s: movie's step is one of its cards: %+v", surface, s)
 			}
 		}
-		if b.Open["movie"] != 3 || b.Open["ship"] != 1 || b.Open["dentist"] != 0 {
+		if b.Open["movie"] != 3 || b.Open["ship"] != 1 || b.Open["dentist"] != 1 {
 			t.Fatalf("%s: open=%v", surface, b.Open)
 		}
 		if b.Installs["ship"] != 1 || b.Installs["movie"] != 0 {
 			t.Fatalf("%s: installs=%v", surface, b.Installs)
 		}
 		for _, s := range b.Sessions {
-			if s.ID == "dentist" || s.ID == "calendar" {
-				t.Fatalf("%s: no bundle for the owner's own work: %+v", surface, s)
+			if s.ID == "calendar" || s.ID == "pitch" {
+				t.Fatalf("%s: no bundle for sessionless work: %+v", surface, s)
 			}
+		}
+		if b.Section["dentist"] != "your_turn" {
+			t.Fatalf("%s: the dentist session is under Your turn: %v", surface, b.Section)
 		}
 	}
 }
@@ -200,15 +203,18 @@ func TestInstallCardIsTheDevices(t *testing.T) {
 		{ID: "r1", ThreadID: "both", Surface: "any", State: "open", Kind: "read", Title: "The toolbar is in"},
 	}
 	for _, tc := range []struct {
-		surface         string
-		count           int
-		ship, mac, both int
-		shipSec, macSec string
-		bothPill        string
+		surface           string
+		count             int
+		ship, mac, both   int
+		shipSec, macSec   string
+		shipPill, macPill string
+		bothPill          string
 	}{
-		{"web", 4, 1, 1, 2, "your_turn", "your_turn", "1 to read/read 1 to install/install"},
-		{"mobile", 3, 1, 0, 2, "your_turn", "", "1 to read/read 1 to install/install"},
-		{"desktop", 2, 0, 1, 1, "", "your_turn", "1 to read/read"},
+		// The session whose only card is hidden here wears "done" - the pill
+		// it would wear with no card - never the thread's own "your turn".
+		{"web", 4, 1, 1, 2, "your_turn", "your_turn", "1 to install/install", "1 to install/install", "1 to read/read 1 to install/install"},
+		{"mobile", 3, 1, 0, 2, "your_turn", "", "1 to install/install", "done/done", "1 to read/read 1 to install/install"},
+		{"desktop", 2, 0, 1, 1, "", "your_turn", "done/done", "1 to install/install", "1 to read/read"},
 	} {
 		b := Build(tc.surface, asks, nil, ths)
 		if b.Surface != tc.surface || b.Count != tc.count || b.Badges.YourTurn != tc.count {
@@ -222,6 +228,16 @@ func TestInstallCardIsTheDevices(t *testing.T) {
 		}
 		if b.Section["ship"] != tc.shipSec || b.Section["mac"] != tc.macSec {
 			t.Fatalf("%s: section=%v", tc.surface, b.Section)
+		}
+		pillOf := func(id string) string {
+			var ps []string
+			for _, p := range b.Pills[id] {
+				ps = append(ps, p.Word+"/"+p.Tone)
+			}
+			return strings.Join(ps, " ")
+		}
+		if pillOf("ship") != tc.shipPill || pillOf("mac") != tc.macPill {
+			t.Fatalf("%s: ship pill=%q mac pill=%q", tc.surface, pillOf("ship"), pillOf("mac"))
 		}
 		var ps []string
 		for _, p := range b.Pills["both"] {

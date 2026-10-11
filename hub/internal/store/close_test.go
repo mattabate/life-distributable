@@ -77,7 +77,7 @@ func TestStandingIsTheClientsOldLists(t *testing.T) {
 		want  string
 	}{
 		{"dismissed", true, "mine", "wont"}, {"denied", true, "mine", "wont"}, {"failed", true, "agents", "wont"},
-		{"expired", false, "recs", "wont"}, {"declined", true, "recs", "wont"},
+		{"expired", false, "recs", "wont"}, {"declined", true, "recs", "wont"}, {"superseded", false, "recs", "wont"},
 		{"done", false, "agents", "done"}, {"accepted", false, "recs", "done"}, {"approved", true, "mine", "done"},
 		{"scheduled", false, "mine", "todo"}, {"scheduled", false, "homework", "todo"}, {"fired", false, "chores", "todo"},
 		{"scheduled", false, "scheduled", ""}, {"proposed", false, "recs", ""},

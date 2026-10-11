@@ -79,3 +79,43 @@ Entry format:
   place without sliding in.
 - How: same merge as add-0002. By hand: `RecsView.swift`, `RecCard.swift`,
   `RootView.swift`, `ConfigView.swift`.
+
+## add-0005 · 2026-10-11 · Pictures in replies, title-only session cards
+- For: everyone
+- Offer: When an agent puts a hub file alone on a line (the
+  `![name](url)` line `ops/blob-put.py` now prints, relative paths
+  accepted), the picture or a file chip is drawn in cards and replies;
+  several pictures sit in a strip of small captioned tiles and a click or
+  tap opens the whole file. Session cells show their title only. On All
+  sessions a row's left bar is red under Your turn, blue under Working,
+  none otherwise. Configuration's plan limit bars stack one full-width bar
+  per row while the card sits beside Goals.
+- How: `git merge upstream/main`, conflicts resolved in favour of the
+  owner's own changes, then `make check`, `make webcheck`,
+  `ops/hub.sh restart`, `make ship`. By hand: `web/ui.js`,
+  `views/threads.js`, `app.css`, `StyledText.swift`, `Attachments.swift`,
+  `ThreadRows.swift`, `ConfigView.swift`, `ops/blob-put.py`, `ops/py.sh`.
+
+## add-0006 · 2026-10-11 · Calendar: noon in view, reminders read like cards
+- For: everyone
+- Offer: Week and day views open with 12 PM in the middle. A day's all-day
+  row holds four items, and "+N more" opens the rest. A reminder is a dark
+  blue My tasks row that answers Respond · Read: Read closes it, Respond
+  sends the words to its session. A rec that was replaced is crossed out,
+  and a rec row opens as its card with "open rec" to go to Recs.
+- How: same merge as add-0005. By hand: `views/calgrid.js`,
+  `views/calendar.js`, `store/close.go`, `calendar/calendar.go`,
+  `CalendarView.swift`, `CalendarGrid.swift`, `CalendarWeek.swift`,
+  `RespondSheet.swift`.
+
+## add-0007 · 2026-10-11 · Steadier sessions and app
+- For: everyone
+- Offer: A session whose saved transcript was cleaned up starts afresh
+  instead of failing on every message. Answering a read card with no words
+  still shows in the chat and does not wake the session. A calendar step
+  that fired inside a session shows under Your turn. A session whose only
+  card is the other device's app build no longer shows a red "your turn".
+  The app cancels and retries a request stuck waiting for a connection
+  during a hub restart, so one tap no longer stalls the rest.
+- How: same merge as add-0005. By hand: `threads/runner.go`,
+  `threads/prompts.go`, `attention/attention.go`, `HubClient.swift`.

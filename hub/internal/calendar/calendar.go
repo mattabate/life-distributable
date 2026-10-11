@@ -350,7 +350,8 @@ func stampEntry(e *Entry) {
 		e.Lane = "agents"
 	}
 
-	e.Closed = e.Did || e.State == "done" || e.State == "accepted" || store.Wont(e.State) ||
+	// A superseded rec is closed too: it must not look like an open one.
+	e.Closed = e.Did || e.State == "done" || e.State == "accepted" || e.State == "superseded" || store.Wont(e.State) ||
 		(e.Kind == "action" && e.State != "" && e.State != "proposed")
 	e.Mark = store.CalMark(e.State, e.Did, e.Lane)
 	e.Open = false

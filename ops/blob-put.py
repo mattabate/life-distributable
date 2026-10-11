@@ -8,7 +8,11 @@ reaches them: the blob's URL opens in the console (cookie auth) and
 `GET /api/v1/blobs/<ref>` serves it. Address, token and TLS come from
 hublib (ops/hub.json); only the hub on the tailnet is contacted.
 
-  ops/py.sh blob-put.py <file> [note]     -> prints ref and the console URL
+The last line printed is ready to paste: `![name](url)` on a line of its own
+in a reply or a card's --detail is drawn AS the picture (a PDF as a file
+chip) on the console, the desktop app and the phone.
+
+  ops/py.sh blob-put.py <file> [note]     -> prints ref, the URL, the markdown line
 """
 import json
 import mimetypes
@@ -23,7 +27,7 @@ def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
         return 2
-    path = sys.argv[1]
+    path = os.path.join(os.environ.get("PY_CALLER_PWD", ""), sys.argv[1])
     note = sys.argv[2] if len(sys.argv) > 2 else ""
     name = os.path.basename(path)
     ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
@@ -45,7 +49,9 @@ def main() -> int:
         return 1
     ref = json.loads(out).get("blob_ref", "")
     print(f"{name}: {ref}")
-    print(hublib.url(f"/api/v1/blobs/{ref}"))
+    url = hublib.url(f"/api/v1/blobs/{ref}")
+    print(url)
+    print(f"![{os.path.splitext(name)[0]}]({url})")
     return 0
 
 

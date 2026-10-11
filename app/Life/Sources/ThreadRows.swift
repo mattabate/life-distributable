@@ -106,7 +106,18 @@ struct AllThreadsView: View {
         .padding(.vertical, 1)
         .contentShape(Rectangle())
         .onTapGesture { nav.card = OpenAsk(thread: t, message: nil, card: board.first[t.id].flatMap { $0.isEmpty ? nil : $0 }) }
-        .rowAccent(statusColor(t.status))
+        .rowAccent(rail(t))
+    }
+
+    /// The rail is the sidebar's heading for this session: red under Your
+    /// turn, blue under Working, none when the sidebar does not list it.
+    func rail(_ t: Thread) -> Color {
+        guard store.board != nil else { return statusColor(t.status) }
+        switch board.section?[t.id] {
+        case "your_turn": return .red
+        case "working": return .blue
+        default: return .secondary
+        }
     }
 
     func load() async { await store.refresh(hub) }
@@ -114,15 +125,13 @@ struct AllThreadsView: View {
 
 /// One open card on a session's row, worded the console's way (`sessionCards`
 /// + `miniCardHTML`, views/threads.js): what it wants from the owner in one word
-/// (`verb`), its whole title, the first lines of what it says, and the tint
+/// (`verb`), its whole title, and the tint
 /// its class wears. Built from the board's bundle so the phone and the console
 /// draw the same cells in the same order.
 struct SessionCell: Identifiable, Hashable {
     let id: String
     let title: String
-    /// The card's words under the title (nil: an install's title is the whole
-    /// instruction, an error's body is a log).
-    let body: String?
+    // No words under the title: it says what it wants, the chat holds the rest.
     let verb: String
     /// `needs` (red) · `read` (blue) · `install` (teal) · `error` (grey).
     let tone: String
@@ -140,12 +149,11 @@ struct SessionCell: Identifiable, Hashable {
     /// then its asks, then the owner's dated steps — the board's order, untouched.
     static func cells(_ s: BoardSession) -> [SessionCell] {
         let acts = s.actions.map { a in
-            SessionCell(id: a.id, title: a.title, body: body(a.title, a.detail), verb: "approve", tone: "needs", step: false)
+            SessionCell(id: a.id, title: a.title, verb: "approve", tone: "needs", step: false)
         }
         let asks = (s.asks + (s.steps ?? [])).enumerated().map { i, a in
             let k = a.kind
             return SessionCell(id: a.id, title: a.title,
-                               body: k == "install" || k == "error" ? nil : body(a.title, a.detail),
                                verb: a.verb ?? "for you",  // the hub's word (store.AskVerb)
                                tone: k == "read" ? "read" : k == "install" ? "install" : k == "error" ? "error" : "needs",
                                step: i >= s.asks.count)
@@ -153,16 +161,6 @@ struct SessionCell: Identifiable, Hashable {
         return acts + asks
     }
 
-    /// The body under the title: the detail flattened to one paragraph
-    /// (`previewLine`, the console's mdPreview), less a first line that
-    /// repeats the title — a card the hub minted from a reply has that reply's
-    /// first line as its title AND as the first line of its body, and three
-    /// lines tall it is said once.
-    static func body(_ title: String, _ detail: String) -> String? {
-        var lines = detail.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        if lines.count > 1, !plain(title).isEmpty, plain(lines[0]).hasPrefix(plain(title)) { lines.removeFirst() }
-        return previewLine(lines.joined(separator: "\n"))
-    }
     /// Markdown links to their text, then every mark that would make two
     /// spellings of one sentence differ — the console's `plain`.
     static func plain(_ s: String) -> String {
@@ -173,8 +171,8 @@ struct SessionCell: Identifiable, Hashable {
 }
 
 /// One cell: the chat's card, small — the console's `.ask.mini`. The corner
-/// verb says what it wants; the title is whole; the body is clamped to three
-/// lines. A tap lands the chat on this very card.
+/// verb says what it wants; the title is whole. A tap lands the chat on this
+/// very card.
 struct MiniCard: View {
     let c: SessionCell
     let tap: () -> Void
@@ -186,9 +184,6 @@ struct MiniCard: View {
                     Text(md(c.title)).font(.subheadline.weight(.medium)).multilineTextAlignment(.leading)
                     Spacer(minLength: 4)
                     Text(c.verb).font(.caption2).foregroundStyle(c.color).layoutPriority(1)
-                }
-                if let b = c.body, !b.isEmpty {
-                    Text(md(b)).font(.caption).foregroundStyle(.secondary).lineLimit(3).multilineTextAlignment(.leading)
                 }
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
@@ -214,7 +209,7 @@ struct WebPill: View {
 
 /// The console's `.card.sess > .ask.mini`: a full-width row under a hairline,
 /// a 3pt tint rail on the left, the whole title, the verb in caps in a tinted
-/// box at the right, three lines of what it says.
+/// box at the right.
 struct WebMiniCard: View {
     let c: SessionCell
     let tap: () -> Void
@@ -230,9 +225,6 @@ struct WebMiniCard: View {
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .background(c.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
                         .layoutPriority(1)
-                }
-                if let b = c.body, !b.isEmpty {
-                    Text(md(b)).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(3).multilineTextAlignment(.leading)
                 }
             }
             .padding(.leading, 13).padding(.trailing, 14).padding(.vertical, 9)

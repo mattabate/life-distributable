@@ -125,7 +125,11 @@ const calRecDone = e => calIsRec(e) && !!e.did;
 // (app.css --teal, the same value).
 const CAL_INSTALL = '#0d9488';
 const calIsInstall = e => e.ask_kind === 'install' && (e.kind === 'ask' || !!e.did);
-const calShade = e => (calRecDone(e) ? CAL_REC_DONE : calIsInstall(e) ? CAL_INSTALL : calColor(e));
+// A reminder (`note`) is dark blue: still My tasks, but akin to the chat's
+// read card.
+const CAL_NOTE = '#1e40af';
+const calShade = e => (calRecDone(e) ? CAL_REC_DONE : calIsInstall(e) ? CAL_INSTALL
+  : e.kind === 'note' ? CAL_NOTE : calColor(e));
 const calRecCls = e => (calIsRec(e) ? (calRecDone(e) ? ' rec decided' : ' rec') : '');
 // The id a pile opens under: one member opens its own card, many open the
 // popout that lists them.
@@ -377,7 +381,7 @@ function calTimeGridHTML(cal, from, to) {
   // the all-day band rather than vanishing (nothing files one today).
   const bandOf = d => (byDay[d] || []).filter(e => !e.at);
   const recOf = d => (byDay[d] || []).filter(e => e.at && calIsRecord(e));
-  const allDayRows = Math.max(1, ...days.map(d => bandOf(d).length));
+  const allDayRows = Math.max(1, ...days.map(d => Math.min(CAL_BAND_MAX, bandOf(d).length)));
   // The strip's width is reserved across the whole grid or none of it: columns
   // of two different widths in one week read as a rendering fault.
   const strip = days.some(d => recOf(d).length > 0);
@@ -390,7 +394,7 @@ function calTimeGridHTML(cal, from, to) {
   }).join('');
 
   const band = days.map(d => `<div class="cal-allday" data-day="${d}">${
-    bandOf(d).map(calChipHTML).join('')}</div>`).join('');
+    calBandHTML(bandOf(d))}</div>`).join('');
 
   const hours = Array.from({ length: 24 }, (_, h) =>
     `<div class="cal-hour" style="height:${CAL_HOUR_H}px"><span>${h === 0 ? '' : calD3(h)}</span></div>`).join('');
@@ -594,6 +598,19 @@ function calGroupBlockHTML(p) {
 }
 const calGroupTip = es => es.map(m => (m.at ? m.at + ' ' : '') + calGlyph(m) + calLabel(m)).join('\n');
 
+// A day's all-day band holds four rows at most: past four, the open ones come
+// first, three show and a fourth row says "+N more" and opens the whole day's
+// band as the pile popout.
+const CAL_BAND_MAX = 4;
+function calBandHTML(es) {
+  if (es.length <= CAL_BAND_MAX) return es.map(calChipHTML).join('');
+  const sorted = [...es.filter(e => !calClosed(e)), ...es.filter(calClosed)];
+  const hidden = sorted.slice(CAL_BAND_MAX - 1);
+  return sorted.slice(0, CAL_BAND_MAX - 1).map(calChipHTML).join('')
+    + `<div class="cal-ev chip more" data-id="grp:${esc(sorted.map(m => m.id).join(','))}" data-day="${esc(es[0].day)}"
+      title="${esc(calGroupTip(hidden))}"><span class="t">+${hidden.length} more</span></div>`;
+}
+
 // An all-day chip, and a month cell's row (`row`: always the lane's dot, no
 // ○ — every row a month cell draws is an open step of the owner's).
 function calChipHTML(e) {
@@ -641,7 +658,8 @@ function calGroupPanelHTML(cal) {
   // A run of record is named for its session: "7 steps in <session
   // title>" — the deliverable, then the steps that made it.
   const { title, n } = calGroupLabel(es);
-  const what = n.startsWith('+') ? `${es.length} ${esc(lane.label.toLowerCase())} in one box` : `${esc(n)} in ${esc(title)}`;
+  const what = es.every(e => !e.at) ? `${es.length} all day`
+    : n.startsWith('+') ? `${es.length} ${esc(lane.label.toLowerCase())} in one box` : `${esc(n)} in ${esc(title)}`;
   return `<div class="cal-overlay" onclick="if(event.target===this)calClose()">
     <div class="cal-panel">
       <div class="cal-panelhead">
@@ -649,7 +667,7 @@ function calGroupPanelHTML(cal) {
         <div><div class="cal-when">${esc(when)}</div><div class="small muted">${what}</div></div>
         <div class="grow"></div><button class="sm icon" onclick="calClose()" title="Close">✕</button>
       </div>
-      ${es.map(e => `<div class="cal-ev rail${calClosed(e) ? ' closed' : ''}${calWont(e)}" data-id="${esc(e.id)}" style="--c:${calColor(e)}">
+      ${es.map(e => `<div class="cal-ev rail${calClosed(e) ? ' closed' : ''}${calWont(e)}" data-id="${esc(e.id)}" style="--c:${calShade(e)}">
         <span class="dot"></span><span class="at">${esc(e.at || '')}</span><span class="t">${calGlyph(e)}${esc(calLabel(e))}</span></div>`).join('')}
     </div></div>`;
 }
@@ -725,14 +743,13 @@ function calScrollRestore(view) {
     if (!calScrollApplying) calScrollTops.set(key, sc.scrollTop);
   }, { passive: true });
   if (calScrollTops.has(key)) { calScrollPut(sc, key, calScrollTops.get(key)); return; }
-  // A range seen for the first time opens on the hour most likely wanted: the earliest thing on it, else 7am — never midnight,
-  // which is eight empty hours of nothing.
+  // A range seen for the first time opens with 12 PM in the middle of the
+  // clock. The header and band are sticky inside the scroller, so the clock
+  // seen is the height under them (`body.offsetTop`).
   const body = view.querySelector('.cal-cols.body');
   if (!body) return;
-  // Marks count as much as blocks: a past day whose whole content is the
-  // record would otherwise open at 7am with the strip's marks off-screen.
-  const first = [...view.querySelectorAll('.cal-ev.block, .cal-ev.mark')].map(el => parseFloat(el.style.top)).sort((a, b) => a - b)[0];
-  calScrollPut(sc, key, Math.max(0, body.offsetTop + (first === undefined ? 7 * CAL_HOUR_H : first) - CAL_HOUR_H * 1.5));
+  const stuck = body.offsetTop;
+  calScrollPut(sc, key, Math.max(0, stuck + 12 * CAL_HOUR_H - (stuck + sc.clientHeight) / 2));
 }
 function calScrollPut(sc, key, top) {
   calScrollApplying = true;

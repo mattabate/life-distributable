@@ -34,13 +34,9 @@ import (
 //     "~rN" revision for a re-sent key with a different payload.
 //   - Supersedes set by the writer (mail's parser bump) is stored as given.
 //
-// Future writers land the same way. The Mac recorder, car (internal/car,
-// 2026-09-28), is source `car`, kinds `speech` (a transcribed chunk,
-// revisable), `session` (revisable), `marker`, `activity` (app, window,
-// click, scroll… — never car's `typed`/`key` keystrokes) and `screen` (a
-// JPEG, blob first), each keyed `<device>:<session>[:<n>]`, so a re-read
-// window is skipped, not doubled, whichever route (the local syncer, or POST
-// /observations/batch from a laptop once the hub moves) the rows came in by.
+// Future writers land the same way: their own source, kinds keyed
+// `<device>:<n>`, so a re-read window is skipped, not doubled, whichever
+// route (a local syncer, or POST /observations/batch) the rows came in by.
 func (s *Store) Ingest(items []Observation) (Result, error) {
 	res := Result{Rows: make([]Observation, len(items))}
 	for i, o := range items {

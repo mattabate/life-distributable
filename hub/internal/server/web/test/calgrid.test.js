@@ -168,6 +168,44 @@ test('a collapsed box says +N and opens the popout listing every member', () => 
   calState.open = '';
 });
 
+test('the all-day band holds four; a fifth collapses to "+N more" opening the whole band', () => {
+  calState.off = new Set();
+  const step = (id, closed) => ({ id, kind: 'owner', lane: 'mine', day: '2026-10-10', at: '', title: 'step ' + id,
+    state: closed ? 'done' : 'scheduled', closed: !!closed, mark: closed ? 'done' : 'todo' });
+  const four = ['a', 'b', 'c', 'd'].map(id => step(id));
+  assert.doesNotMatch(calBandHTML(four), /more/);
+  assert.equal((calBandHTML(four).match(/cal-ev chip/g) || []).length, 4);
+  // Six, one closed: the open ones lead, three show, the fourth row is +3.
+  const six = [step('x', true), ...four, step('e')];
+  const html = calBandHTML(six);
+  assert.equal((html.match(/class="cal-ev chip[" ]/g) || []).length, 4);
+  assert.match(html, /chip more" data-id="grp:a,b,c,d,e,x"/);
+  assert.match(html, />\+3 more</);
+  assert.doesNotMatch(html.split('chip more')[0], /step x/);
+  calState.open = 'grp:a,b,c,d,e,x';
+  const panel = calPanelHTML({ days: [{ day: '2026-10-10', entries: six }] });
+  assert.match(panel, /6 all day/);
+  assert.match(panel, /data-id="x"/);
+  calState.open = '';
+  // The band is never taller than four rows.
+  const grid = calTimeGridHTML({ days: [{ day: '2026-10-10', entries: six }] }, '2026-10-10', '2026-10-10');
+  assert.match(grid, /min-height:92px/);
+});
+
+test('a reminder is dark blue and answers Respond then Read, never Did it / Skip / Send', () => {
+  assert.equal(calColor({ kind: 'note', lane: 'mine' }), '#d93025');
+  assert.equal(calShade({ kind: 'note', lane: 'mine' }), CAL_NOTE);
+  const note = { id: 'cal-n1', ref: 'cal:cal-n1', item: true, kind: 'note', lane: 'mine', state: 'scheduled', mark: 'todo', title: 'Window closes',
+    detail: 'Nothing to buy before today.', thread_id: 't-1', outcomes: [{ value: '', label: 'Respond' }, { value: 'done', label: 'Read' }] };
+  const nh = calEntryHTML(note, {});
+  assert.match(nh, /<span class="tick">○<\/span>Window closes/);
+  assert.match(nh, /composerSend\('cal:cal-n1',''\)[^>]*>Respond<[\s\S]*composerSend\('cal:cal-n1','done'\)[^>]*>Read</);
+  assert.match(calChipHTML({ ...note, day: '2026-10-10' }), new RegExp('--c:' + CAL_NOTE));
+  assert.doesNotMatch(nh, />Did it<|>Skip<|>Send<|resolveCal\('cal-n1','done'\)/);
+  // Closed, it is the plain row with Reopen.
+  assert.match(calEntryHTML({ ...note, state: 'done', closed: true, mark: 'done' }, {}), /Reopen/);
+});
+
 test('a block carries what the drop needs, and an immovable row says why', () => {
   const e = {
     id: 'cal-9f51', ref: 'cal:cal-9f51', kind: 'owner', state: 'scheduled',

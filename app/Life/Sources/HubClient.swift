@@ -231,12 +231,46 @@ final class HubClient {
     /// finishes in-flight requests, so a handled POST is never sent twice.
     nonisolated private static func dataRetryingRestart(_ req: URLRequest) async throws -> (Data, URLResponse) {
         var attempt = 0
+        let waiter = WaitCanceller()
         while true {
-            do { return try await session.data(for: req) } catch let e as URLError
+            // A request placed while the hub is down between drain and listen
+            // never connects: `waitsForConnectivity` parks it for the whole
+            // resource timeout, and every later request queues behind it.
+            // Nothing was sent, so drop it, drop the pool and retry; the last
+            // try may wait (the phone's radio asleep).
+            waiter.cancelOnWait = attempt < 5
+            do { return try await session.data(for: req, delegate: waiter) } catch let e as URLError
+                where e.code == .cancelled && waiter.takeWaited() {
+                resetPool("waiting for connectivity")
+                try await Task.sleep(nanoseconds: UInt64(250_000_000) << UInt64(attempt))
+                attempt += 1
+            } catch let e as URLError
                 where attempt < 5 && [.cannotConnectToHost, .networkConnectionLost].contains(e.code) {
                 try await Task.sleep(nanoseconds: UInt64(250_000_000) << UInt64(attempt))
                 attempt += 1
             }
+        }
+    }
+
+    /// Per-request delegate for `dataRetryingRestart`: a task that starts
+    /// waiting for connectivity (it never sent a byte) is cancelled when
+    /// `cancelOnWait` is set, and `takeWaited` tells the retry loop why.
+    private final class WaitCanceller: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancel = false
+        private var waited = false
+        var cancelOnWait: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return cancel }
+            set { lock.lock(); cancel = newValue; lock.unlock() }
+        }
+        func urlSession(_ session: URLSession, taskIsWaitingForConnectivity task: URLSessionTask) {
+            lock.lock(); let go = cancel; if go { waited = true }; lock.unlock()
+            if go { task.cancel() }
+        }
+        /// Whether the last try was cancelled for waiting; clears it.
+        func takeWaited() -> Bool {
+            lock.lock(); defer { waited = false; lock.unlock() }
+            return waited
         }
     }
 

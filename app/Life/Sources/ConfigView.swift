@@ -156,7 +156,10 @@ struct ConfigView: View {
                 }
                 .buttonStyle(.plain)
                 if q.available, !q.windows.isEmpty {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: mac ? 190 : 230), spacing: 18)], alignment: .leading, spacing: 6) {
+                    // On the Mac the card always sits beside Goals, too narrow
+                    // for bars on a row: one full-width bar per row instead,
+                    // the console's .cfg-lims.
+                    LazyVGrid(columns: mac ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 230), spacing: 18)], alignment: .leading, spacing: mac ? 8 : 6) {
                         ForEach(q.windows) { limit($0) }
                     }
                 } else if let e = q.error, !e.isEmpty {

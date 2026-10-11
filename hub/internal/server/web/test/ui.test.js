@@ -165,6 +165,30 @@ test('md: a pipe table is a table, not paragraphs of pipes', () => {
   assert.equal(md('a | b'), '<p>a | b</p>');
 });
 
+test('md: a line that is only a hub file draws the file; anywhere else it is a link', () => {
+  const ref = 'sha256/a6/a620d8.png';
+  for (const line of [`![before](https://host.example.ts.net:8443/api/v1/blobs/${ref})`,
+                      `[shot](https://host:8443/api/v1/blobs/${ref})`,
+                      `https://host:8443/api/v1/blobs/${ref}`, `  /api/v1/blobs/${ref}  `]) {
+    assert.equal(blobLineRef(line), ref, line);
+  }
+  const html = md(`**Now**\n\n![now](https://h:8443/api/v1/blobs/${ref})\n\nafter`);
+  assert.ok(html.startsWith('<p><strong>Now</strong></p><div class="md-files"><figure><a href="/api/v1/blobs/sha256/a6/a620d8.png"'), html);
+  assert.ok(html.includes('<img src="/api/v1/blobs/sha256/a6/a620d8.png"') && html.includes('<figcaption>now</figcaption>') && html.endsWith('<p>after</p>'), html);
+  // Files on lines in a row, blank lines between, are one strip of tiles.
+  const two = md(`![before](/api/v1/blobs/sha256/00/b.png)\n\n![after](/api/v1/blobs/sha256/00/a.png)\nend`);
+  assert.equal((two.match(/class="md-files"/g) || []).length, 1, two);
+  assert.equal((two.match(/<figure>/g) || []).length, 2, two);
+  assert.ok(two.endsWith('<p>end</p>'), two);
+  // Not a picture: a chip.
+  assert.ok(md('[bill](https://h/api/v1/blobs/sha256/00/abc.pdf)').includes('📎 abc.pdf'));
+  // Inside a sentence, in a list, or climbing out of the blob route: not a file.
+  assert.equal(blobLineRef(`see ![x](https://h/api/v1/blobs/${ref}) here`), null);
+  assert.equal(blobLineRef(`- ![x](https://h/api/v1/blobs/${ref})`), null);
+  assert.equal(blobLineRef('/api/v1/blobs/../secret'), null);
+  assert.equal(mdInline('see ![x](https://h/a.png) here'), 'see <a href="https://h/a.png" target="_blank" rel="noopener">x</a> here');
+});
+
 test('md: a fenced block keeps its text verbatim under a Copy button', () => {
   const box = (lang, text) => `<div class="md-code"><div class="md-code-bar"><span>${lang}</span>` +
     `<button type="button" class="md-copy" onclick="mdCopy(this)">Copy</button></div><pre><code>${text}</code></pre></div>`;
@@ -567,10 +591,10 @@ test('config: sources are sections of cards, by tag, each edged in its colour', 
   ];
   const h = cfgSourcesHTML(groups);
   assert.equal(h.split('<section class="sgroup"').length - 1, 2);
-  assert.match(h, /<section class="sgroup" style="--c:#181717;--n:3">\s*<h4>Code<span class="muted">3<\/span><\/h4>/);
+  assert.match(h, /<section class="sgroup" style="--c:#181717">\s*<h4>Code<span class="muted">3<\/span><\/h4>/);
   assert.ok(h.indexOf('>GitHub<') < h.indexOf('>GitLab<') && h.indexOf('>GitLab<') < h.indexOf('>YouTube<'));
   // No tag: the title on slate.
-  assert.match(h, /<section class="sgroup" style="--c:#64748B;--n:1">\s*<h4>Home<span class="muted">1<\/span><\/h4>/);
+  assert.match(h, /<section class="sgroup" style="--c:#64748B">\s*<h4>Home<span class="muted">1<\/span><\/h4>/);
   // The tile: letters on the provider's colour, or its logo path in its ink.
   assert.match(h, /<span class="bmark" style="background:#FF0000;color:#FFFFFF">▶<\/span>/);
   assert.match(h, /<span class="bmark logo" style="background:#181717;color:#FFFFFF"><svg viewBox="0 0 24 24" aria-label="GH"><path fill="currentColor" d="M12 .297c-6.63 0-12 5.373-12 12"\/><\/svg><\/span>/);

@@ -55,7 +55,12 @@ struct RespondSubject {
     var footer = ""
     enum QuietClose { case cal(String) }
 
-    /// A homework row on the calendar: the console's calHomeworkBox.
+    /// A reminder (`note`): its words close it as read whichever chip sent
+    /// them - Respond on a read card is its answer, as in the chat.
+    var wordsClose = false
+
+    /// A homework row on the calendar: the console's calHomeworkBox. A
+    /// reminder takes the same box with the hub's Respond · Read.
     init(homework e: CalEntry, first: String) {
         ref = "cal:" + e.id
         title = e.title
@@ -63,6 +68,7 @@ struct RespondSubject {
         threadID = e.thread_id ?? ""
         quiet = .cal(e.id)
         newTitle = e.title
+        wordsClose = e.isNote
         outcomes = Self.chips(e.outcomes)
         initial = outcomes.first { $0.value == first } ?? .none
     }
@@ -219,6 +225,10 @@ final class RespondModel {
         }
         if subject.quiet != nil {
             let words = subject.threadID.isEmpty ? "start a session about it" : "go to its session"
+            if subject.wordsClose {
+                return outcome.value == "done" ? "Marked read. With nothing typed it just closes; anything you type will \(words)."
+                    : "Your words \(words), and it closes as read."
+            }
             switch outcome.value {
             case "done": return "Marked done. With nothing typed it just closes; anything you type will \(words)."
             case "wont": return "Skipped. With nothing typed it just closes; anything you type will \(words)."
@@ -265,7 +275,7 @@ final class RespondModel {
                     let refs = try await attachments.upload(to: hub, threadID: subject.threadID.isEmpty ? nil : subject.threadID)
                     try await hub.postPrompt(target: subject.threadID.isEmpty ? "new" : "new-or:" + subject.threadID,
                                              text: text + subject.footer, re: subject.ref,
-                                             outcome: outcome.value,
+                                             outcome: subject.wordsClose && outcome.value.isEmpty ? "done" : outcome.value,
                                              title: subject.newTitle, attachments: refs)
                     await finished()
                     return

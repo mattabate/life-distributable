@@ -13,6 +13,9 @@
 # a new one is still possible — and shows up in `git status`, which is the
 # point: arbitrary code becomes something you can see in a diff.
 set -euo pipefail
+# Where it was called from, so a script can take a relative path argument
+# (blob-put.py ops/logs/x.png) although it runs from ops/.
+export PY_CALLER_PWD="$PWD"
 cd "$(dirname "$0")"
 
 if [[ $# -eq 0 ]]; then

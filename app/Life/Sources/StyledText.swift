@@ -39,12 +39,14 @@ struct StyledText: View {
         // A fenced block is its own box with a Copy button, so a text holding
         // one is a stack: text view, box, text view. Anything else — nearly
         // every message — stays the single text view it was.
-        if text.contains("```") {
+        // A line that is only a hub file is the file itself (`blobLine`).
+        if text.contains("```") || text.contains("/api/v1/blobs/") {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(mdSegments(text).enumerated()), id: \.offset) { _, seg in
                     switch seg {
                     case .text(let t): SelectableText(attributed: cached(t), tint: UIColor(color), chat: chatHook, lines: lines)
                     case .code(let code, let lang): CodeBlock(code: code, lang: lang, style: style)
+                    case .files(let files): FileStrip(files: files)
                     }
                 }
             }
@@ -480,6 +482,57 @@ func mdTableSeparator(_ line: String) -> [NSTextAlignment]? {
 enum MdSegment: Equatable {
     case text(String)
     case code(String, lang: String)
+    /// Hub blobs on lines in a row (blank lines between are fine): one strip
+    /// of small tiles, pictures or file chips.
+    case files([MdFile])
+}
+
+struct MdFile: Equatable, Hashable {
+    let ref: String
+    /// The link's [text], drawn under the tile.
+    let caption: String
+}
+
+/// A line that is only a hub file - `![caption](.../api/v1/blobs/<ref>)`,
+/// `[name](...)` or the bare URL - else nil. The line IS the picture, fetched
+/// with the token from whichever hub this is. The console's twin is
+/// `blobLine` in ui.js, same pattern.
+func blobLine(_ line: String) -> MdFile? {
+    guard let m = line.wholeMatch(of: /\s*(?:!?\[([^\]]*)\]\()?(?:https?:\/\/[^\s\/)]+)?\/api\/v1\/blobs\/([\w.\/-]+)\)?\s*/),
+          !m.2.contains("..") else { return nil }
+    return MdFile(ref: String(m.2), caption: String(m.1 ?? "").trimmingCharacters(in: .whitespaces))
+}
+func blobLineRef(_ line: String) -> String? { blobLine(line)?.ref }
+
+/// The strip: small same-size tiles, wrapping, each captioned, a click (tap)
+/// opening the whole file. The console's `filesHTML`.
+struct FileStrip: View {
+    let files: [MdFile]
+    #if targetEnvironment(macCatalyst)
+    static let tile = CGSize(width: 240, height: 150)
+    #else
+    static let tile = CGSize(width: 160, height: 104)
+    #endif
+    var body: some View {
+        FlowRow(spacing: 10) {
+            ForEach(files, id: \.self) { f in
+                VStack(alignment: .leading, spacing: 3) {
+                    if isImageRef(f.ref) {
+                        BlobImage(ref: f.ref, maxHeight: Self.tile.height)
+                            .frame(width: Self.tile.width, height: Self.tile.height)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1)))
+                    } else {
+                        BlobDocument(ref: f.ref)
+                    }
+                    if !f.caption.isEmpty {
+                        Text(f.caption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .frame(maxWidth: Self.tile.width, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
 }
 
 func mdSegments(_ text: String) -> [MdSegment] {
@@ -493,6 +546,17 @@ func mdSegments(_ text: String) -> [MdSegment] {
     let lines = text.components(separatedBy: "\n")
     var i = 0
     while i < lines.count {
+        if let first = blobLine(lines[i]) {
+            flush()
+            var files = [first]
+            i += 1
+            while i < lines.count {
+                if lines[i].trimmingCharacters(in: .whitespaces).isEmpty { i += 1; continue }
+                guard let f = blobLine(lines[i]) else { break }
+                files.append(f); i += 1
+            }
+            out.append(.files(files)); continue
+        }
         guard let m = lines[i].wholeMatch(of: /(\s*)(`{3,})\s*([\w.+#-]*)\s*/) else {
             prose.append(lines[i]); i += 1; continue
         }
