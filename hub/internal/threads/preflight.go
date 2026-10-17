@@ -12,7 +12,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,6 +26,7 @@ func (m *Manager) probeModel(model string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	c := exec.CommandContext(ctx, m.ClaudeBin, "-p", "--model", model, "--output-format", "text", "--max-turns", "1", "--tools", "")
+	c.Dir = sideDir()
 	c.Stdin = strings.NewReader("Reply with the single word OK.")
 	out, err := c.CombinedOutput()
 	return string(out), err
@@ -37,13 +40,29 @@ func (m *Manager) PreflightModels(ladder []string) []string {
 	if m.Probe == nil {
 		return nil
 	}
+	// Only a CLI update (or a new ladder) can change the answer, and probing
+	// every rung on every restart adds up. The key is stored only after a
+	// clean pass, so a rejected rung or a failed probe is retried on the next
+	// restart.
+	key := ""
+	if m.CLIVersion != nil {
+		if v := m.CLIVersion(); v != "" {
+			key = v + " | " + strings.Join(ladder, ",")
+		}
+	}
+	if key != "" && m.db.Setting(preflightKey) == key {
+		log.Printf("preflight: skipped, already passed on %s", key)
+		return nil
+	}
 	var bad []string
+	clean := true
 	for _, model := range ladder {
 		out, err := m.Probe(model)
 		if err == nil && !spend.IsUnsupportedModelError(out) {
 			log.Printf("preflight: %s ok", model)
 			continue
 		}
+		clean = false
 		if !spend.IsUnsupportedModelError(out) {
 			log.Printf("preflight: %s failed (%v): %s", model, err, firstLine(out, 200))
 			continue
@@ -55,7 +74,36 @@ func (m *Manager) PreflightModels(ladder []string) []string {
 		}
 		m.raiseStaleCLI(model, out)
 	}
+	if clean && key != "" {
+		m.db.SetSetting(preflightKey, key)
+	}
 	return bad
+}
+
+// preflightKey: the settings row holding the CLI version + ladder that last
+// passed every probe.
+const preflightKey = "preflight:passed"
+
+// cliVersion is `claude --version`: no model call, no tokens.
+func (m *Manager) cliVersion() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, m.ClaudeBin, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// sideDir is an empty folder the tool-less one-shot calls (preflight probes,
+// titles and command descriptions) run from, so the CLI loads no project
+// instructions and no memory for a one-word answer.
+func sideDir() string {
+	d := filepath.Join(os.TempDir(), "life-side-calls")
+	if os.MkdirAll(d, 0o700) != nil {
+		return os.TempDir()
+	}
+	return d
 }
 
 func (m *Manager) raiseStaleCLI(model, out string) {

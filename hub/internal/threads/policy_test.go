@@ -95,6 +95,17 @@ func TestLeanCheckIn(t *testing.T) {
 			t.Fatalf("recap missing %q:\n%s", want, p)
 		}
 	}
+	// A capped process is told so, up front, and so is a message steered into
+	// it while it works.
+	if !strings.HasPrefix(string(p), "[CAPPED PROCESS: ") || !strings.Contains(string(p), "$8.00 cap") || !strings.Contains(string(p), "--new --title") {
+		t.Fatalf("no cap note on a check-in's prompt:\n%s", p)
+	}
+	if err := m.Send(th.ID, "go execute the plan"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(inFile(t, m, th.ID)); !strings.Contains(string(b), "[CAPPED PROCESS: ") || !strings.Contains(string(b), "go execute the plan") {
+		t.Fatalf("a steer into a capped process carries no cap note: %q", string(b))
+	}
 	complete(t, m, th.ID, "Still nothing.")
 	// The owner talking to the same thread keeps their conversation.
 	if err := m.Send(th.ID, "what did you find?"); err != nil {
@@ -163,6 +174,46 @@ func TestMessageRelaunchesOffCheckInModel(t *testing.T) {
 	msgs, _ = m.Messages(th.ID, 1)
 	if msgs[0].Queued {
 		t.Fatalf("%+v", msgs[0])
+	}
+}
+
+// The owner's message at an idle CAPPED process (a check-in wake's, same rung,
+// default policy) must not run under its cap: the hub closes the idle process;
+// the message waits and relaunches uncapped, with --resume.
+func TestMessageRelaunchesOffCappedProcess(t *testing.T) {
+	m, _, cmds := setup(t)
+	m.Policy = spend.DefaultPolicy()
+	th, _ := m.Create("", "life", "", "Watch the account.", "", "", nil)
+	complete(t, m, th.ID, "Watching.")
+	if err := m.CheckIn(th.ID, "checkin"); err != nil {
+		t.Fatal(err)
+	}
+	if c := (*cmds)[1]; !strings.Contains(c, "'--max-budget-usd' '8.00'") {
+		t.Fatal(c)
+	}
+	out := pendingOut(t, m, th.ID)
+	in := inFile(t, m, th.ID)
+	appendOut(t, out, `{"type":"system","subtype":"init","session_id":"sess-4"}
+{"type":"result","subtype":"success","is_error":false,"result":"No deposit yet.","total_cost_usd":0.02,"session_id":"sess-4"}
+`)
+	m.Poll()
+	n := len(*cmds)
+	if err := m.Send(th.ID, "go execute the plan"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(in); !strings.HasSuffix(string(b), eofSentinel+"\n") || strings.Contains(string(b), "go execute") {
+		t.Fatalf("in-file: %q", string(b))
+	}
+	if len(*cmds) != n {
+		t.Fatalf("launched early: %v", (*cmds)[n:])
+	}
+	os.WriteFile(out+".done", nil, 0o644)
+	m.Poll()
+	if len(*cmds) != n+1 || strings.Contains((*cmds)[n], "--max-budget-usd") || !strings.Contains((*cmds)[n], "'--resume' 'sess-4'") {
+		t.Fatalf("%v", (*cmds)[n:])
+	}
+	if b, _ := os.ReadFile(inFile(t, m, th.ID)); !strings.Contains(string(b), "go execute the plan") || strings.Contains(string(b), "[CAPPED PROCESS") {
+		t.Fatal(string(b))
 	}
 }
 

@@ -276,8 +276,9 @@ func (m *Manager) SetAskKind(id, kind string) (Ask, error) {
 // RewordAsk rewrites an open card's words in place — title, the message it
 // leads with (`said`; a dated step's `say` until it fires), its steps — so a
 // card the owner's later words made stale reads true again instead of being
-// closed and raised anew. Quiet: no push, no wake; the row keeps its state and
-// the trail records the rewrite. "" leaves a field as it is. A closed card
+// closed and raised anew. Quiet - no push, no wake - unless the owner has written
+// since the card was raised (below); the row keeps its id and state and the
+// trail records the rewrite. "" leaves a field as it is. A closed card
 // keeps its words (they are what the owner answered), and an error card is the
 // hub's, not an agent's.
 func (m *Manager) RewordAsk(id, title, detail, say, by string) (Ask, error) {
@@ -316,6 +317,19 @@ func (m *Manager) RewordAsk(id, title, detail, say, by string) (Ask, error) {
 		}
 		changed = append(changed, "message")
 	}
+	// A card that sits ABOVE the owner's newest message and gets new words is
+	// the answer to that message, so it moves under it and speaks again:
+	// re-stamped now, its old reply link dropped, tied to the turn in flight if
+	// there is one. Rewording in place left nothing new below what they said,
+	// and it read as silence. Only the words they see or hear move it - a
+	// detail-only fix stays quiet where it is - and a dated step is placed by
+	// its own day, not by this.
+	moved := (title != "" || say != "") && !a.Step() && m.saidSince(a.ThreadID, a.CreatedAt)
+	note := "reworded: " + strings.Join(changed, ", ")
+	if moved {
+		sets, args = append(sets, "created_at=?, message_id=NULL, run_id=?"), append(args, now, nullable(m.LiveRun(a.ThreadID)))
+		note += "; moved below the newest message"
+	}
 	args = append(args, id)
 	tx, err := m.db.Begin()
 	if err != nil {
@@ -329,14 +343,29 @@ func (m *Manager) RewordAsk(id, title, detail, say, by string) (Ask, error) {
 		return Ask{}, err
 	}
 	if _, err := tx.Exec(`INSERT INTO item_events (item_id, ts, actor, from_state, to_state, note) VALUES (?,?,?,?,?,?)`,
-		id, now, by, a.State, a.State, "reworded: "+strings.Join(changed, ", ")); err != nil {
+		id, now, by, a.State, a.State, note); err != nil {
 		return Ask{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Ask{}, err
 	}
-	log.Printf("ask %s: reworded (%s) by %s", id, strings.Join(changed, ", "), by)
+	log.Printf("ask %s: %s by %s", id, note, by)
+	if moved {
+		if b, err := m.GetAsk(id); err == nil {
+			if t, err := m.Get(b.ThreadID); err == nil {
+				m.announce(b, t, b.Said)
+			}
+		}
+	}
 	return m.GetAsk(id)
+}
+
+// saidSince: has the owner written in this thread after this moment?
+func (m *Manager) saidSince(threadID string, at time.Time) bool {
+	var last string
+	m.db.QueryRow(`SELECT COALESCE(MAX(ts),'') FROM thread_messages WHERE thread_id=? AND role='owner'`, threadID).Scan(&last)
+	t, err := time.Parse(time.RFC3339Nano, last)
+	return err == nil && t.After(at)
 }
 
 func newAskID() string { return store.NewID("ask") }

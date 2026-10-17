@@ -8,7 +8,7 @@
 // The inline face draws nothing of its own. It decides
 // the WORDS on the row (the console's askHTML, one list): Restart · Dismiss
 // on a crash, Install · Dismiss on a build, Respond · Read on a read, and on
-// everything else the hub's outcomes (Decided · Not deciding · Reply)
+// everything else the hub's outcomes (Decided · Reply)
 // then Dismiss. Each outcome arms the chat bar with that pick.
 import SwiftUI
 
@@ -177,14 +177,16 @@ struct AskCard: View {
         case "read":
             // Respond ARMS THE REPLY; Read is the silent close — done,
             // "Read it", the session never wakes — and folds the card.
-            return [CardButton(label: "Respond", primary: true) { respond(a.outcomes?.first?.value ?? "done") },
+            // Filled once it is on the bar, outlined until then (Card.swift).
+            let onBar = armedPicks["ask:" + a.id] != nil
+            return [CardButton(label: "Respond", primary: onBar, suggested: !onBar) { respond(a.outcomes?.first?.value ?? "done") },
                     CardButton(label: "Read") { Task { await resolve("done", note: a.readWord) } }]
         default:
-            // The hub's words (Decided · Not deciding · Reply), each
+            // The hub's words (Decided · Reply), each
             // arming the bar with that pick, then Dismiss — the silent close.
-            let os = a.outcomes ?? []
-            let picks = os.isEmpty ? [CardButton(label: "Respond", primary: true) { respond("") }]
-                : outcomeButtons(os, armed: armedPicks["ask:" + a.id]) { respond($0) }
+            let os = a.outcomes ?? [], armed = armedPicks["ask:" + a.id]
+            let picks = os.isEmpty ? [CardButton(label: "Respond", primary: armed != nil, suggested: armed == nil) { respond("") }]
+                : outcomeButtons(os, armed: armed) { respond($0) }
             return picks + [dismiss]
         }
     }

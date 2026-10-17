@@ -23,6 +23,7 @@ func setupAt(t *testing.T, dir string) (*Manager, *nfy, *[]string) {
 	m, err := New(db, "/usr/local/bin/claude", filepath.Join(dir, "runs"), "life", func(p string) (string, bool) { return dir, p == "life" }, []string{"Read"}, n)
 	if err == nil {
 		m.Summarize = nil // no claude in tests
+		m.CLIVersion = nil
 	}
 	if err != nil {
 		t.Fatal(err)

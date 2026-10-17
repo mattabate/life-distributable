@@ -1130,6 +1130,8 @@ struct CalEntrySheet: View {
                     .strikethrough(wont)
                     .foregroundStyle(closed ? Web.muted : Color.primary)
                     .fixedSize(horizontal: false, vertical: true)
+                    // Drag-selectable like the detail under it.
+                    .textSelection(.enabled)
             }
             .font(.system(size: 16))
             Spacer(minLength: 0)

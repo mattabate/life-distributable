@@ -96,8 +96,17 @@ struct ComposerField: UIViewRepresentable {
         if label.text != placeholder { label.text = placeholder }
         if label.font != v.font { label.font = v.font }
         label.isHidden = !v.text.isEmpty
-        if focused, !v.isFirstResponder { v.becomeFirstResponder() }
-        if !focused, v.isFirstResponder { v.resignFirstResponder() }
+        // Never inside this update: taking focus here reads a graph that is
+        // mid-update and can freeze the app. The next run-loop turn reads the
+        // wish as it is then.
+        if focused != v.isFirstResponder {
+            DispatchQueue.main.async { [weak v, weak coordinator = context.coordinator] in
+                guard let v, let coordinator, v.window != nil else { return }
+                let want = coordinator.parent.focused
+                if want, !v.isFirstResponder { v.becomeFirstResponder() }
+                if !want, v.isFirstResponder { v.resignFirstResponder() }
+            }
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView v: UITextView, context: Context) -> CGSize? {

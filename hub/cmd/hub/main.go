@@ -183,6 +183,9 @@ func main() {
 	thr.Model = pickFrom
 	thr.Policy = policy
 	thr.ModelExhausted = picker.MarkExhausted
+	// A card answer on a cold thread re-writes its whole context anyway:
+	// do it one rung below the top family, at a lower price.
+	thr.ColdStart = picker.Below("fable")
 	// Ask each rung for one word before a turn lands on it: a model id the
 	// CLI is too old for closes that rung and raises one card.
 	go thr.PreflightModels(picker.Ladder)

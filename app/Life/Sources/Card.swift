@@ -16,9 +16,14 @@
 import SwiftUI
 
 /// One word button on a card. A `url` opens (Install); `act` runs otherwise.
+/// `primary` is FILLED in the card's tint: the pick that is on the chat bar
+/// right now, or a one-shot act (Install, Restart). `suggested` is OUTLINED
+/// in the tint: the first decisive pick while nothing from this card is on
+/// the bar - a nudge, not a state.
 struct CardButton: Identifiable {
     let label: String
     var primary = false
+    var suggested = false
     var url: URL? = nil
     var act: () -> Void = {}
     var id: String { label }
@@ -28,15 +33,13 @@ struct CardButton: Identifiable {
 /// the same order the Respond sheet's chips and the console's row and strip
 /// draw (the owner 2026-09-18: "Buttons are in a different order on the bar than
 /// on the card"). The hub lists the decisive picks first and words-only
-/// ("Reply", value "") last; the first decisive one is the primary — unless
-/// a pick is armed on the chat bar, and then THAT one is (the owner 2026-10-02:
-/// tapping Won't do after I did this switched the pick but nothing on the
-/// card or the bar showed it, so it read as "clicking does nothing").
+/// ("Reply", value "") last. Nothing armed: the first decisive one is
+/// suggested (outlined). A pick armed on the chat bar: THAT one is filled and
+/// nothing is merely suggested, so arming a pick always visibly changes it.
 /// `arm` is called with the value.
 func outcomeButtons(_ outcomes: [AskOutcome], armed: String? = nil, arm: @escaping (String) -> Void) -> [CardButton] {
     outcomes.enumerated().map { i, o in
-        let primary = armed.map { $0 == o.value } ?? (i == 0 && !o.value.isEmpty)
-        return CardButton(label: o.label, primary: primary) { arm(o.value) }
+        CardButton(label: o.label, primary: armed == o.value, suggested: armed == nil && i == 0 && !o.value.isEmpty) { arm(o.value) }
     }
 }
 
@@ -264,6 +267,8 @@ struct Card: View {
                 // A link opens first, then `act` (Install closes the ask too).
                 if b.primary {
                     Button { tap(b) } label: { word(b) }.buttonStyle(.borderedProminent).tint(tint)
+                } else if b.suggested {
+                    Button { tap(b) } label: { word(b) }.buttonStyle(.bordered).tint(tint)
                 } else {
                     Button { tap(b) } label: { word(b) }.buttonStyle(.bordered)
                 }
@@ -280,7 +285,7 @@ struct Card: View {
         // No extra side padding: with it, I did this · Won't do · Reply ·
         // Dismiss ran 7pt past a 402pt phone's card and Dismiss wrapped alone.
         Text(b.label).font(.subheadline.weight(.semibold)).padding(.vertical, 2)
-            .foregroundStyle(b.primary ? .white : .primary)
+            .foregroundStyle(b.primary ? AnyShapeStyle(.white) : b.suggested ? AnyShapeStyle(tint) : AnyShapeStyle(.primary))
     }
 
     /// A dismissed card keeps a footprint to reopen or reread it: one grey line where the card was; tap unfolds the body + Reopen.

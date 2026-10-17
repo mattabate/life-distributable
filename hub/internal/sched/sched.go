@@ -15,6 +15,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -596,6 +597,20 @@ Rules:
  "needs_you": ["things only the owner can do, each one line; empty if none"]}`
 }
 
+// jobEnv puts the hub binary's dir (ops/bin, where lifectl lives) first on
+// PATH, as sessions get it: the grant is Bash(lifectl:*), so lifectl must
+// resolve bare, and a launchd PATH has no ops/bin.
+func jobEnv() []string {
+	env := os.Environ()
+	exe, err := os.Executable()
+	if err != nil || !fileExists(filepath.Join(filepath.Dir(exe), "lifectl")) {
+		return env
+	}
+	return append(env, "PATH="+filepath.Dir(exe)+":"+os.Getenv("PATH"))
+}
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
 func (s *Scheduler) runClaude(ctx context.Context, dir, prompt string, tools []string) (Output, error) {
 	args := []string{"-p", "--output-format", "json", "--permission-mode", "acceptEdits"}
 	if len(tools) > 0 {
@@ -606,6 +621,7 @@ func (s *Scheduler) runClaude(ctx context.Context, dir, prompt string, tools []s
 	}
 	c := exec.CommandContext(ctx, s.claudeBin, args...)
 	c.Dir = dir
+	c.Env = jobEnv()
 	c.Stdin = strings.NewReader(prompt)
 	raw, err := c.CombinedOutput()
 	o := Output{Raw: string(raw)}

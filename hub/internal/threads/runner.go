@@ -341,10 +341,19 @@ func (m *Manager) runRef(id, author, role, kind, text string, attachments []stri
 		if r.in != "" && r.eof == 0 {
 			// An idle process on the wrong rung (a sonnet check-in's process,
 			// now the owner is talking) is closed; the message stays queued and
-			// finishProcess starts the next one on the right model.
-			if r.busy == 0 && r.model != "" {
-				if want := m.resolve(t, kind); want.Model != "" && want.Model != r.model {
+			// finishProcess starts the next one on the right model. So is an
+			// idle CAPPED process (a check-in wake's dollar cap) when what
+			// arrives runs uncapped: the owner's message must not run under a
+			// check-in's cap and leave half the plan queued as a later wake.
+			if r.busy == 0 {
+				want := m.resolve(t, kind)
+				if r.model != "" && want.Model != "" && want.Model != r.model {
 					log.Printf("thread %s: %s wake wants %s, process is on %s: closing it", id, kind, want.Model, r.model)
+					m.sendEOF(r)
+					return nil
+				}
+				if have := m.capUSD(t, r.trigger); have > 0 && want.MaxBudgetUSD == 0 {
+					log.Printf("thread %s: %s runs uncapped, process (%s) is capped at $%.2f: closing it", id, kind, r.trigger, have)
 					m.sendEOF(r)
 					return nil
 				}
@@ -506,7 +515,7 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 	// open for the owner everywhere (boardHeader).
 	peers := ""
 	if !midTurn {
-		peers = m.boardHeader(t.ID) + m.peersHeader(t.ID)
+		peers = m.boardBlocks(t.ID, fresh)
 	}
 	return m.asksHeader(t.ID) + peers + prompt, nil
 }
@@ -632,6 +641,11 @@ func (m *Manager) deliver(t Thread, r run) error {
 	if err != nil {
 		return err
 	}
+	// A steer into a busy capped process cannot relaunch it (runRef closes
+	// only an idle one): the session is told what it is running under.
+	if usd := m.capUSD(t, r.trigger); usd > 0 {
+		p = capNote(usd) + "\n\n" + p
+	}
 	f, err := os.OpenFile(r.in, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -690,6 +704,9 @@ func (m *Manager) launch(t Thread) error {
 	if err != nil {
 		return err
 	}
+	if res.MaxBudgetUSD > 0 {
+		prompt = capNote(res.MaxBudgetUSD) + "\n\n" + prompt
+	}
 	now := time.Now()
 	runID := store.NewID(now.Format("20060102-150405"))
 	base := filepath.Join(m.RunsDir, t.ID+"-"+runID)
@@ -745,6 +762,23 @@ func (m *Manager) launch(t Thread) error {
 		return fmt.Errorf("record run: %w", err)
 	}
 	return nil
+}
+
+// capUSD: the CLI dollar cap a process launched by `trigger` on thread t
+// carries (spend.Rule.MaxBudgetUSD, the check-in wake's), 0 = none.
+func (m *Manager) capUSD(t Thread, trigger string) float64 {
+	if m.Policy == nil {
+		return 0
+	}
+	return m.Policy.Resolve(trigger, t.ModelClass, t.GoalID).MaxBudgetUSD
+}
+
+// capNote heads every prompt a capped process reads - its launch and each
+// message steered into it - so the session knows the cap is on THIS process,
+// not on the work, and hands what it cannot finish to a new session at once
+// instead of queueing a wake.
+func capNote(usd float64) string {
+	return fmt.Sprintf("[CAPPED PROCESS: this process was started as a check-in wake and carries the CLI's $%.2f cap; what is left of it may be less than the work. Work it cannot finish goes to a NEW session THE SAME MINUTE - `lifectl prompt \"<what is done; every step left, exact>\" --new --title \"…\"` starts one with no cap - never a timed wake for work that can run now.]", usd)
 }
 
 // transcriptExists reports whether the CLI still holds the session's
@@ -1801,6 +1835,20 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 			fresh = append(fresh, a)
 		}
 	}
+	// A turn on the owner's message that ended with no words at all - not even
+	// the sentinel a finished session ends on - and no card answered nothing:
+	// it runs once more, told so; a second silent end is a red card (retry.go
+	// silentEnd).
+	silent, noAnswer := "", false
+	if ok == 1 && streamed == "" && len(fresh) == 0 {
+		if said, retried := m.silentEnd(threadID, turn); said != "" && !retried {
+			silent = said
+		} else if retried {
+			if a, err := m.AddAsk(threadID, r.id, "No answer", "The session ended twice on your message without a reply or a card. Restart runs it again.", "error", ""); err == nil {
+				fresh, noAnswer = append(fresh, a), true
+			}
+		}
+	}
 	// A reply that raised only read-asks is an answer, not a stopped session
 	// (nothing to do, the agent is not blocked, so it is not red): both surfaces
 	// draw `read` blue and `needs_you` red.
@@ -1817,7 +1865,7 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 	// the owner is meant to answer: both surfaces colour `error` red, and the
 	// sessions list says "Session failed" instead of printing the CLI's
 	// paragraph as if it were the session's answer.
-	if ok == 0 {
+	if ok == 0 || noAnswer {
 		kind = "error"
 	}
 	unreadBump := 0
@@ -1851,6 +1899,17 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 		r.turns++
 		for _, id := range late {
 			m.db.Exec(`UPDATE thread_messages SET run_id=? WHERE id=?`, r.turnID(), id)
+		}
+	} else if silent != "" {
+		// Nothing newer from the owner, so the re-run is the next turn: on the
+		// live process now, or the next launch once this one has exited.
+		m.noAnswerNote(threadID, silent)
+		if _, err := os.Stat(r.out + ".done"); err != nil && r.in != "" && r.eof == 0 {
+			if t, err := m.Get(threadID); err == nil && m.deliver(t, r) == nil {
+				r.busy = 1
+				r.turns++
+				now = time.Now() // the boundary is past the note, so it is not late
+			}
 		}
 	}
 	r.lastBoundary, r.lastResult = now, now

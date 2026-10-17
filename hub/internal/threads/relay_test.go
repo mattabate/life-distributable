@@ -199,7 +199,9 @@ func TestBoardHeaderListsWhatIsOpenForTheOwnerEverywhere(t *testing.T) {
 	}
 	var note string
 	m.db.QueryRow(`SELECT note FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1`, theirs.ID).Scan(&note)
-	if note != "reworded: title, detail, message" {
+	// The owner wrote after it was raised, so the new words move it below
+	// that message.
+	if note != "reworded: title, detail, message; moved below the newest message" {
 		t.Fatal(note)
 	}
 	if _, err := m.ResolveAsk(theirs.ID, "done", "owner", ""); err != nil {

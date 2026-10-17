@@ -40,13 +40,12 @@ final class DecodeTests: XCTestCase {
         XCTAssertEqual(s.asks.first?.title, "Pick a day")
         let cells = SessionCell.cells(s)
         XCTAssertEqual(cells.map(\.verb), ["decide"])
-        XCTAssertEqual(cells.first?.body, "Mon or Tue?")
     }
 
     /// The cells a session row draws are the console's `sessionCards`, rule
     /// for rule: approvals first (verb "approve"), then asks with the verb of
-    /// their kind, an install or a crash with no body, a hub-minted card's
-    /// body line that repeats its title dropped, and the owner's dated steps last.
+    /// their kind, and the owner's dated steps last. No body line under the
+    /// title: the title says what it wants.
     func testSessionCells() throws {
         let s = try decode(BoardSession.self, """
         {"id":"t-1","title":"Ship it","n":3,"first":"20260923-120000-ab","running":false,
@@ -63,10 +62,7 @@ final class DecodeTests: XCTestCase {
         XCTAssertEqual(cells.map(\.id), ["20260923-120000-ab", "ask-r", "ask-i", "ask-s"])
         XCTAssertEqual(cells.map(\.verb), ["approve", "read", "install", "do"])
         XCTAssertEqual(cells.map(\.tone), ["needs", "read", "install", "needs"])
-        XCTAssertEqual(cells[0].body, "Two files.")
-        XCTAssertEqual(cells[1].body, "Every Wednesday, 09:00.")
-        XCTAssertNil(cells[2].body)
-        XCTAssertNil(cells[3].body)
+        XCTAssertEqual(cells.map(\.step), [false, false, false, true])
     }
 
     func testAsk() throws {

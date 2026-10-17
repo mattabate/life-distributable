@@ -75,6 +75,16 @@ function emptyHTML(text, how) {
   const line = `<div class="empty">${esc(text)}</div>`;
   return how === 'card' ? card(line) : line;
 }
+// The one switch between views of the same thing: a sunken track with the
+// chosen half raised. `opts` are [key, label, {title, n}]; `onclick(key)` is
+// the button's onclick expression.
+function segHTML(opts, cur, onclick, cls) {
+  return `<div class="seg${cls ? ' ' + cls : ''}" role="tablist">${opts.map(([k, label, o]) => {
+    const on = String(k) === String(cur);
+    return `<button role="tab" data-k="${esc(k)}" aria-selected="${on}" class="${on ? 'on' : ''}" onclick="${esc(onclick(k))}"${
+      o && o.title ? ` title="${esc(o.title)}"` : ''}>${label}${o && o.n != null ? `<span class="n">${num(o.n)}</span>` : ''}</button>`;
+  }).join('')}</div>`;
+}
 // A page's first paint while its read is in flight.
 const loadingHTML = () => `<div class="pane wide">${emptyHTML('Loading…')}</div>`;
 
@@ -393,9 +403,12 @@ function mdCopy(btn) {
 // thumbnail links to the full file. HEIC only decodes in Safari, hence the
 // onerror fallback to a plain link.
 const isImageRef = r => /\.(png|jpe?g|gif|webp|heic|heif|avif)$/i.test(String(r || ''));
+const isAudioRef = r => /\.(m4a|mp3|wav|aac|caf)$/i.test(String(r || ''));
 function attachHTML(ref) {
   const url = '/api/v1/blobs/' + esc(ref);
   const name = esc(String(ref).split('/').pop());
+  // A sound file plays in place.
+  if (isAudioRef(ref)) return `<audio controls preload="none" src="${url}"></audio>`;
   if (!isImageRef(ref)) return `<a href="${url}" target="_blank" class="small att-file">📎 ${name}</a>`;
   // Click opens it in the lightbox instead of a new tab - the href stays so
   // ⌘-click and "open in new tab" still work.
@@ -726,7 +739,8 @@ function toggleCardLong(btn, key) {
 // ---------- the one card ----------
 // Every card in the chat — an ask, an approval, a rec — is ONE shape, with the
 // same components and no excess styling code: a tinted box, a mark and the title, the body, a meta row, and ONE row
-// of word buttons at the bottom, the primary in the card's tint. The words
+// of word buttons at the bottom - the pick on the composer FILLED in the
+// card's tint, the suggested first pick outlined in it. The words
 // are the hub's — `outcomes` on an ask, an action and a rec are one shape
 // (store.Outcome) — and each arms the composer with that pick; the client
 // adds only the silent closes (Dismiss; a read's Read) and the two buttons
@@ -738,12 +752,15 @@ function toggleCardLong(btn, key) {
 // A card is { ref, id, tint, mark, title, body, meta, acts, closed, folded, trail }:
 //   ref     ask | action | rec — the id's namespace (data-k)
 //   tint    '' red (a stopped session, a proposal) | read | install | rec | err-card
-//   acts    [{ label, js | href, primary }] — the row of an open card
+//   acts    [{ label, js | href, primary, suggested }] — the row of an open
+//           card: `primary` filled (on the bar, or a one-shot act such as
+//           Install), `suggested` outlined (the first pick, nothing armed)
 //   closed  the words where the row was (a closed card)
 //   folded  the word before the title (a folded card; acts = Reopen)
+const btnCls = b => 'sm' + (b.primary ? ' primary' : b.suggested ? ' suggested' : '');
 const cardBtn = b => b.href
-  ? `<a class="btn sm${b.primary ? ' primary' : ''}" href="${esc(b.href)}" target="_blank">${b.label}</a>`
-  : `<button class="sm${b.primary ? ' primary' : ''}" onclick="${b.js}">${b.label}</button>`;
+  ? `<a class="btn ${btnCls(b)}" href="${esc(b.href)}" target="_blank">${b.label}</a>`
+  : `<button class="${btnCls(b)}" onclick="${b.js}">${b.label}</button>`;
 function cardHTML(c, opened) {
   const id = esc(c.id), acts = (c.acts || []).map(cardBtn).join('');
   const body = c.body ? `<div class="small">${c.body}</div>` : '';
@@ -786,10 +803,14 @@ function saidCovers(said, title) {
 // The hub's outcomes as the row, in the hub's order — the same order the
 // composer strip draws its chips — never a different order on the bar than
 // on the card. The hub lists the decisive
-// ones first and "Reply" (value "") last; the first decisive one is
-// primary; `arm(value)` is each button's onclick.
-function outcomeBtns(outcomes, arm) {
-  return (outcomes || []).map((o, i) => ({ label: esc(o.label), js: arm(o.value), primary: i === 0 && !!o.value }));
+// ones first and "Reply" (value "") last. `armed` is the pick this card has on
+// the composer right now ('' = Reply; undefined/null = none): that one is
+// primary (filled) and nothing else is marked; with none, the first decisive
+// one is suggested (outlined) - never filled, so that arming it is a visible
+// change. `arm(value)` is each button's onclick.
+function outcomeBtns(outcomes, arm, armed) {
+  const none = armed === undefined || armed === null;
+  return (outcomes || []).map((o, i) => ({ label: esc(o.label), js: arm(o.value), primary: !none && armed === o.value, suggested: none && i === 0 && !!o.value }));
 }
 
 // Where a card stands is the hub's (store.AskStanding): `open` = the owner's move,
@@ -816,8 +837,11 @@ function pauseBarHTML(a) {
     <div class="pause-foot"><span>${clockShort(new Date(from))}</span><span>${clockShort(new Date(to))} · ${left}</span></div>`;
 }
 
-function askHTML(a, opened) {
+// `armed`: the pick this card has on the chat's composer (threads.js
+// chatArmed), undefined off a chat or when nothing of it is armed.
+function askHTML(a, opened, armed) {
   const id = esc(a.id), err = a.kind === 'error', paused = err && !!a.resumes_at;
+  const onBar = armed !== undefined && armed !== null;
   const open = !a.closed, answered = open && !a.open;
   // A read card is blue, never red: it asks the owner to read an answer, not
   // to unblock anything — red is for a stopped session. Replying to one does
@@ -831,7 +855,7 @@ function askHTML(a, opened) {
   const mac = install && askInstallTarget(a) === 'mac';
   const link = install && !mac && askInstallLink(a.detail);
   const dismiss = { label: 'Dismiss', js: `cardFold('ask','${id}')` };
-  const respond = { label: 'Respond', js: `openRespond('${id}')`, primary: true };
+  const respond = { label: 'Respond', js: `openRespond('${id}')`, primary: onBar, suggested: !onBar };
   // A closed card carries Reopen when the hub says so (`reopen`: every kind
   // but an install) — the done ones too, not just a fold.
   const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('ask','${id}',true)` }] : [])
@@ -841,10 +865,10 @@ function askHTML(a, opened) {
     // A read: Respond arms the reply (sending closes it, words or not); Read
     // is its silent close — done, "Read it", wakes nothing.
     : read ? [respond, { label: 'Read', js: `resolveAsk('${id}','done','${esc(((a.outcomes || [])[0] || {}).label || '')}')` }]
-    // Every other kind: the hub's words (Decided · Not deciding · Just
+    // Every other kind: the hub's words (Decided · Just
     // reply), each arming the composer with that pick, then Dismiss — the
     // silent close.
-    : (a.outcomes && a.outcomes.length ? outcomeBtns(a.outcomes, v => `openRespond('${id}','${v}')`) : [respond]).concat(dismiss);
+    : (a.outcomes && a.outcomes.length ? outcomeBtns(a.outcomes, v => `openRespond('${id}','${v}')`, armed) : [respond]).concat(dismiss);
   return cardHTML({
     ref: 'ask', id: a.id, title: a.title, verb: a.verb || 'for you',
     tint: paused && open ? 'paused' : err ? 'err-card' : read ? 'read' : install ? 'install' : '',
@@ -883,7 +907,7 @@ const kindPill = { money: 'amber', delete: 'needs', contact: 'purple', share: 'p
 // the row was; the audit trail below says who decided it and when.
 // The job behind a thread-less action's `source` (claude:job:<name>), or ''.
 const actionJob = a => (!a.thread_id && /^claude:job:/.test(a.source || '')) ? a.source.slice('claude:job:'.length) : '';
-function actionHTML(a, opened) {
+function actionHTML(a, opened, armed) {
   const id = esc(a.id), job = actionJob(a);
   const open = a.open, dismissed = a.folded === 'dismissed';
   const payload = a.exec_payload && a.exec_type && a.exec_type !== 'none'
@@ -891,7 +915,7 @@ function actionHTML(a, opened) {
        <pre class="io mono">${esc(typeof a.exec_payload === 'string' ? a.exec_payload : JSON.stringify(a.exec_payload, null, 2))}</pre></details>`
     : '';
   const arm = v => a.thread_id ? `armActionReply('${id}','${v}')` : `decideAction('${id}',${v === 'approved'})`;
-  const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('action','${id}',true)` }] : []) : outcomeBtns(a.outcomes, arm).concat({ label: 'Dismiss', js: `cardFold('action','${id}')` });
+  const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('action','${id}',true)` }] : []) : outcomeBtns(a.outcomes, arm, armed).concat({ label: 'Dismiss', js: `cardFold('action','${id}')` });
   return cardHTML({
     ref: 'action', id: a.id, title: a.title, tint: '', verb: 'approve',
     mark: open ? '🔴 ' : (a.state === 'denied' || a.state === 'failed') ? '✕ ' : '✓ ',
@@ -921,11 +945,11 @@ function costLabel(r) {
 const REC_STATE_WORD = { proposed: 'open', deferred: 'later', accepted: 'accepted', declined: 'declined', done: 'done', superseded: 'superseded', expired: 'expired' };
 // A rec's standing is the hub's (store.RecStanding): a parked (deferred) rec
 // is not `closed`, so it keeps its buttons; `folded` marks one dismissed.
-function recHTML(r, opened) {
+function recHTML(r, opened, armed) {
   const id = esc(r.id), open = !r.closed;
   const dismissed = r.folded === 'dismissed';
   const note = r.decision_note ? ' — ' + mdInline(r.decision_note, false) : '';
-  const acts = !open ? (r.reopen ? [{ label: 'Reopen', js: `cardFold('rec','${id}',true)` }] : []) : outcomeBtns(r.outcomes, v => `armRecReply('${id}','${v}')`).concat({ label: 'Dismiss', js: `cardFold('rec','${id}')` });
+  const acts = !open ? (r.reopen ? [{ label: 'Reopen', js: `cardFold('rec','${id}',true)` }] : []) : outcomeBtns(r.outcomes, v => `armRecReply('${id}','${v}')`, armed).concat({ label: 'Dismiss', js: `cardFold('rec','${id}')` });
   return cardHTML({
     ref: 'rec', id: r.id, title: r.title, tint: 'rec', verb: 'rec',
     mark: open ? '💡 ' : r.status === 'declined' ? '✕ ' : '✓ ',

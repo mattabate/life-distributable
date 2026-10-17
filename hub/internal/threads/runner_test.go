@@ -199,6 +199,50 @@ func TestPrunedTranscriptStartsLean(t *testing.T) {
 	}
 }
 
+// A turn on the owner's message that ends with no words and no card answered
+// nothing: it runs once more on the live process, told so; a second silent
+// end is a red "No answer" card. A turn that touched a card answered.
+func TestSilentTurnRerunsOnceThenCards(t *testing.T) {
+	m, _, cmds := setup(t)
+	th, _ := m.Create("", "life", "", "Why did the build fail?", "", "", nil)
+	out, in := pendingOut(t, m, th.ID), inFile(t, m, th.ID)
+	silent := `{"type":"result","subtype":"success","is_error":false,"result":"","total_cost_usd":0.02,"session_id":"s"}` + "\n"
+	appendOut(t, out, silent)
+	m.Poll()
+	msgs, _ := m.Messages(th.ID, 50)
+	note := msgs[len(msgs)-1]
+	if th, _ = m.Get(th.ID); th.Status != "running" || note.Role != "system" || !strings.HasPrefix(note.Text, noAnswerTag) || note.Queued || note.RunID != msgs[0].RunID+"-t2" || len(*cmds) != 1 {
+		t.Fatalf("not re-run on the live process: %s %+v", th.Status, msgs)
+	}
+	if b, _ := os.ReadFile(in); !strings.Contains(string(b), "Why did the build fail?") || strings.Count(string(b), "\n") != 2 {
+		t.Fatalf("re-run not on stdin: %s", b)
+	}
+	if asks, _ := m.ListAsks("active", th.ID, 10); len(asks) != 0 {
+		t.Fatalf("first silent end raised a card: %+v", asks)
+	}
+	appendOut(t, out, silent)
+	m.Poll()
+	asks, _ := m.ListAsks("active", th.ID, 10)
+	if th, _ = m.Get(th.ID); th.Status != "needs_you" || len(asks) != 1 || asks[0].Kind != "error" || asks[0].Title != "No answer" {
+		t.Fatalf("second silent end: %s %+v", th.Status, asks)
+	}
+	if msgs, _ = m.Messages(th.ID, 50); msgs[len(msgs)-1].Kind != "error" {
+		t.Fatalf("%+v", msgs[len(msgs)-1])
+	}
+	// They answer; the session closes the card and ends quietly: that is an answer.
+	m.ResolveAsk(asks[0].ID, "done", "owner", "")
+	if err := m.Send(th.ID, "ok thanks"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	m.db.Exec(`INSERT INTO item_events (item_id, ts, actor, from_state, to_state, note) VALUES (?,?,?,?,?,?)`, asks[0].ID, ts(time.Now()), "claude:thread:"+th.ID, "done", "done", "noted")
+	appendOut(t, out, silent)
+	m.Poll()
+	if msgs, _ = m.Messages(th.ID, 50); msgs[len(msgs)-1].Role != "claude" {
+		t.Fatalf("a turn that touched a card was re-run: %+v", msgs[len(msgs)-1])
+	}
+}
+
 func TestLateMessageStartsNextTurn(t *testing.T) {
 	m, _, cmds := setup(t)
 	th, _ := m.Create("", "life", "", "Do a thing.", "", "", nil)

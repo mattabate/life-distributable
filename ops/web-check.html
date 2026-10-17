@@ -33,7 +33,7 @@
   // Linked to reply 5 by the hub (message_id): the card IS that turn's reply,
   // drawn under its "turn ended" line (2026-09-13).
   const ASK = { id: 'ask-t3st', thread_id: 't-t3st', thread_title: 'Exports', state: 'open', kind: 'decision', message_id: 5,
-                outcomes: [{ value: '', label: 'Reply' }, { value: 'done', label: 'Decided' }, { value: 'wont', label: 'Not deciding' }],
+                outcomes: [{ value: '', label: 'Reply' }, { value: 'done', label: 'Decided' }],
                 detail: 'line one\n- a bullet', created_at: new Date().toISOString() };
   const DECIDED = [];
   // Uploads (a pasted screenshot's observation payload) and plain chat
@@ -201,7 +201,7 @@ setTimeout(async () => {
       check('a sent answer shows its pick and card', !!re && re.textContent.includes('Decided') && re.textContent.includes('Amazon data export'),
         String(re ? re.textContent : document.getElementById('msgs')?.innerHTML).slice(0, 200));
       // The chips are the hub's words for THIS kind, its default lit.
-      check('strip offers the hub vocabulary', /primary[^>]*>Reply/.test(strip.innerHTML) && strip.innerHTML.includes('>Decided<') && strip.innerHTML.includes('>Not deciding<'),
+      check('strip offers the hub vocabulary', /primary[^>]*>Reply/.test(strip.innerHTML) && strip.innerHTML.includes('>Decided<') && !strip.innerHTML.includes('>Not deciding<'),
         strip.innerHTML.slice(0, 300));
       // The card being answered is the box's HEADING now, so the chips sit UNDER it with the words they
       // belong to — above it they pushed the card off the top of the box.

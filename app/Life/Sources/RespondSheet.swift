@@ -251,6 +251,25 @@ final class RespondModel {
         return s + "The session that raised it gets it right away."
     }
 
+    /// Back to an empty box with the first chip lit - the SAME box. A spent
+    /// box is reset, never swapped for a new model, so the old draft cannot
+    /// live on holding words that were already sent.
+    func reset() {
+        draft.text = ""
+        attachments.clear()
+        outcome = subject.initial
+        error = nil
+        busy = false
+    }
+
+    /// The hub has it: the words leave the box (they are in the chat now),
+    /// then whoever drew the box hears.
+    private func landed(_ finished: () async -> Void) async {
+        draft.text = ""
+        busy = false
+        await finished()
+    }
+
     /// Sends it; `finished` runs once it landed (refresh, close the page).
     func submit(hub: HubClient, confirmed: Bool = false, finished: @escaping () async -> Void) {
         // An empty reply to a read asks first ("Are you sure?" → "Send
@@ -269,7 +288,7 @@ final class RespondModel {
                         if case .cal(let id) = q, outcome.closes {
                             _ = try await hub.resolveCalItem(id, state: outcome.value == "done" ? "done" : "dismissed")
                         }
-                        await finished()
+                        await landed(finished)
                         return
                     }
                     let refs = try await attachments.upload(to: hub, threadID: subject.threadID.isEmpty ? nil : subject.threadID)
@@ -277,12 +296,12 @@ final class RespondModel {
                                              text: text + subject.footer, re: subject.ref,
                                              outcome: subject.wordsClose && outcome.value.isEmpty ? "done" : outcome.value,
                                              title: subject.newTitle, attachments: refs)
-                    await finished()
+                    await landed(finished)
                     return
                 }
                 if let id = subject.loneTodo, outcome.closes, attachments.isEmpty {
                     _ = try await hub.resolveCalItem(id, state: outcome.value == "done" ? "done" : "dismissed", note: text)
-                    await finished()
+                    await landed(finished)
                     return
                 }
                 let refs = try await attachments.upload(to: hub, threadID: subject.threadID)
@@ -295,7 +314,7 @@ final class RespondModel {
                                          inAfter: "", on: "", at: "",
                                          title: subject.newTitle,
                                          attachments: refs)
-                await finished()
+                await landed(finished)
             } catch {
                 self.error = error.localizedDescription
                 busy = false

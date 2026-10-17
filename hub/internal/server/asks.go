@@ -114,7 +114,8 @@ func (s *Server) setAskKind(w http.ResponseWriter, r *http.Request) {
 }
 
 // rewordAsk: an open card's words rewritten in place (threads.RewordAsk) —
-// `lifectl ask <id> set --title … --say … --detail …`. Quiet: no push, no wake.
+// `lifectl ask <id> set --title … --say … --detail …`. Quiet, unless it sat
+// above the newest message: then it moves below it and speaks again.
 func (s *Server) rewordAsk(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Title, Detail, Say, By string }
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {

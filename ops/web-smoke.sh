@@ -37,7 +37,7 @@ url=$(ops/hub.sh url)
 # (ops/logs/web/*.png). A third argument shoots any other route as view.png.
 if [ "${1:-}" = "shot" ]; then
   mkdir -p ops/logs/web
-  tid=${2:-$(ops/bin/lifectl threads | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)}
+  tid=${2:-$(ops/bin/lifectl threads --json | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)}
   "$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
     --window-size=1500,1000 --virtual-time-budget=9000 \
     --screenshot=ops/logs/web/list.png "$url" >/dev/null 2>&1 || true
@@ -94,7 +94,7 @@ echo "web-smoke: OK (sessions list rendered)"
 
 # Phase 2: open a real session — the chat is where the work is, and a thrown
 # render leaves the pane empty rather than erroring anywhere visible.
-tid=$(ops/bin/lifectl threads | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)
+tid=$(ops/bin/lifectl threads --json | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)
 [ -n "$tid" ] || { echo "web-smoke: no threads to open"; exit 0; }
 chat=$("$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
        --virtual-time-budget=9000 --dump-dom "$url#/sessions/$tid" 2>/dev/null || true)
@@ -175,7 +175,7 @@ echo "web-smoke: OK (ask card controls behave — $(printf '%s\n' "$res" | grep 
 # Phase 5: one real recommendation's page. The list draws cards from a
 # template; the detail route renders `because`/`expect`, the decision and the
 # outcome, and it is the one place scoring can be done by hand.
-rid=$(ops/bin/lifectl recs all | sed -n 's/.*"id": "\(rec-[^"]*\)".*/\1/p' | head -1)
+rid=$(ops/bin/lifectl recs all --json | sed -n 's/.*"id": "\(rec-[^"]*\)".*/\1/p' | head -1)
 if [ -n "$rid" ]; then
   rp=$("$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
        --virtual-time-budget=8000 --dump-dom "$url#/recs/$rid" 2>/dev/null || true)

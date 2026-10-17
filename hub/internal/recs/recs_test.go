@@ -186,6 +186,12 @@ func TestDecideSetsReviewDate(t *testing.T) {
 	if got.Status != "accepted" || got.ReviewOn != "2026-09-22" || got.DecidedAt == nil || got.DecisionNote == "" {
 		t.Fatalf("%+v", got)
 	}
+	// The ledger row says what the board says.
+	var status, note string
+	s.db.QueryRow(`SELECT status, decision_note FROM recs WHERE id=?`, r.ID).Scan(&status, &note)
+	if status != "accepted" || note != "ok, spread over three weeks" {
+		t.Fatalf("recs row %q %q", status, note)
+	}
 	// A rec that named its own review date keeps it.
 	r2, _ := s.Add(Rec{Title: "x", ReviewOn: "2026-10-01"})
 	g2, _ := s.Decide(r2.ID, "accepted", "owner", "")

@@ -119,3 +119,62 @@ Entry format:
   during a hub restart, so one tap no longer stalls the rest.
 - How: same merge as add-0005. By hand: `threads/runner.go`,
   `threads/prompts.go`, `attention/attention.go`, `HubClient.swift`.
+
+## add-0008 · 2026-10-17 · Cards: the pick shows, fewer buttons
+- For: everyone
+- Offer: A decision card answers Decided · Reply · Dismiss ("Not
+  deciding" is gone). A card's first decisive button is outlined in the
+  card's colour, and the one armed on the chat bar is filled, so a tap
+  visibly changes the card and switching picks moves the fill. A sound
+  file in a message plays in place: an audio player on the web, Play and
+  Pause in the apps.
+- How: `git merge upstream/main`, conflicts resolved in favour of the
+  owner's own changes, then `make check`, `make webcheck`,
+  `ops/hub.sh restart`, `make ship`. By hand: `store/close.go`,
+  `web/ui.js`, `web/composer.js`, `views/threads.js`, `app.css`,
+  `Card.swift`, `AskCards.swift`, `Attachments.swift`, `StyledText.swift`.
+
+## add-0009 · 2026-10-17 · Calendar: merge duplicates, refuse near-duplicates
+- For: everyone
+- Offer: `lifectl cal <dup> into <keeper>` folds one item into another:
+  the keeper's detail gains a MERGED line, the other is dismissed and its
+  repeat ended. A session that files an item repeating an open one within
+  3 days (same title, or same goal plus the same cited id or most title
+  words) is refused until it passes `--distinct "why"`; a repeating
+  item's next occurrence is never refused. On the desktop app an open
+  item's title can be selected and copied.
+- How: same merge as add-0008. By hand: `calendar/calendar.go`,
+  `server/calendar.go`, `server/routes.go`, `cmd/lifectl/main.go`,
+  `CalendarView.swift`.
+
+## add-0010 · 2026-10-17 · Sessions: no silent turns, cheaper runs
+- For: everyone
+- Offer: A turn on the owner's message that ends with no words and no
+  card runs once more, and a second silent end raises a red "No answer"
+  card with Restart. A card reworded after the owner's newest message
+  moves below it and is announced again. Sessions finish a plan in the
+  same turn: a timed wake is only for waiting on the outside world, and a
+  check-in that hits its cost cap hands what is left to a new session at
+  once. A plan the owner carries out is one card with every step numbered
+  and timed. Cost: an answer on a thread idle over an hour starts one
+  model down, the board and other-sessions blocks resend only what
+  changed, and `lifectl` lists print one line per row (`--json` for the
+  raw form). Scheduled jobs find `lifectl` on their PATH, and a rec's
+  status follows its card.
+- How: same merge as add-0008. By hand: `threads/runner.go`,
+  `threads/retry.go`, `threads/asks.go`, `threads/relay.go`,
+  `threads/preflight.go`, `threads/threads.go`, `cmd/hub/main.go`,
+  `cmd/lifectl/main.go`, `sched/sched.go`, `recs/recs.go`,
+  `ops/web-smoke.sh`, `ops/schedule.json`.
+
+## add-0011 · 2026-10-17 · Steadier chat and Configuration
+- For: everyone
+- Offer: Pressing a card's buttons no longer freezes the desktop app. A
+  reply that was sent no longer shows as an unsent draft. Coming up
+  draws a single queued run once, with no fold; several fold under their
+  count, and the phone's Turn off button no longer wraps letter by
+  letter. Configuration drops the red "nearly out" box over Powered by;
+  a low limit still turns its own row red.
+- How: same merge as add-0008. By hand: `ComposerField.swift`,
+  `RespondSheet.swift`, `RecsView.swift`, `ThreadDetail.swift`,
+  `ConfigView.swift`, `views/threads.js`, `views/config.js`, `app.css`.

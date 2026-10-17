@@ -1233,9 +1233,29 @@ function cardInChainHTML(ref) {
 
 // A dismissed card's fold remembers the owner's click across the redraw (cardHTML).
 const chatOpened = (ref, id) => chatState.open.get(ref + ':' + id) === true;
-const chatAskHTML = a => askHTML(a, chatOpened('ask', a.id));
-const chatActionHTML = a => actionHTML(a, chatOpened('action', a.id));
-const chatRecHTML = r => recHTML(r, chatOpened('rec', r.id));
+// The pick a card has on this chat's composer ('' = Reply), undefined when
+// none: its row draws that one filled (ui.js outcomeBtns).
+const chatArmed = (ref, id) => { const c = composerCards('chat').find(x => x.ref === ref && x.id === id); return c ? (c.outcome || '') : undefined; };
+const chatAskHTML = a => askHTML(a, chatOpened('ask', a.id), chatArmed('ask', a.id));
+const chatActionHTML = a => actionHTML(a, chatOpened('action', a.id), chatArmed('action', a.id));
+const chatRecHTML = r => recHTML(r, chatOpened('rec', r.id), chatArmed('rec', r.id));
+
+// The cards' rows follow the bar: whenever the strip changes - a button armed,
+// a chip switched, a x - every card that was or is on it is redrawn in place,
+// so its filled button is the bar's pick. Only those cards: the rest are
+// untouched.
+let chatArmedWas = new Set();
+function chatPaintArmed() {
+  const now = new Set(composerCards('chat').map(c => c.ref + ':' + c.id));
+  for (const ref of new Set([...chatArmedWas, ...now])) {
+    const i = ref.indexOf(':'), kind = ref.slice(0, i), id = ref.slice(i + 1);
+    const el = document.getElementById('ask-card-' + id);
+    const c = kind === 'rec' ? chatState.recs.find(r => r.id === id) : chatState.cards[ref];
+    if (!el || !c) continue;
+    el.outerHTML = kind === 'rec' ? chatRecHTML(c) : kind === 'action' ? chatActionHTML(c) : chatAskHTML(c);
+  }
+  chatArmedWas = now;
+}
 
 // count = the hub's row for this message ({tools, thoughts, steps}); it wins
 // over anything counted here, which is only ever the steps we happen to hold.
@@ -1363,6 +1383,21 @@ function queuedHTML(prompts) {
     .sort((a, b) => (a.not_before || '').localeCompare(b.not_before || ''));
   if (!ps.length) return '';
   const mine = p => p.author === 'owner' ? 'you' : p.author === 'hub' ? 'the hub' : 'this session';
+  const row = p => `<div class="row qrow">
+      ${p.repeat ? `<span class="pill done" title="standing check-in">${esc(cadenceWords(p.repeat))}</span>` : ''}
+      <span class="pill">${esc(p.repeat ? 'next ' : '')}${esc(p.not_before ? when(p.not_before) : 'now')}</span>
+      ${p.target === 'new' ? '<span class="pill">new session</span>' : ''}
+      ${p.outcome ? pill(p.outcome) : ''}
+      <span class="grow trunc small" title="${esc(p.text || '')}">${esc(promptWords(p))} <span class="muted">· from ${esc(mine(p))}</span></span>
+      <button class="sm" onclick="cancelPrompt('${esc(p.id)}')">${p.repeat ? 'Turn off' : 'Cancel'}</button>
+    </div>`;
+  // A run is drawn once. One wake = its row, no fold; several = a fold whose
+  // bar names the count and, shut, when the next one fires; open, the bar is
+  // the count alone and the rows carry the rest (app.css hides the bar's pill
+  // and words under [open]).
+  if (ps.length === 1) return `<div class="queued one" id="queued">
+    <div class="row qrow"><span class="hl small muted">Coming up</span>${row(ps[0])}</div>
+  </div>`;
   const next = ps[0];
   return `<details class="queued" id="queued"${queuedIsOpen() ? ' open' : ''}>
     <summary>
@@ -1370,16 +1405,7 @@ function queuedHTML(prompts) {
       <span class="pill">next ${esc(next.not_before ? when(next.not_before) : 'now')}</span>
       <span class="grow trunc small muted">${esc(promptWords(next))}</span>
     </summary>
-    <div class="qlist">
-    ${ps.map(p => `<div class="row qrow">
-      ${p.repeat ? `<span class="pill done" title="standing check-in">${esc(cadenceWords(p.repeat))}</span>` : ''}
-      <span class="pill">${esc(p.repeat ? 'next ' : '')}${esc(p.not_before ? when(p.not_before) : 'now')}</span>
-      ${p.target === 'new' ? '<span class="pill">new session</span>' : ''}
-      ${p.outcome ? pill(p.outcome) : ''}
-      <span class="grow trunc small" title="${esc(p.text || '')}">${esc(promptWords(p))} <span class="muted">· from ${esc(mine(p))}</span></span>
-      <button class="sm" onclick="cancelPrompt('${esc(p.id)}')">${p.repeat ? 'Turn off' : 'Cancel'}</button>
-    </div>`).join('')}
-    </div>
+    <div class="qlist">${ps.map(row).join('')}</div>
   </details>`;
 }
 
@@ -1463,9 +1489,8 @@ function recReplyOf(r, outcome, fixed) {
   };
 }
 
-// What each pick does when sent: the hub's own hint on each outcome
-// (store/close.go), the line under the chips.
-const outcomeMeans = outcomes => Object.fromEntries((outcomes || []).map(o => [o.value, o.hint || '']));
+// outcomeMeans (what each pick does when sent) lives in composer.js, which
+// draws the line and must load without this file (the calendar's boxes).
 
 // An approval card's three buttons arm the same composer, like every other
 // cell. Send posts one
@@ -1517,6 +1542,8 @@ function chatComposerSpec(running) {
     // to the minute whichever session it names.
     send: chatSend,
     after: () => (chatState.id ? refreshThread(chatState.id, true) : null),
+    // The cards' rows follow the strip (chatPaintArmed).
+    armed: chatPaintArmed,
   };
 }
 

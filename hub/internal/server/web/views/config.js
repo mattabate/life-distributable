@@ -23,12 +23,11 @@ function cfgDay(iso) {
 
 // A limit with this little left is "nearly out". The hub's amber `warn` is a
 // pace call that lights early; this is the plain "you are about to hit the
-// wall" state, so it is red and named at the top of the block.
+// wall" state, so its row goes red: label, number and meter. There is no
+// banner over the block - the row says it.
 const CFG_LOW_LEFT = 10;
 const cfgLeft = w => Math.max(0, 100 - Math.round(w.utilization));
 const cfgLow = w => cfgLeft(w) <= CFG_LOW_LEFT;
-// "resets 11:59 PM", the hub's own words from the window's foot line.
-const cfgResets = w => (w.foot || '').split(' · ').find(s => s.startsWith('resets')) || '';
 
 // The model ladder's toggle: the same buttons as the Spend page
 // (spend.js spendModelBar, setDefaultModel): the rung new sessions start on
@@ -61,11 +60,7 @@ function cfgPlanHTML(q, m) {
         w.elapsed_pct > 0 ? `<i class="tick" style="left:${Math.min(100, w.elapsed_pct)}%"></i>` : ''}</div>
     </div>`;
   }).join('');
-  const alerts = wins.filter(cfgLow).map(w => `<div class="cfg-alert">
-      <strong>${esc(w.label)} nearly out</strong><span>${[`${cfgLeft(w)}% left`, cfgResets(w)].filter(Boolean).map(esc).join(' · ')}</span>
-    </div>`).join('');
   return `<div class="cfg-prov">
-    ${alerts}
     <div class="cfg-plan">${brandMark(p.brand)}
       <span class="grow"><strong>${esc(p.name)}</strong><span class="small muted">${[esc(p.via), price].filter(Boolean).join(' · ')}</span></span>
       <a class="cfg-month" href="#/spend"><span class="n">${usd0(p.month_usd)}</span><span class="small muted">this month</span></a>

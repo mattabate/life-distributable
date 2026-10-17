@@ -8,6 +8,38 @@ import (
 	"life/hub/internal/calendar"
 )
 
+// The merge verb over the wire: 400 without `into`, 200 with the keeper, and
+// a session's near-duplicate add is refused until it says why.
+func TestCalendarMergeAndNearDuplicate(t *testing.T) {
+	s := newTest(t)
+	do := func(method, url, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, url, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer secret")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	keep, _ := s.Cal.Add(calendar.Item{Title: "Autopay check", Day: "2026-10-20", Kind: "owner"})
+	add := `{"title":"autopay check","day":"2026-10-21","kind":"agent","source":"claude:thread:x"%s}`
+	if w := do("POST", "/api/v1/calendar", strings.Replace(add, "%s", "", 1)); w.Code != 400 || !strings.Contains(w.Body.String(), "near-duplicate of "+keep.ID) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w := do("POST", "/api/v1/calendar", strings.Replace(add, "%s", `,"distinct":"the agent half"`, 1))
+	if w.Code != 201 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	id := strings.SplitN(strings.SplitN(w.Body.String(), `"id":"`, 2)[1], `"`, 2)[0]
+	if w := do("POST", "/api/v1/calendar/"+id+"/merge", `{}`); w.Code != 400 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := do("POST", "/api/v1/calendar/"+id+"/merge", `{"into":"`+keep.ID+`"}`); w.Code != 200 || !strings.Contains(w.Body.String(), "MERGED") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if got, _ := s.Cal.Get(id); got.State != "dismissed" {
+		t.Fatalf("merged item still %s", got.State)
+	}
+}
+
 // The owner closing their own step over the wire is a message, not a button:
 // no note → 409 and nothing written; with one → 200, the item
 // closes with their words on it, and exactly one prompt carrying them is

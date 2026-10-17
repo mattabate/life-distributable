@@ -3,6 +3,7 @@ package threads
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"life/hub/internal/notify"
 )
@@ -126,6 +127,55 @@ func TestSpokenLineIsStoredOnTheCard(t *testing.T) {
 	c, _ := m2.AddAskSaid(th2.ID, "", "Nothing was spoken", "", "read", "", "", say)
 	if c.Said != "" {
 		t.Errorf("said recorded with nothing to speak it: %q", c.Said)
+	}
+}
+
+// A card reworded after the owner's newest message is the answer to it: it
+// moves below that message and is spoken again. Reworded before they wrote,
+// or detail only, it stays put and quiet.
+func TestRewordAfterTheirMessageMovesAndSpeaks(t *testing.T) {
+	m, _, _ := setup(t)
+	n := &cardNfy{}
+	m.Notifier = n
+	th, _ := m.Create("Nap schedule", "life", "", "Working.", "", "", nil)
+	a, err := m.AddAskSaid(th.ID, "run1", "Nap plan", "", "read", "", "", "Hey, here is the nap plan.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.RewordAsk(a.ID, "", "", "Hey, the nap plan, tightened.", "claude:thread:"+th.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := m.GetAsk(a.ID); len(n.said) != 1 || !got.CreatedAt.Equal(a.CreatedAt) {
+		t.Fatalf("no message since: quiet, in place (spoken %v)", n.said)
+	}
+
+	theirs := time.Now().Add(time.Second)
+	if _, err := m.db.Exec(`INSERT INTO thread_messages (thread_id, role, text, ts) VALUES (?,?,?,?)`, th.ID, "owner", "This one never responded.", ts(theirs)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.RewordAsk(a.ID, "", "1. Nap at 2.", "", "claude:thread:"+th.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := m.GetAsk(a.ID); len(n.said) != 1 || got.CreatedAt.After(theirs) {
+		t.Fatalf("detail only: quiet, in place (spoken %v)", n.said)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+	say := "Hey, sorry, here it is: nap at two, up by three."
+	b, err := m.RewordAsk(a.ID, "", "", say, "claude:thread:"+th.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.ID != a.ID || !b.CreatedAt.After(theirs) || b.MessageID != 0 {
+		t.Fatalf("moved below their message: %+v", b)
+	}
+	if len(n.said) != 2 || n.said[1] != say {
+		t.Fatalf("spoken again: %v", n.said)
+	}
+	var note string
+	m.db.QueryRow(`SELECT note FROM item_events WHERE item_id=? ORDER BY id DESC LIMIT 1`, a.ID).Scan(&note)
+	if !strings.Contains(note, "moved below the newest message") {
+		t.Fatal(note)
 	}
 }
 

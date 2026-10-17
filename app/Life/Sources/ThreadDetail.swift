@@ -1888,51 +1888,26 @@ struct ThreadSettings: View {
                     SchedulePicker(schedule: $schedule)
                     TextField("What to do at each check-in (optional)", text: $schedulePrompt, axis: .vertical).lineLimit(2...6)
                 } header: { Text("Schedule") }
-                if !queued.isEmpty {
+                // A run is drawn once: one wake is its row, no fold; several
+                // fold, and open, the label is the count alone.
+                if queued.count == 1, let p = queued.first {
+                    Section("Coming up") { queuedRow(p) }
+                } else if !queued.isEmpty {
                     Section {
                         DisclosureGroup(isExpanded: $queuedOpen) {
-                        ForEach(queued) { p in
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: p.standing ? "clock.arrow.circlepath" : p.author == "owner" ? "person.crop.circle" : "arrow.uturn.left.circle").font(.caption2)
-                                    // A standing row (one clock) is the
-                                    // check-in itself: its cadence in the same words
-                                    // as the session card, and Turn off, because
-                                    // cancelling it IS the schedule going off.
-                                    if p.standing { Chip(scheduleLabel(p.repeat ?? ""), icon: "repeat") }
-                                    Text((p.standing ? "next " : "") + p.whenLabel).font(.caption.weight(.semibold))
-                                    // Only a bare "new" target starts a session.
-                                    // "new-or:<this thread>" RESUMES this one —
-                                    // labelling those "new session" is what read
-                                    // as a pile of future threads being created.
-                                    if p.target == "new" { Chip("new session", icon: "plus.bubble") }
-                                    Spacer(minLength: 0)
-                                    Button(p.standing ? "Turn off" : "Cancel") {
-                                        Task {
-                                            do { _ = try await hub.cancelPrompt(p.id); await loadPrompts() }
-                                            catch { self.error = error.localizedDescription }
-                                        }
-                                    }.font(.caption).buttonStyle(.borderless)
-                                }.foregroundStyle(.secondary)
-                                // TITLE first, text only when there is none
-                                // A calendar wake's text is its title + "\n\n" +
-                                // the whole instruction, so showing text printed
-                                // the title twice and then a paragraph of prose.
-                                Text(p.rowLabel).font(.subheadline).lineLimit(2)
-                            }.padding(.vertical, 2)
-                        }
+                            ForEach(queued) { p in queuedRow(p) }
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 6) {
                                     Text("Coming up · \(queued.count)").font(.subheadline.weight(.semibold))
                                     Spacer(minLength: 0)
-                                    if let n = queued.first {
+                                    if !queuedOpen, let n = queued.first {
                                         Text("next " + n.whenLabel).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                                     }
                                 }
                                 // The name only if it fits on its own line —
                                 // the time is what the bar owes the owner.
-                                if let n = queued.first {
+                                if !queuedOpen, let n = queued.first {
                                     Text(n.rowLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                             }
@@ -1980,6 +1955,35 @@ struct ThreadSettings: View {
         }
     }
 
+    /// One queued wake: who queued it, its cadence (standing), when, Cancel,
+    /// and its words underneath.
+    private func queuedRow(_ p: Prompt) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: p.standing ? "clock.arrow.circlepath" : p.author == "owner" ? "person.crop.circle" : "arrow.uturn.left.circle").font(.caption2)
+                // A standing row is the check-in itself: its cadence in the
+                // same words as the session card, and Turn off, because
+                // cancelling it IS the schedule going off.
+                if p.standing { Chip(scheduleLabel(p.repeat ?? ""), icon: "repeat") }
+                Text((p.standing ? "next " : "") + p.whenLabel).font(.caption.weight(.semibold))
+                // Only a bare "new" target starts a session. "new-or:<this
+                // thread>" RESUMES this one, so it is not labelled "new session".
+                if p.target == "new" { Chip("new session", icon: "plus.bubble") }
+                Spacer(minLength: 0)
+                Button(p.standing ? "Turn off" : "Cancel") {
+                    Task {
+                        do { _ = try await hub.cancelPrompt(p.id); await loadPrompts() }
+                        catch { self.error = error.localizedDescription }
+                    }
+                }.font(.caption).buttonStyle(.borderless)
+            }.foregroundStyle(.secondary)
+            // Title first, text only when there is none. A calendar wake's
+            // text is its title + "\n\n" + the whole instruction, so showing
+            // text printed the title twice and then a paragraph of prose.
+            Text(p.rowLabel).font(.subheadline).lineLimit(2)
+        }.padding(.vertical, 2)
+    }
+
     /// Quiet on failure (`prompts.error` is never drawn): an older hub has no
     /// /prompts, and that is not worth an error banner over the settings the
     /// owner actually came here for.
@@ -2018,32 +2022,30 @@ struct ComingUpStrip: View {
     var body: some View {
         if let next = prompts.first {
             VStack(alignment: .leading, spacing: 0) {
-                Button { open.toggle() } label: {
+                if prompts.count == 1 {
                     HStack(spacing: 8) {
-                        Text(open ? "▾" : "▸").font(.system(size: 10)).foregroundStyle(.secondary)
-                        Text("Coming up · \(prompts.count)").font(small.weight(.semibold)).foregroundStyle(.secondary)
-                            .fixedSize()
-                        pill("next " + next.whenLabel)
-                        Text(next.rowLabel).font(small).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-                        Spacer(minLength: 0)
+                        Text("Coming up").font(small.weight(.semibold)).foregroundStyle(.secondary).fixedSize()
+                        row(next)
                     }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Coming up, \(prompts.count), next \(next.whenLabel)")
-                if open {
-                    ForEach(prompts) { p in
+                    .accessibilityLabel("Coming up, \(next.whenLabel), \(next.rowLabel)")
+                } else {
+                    Button { open.toggle() } label: {
                         HStack(spacing: 8) {
-                            if p.standing { pill(scheduleLabel(p.repeat ?? "")) }
-                            pill((p.standing ? "next " : "") + p.whenLabel)
-                            if p.target == "new" { pill("new session") }
-                            (Text(p.rowLabel) + Text(" · from " + from(p)).foregroundStyle(.secondary))
-                                .font(small).lineLimit(1).truncationMode(.tail)
+                            Text(open ? "▾" : "▸").font(.system(size: 10)).foregroundStyle(.secondary)
+                            Text("Coming up · \(prompts.count)").font(small.weight(.semibold)).foregroundStyle(.secondary)
+                                .fixedSize()
+                            if !open {
+                                pill("next " + next.whenLabel)
+                                Text(next.rowLabel).font(small).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                            }
                             Spacer(minLength: 0)
-                            Button(p.standing ? "Turn off" : "Cancel") { cancel(p) }
-                                .font(small).buttonStyle(.borderless)
                         }
-                        .padding(.top, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Coming up, \(prompts.count), next \(next.whenLabel)")
+                    if open {
+                        ForEach(prompts) { p in row(p).padding(.top, 6) }
                     }
                 }
             }
@@ -2055,6 +2057,36 @@ struct ComingUpStrip: View {
             #else
             .padding(.horizontal, 4).padding(.vertical, 2)
             #endif
+        }
+    }
+
+    /// One wake: cadence (standing), when, its words, who queued it, Cancel.
+    /// On a narrow screen the words give way first - whole if they fit,
+    /// truncated at a readable width if that fits, gone otherwise - and the
+    /// button never wraps.
+    private func row(_ p: Prompt) -> some View {
+        ViewThatFits(in: .horizontal) {
+            rowContent(p, words: .whole)
+            rowContent(p, words: .clipped)
+            rowContent(p, words: .none)
+        }
+    }
+
+    private enum Words { case whole, clipped, none }
+
+    private func rowContent(_ p: Prompt, words: Words) -> some View {
+        HStack(spacing: 8) {
+            if p.standing { pill(scheduleLabel(p.repeat ?? "")) }
+            pill((p.standing ? "next " : "") + p.whenLabel)
+            if p.target == "new" { pill("new session") }
+            if words != .none {
+                (Text(p.rowLabel) + Text(" · from " + from(p)).foregroundStyle(.secondary))
+                    .font(small).lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: words == .clipped ? 140 : nil, alignment: .leading)
+            }
+            Spacer(minLength: 0)
+            Button(p.standing ? "Turn off" : "Cancel") { cancel(p) }
+                .font(small).buttonStyle(.borderless).lineLimit(1).fixedSize()
         }
     }
 
