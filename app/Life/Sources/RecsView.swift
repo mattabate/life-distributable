@@ -878,8 +878,9 @@ struct MacRecReplyBox: View {
             RespondChips(model: model)
             if let e = model.error { ErrorBanner(message: e) }
             RespondBar(model: model) {
-                // A Reply leaves the rec open: a fresh box, not a spent one.
-                model = RespondModel(model.subject)
+                // A Reply leaves the rec open: a fresh box, not a spent one -
+                // the same model, emptied.
+                model.reset()
                 await sent()
             }
             .background(Web.panel, in: RoundedRectangle(cornerRadius: 10))

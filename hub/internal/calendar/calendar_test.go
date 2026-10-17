@@ -514,6 +514,114 @@ func TestNoDuplicateItemsOrForkedChains(t *testing.T) {
 	}
 }
 
+// A session's near-duplicate is refused across kinds and nearby days unless
+// it says why it is distinct; different rec ids never collide; hub-sourced
+// and the owner's own items are not checked.
+func TestNearDuplicateGuard(t *testing.T) {
+	c, _, _ := newTest(t)
+	c.Now = func() time.Time { return time.Date(2026, 10, 12, 9, 0, 0, 0, time.Local) }
+	ses := "claude:thread:x"
+	plants, err := c.Add(Item{Title: "Water the plants", Day: "2026-10-14", Kind: "owner", Source: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Add(Item{Title: "water the plants", Day: "2026-10-15", Kind: "homework", Source: ses})
+	if err == nil || !strings.Contains(err.Error(), plants.ID) {
+		t.Fatalf("same title, other kind, a day later: want near-duplicate of %s, got %v", plants.ID, err)
+	}
+	if _, err := c.Add(Item{Title: "water the plants", Day: "2026-10-15", Kind: "homework", Source: ses, Distinct: "the balcony ones"}); err != nil {
+		t.Fatalf("--distinct files it: %v", err)
+	}
+	if _, err := c.Add(Item{Title: "Water the plants", Day: "2026-10-20", Kind: "owner", Source: ses}); err != nil {
+		t.Fatalf("six days on is not a duplicate: %v", err)
+	}
+	g := "garden"
+	run, _ := c.Add(Item{Title: "Saturday run: long park route", Day: "2026-10-16", Kind: "owner", GoalID: g, Source: "owner"})
+	if _, err := c.Add(Item{Title: "Plan the Saturday long park route", Day: "2026-10-15", Kind: "agent", GoalID: g, Source: ses}); err == nil || !strings.Contains(err.Error(), run.ID) {
+		t.Fatalf("same goal, most words shared: want near-duplicate of %s, got %v", run.ID, err)
+	}
+	if _, err := c.Add(Item{Title: "Plan the Saturday long park route", Day: "2026-10-15", Kind: "agent", GoalID: "other", Source: ses}); err != nil {
+		t.Fatalf("another goal is another thing: %v", err)
+	}
+	a, _ := c.Add(Item{Title: "Score rec-1a2b3c4d (review dates)", Day: "2026-11-11", Kind: "agent", GoalID: g, Source: ses})
+	if _, err := c.Add(Item{Title: "Score rec-5e6f7a8b (review dates)", Day: "2026-11-11", Kind: "agent", GoalID: g, Source: ses}); err != nil {
+		t.Fatalf("different recs are different runs: %v", err)
+	}
+	if _, err := c.Add(Item{Title: "Check the merge verb", Detail: "for rec-1a2b3c4d", Day: "2026-11-12", Kind: "agent", GoalID: g, Source: ses}); err == nil || !strings.Contains(err.Error(), a.ID) {
+		t.Fatalf("same rec cited: want near-duplicate of %s, got %v", a.ID, err)
+	}
+	if _, err := c.Add(Item{Title: "Water the plants", Day: "2026-10-21", Kind: "owner", Source: "hub:learn"}); err != nil {
+		t.Fatalf("hub items are not checked: %v", err)
+	}
+}
+
+// A chain's next occurrence is never refused as a near-duplicate: a daily
+// step matched itself when Tick fired it, and a check-in matched its same-goal
+// run citing the same rec.
+func TestSpawnNextSkipsTheNearDuplicateGuard(t *testing.T) {
+	c, th, _ := newTest(t)
+	now := ahead(7, 20, 0)
+	c.Now = func() time.Time { return now }
+	ses, g := "claude:thread:x", "healthier"
+	wash, err := c.Add(Item{Title: "Wash your face", Day: day(now), At: "20:00", Kind: "owner", Repeat: "daily", Due: "on", GoalID: g, Source: ses})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, _ := th.Create("", "life", "", "Packs check-in.", "", "", nil)
+	packs, err := c.Add(Item{Title: "Packs check-in", Detail: "rec-8707: how many yesterday, how many today", Day: day(now), At: "20:00", Kind: "agent", Repeat: "every2d", GoalID: g, ThreadID: tr.ID, Source: ses})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Add(Item{Title: "Score rec-8707 (the pack ceiling)", Day: day(ahead(9, 0, 0)), At: "09:30", Kind: "agent", GoalID: g, Source: "owner"}); err != nil {
+		t.Fatal(err)
+	}
+	c.Tick()
+	th.DuePrompts(now)
+	next, _ := c.List(day(ahead(8, 0, 0)), day(ahead(9, 0, 0)), "")
+	var gotWash, gotPacks bool
+	for _, n := range next {
+		gotWash = gotWash || (n.PrevID == wash.ID && n.Day == day(ahead(8, 0, 0)))
+		gotPacks = gotPacks || (n.PrevID == packs.ID && n.Day == day(ahead(9, 0, 0)))
+	}
+	if !gotWash || !gotPacks {
+		t.Fatalf("both chains must continue (wash %v, packs %v): %+v", gotWash, gotPacks, next)
+	}
+}
+
+// Merge folds one open item into another: the keeper carries its words, the
+// other is dismissed, superseded and does not continue its chain.
+func TestMerge(t *testing.T) {
+	c, _, _ := newTest(t)
+	db := c.db
+	c.Now = func() time.Time { return time.Date(2026, 10, 12, 9, 0, 0, 0, time.Local) }
+	keep, _ := c.Add(Item{Title: "Autopay check", Detail: "First card", Day: "2026-10-20", Kind: "owner", Source: "owner"})
+	dup, _ := c.Add(Item{Title: "Confirm autopay", Detail: "Second card too", Day: "2026-10-21", Kind: "owner", Repeat: "monthly", Source: "owner"})
+	got, err := c.Merge(dup.ID, keep.ID, "claude:thread:x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Detail, "**MERGED 2026-10-12:** "+dup.ID+" (Confirm autopay, 2026-10-21)") || !strings.Contains(got.Detail, "Second card too") || !strings.HasPrefix(got.Detail, "First card") {
+		t.Fatalf("keeper detail: %q", got.Detail)
+	}
+	d, _ := c.Get(dup.ID)
+	var sup string
+	db.QueryRow(`SELECT COALESCE(superseded_by,'') FROM items WHERE id=?`, dup.ID).Scan(&sup)
+	if d.State != "dismissed" || d.Resolution != "merged into "+keep.ID || sup != keep.ID {
+		t.Fatalf("folded item: state %s resolution %q superseded_by %q", d.State, d.Resolution, sup)
+	}
+	var n int
+	db.QueryRow(`SELECT COUNT(*) FROM items WHERE src='cal' AND title='Confirm autopay' AND state='scheduled'`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("a merged repeat must not spawn its next occurrence (%d open)", n)
+	}
+	if _, err := c.Merge(dup.ID, keep.ID, "owner"); err == nil {
+		t.Fatal("a closed item cannot merge again")
+	}
+	if _, err := c.Merge(keep.ID, keep.ID, "owner"); err == nil {
+		t.Fatal("an item cannot merge into itself")
+	}
+}
+
 // Reopening a fired item dismisses the ask it minted rather than orphaning
 // it on the board; the item mints a new one when it fires again.
 func TestReopenClosesTheMintedAsk(t *testing.T) {

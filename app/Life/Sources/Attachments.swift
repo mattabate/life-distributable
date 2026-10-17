@@ -5,6 +5,7 @@ import UIKit
 import ImageIO
 import UniformTypeIdentifiers
 import QuickLook
+import AVFoundation
 
 /// A document (a PDF, a CSV, an export) attached to a message, as opposed to
 /// a picture: the bytes go up untouched under their own name, so the hub
@@ -527,6 +528,51 @@ struct BlobDocument: View {
         fetching = true; defer { fetching = false }
         guard let url = await blobTempFile(ref, hub: hub) else { failed = true; return }
         local = url; preview = url
+    }
+}
+
+func isAudioRef(_ ref: String) -> Bool {
+    ["m4a", "mp3", "wav", "aac", "caf"].contains(ref.split(separator: ".").last.map { $0.lowercased() } ?? "")
+}
+
+/// An audio blob as a player, play/pause in place. The web's twin is an
+/// `<audio controls>` element.
+struct BlobAudio: View {
+    @Environment(HubClient.self) private var hub
+    let ref: String
+    @State private var player: AVAudioPlayer?
+    @State private var playing = false
+    @State private var fetching = false
+    @State private var failed = false
+    private let tick = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Button {
+            Task { await toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                if fetching { ProgressView().controlSize(.small) }
+                else { Image(systemName: failed ? "speaker.slash" : playing ? "pause.circle.fill" : "play.circle.fill").font(.title2) }
+                Text(failed ? "Can't play" : playing ? "Playing" : "Play").font(.caption.weight(.semibold))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .onReceive(tick) { _ in if playing, player?.isPlaying != true { playing = false } }
+        .onDisappear { player?.stop(); playing = false }
+        .accessibilityLabel(playing ? "Pause" : "Play")
+    }
+
+    private func toggle() async {
+        if let player {
+            if player.isPlaying { player.pause(); playing = false } else { player.play(); playing = true }
+            return
+        }
+        fetching = true; defer { fetching = false }
+        guard let url = await blobTempFile(ref, hub: hub), let p = try? AVAudioPlayer(contentsOf: url) else { failed = true; return }
+        player = p
+        p.play(); playing = true
     }
 }
 

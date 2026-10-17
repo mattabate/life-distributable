@@ -133,6 +133,58 @@ func (m *Manager) retryTransient(r run, text string) bool {
 	return true
 }
 
+// noAnswerTag opens the note a silent turn is re-run on, so the re-run's own
+// silent end is recognised as the second.
+const noAnswerTag = "[no answer]"
+
+// silentEnd: the turn that just ended with no words and no new card - was it
+// meant to answer the owner? said is their last message in the turn's input,
+// empty when the turn was a check-in or a card they answered, and when the
+// session touched any card this turn (closed, reworded, proposed, dated: its
+// own item_events), which is an answer too. retried: the turn was already the
+// re-run. Caller holds m.mu.
+func (m *Manager) silentEnd(threadID, turn string) (said string, retried bool) {
+	rows, err := m.db.Query(`SELECT role, text, COALESCE(NULLIF(delivered_at,''), ts) FROM thread_messages WHERE run_id=? AND role IN ('owner','system') AND queued=0 ORDER BY id`, turn)
+	if err != nil {
+		return "", false
+	}
+	start := ""
+	for rows.Next() {
+		var role, text, at string
+		rows.Scan(&role, &text, &at)
+		switch {
+		case role == "owner":
+			said = text
+		case strings.HasPrefix(text, noAnswerTag):
+			retried = true
+		default:
+			continue
+		}
+		if start == "" || at < start {
+			start = at
+		}
+	}
+	rows.Close()
+	if start == "" {
+		return "", false
+	}
+	var touched int
+	m.db.QueryRow(`SELECT COUNT(*) FROM item_events WHERE actor=? AND ts>=?`, "claude:thread:"+threadID, start).Scan(&touched)
+	if touched > 0 {
+		return "", false
+	}
+	return strings.TrimSpace(said), retried
+}
+
+// noAnswerNote queues the re-run of a turn that ended without answering the
+// owner. Caller holds m.mu.
+func (m *Manager) noAnswerNote(threadID, said string) {
+	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, queued) VALUES (?,?,?,?,?,1)`,
+		threadID, ts(time.Now()), "system", "message",
+		fmt.Sprintf("%s Your last turn ended without answering them: no reply and no card. Their message was: %q. Answer it now, as a card.", noAnswerTag, firstLine(said, 300)))
+	log.Printf("thread %s: turn ended without an answer, re-running once", threadID)
+}
+
 // backfillErrorAsks: the failure cards already on the owner's board were written
 // as `read` asks with the CLI's paragraph for a title. Retag and retitle the
 // live ones so the change is visible on the cards that prompted it, not only

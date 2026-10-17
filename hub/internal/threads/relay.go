@@ -66,7 +66,98 @@ func (m *Manager) peersHeader(self string) string {
 	if b.Len() == 0 {
 		return ""
 	}
-	return "[Other sessions right now — live ones first with what each is doing, then the standing ones and their lane. Do not redo their work. A task or fact that belongs with one of them (it is live on that work, or has the experience): `lifectl relay <id> \"…\"` — the owner approves the card, the hub delivers; a live session over a standing one. A session that knows a topic but is not listed: `lifectl threads --q <word>`. Never for chat or status.]" + b.String() + "\n\n"
+	return peersHead + b.String() + "\n\n"
+}
+
+const peersHead = "[Other sessions right now — live ones first with what each is doing, then the standing ones and their lane. Do not redo their work. A task or fact that belongs with one of them (it is live on that work, or has the experience): `lifectl relay <id> \"…\"` — the owner approves the card, the hub delivers; a live session over a standing one. A session that knows a topic but is not listed: `lifectl threads --q <word>`. Never for chat or status.]"
+
+const boardHead = "[Open for the owner right now across every session — their whole board, oldest first. Their message to you may resolve one of these too, even another session's, or make its words stale: close it with what happened (`lifectl ask <id> done \"…\"`, `lifectl cal <id> done`), or reword it so it reads true now (`lifectl ask <id> set --title \"…\" --say \"…\" [--detail @file]`, `lifectl cal <id> set …`). Only what their words actually settle; the rest stays theirs. Never raise a card that repeats one here — that thing is already in hand.]"
+
+// boardRefresh: past this since a thread last got the whole blocks (rules
+// included), it gets them whole again - auto-compaction may have folded the
+// earlier copy away.
+const boardRefresh = 3 * time.Hour
+
+type boardSent struct {
+	board, peers string
+	full         time.Time
+}
+
+// boardBlocks: the board and other-sessions blocks for one turn. The whole
+// blocks, rules and all, on a fresh start, the first turn since a hub
+// restart, or every boardRefresh; otherwise only what changed since that
+// thread's last turn - a turn used to re-send a few KB it already had.
+func (m *Manager) boardBlocks(id string, fresh bool) string {
+	board := strings.TrimSuffix(strings.TrimPrefix(m.boardHeader(id), boardHead), "\n\n")
+	peers := strings.TrimSuffix(strings.TrimPrefix(m.peersHeader(id), peersHead), "\n\n")
+	now := time.Now()
+	m.boardMu.Lock()
+	last, seen := m.boardSeen[id]
+	full := fresh || !seen || now.Sub(last.full) > boardRefresh
+	sent := boardSent{board: board, peers: peers, full: last.full}
+	if full {
+		sent.full = now
+	}
+	if m.boardSeen != nil {
+		m.boardSeen[id] = sent
+	}
+	m.boardMu.Unlock()
+	whole := func(head, body string) string {
+		if body == "" {
+			return ""
+		}
+		return head + body + "\n\n"
+	}
+	if full {
+		return whole(boardHead, board) + whole(peersHead, peers)
+	}
+	if board == last.board && peers == last.peers {
+		return "[Board and other sessions: unchanged since your last turn.]\n\n"
+	}
+	return boardDelta("Open for the owner", boardHead, last.board, board) + boardDelta("Other sessions", peersHead, last.peers, peers)
+}
+
+// boardDelta: the rows of `cur` that are new or reworded since `prev`, and
+// the ids that left - under the same rules as the whole block. A block that
+// was empty last turn never carried its rules, so it goes whole.
+func boardDelta(name, head, prev, cur string) string {
+	if prev == "" && cur != "" {
+		return head + cur + "\n\n"
+	}
+	if prev == cur {
+		return "[" + name + ": unchanged since your last turn.]\n\n"
+	}
+	rowID := func(l string) string {
+		f := strings.Fields(l)
+		if len(f) == 0 {
+			return ""
+		}
+		return f[0]
+	}
+	had, have := map[string]bool{}, map[string]bool{}
+	for _, l := range strings.Split(prev, "\n") {
+		had[l] = true
+	}
+	var b strings.Builder
+	for _, l := range strings.Split(cur, "\n") {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		have[rowID(l)] = true
+		if !had[l] {
+			b.WriteString("\n" + l)
+		}
+	}
+	var gone []string
+	for _, l := range strings.Split(prev, "\n") {
+		if id := rowID(l); id != "" && !have[id] {
+			gone = append(gone, id)
+		}
+	}
+	if len(gone) > 0 {
+		b.WriteString("\n  gone: " + strings.Join(gone, ", "))
+	}
+	return "[" + name + " — changed since your last turn, same rules as the whole block; new or reworded rows:]" + b.String() + "\n\n"
 }
 
 // boardCap: everything open for the owner today fits in a screen; past that
@@ -133,7 +224,7 @@ func (m *Manager) boardHeader(self string) string {
 	if b.Len() == 0 {
 		return ""
 	}
-	return "[Open for the owner right now across every session — their whole board, oldest first. Their message to you may resolve one of these too, even another session's, or make its words stale: close it with what happened (`lifectl ask <id> done \"…\"`, `lifectl cal <id> done`), or reword it so it reads true now (`lifectl ask <id> set --title \"…\" --say \"…\" [--detail @file]`, `lifectl cal <id> set …`). Only what their words actually settle; the rest stays theirs. Never raise a card that repeats one here — that thing is already in hand.]" + b.String() + "\n\n"
+	return boardHead + b.String() + "\n\n"
 }
 
 // RelayTarget names the session a relay proposal addresses, or says why it

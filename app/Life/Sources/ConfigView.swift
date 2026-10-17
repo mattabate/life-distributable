@@ -138,7 +138,6 @@ struct ConfigView: View {
     @ViewBuilder private func plan(_ d: ConfigData) -> some View {
         if let q = d.quota, let p = q.plan {
             VStack(alignment: .leading, spacing: 10) {
-                if q.available { ForEach(q.windows.filter(low)) { alert($0) } }
                 NavigationLink { SpendView(pushed: true) } label: {
                     HStack(spacing: 10) {
                         BrandTile(brand: p.brand, size: 34)
@@ -240,32 +239,11 @@ struct ConfigView: View {
     }
 
     // A limit with this little left is "nearly out" — the console's cfgLow.
-    // The hub's amber `warn` is a pace call that lights early; this is red and
-    // named at the top of the block.
+    // The hub's amber `warn` is a pace call that lights early; this is red:
+    // the row's label, number and meter. No banner names it over the block.
     private static let lowLeft = 10
     private func left(_ w: QuotaWindow) -> Int { max(0, 100 - Int(jsRound(w.utilization))) }
     private func low(_ w: QuotaWindow) -> Bool { left(w) <= Self.lowLeft }
-
-    /// "7 days nearly out   2% left · resets Oct 7 12:00 AM"
-    private func alert(_ w: QuotaWindow) -> some View {
-        let resets = (w.foot ?? "").components(separatedBy: " · ").first { $0.hasPrefix("resets") }
-        let rest = ["\(left(w))% left", resets].compactMap { $0 }.joined(separator: " · ")
-        return ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("\(w.label) nearly out").fontWeight(.semibold)
-                Text(rest).monospacedDigit().opacity(0.9)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(w.label) nearly out").fontWeight(.semibold)
-                Text(rest).monospacedDigit().opacity(0.9)
-            }
-        }
-        .font(.system(size: 13)).foregroundStyle(.red)
-        .padding(.horizontal, 10).padding(.vertical, 7)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Color.red.opacity(0.35), lineWidth: 1) }
-    }
 
     /// One limit: its label, the headroom left, a thin meter with the clock's tick.
     private func limit(_ w: QuotaWindow) -> some View {

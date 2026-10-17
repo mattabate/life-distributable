@@ -117,6 +117,9 @@ const COMPOSER_WHEN = [['now', 'Now'], ['1h', 'In an hour'], ['tomorrow', 'Tomor
 //                 re-renders the box from state that is still full, and the
 //                 old words would come straight back.
 //   inline        true for a box inside a card (no top border, tighter)
+//   armed()       run whenever the strip changes (a card armed, a chip
+//                 switched, a x): the page redraws the cards' rows so the
+//                 filled button is the bar's pick
 function composerHTML(key, spec) {
   const st = composerState(key);
   spec = spec || {};
@@ -202,6 +205,11 @@ function outcomeActions(outcomes) {
     cls: i === 0 && o.value ? 'primary' : '', confirmEmpty: !!o.value, needsWords: !o.value,
   }));
 }
+
+// What each pick does when sent: the hub's own hint on each outcome, the line
+// under the chips. Here, not in threads.js: the calendar's boxes draw it with
+// no chat loaded.
+const outcomeMeans = outcomes => Object.fromEntries((outcomes || []).map(o => [o.value, o.hint || '']));
 
 // ---------- the reply box ----------
 // replyBox: THE box that lives on a card and answers it — a rec on the Recs
@@ -289,6 +297,10 @@ function composerDrawRe(key) {
   if (el) el.innerHTML = composerReHTML(key);
   const box = document.getElementById(cdom(key) + '-draft');
   if (box) box.placeholder = composerPlaceholder(key);
+  // The cards above follow the strip (spec.armed; the chat redraws the rows
+  // of the cards armed, so the filled button is the bar's pick).
+  const spec = composerState(key).spec || {};
+  if (spec.armed) spec.armed();
 }
 
 // i: which armed card (0 = `re`, the rest index `also`); absent = the first.

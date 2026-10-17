@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -194,6 +195,9 @@ type Item struct {
 	// Soon: no day — read-only on a row (day == ""); on POST it is the explicit
 	// "I mean no day", so a forgotten `day` is still an error.
 	Soon bool `json:"soon,omitempty"`
+	// Distinct: POST only, never stored - a session's reason that this item is
+	// not the near-duplicate Add would otherwise refuse.
+	Distinct string `json:"distinct,omitempty"`
 }
 
 // Slot: where the row sits — its own day and time, or for a soon item the
@@ -715,6 +719,11 @@ func (c *Calendar) Add(it Item) (Item, error) {
 		it.Kind, it.Day, it.Title).Scan(&dup) == nil {
 		return Item{}, fmt.Errorf("duplicate of %s (same title, kind and day, still open): edit that one with `lifectl cal %s set` instead", dup, dup)
 	}
+	if strings.HasPrefix(it.Source, "claude:") && strings.TrimSpace(it.Distinct) == "" {
+		if dup := c.nearDuplicate(it); dup != "" {
+			return Item{}, fmt.Errorf("near-duplicate of %s: fold this into it (`lifectl cal %s set --detail ...`), or pass --distinct \"why\"", dup, dup)
+		}
+	}
 	now := c.Now()
 	it.ID, it.CreatedAt, it.UpdatedAt, it.State = newID(), now, now, "scheduled"
 	_, err := c.setItem(it.ID, it.Source, "", `INSERT INTO items (id,src,created_at,updated_at,title,detail,kind,day,at,repeat,goal_id,thread_id,source,state,nag_min,prev_id,ask_kind,check_hint,surface,say,due)
@@ -728,6 +737,92 @@ func (c *Calendar) Add(it Item) (Item, error) {
 		c.queueWake(it)
 	}
 	return c.Get(it.ID)
+}
+
+var (
+	itemRef  = regexp.MustCompile(`\b(?:rec|cal|ask|act)-[0-9a-f]{4,}\b`)
+	wordRun  = regexp.MustCompile(`[a-z0-9]+`)
+	noiseWds = map[string]bool{"the": true, "and": true, "for": true, "with": true, "from": true, "into": true, "this": true, "that": true, "your": true, "his": true, "rec": true, "cal": true, "ask": true, "act": true}
+)
+
+// nearDuplicate: the exact guard misses reworded twins. A session's new item
+// is a near-duplicate of an open one, of any kind, within 3 days of it (or
+// both soon) when the titles match, or when both sit under the same goal and
+// either cite the same rec-/cal- id or share at least half their words. Two
+// items citing only different ids are never duplicates. Hub-sourced items
+// never reach here, and a chain's next occurrence (spawnNext) comes with its
+// reason.
+func (c *Calendar) nearDuplicate(it Item) string {
+	q := `SELECT id, title, COALESCE(goal_id,''), detail FROM items WHERE src='cal' AND state IN ('scheduled','open') AND day=''`
+	args := []any{}
+	if it.Day != "" {
+		d, _ := time.ParseInLocation("2006-01-02", it.Day, time.Local)
+		q = `SELECT id, title, COALESCE(goal_id,''), detail FROM items WHERE src='cal' AND state IN ('scheduled','open') AND day BETWEEN ? AND ?`
+		args = append(args, d.AddDate(0, 0, -3).Format("2006-01-02"), d.AddDate(0, 0, 3).Format("2006-01-02"))
+	}
+	rows, err := c.db.Query(q+` ORDER BY day, at, id`, args...)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	title := strings.ToLower(it.Title)
+	refs, words := itemRefs(it.Title+" "+it.Detail), titleWords(it.Title)
+	for rows.Next() {
+		var id, t, goal, detail string
+		if rows.Scan(&id, &t, &goal, &detail) != nil {
+			continue
+		}
+		if strings.ToLower(t) == title {
+			return id
+		}
+		if it.GoalID == "" || goal != it.GoalID {
+			continue
+		}
+		theirs := itemRefs(t + " " + detail)
+		if len(refs) > 0 && len(theirs) > 0 {
+			for r := range refs {
+				if theirs[r] {
+					return id
+				}
+			}
+			continue
+		}
+		if jaccard(words, titleWords(t)) >= 0.5 {
+			return id
+		}
+	}
+	return ""
+}
+
+func itemRefs(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, r := range itemRef.FindAllString(strings.ToLower(s), -1) {
+		out[r] = true
+	}
+	return out
+}
+
+func titleWords(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range wordRun.FindAllString(itemRef.ReplaceAllString(strings.ToLower(s), " "), -1) {
+		if len(w) > 2 && !noiseWds[w] {
+			out[w] = true
+		}
+	}
+	return out
+}
+
+func jaccard(a, b map[string]bool) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	n := 0
+	for w := range a {
+		if b[w] {
+			n++
+		}
+	}
+	return float64(n) / float64(len(a)+len(b)-n)
 }
 
 // agentSlot: the minute an agent item with no time of its own will run. An
@@ -1678,6 +1773,51 @@ func (c *Calendar) resolveLocked(it Item, state, by, note string, quiet bool) {
 	log.Printf("calendar: %s %s → %s by %s", id, it.State, state, by)
 }
 
+// Merge folds one open item into another: the keeper's detail gains a MERGED
+// line with the other's title, day and detail, and the other is dismissed
+// "merged into <id>" with superseded_by set, its wake cancelled and its chain
+// ended (a merged repeat is the duplicate, so it spawns no next occurrence).
+func (c *Calendar) Merge(from, into, by string) (Item, error) {
+	if from == into {
+		return Item{}, errors.New("an item cannot merge into itself")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	f, err := c.Get(from)
+	if err != nil {
+		return Item{}, fmt.Errorf("no such item %s", from)
+	}
+	k, err := c.Get(into)
+	if err != nil {
+		return Item{}, fmt.Errorf("no such item %s", into)
+	}
+	open := func(it Item) bool { return it.State == "scheduled" || it.State == "open" }
+	if !open(f) || !open(k) {
+		return Item{}, errors.New("both items must be open to merge")
+	}
+	when := f.Day
+	if when == "" {
+		when = "soon"
+	}
+	if f.At != "" {
+		when += " " + f.At
+	}
+	line := fmt.Sprintf("**MERGED %s:** %s (%s, %s)", c.Now().Local().Format("2006-01-02"), f.ID, f.Title, when)
+	if d := strings.TrimSpace(f.Detail); d != "" {
+		line += "\n" + d
+	}
+	detail := strings.TrimSpace(strings.TrimSpace(k.Detail) + "\n\n" + line)
+	if err := c.edit(k.ID, `UPDATE items SET detail=?, updated_at=? WHERE id=?`, detail, ts(c.Now()), k.ID); err != nil {
+		return Item{}, err
+	}
+	f.Repeat = ""
+	c.resolveLocked(f, "dismissed", by, "merged into "+k.ID, true)
+	if _, err := c.db.Exec(`UPDATE items SET superseded_by=? WHERE id=?`, k.ID, f.ID); err != nil {
+		return Item{}, err
+	}
+	return c.Get(k.ID)
+}
+
 // fireAt: the instant an item becomes live.
 func (c *Calendar) fireAt(it Item) time.Time {
 	d, _ := time.ParseInLocation("2006-01-02", it.Day, time.Local)
@@ -1733,8 +1873,11 @@ func (c *Calendar) spawnNext(it Item) {
 	if n > 0 {
 		return
 	}
+	// A chain's next occurrence is never a near-duplicate: it keeps the row's
+	// own session as its source, so without a reason the guard would refuse it
+	// against the row itself or a same-goal sibling citing the same rec.
 	next := Item{Title: it.Title, Detail: it.Detail, Kind: it.Kind, Day: nd, At: it.At, Repeat: it.Repeat, GoalID: it.GoalID, ThreadID: it.ThreadID, Source: it.Source, NagMin: it.NagMin, PrevID: it.ID, Due: it.Due,
-		Surface: it.Surface, AskKind: it.AskKind, CheckHint: it.CheckHint}
+		Surface: it.Surface, AskKind: it.AskKind, CheckHint: it.CheckHint, Distinct: "next occurrence of " + it.ID}
 	if _, err := c.Add(next); err != nil {
 		log.Printf("calendar: next occurrence of %s: %v", it.ID, err)
 	}

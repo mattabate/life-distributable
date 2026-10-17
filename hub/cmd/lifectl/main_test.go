@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"regexp"
 	"strings"
@@ -43,5 +44,20 @@ func TestActor(t *testing.T) {
 	t.Setenv("LIFE_THREAD_ID", "th-1")
 	if got := actor(); got != "claude:thread:th-1" {
 		t.Errorf("session: %q", got)
+	}
+}
+
+// Lists print one line per row: a 400 KB recs dump was clipped by the
+// agent's tool anyway.
+func TestPrintRows(t *testing.T) {
+	var v any
+	json.Unmarshal([]byte(`{"open":[{"id":"rec-1","state":"open","goal_id":"g","title":"Try X\nlong detail","detail":"skip me"}],"done":[],"thread":{"id":"th-1","status":"idle","title":"T"}}`), &v)
+	var b strings.Builder
+	if n := printRows(&b, "", v); n != 2 {
+		t.Fatalf("%d rows:\n%s", n, b.String())
+	}
+	want := "open:\nrec-1  open  goal g  Try X\nth-1  idle  T\n"
+	if b.String() != want {
+		t.Fatalf("got\n%q\nwant\n%q", b.String(), want)
 	}
 }

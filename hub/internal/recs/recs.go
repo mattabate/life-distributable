@@ -80,20 +80,31 @@ CREATE INDEX IF NOT EXISTS rec_events_rec ON rec_events(rec_id, id);`,
 	// detail, status, the decision — moves to the one table of what reaches
 	// the owner (store.ItemsSchema), trail and all. `recs` stays as the scoring
 	// ledger under the same id (domain, cost, confidence, dates, outcome,
-	// links, model); its status/decided_* columns and rec_events are frozen
-	// from here on.
+	// links, model); rec_events is frozen from here on, and its
+	// status/decided_* columns mirror the item (syncFromItem).
 	`INSERT OR IGNORE INTO items (id,src,created_at,updated_at,title,detail,kind,state,goal_id,thread_id,source,prev_id,resolved_at,resolved_by,resolution)
 	SELECT id,'rec',created_at,updated_at,title,detail,kind,status,goal_id,thread_id,source,prev_id,decided_at,decided_by,decision_note FROM recs ORDER BY created_at;
 INSERT INTO item_events (item_id,ts,actor,from_state,to_state,note) SELECT rec_id,ts,actor,from_state,to_state,note FROM rec_events ORDER BY id;
 UPDATE items SET ` + store.ItemStampSet + ` WHERE src='rec';`,
 }
 
+// syncFromItem copies a rec's decision (its item's state and resolution) onto
+// its ledger row, so recs.status never disagrees with the board. The item
+// stays the one place a decision is written; this is its mirror.
+const syncFromItem = `UPDATE recs SET
+	status = (SELECT i.state FROM items i WHERE i.id=recs.id AND i.src='rec'),
+	decided_at = (SELECT i.resolved_at FROM items i WHERE i.id=recs.id AND i.src='rec'),
+	decided_by = (SELECT i.resolved_by FROM items i WHERE i.id=recs.id AND i.src='rec'),
+	decision_note = (SELECT i.resolution FROM items i WHERE i.id=recs.id AND i.src='rec')`
+
 // setRec is the ONE writer of a rec's status (and of its score): move is the
 // item's own write, ledger the side table's (same transaction), and the
 // decision — before → after, by whom, with what words — is appended to
 // item_events. Every call is a decision, so it is logged even when the status
-// stays (a re-decided note, a score). moved = the row changed.
+// stays (a re-decided note, a score). moved = the row changed. Last in the
+// transaction, the ledger row takes the item's decision (syncFromItem).
 func (s *Store) setRec(id, by, note string, move store.Stmt, ledger ...store.Stmt) (bool, error) {
+	ledger = append(ledger, stmt(syncFromItem+` WHERE id=?`, id))
 	return store.ItemLog.MoveWith(s.db, id, by, strings.TrimSpace(note), true, s.Now(), move, ledger...)
 }
 

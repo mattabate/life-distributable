@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -73,6 +74,17 @@ func main() {
 		die("token: %v", err)
 	}
 	c := client{base: "https://" + cfg.PublicHost, token: strings.TrimSpace(string(tokB))}
+	// --json anywhere: the list commands print the hub's JSON as before;
+	// without it they print one line per row.
+	args := os.Args[:0:0]
+	for _, a := range os.Args {
+		if a == "--json" {
+			c.json = true
+			continue
+		}
+		args = append(args, a)
+	}
+	os.Args = args
 
 	switch os.Args[1] {
 	case "propose":
@@ -332,7 +344,7 @@ func main() {
 			state = os.Args[2]
 		}
 		thread := threadFlag(os.Getenv("LIFE_THREAD_ID"))
-		c.call("GET", "/api/v1/prompts?"+url.Values{"state": {state}, "thread": {thread}}.Encode(), nil)
+		c.list("/api/v1/prompts?" + url.Values{"state": {state}, "thread": {thread}}.Encode())
 	case "asks":
 		// lifectl asks [active|all|open|answered|done|dismissed] [--thread id]
 		state := ""
@@ -340,7 +352,7 @@ func main() {
 			state = os.Args[2]
 		}
 		thread := threadFlag("")
-		c.call("GET", "/api/v1/asks?"+url.Values{"state": {state}, "thread": {thread}}.Encode(), nil)
+		c.list("/api/v1/asks?" + url.Values{"state": {state}, "thread": {thread}}.Encode())
 	case "ask":
 		// lifectl ask add "title" [--detail ...] [--kind decision|access|physical|read|install|other] [--surface mobile|web|any] [--check ...] [--thread id] [--on YYYY-MM-DD [--at HH:MM]]
 		// lifectl ask <id>                      show
@@ -423,6 +435,7 @@ func main() {
 		// lifectl cal <id> done|dismiss|reopen ["what happened"]
 		// lifectl cal add "title" [--detail d] [--goal g]   NO --on = a soon item: the owner's to-do with no due day, never overdue
 		// lifectl cal <id> soon                        an open owner step loses its day and becomes a soon item
+		// lifectl cal <from-id> into <to-id>            fold a duplicate into the keeper (also: cal <from-id> <to-id>)
 		if len(os.Args) > 2 && os.Args[2] == "add" {
 			need(4)
 			fs := flag.NewFlagSet("cal add", flag.ExitOnError)
@@ -435,6 +448,7 @@ func main() {
 			repeat := fs.String("repeat", "", "daily|weekly|monthly|yearly|every<N>d (e.g. every2d)")
 			nag := fs.Int("nag", 0, "minutes between reminders after it is due (owner items; default 360)")
 			due := fs.String("due", "", "owner/homework: on = its day only, missed at midnight, never overdue (a chore: water the plants) | by = any time up to its day, overdue after (an assignment, a deadline). Default: on for --repeat daily, else by")
+			distinct := fs.String("distinct", "", "why this is not the near-duplicate the hub names (it refuses a session's item that repeats an open one within 3 days)")
 			fs.Parse(os.Args[4:])
 			// No --on = a SOON item: a to-do of the owner's with no due day.
 			// It is never overdue, never nagged, raises no ask, and belongs to no
@@ -448,7 +462,18 @@ func main() {
 			}
 			src := actor()
 			c.call("POST", "/api/v1/calendar", map[string]any{"title": titleArg(os.Args[3]), "day": *on, "soon": soon, "at": *at, "kind": *kind, "detail": text(*detail),
-				"goal_id": *goal, "thread_id": *thread, "repeat": *repeat, "nag_min": *nag, "source": src, "due": *due})
+				"goal_id": *goal, "thread_id": *thread, "repeat": *repeat, "nag_min": *nag, "source": src, "due": *due, "distinct": *distinct})
+			return
+		}
+		// lifectl cal <from-id> into <to-id> (or <from-id> <to-id>): fold one
+		// open item into another.
+		if len(os.Args) > 3 && strings.HasPrefix(os.Args[2], "cal-") && (strings.HasPrefix(os.Args[3], "cal-") || os.Args[3] == "into") {
+			into := os.Args[3]
+			if into == "into" {
+				need(5)
+				into = os.Args[4]
+			}
+			c.call("POST", "/api/v1/calendar/"+os.Args[2]+"/merge", map[string]string{"into": into, "by": actor()})
 			return
 		}
 		if len(os.Args) > 2 && strings.HasPrefix(os.Args[2], "cal-") {
@@ -520,7 +545,7 @@ func main() {
 		if len(os.Args) > 3 {
 			to = os.Args[3]
 		}
-		c.call("GET", "/api/v1/calendar?from="+from+"&to="+to, nil)
+		c.list("/api/v1/calendar?from=" + from + "&to=" + to)
 	case "recs":
 		// lifectl recs [open|all|deferred|accepted|declined|expired] [--domain d] [--kind k] [--goal g] [--due YYYY-MM-DD] [--under N] [--model id]
 		// lifectl recs stats                            the track record
@@ -548,7 +573,7 @@ func main() {
 		if *under > 0 {
 			q.Set("max_cents", strconv.Itoa(int(*under*100+0.5)))
 		}
-		c.call("GET", "/api/v1/recs?"+q.Encode(), nil)
+		c.list("/api/v1/recs?" + q.Encode())
 	case "rec":
 		// lifectl rec add "title" [--detail d] [--domain d] [--kind k] [--cost 69.00] [--period monthly|yearly]
 		//                         [--effort low|med|high] [--confidence 0-100] [--because "the evidence"]
@@ -630,7 +655,7 @@ func main() {
 			query = "&archived=1"
 		}
 		if *q == "" {
-			c.call("GET", "/api/v1/threads?"+strings.TrimPrefix(query, "&"), nil)
+			c.list("/api/v1/threads?" + strings.TrimPrefix(query, "&"))
 			return
 		}
 		var rows []struct {
@@ -742,7 +767,101 @@ func main() {
 	}
 }
 
-type client struct{ base, token string }
+type client struct {
+	base, token string
+	json        bool // --json: list commands print the raw JSON
+}
+
+// list GETs a list route and prints one line per row: id, state, day, kind,
+// goal, title. A full calendar or recs dump is hundreds of KB, clipped by the
+// calling session's tool anyway. `lifectl <id>` still shows one row whole;
+// --json gives the raw output for scripts.
+func (c client) list(path string) {
+	if c.json {
+		c.call("GET", path, nil)
+		return
+	}
+	var v any
+	c.fetch(path, &v)
+	n := printRows(os.Stdout, "", v)
+	if n == 0 {
+		fmt.Println("(none)")
+	}
+}
+
+// rowFields: what a row line carries, in order; title last.
+var rowFields = []string{"id", "status", "state", "kind", "day", "cal_day", "at", "window", "schedule_label", "goal_id", "thread_title"}
+
+// printRows prints every object found in v as one line, a nested array of
+// objects under a "key:" heading, and returns how many rows it printed.
+func printRows(w io.Writer, key string, v any) int {
+	switch x := v.(type) {
+	case []any:
+		if len(x) == 0 {
+			return 0
+		}
+		if key != "" {
+			fmt.Fprintf(w, "%s:\n", key)
+		}
+		n := 0
+		for _, e := range x {
+			if o, ok := e.(map[string]any); ok {
+				fmt.Fprintln(w, rowLine(o))
+				n++
+			}
+		}
+		return n
+	case map[string]any:
+		if _, ok := x["id"]; ok && key != "" {
+			fmt.Fprintln(w, rowLine(x))
+			return 1
+		}
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		n := 0
+		for _, k := range keys {
+			n += printRows(w, k, x[k])
+		}
+		return n
+	}
+	return 0
+}
+
+func rowLine(o map[string]any) string {
+	var parts []string
+	for _, f := range rowFields {
+		if s := scalar(o[f]); s != "" {
+			if f == "goal_id" {
+				s = "goal " + s
+			}
+			parts = append(parts, s)
+		}
+	}
+	title := scalar(o["title"])
+	if title == "" {
+		title = scalar(o["text"])
+	}
+	if i := strings.IndexByte(title, '\n'); i >= 0 {
+		title = title[:i]
+	}
+	if r := []rune(title); len(r) > 110 {
+		title = string(r[:110]) + "…"
+	}
+	return strings.Join(append(parts, title), "  ")
+}
+
+func scalar(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	}
+	return ""
+}
 
 // fetch GETs one path and decodes its JSON into out (a printer's half of call).
 func (c client) fetch(path string, out any) {
@@ -892,6 +1011,7 @@ func readJSONArg(arg string) []byte {
 // usageText lists every command (TestUsageListsEveryCommand keeps it so).
 // Titles come BEFORE flags; any prose flag takes text, @file or - (stdin).
 const usageText = `usage: lifectl <command> …   (reads ops/hub.json public_host + ops/secrets/hub.token)
+          lists (asks, cal, recs, threads, prompts) print one line per row; --json for the raw JSON
 
 hub       api METHOD /api/v1/… [json|@file|-] · status · reload · jobs · run <job> · runs [job]
           push test · spend [days] · budget [clear] · feed <file>

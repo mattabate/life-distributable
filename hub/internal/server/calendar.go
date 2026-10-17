@@ -40,6 +40,28 @@ func (s *Server) calendarAdd(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, it)
 }
 
+// calendarMerge: fold the path's item into `into`.
+func (s *Server) calendarMerge(w http.ResponseWriter, r *http.Request) {
+	if s.Cal == nil {
+		jsonErr(w, 503, "calendar not configured")
+		return
+	}
+	var in struct{ Into, By string }
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Into == "" {
+		jsonErr(w, 400, "need {into}")
+		return
+	}
+	if in.By == "" {
+		in.By = "owner"
+	}
+	it, err := s.Cal.Merge(r.PathValue("id"), in.Into, in.By)
+	if err != nil {
+		jsonErr(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, it)
+}
+
 func (s *Server) calendarGet(w http.ResponseWriter, r *http.Request) {
 	if s.Cal == nil {
 		jsonErr(w, 503, "calendar not configured")

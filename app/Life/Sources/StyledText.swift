@@ -522,6 +522,8 @@ struct FileStrip: View {
                             .frame(width: Self.tile.width, height: Self.tile.height)
                             .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
                             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1)))
+                    } else if isAudioRef(f.ref) {
+                        BlobAudio(ref: f.ref)
                     } else {
                         BlobDocument(ref: f.ref)
                     }

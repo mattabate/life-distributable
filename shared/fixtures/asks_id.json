@@ -21,10 +21,6 @@
       "label": "Decided"
     },
     {
-      "value": "wont",
-      "label": "Not deciding"
-    },
-    {
       "value": "",
       "label": "Reply"
     }

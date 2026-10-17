@@ -182,6 +182,8 @@ test('md: a line that is only a hub file draws the file; anywhere else it is a l
   assert.ok(two.endsWith('<p>end</p>'), two);
   // Not a picture: a chip.
   assert.ok(md('[bill](https://h/api/v1/blobs/sha256/00/abc.pdf)').includes('📎 abc.pdf'));
+  // A sound: a player in place.
+  assert.ok(md('[af_heart](https://h/api/v1/blobs/sha256/00/v.m4a)').includes('<audio controls preload="none" src="/api/v1/blobs/sha256/00/v.m4a"></audio>'));
   // Inside a sentence, in a list, or climbing out of the blob route: not a file.
   assert.equal(blobLineRef(`see ![x](https://h/api/v1/blobs/${ref}) here`), null);
   assert.equal(blobLineRef(`- ![x](https://h/api/v1/blobs/${ref})`), null);
@@ -232,7 +234,7 @@ test('statusPill', () => {
 
 // The hub's order (2026-09-18: decisive first, "Reply" last) — the card
 // row and the composer strip both draw it as sent, so they cannot differ.
-const outcomes = [{ value: 'done', label: 'Decided' }, { value: 'wont', label: 'Not deciding' }, { value: '', label: 'Reply' }];
+const outcomes = [{ value: 'done', label: 'Decided' }, { value: '', label: 'Reply' }];
 const ask = { id: 'ask-1a2b3c4d', thread_id: 't-1a2b3c4d', thread_title: 'Plan lunches', title: 'Pick a **day**',
   detail: '- Mon\n- Tue', kind: 'decision', verb: 'decide', surface: 'any', state: 'open', open: true, closed: false, created_at: new Date().toISOString(), outcomes };
 // Where a row stands is the hub's (store.AskStanding / ActionStanding /
@@ -250,11 +252,29 @@ test('askHTML in the chat: bubble, id for deep links, the hub\'s words + Dismiss
   assert.match(h, /^<div class="ask" id="ask-card-ask-1a2b3c4d">/);
   assert.match(h, /🔴 <span class="verb">[a-z ]+<\/span><\/div><div class="t">Pick a <strong>day<\/strong>/);
   assert.match(h, /<ul><li>Mon<\/li><li>Tue<\/li><\/ul>/);
-  assert.match(h, /<div class="acts"><button class="sm primary" onclick="openRespond\('ask-1a2b3c4d','done'\)">Decided<\/button><button class="sm" onclick="openRespond\('ask-1a2b3c4d','wont'\)">Not deciding<\/button><button class="sm" onclick="openRespond\('ask-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('ask','ask-1a2b3c4d'\)">Dismiss<\/button><\/div>/);
+  assert.match(h, /<div class="acts"><button class="sm suggested" onclick="openRespond\('ask-1a2b3c4d','done'\)">Decided<\/button><button class="sm" onclick="openRespond\('ask-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('ask','ask-1a2b3c4d'\)">Dismiss<\/button><\/div>/);
   // No Open page: the card in the chat IS the page.
   assert.doesNotMatch(h, /resolveAskGlobal|>Done<|>Open|target="_blank"|>Respond</);
   // A hub that sent no words: one Respond, the composer's default.
   assert.match(askHTML({ ...ask, outcomes: undefined }), /openRespond\('ask-1a2b3c4d'\)">Respond<[\s\S]*>Dismiss</);
+});
+
+// The pick on the bar is the FILLED button, and only that one; with nothing
+// armed the first pick is outlined (suggested), never filled, so arming it
+// shows. '' (Reply) is a real pick.
+test('askHTML / recHTML / actionHTML: the armed pick is primary, the rest plain', () => {
+  const done = askHTML(ask, false, 'done');
+  assert.match(done, /<button class="sm primary" onclick="openRespond\('ask-1a2b3c4d','done'\)">Decided<\/button><button class="sm" onclick="openRespond\('ask-1a2b3c4d',''\)">Reply</);
+  assert.doesNotMatch(done, /suggested/);
+  const reply = askHTML(ask, false, '');
+  assert.match(reply, /<button class="sm primary" onclick="openRespond\('ask-1a2b3c4d',''\)">Reply</);
+  assert.doesNotMatch(reply, /suggested|sm primary" onclick="openRespond\('ask-1a2b3c4d','done'\)/);
+  // A read's Respond: outlined until it is on the bar, filled once it is.
+  assert.match(askHTML(readAsk), /<button class="sm suggested" onclick="openRespond\('ask-1a2b3c4d'\)">Respond</);
+  assert.match(askHTML(readAsk, false, 'done'), /<button class="sm primary" onclick="openRespond\('ask-1a2b3c4d'\)">Respond</);
+  assert.match(askHTML({ ...ask, outcomes: undefined }, false, ''), /<button class="sm primary" onclick="openRespond\('ask-1a2b3c4d'\)">Respond</);
+  // Install, Restart: one-shot acts, filled as ever.
+  assert.match(askHTML({ ...ask, kind: 'error', detail: 'boom' }), /<button class="sm primary" onclick="retryAsk\('ask-1a2b3c4d'\)">Restart</);
 });
 
 // A read card is Respond (blue, arms the reply) + Read (white, the silent
@@ -405,8 +425,10 @@ test('actionHTML: the approval card in the chat', () => {
   assert.match(chat, /<div class="card-h">🔴 <span class="verb">approve<\/span><\/div><div class="t">git commit<\/div>/);
   assert.match(chat, /<span class="pill purple">commit<\/span>/);
   assert.match(chat, /will run: shell/);
-  assert.match(chat, /<div class="acts"><button class="sm primary" onclick="armActionReply\('act-1a2b3c4d','approved'\)">Approve<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d','denied'\)">Deny<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('action','act-1a2b3c4d'\)">Dismiss<\/button><\/div>/);
+  assert.match(chat, /<div class="acts"><button class="sm suggested" onclick="armActionReply\('act-1a2b3c4d','approved'\)">Approve<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d','denied'\)">Deny<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('action','act-1a2b3c4d'\)">Dismiss<\/button><\/div>/);
   assert.doesNotMatch(chat, /textarea|anote|decideAction|approve\?|Open in session/);
+  // Deny on the bar: Deny filled, Approve plain.
+  assert.match(actionHTML(action, false, 'denied'), /<button class="sm" onclick="armActionReply\('act-1a2b3c4d','approved'\)">Approve<\/button><button class="sm primary" onclick="armActionReply\('act-1a2b3c4d','denied'\)">Deny</);
   // Dismissed: folded like a dismissed ask, Reopen inside; the fold remembers.
   const gone = actionHTML({ ...action, state: 'dismissed', ...DISMISSED });
   assert.match(gone, /^<details class="ask folded" id="ask-card-act-1a2b3c4d" data-k="action:act-1a2b3c4d" data-def="0">/);
@@ -442,8 +464,11 @@ test('recHTML: the rec card in the chat', () => {
   assert.match(h, /^<div class="ask rec" id="ask-card-rec-1a2b3c4d">/);
   assert.match(h, /💡 <span class="verb">rec<\/span><\/div><div class="t">Try <strong>oat<\/strong> milk<\/div>/);
   assert.match(h, /<a class="pill purple" href="#\/recs\/rec-1a2b3c4d">rec<\/a>/);
-  assert.match(h, /<div class="acts"><button class="sm primary" onclick="armRecReply\('rec-1a2b3c4d','accepted'\)">Accept<\/button><button class="sm" onclick="armRecReply\('rec-1a2b3c4d','declined'\)">Decline<\/button><button class="sm" onclick="armRecReply\('rec-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('rec','rec-1a2b3c4d'\)">Dismiss<\/button><\/div>/);
+  assert.match(h, /<div class="acts"><button class="sm suggested" onclick="armRecReply\('rec-1a2b3c4d','accepted'\)">Accept<\/button><button class="sm" onclick="armRecReply\('rec-1a2b3c4d','declined'\)">Decline<\/button><button class="sm" onclick="armRecReply\('rec-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('rec','rec-1a2b3c4d'\)">Dismiss<\/button><\/div>/);
   assert.doesNotMatch(h, /Open in Recs|The record/);
+  // Accept pressed: Accept filled (it was only outlined before), Decline plain.
+  assert.match(recHTML(rec, false, 'accepted'), /<div class="acts"><button class="sm primary" onclick="armRecReply\('rec-1a2b3c4d','accepted'\)">Accept<\/button><button class="sm" onclick="armRecReply\('rec-1a2b3c4d','declined'\)">Decline</);
+  assert.match(recHTML(rec, false, 'declined'), /<button class="sm" onclick="armRecReply\('rec-1a2b3c4d','accepted'\)">Accept<\/button><button class="sm primary" onclick="armRecReply\('rec-1a2b3c4d','declined'\)">Decline</);
   const done = recHTML({ ...rec, status: 'declined', decided_by: 'owner', decision_note: 'no', ...CLOSED, reopen: false });
   assert.match(done, /^<div class="ask rec answered"/);
   assert.match(done, /✕ <span class="verb">rec<\/span><\/div><div class="t">Try/);
@@ -603,7 +628,7 @@ test('config: sources are sections of cards, by tag, each edged in its colour', 
 });
 
 // Powered by: the plan, this month's spend, a meter per limit with its clock
-// tick, a red alert for a limit nearly out, and the model ladder.
+// tick, a red row for a limit nearly out, and the model ladder.
 test('config: the plan block says what runs the sessions and how much is left', () => {
   const q = { available: true, next_model: 'claude-opus-5',
     plan: { name: 'Claude', via: 'Claude Code', usd: 100, period: 'monthly', charged_on: '2026-10-01', month_usd: 23.4,
@@ -618,8 +643,8 @@ test('config: the plan block says what runs the sessions and how much is left', 
   assert.match(h, /<strong>Claude<\/strong><span class="small muted">Claude Code · \$100\/mo · charged Oct 1<\/span>/);
   assert.match(h, /<a class="cfg-month" href="#\/spend"><span class="n">\$23<\/span><span class="small muted">this month<\/span><\/a>/);
   assert.match(h, /<span class="small">All models · 5 hours<\/span>\s*<span class="small n">82% left<\/span>\s*<div class="meter "><div style="width:18%"><\/div><i class="tick" style="left:40%"><\/i><\/div>/);
-  // 7% left: red, named at the top with the hub's own reset words.
-  assert.match(h, /<div class="cfg-alert">\s*<strong>All models · 7 days nearly out<\/strong><span>7% left · resets Oct 11 12:00 AM<\/span>/);
+  // 7% left: its own row goes red; no banner over the block.
+  assert.doesNotMatch(h, /cfg-alert|nearly out/);
   assert.match(h, /<div class="cfg-lim low">\s*<span class="small">All models · 7 days<\/span>\s*<span class="small n" style="color:var\(--red\)">7% left<\/span>\s*<div class="meter bad">/);
   // The ladder: the rung new sessions start on filled, the shut one struck through, auto on.
   assert.match(h, /<button class="sm on" onclick="setDefaultModel\('claude-opus-5'\)">opus 5<\/button>/);

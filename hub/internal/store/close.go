@@ -17,9 +17,11 @@ func oc(value, label string) Outcome { return Outcome{Value: value, Label: label
 // "Reply" last — the one order every row and chip strip draws. A `read`
 // card has exactly one outcome, and it is not a choice: the owner read it.
 // `error` cards have none: they carry Restart, not Respond.
+// A decision has no refusal: not deciding is talking it over (Reply) or
+// dropping it (Dismiss).
 var askOutcomes = map[string][]Outcome{
 	"read":     {oc("done", "Read it")},
-	"decision": {oc("done", "Decided"), oc("wont", "Not deciding"), Reply},
+	"decision": {oc("done", "Decided"), Reply},
 	"access":   {oc("done", "Granted"), oc("wont", "Won't grant"), Reply},
 	"physical": {oc("done", "I did this"), oc("wont", "Won't do"), Reply},
 	"install":  {oc("done", "Installed"), oc("wont", "Won't install"), Reply},
