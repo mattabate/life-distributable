@@ -79,6 +79,7 @@ async function drawList(activeID, reuse) {
   // badge is the whole point. `reuse`: the live loop loaded the board a
   // moment ago, so it is not asked for twice.
   const gen = route.gen;
+  listSide = activeID;
   const [threads, b] = await Promise.all([
     get('/threads'), reuse && board ? board : loadBoard().catch(() => board || EMPTY_BOARD),
   ]);
@@ -109,6 +110,7 @@ async function drawList(activeID, reuse) {
       const cards = sessionCards(bundles[t.id]);
       const open = Math.max((b.open || {})[t.id] || 0, cards.length);
       const more = open - Math.min(cards.length, ROW_CARDS);
+      const shown = moreOpen.has(t.id) ? cards.length : ROW_CARDS;
       // The todo line's colour is the first cards pill's: blue to read, teal
       // to install, red when something is blocked on the owner. A session
       // wears one pill per class (red, blue, teal in that order — an install
@@ -129,14 +131,14 @@ async function drawList(activeID, reuse) {
         // Land on the card (approval or ask), not at the foot of the chat:
         // the board's `first` — the approval card, else the first ask.
         first: b.first[t.id] || '',
-        cells: cards.slice(0, ROW_CARDS).map(c => miniCardHTML(t.id, c)).join('')
-          + (cards.length && more > 0 ? `<a class="small muted more-cards" href="#/sessions/${encodeURIComponent(t.id)}/${encodeURIComponent(cards[Math.min(ROW_CARDS, cards.length - 1)].id)}">and ${more} more</a>` : '')
+        cells: cards.slice(0, shown).map(c => miniCardHTML(t.id, c)).join('')
+          + (cards.length > ROW_CARDS ? `<a class="small muted more-cards" href="#" onclick="event.preventDefault();toggleMoreCards('${esc(t.id)}')">${shown > ROW_CARDS ? 'Show less' : `and ${more} more`}</a>`
+            : cards.length && more > 0 ? `<a class="small muted more-cards" href="#/sessions/${encodeURIComponent(t.id)}">and ${more} more</a>` : '')
           + (todo ? `<div class="small wrap2" style="margin-top:6px;color:var(--${tone})">→ ${mdInline(todo, false)}</div>` : '')
           + (detail ? `<div class="small muted wrap3" style="margin-top:2px">${detail}</div>` : ''),
-        // Every card drawn as a cell = the count pills would say it twice. A
-        // running session keeps its RUNNING pill, in the
-        // card's foot beside the model and the dollars.
-        pills: n && cards.length - ((bundles[t.id] || {}).steps || []).length >= n ? runningOnly(b, t) : sessionPills(b, t),
+        // The cells and the blue dot say what the count and RUNNING pills
+        // did; only the live audio pills stay (speaking, waiting).
+        pills: audioPills(b, t),
       });
     }).join('');
   // A SESSION ON THIS LIST IS WORKING OR WAITING ON THE OWNER — Your turn or Working
@@ -174,16 +176,23 @@ const ALL = ' all'; // drawList's activeID while #/sessions/all is open (no thre
 // two things waiting read as two things, each opening the chat AT that card.
 // The box is a <div> because a link cannot hold links; a click anywhere on it
 // that is not one of them opens the session at its first card.
+//
+// THE NAME AND THE ONE THING IT NEEDS FROM THE OWNER: no model, dollars or
+// tool-call row, since the chat's head carries those. A Your turn card is the
+// name over its first cell ("and N more" under it); a Working card is one
+// line, a blue dot, the name and when it last moved. Only the live audio pills
+// stay (speaking, waiting): the fact a cell cannot carry.
 function sessionCardHTML(t, o) {
-  const failed = t.last_message_kind === 'error' && !isPauseText(t.last_message), running = t.status === 'running';
+  const live = t.status === 'running';
+  const failed = !live && t.last_message_kind === 'error' && !isPauseText(t.last_message);
   const href = `#/sessions/${encodeURIComponent(t.id)}${o.first ? '/' + encodeURIComponent(o.first) : ''}`;
+  const bare = !o.cells;
   return `
-    <div class="card click sess${o.active ? ' on' : ''}" onclick="if(!event.target.closest('a'))location.hash='${href}'">
-      <a class="sess-t${t.unread > 0 ? ' unread' : ''}" href="${href}">${mdInline(t.title || t.id, false)}</a>
-      ${o.cells || ''}
+    <div class="card click sess${bare ? ' sess-line' : ''}${o.active ? ' on' : ''}" onclick="if(!event.target.closest('a'))location.hash='${href}'">
+      <div class="sess-h">${live ? '<span class="sess-dot"></span>' : ''}<a class="sess-t${t.unread > 0 ? ' unread' : ''}" href="${href}">${mdInline(t.title || t.id, false)}</a>${bare ? `<span class="small muted sess-ago">${ago(t.last_message_at || t.updated_at)}</span>` : ''}</div>
+      ${o.pills ? `<div class="small sess-foot">${o.pills}</div>` : ''}
       ${failed ? `<div class="small wrap2 err mt6">${failedPreview(t.last_message)}</div>` : ''}
-      ${running && turnFacts(t, true, false) ? `<div class="sess-run small trunc">${esc(turnFacts(t, true, false))}</div>` : ''}
-      <div class="small muted sess-foot">${o.pills || ''}${t.model ? `<span class="pill" title="${esc(t.model)}">${esc(t.model_label || modelShort(t.model))}</span>` : ''}<span>${ago(t.last_message_at || t.updated_at)}${t.schedule ? ' · ' + esc(t.schedule_label || cadenceWords(t.schedule)) : ''}${t.cost_usd ? ' · ' + usd(t.cost_usd) : ''}</span></div>
+      ${o.cells || ''}
     </div>`;
 }
 
@@ -206,8 +215,18 @@ function sessionCards(bundle) {
   });
   return acts.concat(asks);
 }
-// How many of a session's open cards its row draws; the rest is "and N more".
-const ROW_CARDS = 2;
+// How many of a session's open cards its row draws; the rest is "and N more"
+// (one, like the desktop's `deskCards`).
+const ROW_CARDS = 1;
+// "AND N MORE" OPENS THE REST IN PLACE: the row's older cards drop in under
+// the newest one, each its own cell; "Show less" folds them. Kept per session
+// across the list's repaints.
+const moreOpen = new Set();
+let listSide = '';
+function toggleMoreCards(id) {
+  if (!moreOpen.delete(id)) moreOpen.add(id);
+  drawList(listSide, true);
+}
 
 // One open card as a cell on its session's card: the chat's `.ask` box, small.
 // The title is whole and alone - no words under it; the chat holds the rest.
@@ -215,8 +234,8 @@ function miniCardHTML(threadID, c) {
   return `<a class="ask mini ${c.tint}" href="#/sessions/${encodeURIComponent(threadID)}/${encodeURIComponent(c.id)}">
       <div class="t"><span class="verb">${esc(c.verb)}</span>${c.mark} ${mdInline(c.title, false)}</div></a>`;
 }
-// …and its SPEAKING pill, the one live fact a cell cannot carry (2026-09-25).
-const runningOnly = (b, t) => livePillsHTML((b.pills || {})[t.id]);
+// …and its SPEAKING pill, the one live fact a cell cannot carry.
+const audioPills = (b, t) => livePillsHTML(((b.pills || {})[t.id] || []).filter(p => p.tone === 'speaking' || p.tone === 'waiting'));
 
 // ---- All sessions (#/sessions/all) ----
 // Where Recent went, for finding something done previously: every session,
@@ -894,9 +913,11 @@ async function refreshThread(id, first) {
   // approval's note too, since its card arms the composer (2026-09-17).
   el.innerHTML = `
     <div class="chat-head">
-      <a href="#/sessions" class="sm btn" style="text-decoration:none">←</a>
-      <div class="grow head-id" style="min-width:0">
+      <button class="sm narrow-only" onclick="showList()">←</button>
+      <div class="grow" style="min-width:0">
         <div class="trunc"><strong>${mdInline(t.title || t.id)}</strong></div>
+      </div>
+      <div class="head-id">
         <span id="chat-pills">${headPills(board, t)}</span>${t.model ? `<span class="pill" title="${esc(t.model)}">${esc(t.model_label || modelShort(t.model))}</span>` : ''}
       </div>
       <div class="small muted trunc head-meta">${[
@@ -1145,6 +1166,7 @@ function drawActivity(ordered, events, running, t) {
   // printed both above and below it. Live dot: last starter.
   const starters = {};
   for (const m of ordered) if (startsRun(m)) (starters[m.run_id] ||= []).push(m);
+  for (const e of document.querySelectorAll('#msgs .msg.merged')) e.classList.remove('merged');
   for (const [run, ms] of Object.entries(starters)) {
     const evs = byRun[run] || [];
     ms.forEach((m, i) => {
@@ -1162,6 +1184,7 @@ function drawActivity(ordered, events, running, t) {
       // would lose it: a "1 to read" with no cell).
       const show = (count && (count.steps || (count.segments || []).length)) || slice.length || isLive;
       el.innerHTML = show ? blockHTML(slice, isLive, 'run:' + run + ':' + m.id, count, m.id) : '';
+      if (!isLive) mergeTurnEnd(el, ordered[ordered.indexOf(m) + 1], m);
     });
   }
   const orphanEl = document.getElementById('run-orphan');
@@ -1172,6 +1195,22 @@ function drawActivity(ordered, events, running, t) {
   }
   chatState.liveBlock = !!live || orphan.length > 0;
   paintWorking(running, chatState.liveBlock, t);
+}
+
+// A turn's end line folded into the line of its last block: "6 tool calls ·
+// turn ended · today 11:56 PM · $1.31" where it was two rows (the desktop's
+// ThreadDetail.mergedEnds). Only when the reply row is nothing but that line
+// and comes straight after a block that ends in no card; its row stays in the
+// page, hidden, so a link or the reading anchor still finds it.
+function mergeTurnEnd(slot, reply, m) {
+  if (!reply || reply.role !== 'claude' || reply.kind === 'error' || reply.run_id !== m.run_id) return;
+  const end = document.getElementById('msg-' + reply.id);
+  const last = slot.lastElementChild;
+  if (!end || end.querySelector('.old-reply') || !last || !last.matches('details.run')) return;
+  const line = end.querySelector('.end-line'), hl = last.querySelector('summary .hl');
+  if (!line || !hl) return;
+  hl.insertAdjacentHTML('beforeend', ' · ' + line.innerHTML);
+  end.classList.add('merged');
 }
 
 // THE working line, same on both surfaces (the phone spells it out in

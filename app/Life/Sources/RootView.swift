@@ -303,11 +303,9 @@ struct MacTopBar: View {
             Button { tab = "settings" } label: { Image(systemName: "gearshape") }
                 .buttonStyle(.plain).foregroundStyle(tab == "settings" ? Color.accentColor : .secondary)
                 .help("Settings").padding(.leading, 4)
+            // The build lives in the dot's hover, not beside it.
             Circle().fill(store.error == nil ? Color.green : Color.red).frame(width: 8, height: 8)
-                .help((store.error ?? "Hub reachable") + (compact ? " · build \(appVersionLabel)" : "")).padding(.leading, 6)
-            if !compact {
-                Text(appVersionLabel).font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
-            }
+                .help((store.error ?? "Hub reachable") + " · build \(appVersionLabel)").padding(.leading, 6)
         }
     }
 

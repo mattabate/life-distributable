@@ -181,7 +181,8 @@ func Owner(by string) bool {
 //     words went in and the card waits on its session), and so is a parked
 //     (deferred) rec.
 //   - Folded: a silent close drawn as one grey line with Reopen —
-//     "dismissed", or "read" for a read card closed with its own button.
+//     "dismissed", "read" for a read card closed with its own button, or
+//     "done" for a finished install or decision.
 //   - Lane: whose colour it wears — mine | chores | homework | recs | agents.
 //   - Reopen: a closed card that carries Reopen — every kind except the
 //     install cards, the only ones closed by an external check.
@@ -221,6 +222,10 @@ func AskStanding(kind, class, state, resolution, by string, chore bool) Standing
 		s.Folded = "dismissed"
 	case kind == "read" && state == "done" && resolution == AskOutcomes("read")[0].Label:
 		s.Folded = "read"
+	// A done install or decision says its whole story in its title: one
+	// line in the chat, the body behind a click.
+	case (kind == "install" || kind == "decision") && state == "done":
+		s.Folded = "done"
 	}
 	switch {
 	case class == "practice":

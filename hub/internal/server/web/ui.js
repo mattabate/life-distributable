@@ -873,9 +873,11 @@ function askHTML(a, opened, armed) {
     ref: 'ask', id: a.id, title: a.title, verb: a.verb || 'for you',
     tint: paused && open ? 'paused' : err ? 'err-card' : read ? 'read' : install ? 'install' : '',
     mark: answered ? '⏳ ' : !open ? '✓ ' : paused ? PAUSE_MARK + ' ' : err ? '⚠︎ ' : read ? '🔵 ' : install ? '📲 ' : '🔴 ',
-    body: paused && open ? pauseBarHTML(a) : err ? '' : askBody(install && !mac ? askDetailShown(a.detail) : (a.detail || ''), 'ask:' + a.id),
+    // An item's steps: each its own Did it · Skip, on the one card.
+    body: paused && open ? pauseBarHTML(a) : err ? '' : askBody(install && !mac ? askDetailShown(a.detail) : (a.detail || ''), 'ask:' + a.id)
+      + (a.steps && typeof calStepsHTML === 'function' ? calStepsHTML(a) : ''),
     said: a.said, thread: a.thread_id, acts, closed: open ? '' : esc(a.state),
-    folded: a.folded === 'dismissed' ? '✕ dismissed' : a.folded ? '✓ read' : '',
+    folded: a.folded === 'dismissed' ? '✕ dismissed' : a.folded ? '✓ ' + esc(a.folded) : '',
   }, opened);
 }
 

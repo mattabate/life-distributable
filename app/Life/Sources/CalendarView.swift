@@ -1036,6 +1036,9 @@ struct CalEntrySheet: View {
                                 // the full text is read.
                                 StyledText(text: d, style: .callout, color: Web.muted)
                             }
+                            if let s = entry.steps, !s.isEmpty {
+                                CalStepsList(calID: entry.isItem ? entry.id : nil, steps: s)
+                            }
                             macMetaLine(closed: closed)
                         }
                         .opacity(closed ? 0.62 : 1)
@@ -1264,6 +1267,9 @@ struct CalEntrySheet: View {
                 Section {
                     CalEntryRow(entry: entry, goals: goals)
                     if let d = entry.detailShown, !d.isEmpty, !isOpenInstall { StyledText(text: d, style: .body) }
+                    if let s = entry.steps, !s.isEmpty {
+                        CalStepsList(calID: entry.isItem ? entry.id : nil, steps: s)
+                    }
                     if entry.soon == true && entry.isOpen, let dd = parseDay(entry.day) {
                         LabeledContent("Added", value: dd.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().year()))
                     } else if !entry.day.isEmpty, let dd = parseDay(entry.day) {
@@ -1338,6 +1344,55 @@ struct CalEntrySheet: View {
             if entry.isItem { _ = try await hub.resolveCalItem(entry.id, state: state) }
             else if let a = entry.ask_id { _ = try await hub.resolveAsk(a, state: state) }
             shut()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+/// An item's steps: one line each in the calendar's glyphs, with its own
+/// Did it · Skip, and Undo once closed. The hub closes the item when the last
+/// one does; the list keeps the answer it got back. Drawn on the calendar's
+/// page and panel and on the item's chat card (AskCards). calID nil = read-only
+/// (a coming row).
+struct CalStepsList: View {
+    @Environment(HubClient.self) private var hub
+    let calID: String?
+    @State var steps: [CalStep]
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(steps) { s in
+                HStack(spacing: 8) {
+                    Text(s.glyph).foregroundStyle(.secondary).frame(width: 16)
+                    Text(s.title)
+                        .strikethrough(s.mark == "wont")
+                        .foregroundStyle(s.isOpen ? .primary : .secondary)
+                    Spacer(minLength: 4)
+                    if calID != nil {
+                        if s.isOpen {
+                            Button("Did it") { Task { await close(s.n, "done") } }.buttonStyle(.bordered).controlSize(.small)
+                                .accessibilityIdentifier("step-\(s.n)-done")
+                            Button("Skip") { Task { await close(s.n, "wont") } }.buttonStyle(.bordered).controlSize(.small)
+                                .accessibilityIdentifier("step-\(s.n)-skip")
+                        } else {
+                            Text(s.state).font(.caption).foregroundStyle(.secondary)
+                            Button("Undo") { Task { await close(s.n, "open") } }.buttonStyle(.borderless).controlSize(.small)
+                                .accessibilityIdentifier("step-\(s.n)-undo")
+                        }
+                    }
+                }
+                .font(.subheadline)
+            }
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+        }
+    }
+
+    private func close(_ n: Int, _ outcome: String) async {
+        guard let id = calID else { return }
+        do {
+            let it = try await hub.closeCalStep(id, n: n, outcome: outcome)
+            steps = it.steps ?? steps
+            error = nil
         } catch { self.error = error.localizedDescription }
     }
 }

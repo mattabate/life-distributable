@@ -81,7 +81,9 @@ const CAL_REC_DONE = '#ce93d8';
 // No row is a session run with its time.
 // A did row's title reads as a deed: "Read: the bank feed costs $15/yr",
 // "Approved: move $500", "Accepted: try a new search engine".
-const calLabel = e => (e.verb ? e.verb + ': ' : '') + (e.title || '');
+// `part` (hub): "1 of 2" steps done, the skipped part of an item with steps,
+// visible on the bar itself.
+const calLabel = e => (e.verb ? e.verb + ': ' : '') + (e.title || '') + (e.part ? ` (${e.part})` : '');
 
 // THREE FORMS, THREE PLACES. A deed, a plan and a rec must be visually
 // distinct, and colour alone could not carry it: when everything was a bar in

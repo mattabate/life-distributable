@@ -585,6 +585,8 @@ struct Ask: Codable, Identifiable, Hashable {
     /// session asks, exactly as before.
     var cal_id: String?
     var cal_day: String?
+    /// The calendar item's steps, on its one card.
+    var steps: [CalStep]?
     var state: String
     var check_hint: String
     /// The sentence this card's push SPOKE, word for word — the raising
@@ -1056,6 +1058,20 @@ struct StepSegment: Codable, Hashable {
 
 // MARK: - Calendar (plan layer)
 
+/// One step of a calendar item: closed on its own with Did it / Skip
+/// (POST /calendar/{id}/steps/{n}); the item closes when the last one does.
+struct CalStep: Codable, Hashable, Identifiable {
+    var n: Int
+    var title: String
+    /// open | done | skipped | missed
+    var state: String
+    /// done | wont | todo, the calendar's one glyph vocabulary.
+    var mark: String
+    var id: Int { n }
+    var isOpen: Bool { state == "open" }
+    var glyph: String { mark == "done" ? "✓" : mark == "wont" ? "✕" : "○" }
+}
+
 /// One row of the merged agenda: a calendar item (owner/agent/note), a
 /// session's projected check-in (run), a scheduler job, or an undated open
 /// ask (anytime work).
@@ -1081,7 +1097,7 @@ struct CalEntry: Codable, Identifiable, Hashable {
     /// `CalView.soon` until they close it with words.
     var soon: Bool?
     /// Its window: `on` = its day only, missed
-    /// at midnight; `by` = owed until its day, then overdue.
+    /// 24 hours after its minute; `by` = owed until its day, then overdue.
     var due: String?
     /// No session waits on it: Did it / Skip, no words (hub `sessionless`).
     var tick: Bool?
@@ -1131,11 +1147,15 @@ struct CalEntry: Codable, Identifiable, Hashable {
     /// it will fall. No row exists for it yet, so `item` is absent and it is
     /// read-only: no buttons, no drag; `why` says so.
     var coming: Bool?
+    /// The item's steps, each closed on its own, and "N of M" done once some
+    /// are closed and not all done, printed after the title.
+    var steps: [CalStep]?
+    var part: String?
 
     var isItem: Bool { item == true }
     /// What the row is called on a chip, a block or an agenda line: a record
     /// reads as its deed — "Read: <title>".
-    var label: String { verb.map { "\($0): \(title)" } ?? title }
+    var label: String { (verb.map { "\($0): \(title)" } ?? title) + (part.map { " (\($0))" } ?? "") }
     /// `ref` split at its first colon: ("rec", "rec-<id>").
     var refKind: String? { ref.flatMap { $0.split(separator: ":", maxSplits: 1).first.map(String.init) } }
     var refID: String? { ref.flatMap { r in r.firstIndex(of: ":").map { String(r[r.index(after: $0)...]) } } }
@@ -1233,6 +1253,7 @@ struct CalItem: Codable, Identifiable, Hashable {
     /// (Overdue after). nil otherwise.
     var due: String?
     var prompt_id: String?
+    var steps: [CalStep]?
     var prev_id: String?
     var resolved_at: Date?
     var resolved_by: String?

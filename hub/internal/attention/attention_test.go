@@ -62,10 +62,10 @@ func TestBoardBothSurfaces(t *testing.T) {
 	}
 	// t1 is running: its bundle is still there and still counted, but sinks
 	// under the sessions that have stopped and wait on the owner. Inside a
-	// bundle the asks are in the order raised (a1 before a2 — the web one does
-	// not jump the queue).
+	// bundle the asks are newest first (a2 before a1: the row leads with what
+	// the chat is on now; the web one never jumps it).
 	// a3 is dated: on the calendar list AND a cell on its session.
-	want := "[Proposed by a scheduled job|x2]:x2 t2[Bank A cash|x3]:x3,a3,a4,a7 t3[Lunch routine|a6]:a6 t1[Gold exit|x1]:x1,a1,a2"
+	want := "[Proposed by a scheduled job|x2]:x2 t2[Bank A cash|x3]:x3,a7,a4,a3 t3[Lunch routine|a6]:a6 t1[Gold exit|x1]:x1,a2,a1"
 	if got := sessions(web); got != want {
 		t.Fatalf("web sessions\n got %s\nwant %s", got, want)
 	}
@@ -148,7 +148,7 @@ func TestHisWorkIsTheCalendarsNotASessions(t *testing.T) {
 			t.Fatalf("%s: calendar %v", surface, got)
 		}
 		for _, s := range b.Sessions {
-			if s.ID == "movie" && (len(s.Steps) != 0 || len(s.Asks) != 3 || s.Asks[0].ID != "a5" || s.Asks[1].ID != "a6" || s.Asks[2].ID != "a7") {
+			if s.ID == "movie" && (len(s.Steps) != 0 || len(s.Asks) != 3 || s.Asks[0].ID != "a7" || s.Asks[1].ID != "a6" || s.Asks[2].ID != "a5") {
 				t.Fatalf("%s: movie's step is one of its cards: %+v", surface, s)
 			}
 		}
@@ -299,8 +299,8 @@ func TestHeadingsAndPills(t *testing.T) {
 	if pill("run") != "running/running 1 for you/needs" || pill("read") != "1 to read/read" || pill("act") != "1 for you/needs 1 to read/read" || pill("ship") != "1 to install/install" || pill("mix") != "1 to read/read 1 to install/install" || pill("old") != "" {
 		t.Fatalf("pills %v", b.Pills)
 	}
-	// The row opens on, and names, the read before the install even though the
-	// install came first; a session that only has a build to install names it
+	// The row opens on, and names, the newest card, the read raised after the
+	// install; a session that only has a build to install names it
 	// and prints no description under it — the title is the whole instruction.
 	if b.First["mix"] != "a7" || b.Todo["mix"] != "One install card from now on" || b.Detail["mix"] != "The two build 1001s were one build." {
 		t.Fatalf("mix first=%q todo=%q detail=%q", b.First["mix"], b.Todo["mix"], b.Detail["mix"])

@@ -1,7 +1,7 @@
 {
   "id": "ask-00000001",
-  "created_at": "2026-10-08T21:16:56.793685Z",
-  "updated_at": "2026-10-08T21:16:56.800294Z",
+  "created_at": "2026-10-18T09:34:45.696562Z",
+  "updated_at": "2026-10-18T09:34:45.698555Z",
   "thread_id": "split-my-brokerage-cash-sensibly-00000002",
   "thread_title": "Split my brokerage cash sensibly",
   "title": "Move $2k to Broker B?",
@@ -11,7 +11,7 @@
   "surface": "any",
   "state": "done",
   "check_hint": "",
-  "resolved_at": "2026-10-08T21:16:56.800294Z",
+  "resolved_at": "2026-10-18T09:34:45.698555Z",
   "resolved_by": "owner",
   "resolution": "Check again",
   "thread_running": true,
@@ -28,6 +28,7 @@
   "verb": "decide",
   "open": false,
   "closed": true,
+  "folded": "done",
   "lane": "mine",
   "reopen": true,
   "window": "now"

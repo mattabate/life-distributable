@@ -259,6 +259,8 @@ struct ThreadRow: View {
     var cells: [SessionCell] = []
     /// Open cards beyond the ones drawn (board `open`): "and N more".
     var more: Int = 0
+    /// Every open card (board `open`, at least the cells drawn).
+    var openCount: Int = 0
     /// An older hub counted a card it did not bundle: its title (board
     /// `todo`) and words (board `detail`) draw where the cells would.
     var todo: String? = nil
@@ -270,6 +272,8 @@ struct ThreadRow: View {
 
     /// The desktop: this session is the one open on the right (a blue ring).
     var on = false
+    /// The desktop: "and N more" opened, the older cards drawn under the newest.
+    @State private var moreOpen = false
 
     init(t: Thread, board b: Board, on: Bool = false) {
         self.t = t
@@ -277,6 +281,7 @@ struct ThreadRow: View {
         forYou = b.forYou[t.id] ?? 0
         cells = b.bundleOf(t).map(SessionCell.cells) ?? []
         let open = b.open?[t.id] ?? 0
+        openCount = max(open, cells.count)
         more = max(0, open - min(cells.count, Self.rowCards))
         if forYou > 0, cells.isEmpty { todo = b.todo?[t.id]; detail = b.detail?[t.id] }
         let steps = cells.filter(\.step).count
@@ -300,31 +305,34 @@ struct ThreadRow: View {
     }
 
     #if targetEnvironment(macCatalyst)
-    /// The console's `.card.sess`, line for line (skin.css, the owner 2026-09-29:
-    /// "I want the same exact layout within the desktop app"): the name, then
-    /// its state — pills · model · when · dollars — then what it is doing,
-    /// then its open cards as full-width rows under a hairline, each with a
-    /// tint rail and its verb in a small caps box.
+    /// The console's `.card.sess`, line for line (skin.css). THE NAME AND THE
+    /// ONE THING IT NEEDS FROM THE OWNER: no model, dollars or tool-call row;
+    /// the session's own header carries those. A Your turn card is the name
+    /// over its newest open card, a full-width row under a hairline with a
+    /// tint rail and its verb in a small caps box ("and N more" under it,
+    /// which opens the older ones in place); a Working card is one line, a
+    /// blue dot, the name and when it last moved. Only the live audio pills
+    /// stay (speaking, waiting): the one fact a cell cannot carry.
+    static let deskCards = 1
     var macCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(md(t.title)).font(.system(size: 14.5, weight: t.unread > 0 ? .bold : .semibold))
-                .foregroundStyle(.primary).multilineTextAlignment(.leading)
-            HStack(spacing: 5) {
-                ForEach(pills, id: \.self) { PillChip(pill: $0) }
-                if let m = t.modelShort { WebPill(text: m) }
-                Text(footWords).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
-            }.padding(.top, 7)
-            // The turn in flight, the console's `.sess-run` row: a railed row
-            // under the state line, so the card says one state, not two (the
-            // dollars stay in the foot).
-            if runRow {
-                Text(t.turnFacts(withCost: false)).font(.system(size: 12.5)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).truncationMode(.tail)
-                    .padding(.leading, 13).padding(.trailing, 14).padding(.vertical, 9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
-                    .overlay(alignment: .leading) { Rectangle().fill(Color.accentColor).frame(width: 3) }
-                    .padding(.top, 10).padding(.horizontal, -14).padding(.bottom, cells.isEmpty ? -12 : 0)
-            } else if t.last_message_kind == "error", let m = summaryLine(t.last_message) {
+        let live = pills.filter { ["speaking", "waiting"].contains($0.tone) }
+        let more = max(0, openCount - min(cells.count, Self.deskCards))
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if t.status == "running" {
+                    Circle().fill(Color.accentColor).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                }
+                Text(md(t.title)).font(.system(size: 14.5, weight: t.unread > 0 ? .bold : .semibold))
+                    .foregroundStyle(.primary).multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                if cells.isEmpty, todo?.isEmpty ?? true, let d = t.last_message_at {
+                    Text(shortAgo(d)).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).layoutPriority(1)
+                }
+            }
+            if !live.isEmpty {
+                HStack(spacing: 5) { ForEach(live, id: \.self) { PillChip(pill: $0) } }.padding(.top, 7)
+            }
+            if t.status != "running", t.last_message_kind == "error", let m = summaryLine(t.last_message) {
                 Text(md("Error: \(m)")).font(.system(size: 12.5)).foregroundStyle(.red).lineLimit(2).padding(.top, 6)
             }
             if let todo, !todo.isEmpty, cells.isEmpty {
@@ -332,17 +340,19 @@ struct ThreadRow: View {
             }
             if !cells.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(cells.prefix(Self.rowCards)) { c in WebMiniCard(c: c) { open(c.id) } }
-                    if more > 0 {
-                        Button { open(cells[min(Self.rowCards, cells.count - 1)].id) } label: {
-                            Text("and \(more) more").font(.system(size: 12.5)).foregroundStyle(.secondary)
+                    ForEach(cells.prefix(moreOpen ? cells.count : Self.deskCards)) { c in WebMiniCard(c: c) { open(c.id) } }
+                    if more > 0 || cells.count > Self.deskCards {
+                        // "And N more" opens the older cards in place; the
+                        // console's toggleMoreCards.
+                        Button { if cells.count > Self.deskCards { moreOpen.toggle() } else { open(nil) } } label: {
+                            Text(moreOpen ? "Show less" : "and \(more) more").font(.system(size: 12.5)).foregroundStyle(.secondary)
                                 .padding(.horizontal, 14).padding(.vertical, 8)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
                         }.buttonStyle(.plain)
                     }
                 }
-                .padding(.top, runRow ? 0 : 10).padding(.horizontal, -14).padding(.bottom, -12)
+                .padding(.top, 10).padding(.horizontal, -14).padding(.bottom, -12)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)

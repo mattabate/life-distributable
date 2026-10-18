@@ -28,14 +28,14 @@ func TestStandingIsTheClientsOldLists(t *testing.T) {
 		{"physical", "step", "done", "", "hub", true, Standing{Closed: true, Lane: "chores", Reopen: true}},
 		{"decision", "", "open", "", "", false, Standing{Open: true, Lane: "mine"}},
 		{"decision", "", "answered", "", "", false, Standing{Lane: "mine"}},
-		{"decision", "", "done", "Read it", "app", false, Standing{Closed: true, Lane: "mine", Reopen: true}},
+		{"decision", "", "done", "Read it", "app", false, Standing{Closed: true, Folded: "done", Lane: "mine", Reopen: true}},
 		{"read", "", "done", "Read it", "web", false, Standing{Closed: true, Folded: "read", Lane: "mine", Reopen: true}},
 		{"read", "", "done", "thanks", "claude:thread:t", false, Standing{Closed: true, Lane: "agents", Reopen: true}},
 		{"read", "", "dismissed", "", "app", false, Standing{Closed: true, Folded: "dismissed", Lane: "mine", Reopen: true}},
 		{"install", "", "superseded", "", "claude:thread:t", false, Standing{Closed: true, Lane: "agents"}},
 		// An install card is closed by the phone's build check, not by the
 		// owner: the one closed ask with no Reopen.
-		{"install", "", "done", "tapped Install", "app", false, Standing{Closed: true, Lane: "mine"}},
+		{"install", "", "done", "tapped Install", "app", false, Standing{Closed: true, Folded: "done", Lane: "mine"}},
 		{"decision", "", "superseded", "", "claude:thread:t", false, Standing{Closed: true, Lane: "agents"}},
 		{"physical", "practice", "done", "", "app", false, Standing{Closed: true, Lane: "homework", Reopen: true}},
 	} {

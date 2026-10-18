@@ -4,6 +4,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"life/hub/internal/calendar"
 )
@@ -91,6 +92,52 @@ func (s *Server) calendarUpdate(w http.ResponseWriter, r *http.Request) {
 	it, err := s.Cal.Update(r.PathValue("id"), in)
 	if err != nil {
 		jsonErr(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, it)
+}
+
+// calendarSteps: replace an open item's step list.
+func (s *Server) calendarSteps(w http.ResponseWriter, r *http.Request) {
+	if s.Cal == nil {
+		jsonErr(w, 503, "calendar not configured")
+		return
+	}
+	var in struct{ Steps []string }
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		jsonErr(w, 400, "need {steps: [titles]}")
+		return
+	}
+	it, err := s.Cal.SetSteps(r.PathValue("id"), in.Steps)
+	if err != nil {
+		jsonErr(w, 409, err.Error())
+		return
+	}
+	writeJSON(w, 200, it)
+}
+
+// calendarStep: one step's Did / Skip (or its undo).
+func (s *Server) calendarStep(w http.ResponseWriter, r *http.Request) {
+	if s.Cal == nil {
+		jsonErr(w, 503, "calendar not configured")
+		return
+	}
+	var in struct{ Outcome, By string }
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		jsonErr(w, 400, "bad json")
+		return
+	}
+	n, err := strconv.Atoi(r.PathValue("n"))
+	if err != nil {
+		jsonErr(w, 400, "step must be its number")
+		return
+	}
+	if in.By == "" {
+		in.By = "owner"
+	}
+	it, err := s.Cal.CloseStep(r.PathValue("id"), n, in.Outcome, in.By)
+	if err != nil {
+		jsonErr(w, 409, err.Error())
 		return
 	}
 	writeJSON(w, 200, it)

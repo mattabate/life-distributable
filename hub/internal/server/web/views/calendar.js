@@ -132,7 +132,7 @@ function calEntryHTML(i, opts) {
   return `<div class="card cal${closed ? ' closed' : ''}${install ? ' install' : ''}${i.overdue && !closed ? ' overdue' : ''}"${proposed ? ` data-act="${actID}"` : ''}>
     <div class="spread"><span class="t">${title}</span>
       <span class="small muted">${i.overdue && !closed ? '<span style="color:var(--red);font-weight:600">overdue</span> · ' : ''}${when ? esc(when) + ' · ' : ''}<span class="pill" style="${calPillStyle(i)}">${esc(i.kind_label || i.kind || '')}</span></span></div>
-    ${detail ? `<div class="small muted wrap2">${mdPreview(detail)}</div>` : ''}
+    ${detail ? `<div class="small muted wrap2">${mdPreview(detail)}</div>` : ''}${calStepsHTML(i)}
     <div class="row small muted" style="margin-top:6px">
       ${record}${i.repeat ? esc(i.repeat) + ' · ' : ''}${i.goal_id ? `<a href="#/goals/${esc(i.goal_id)}">${esc(i.goal_id)}</a>` : ''}
       ${link}
@@ -261,6 +261,30 @@ const calPillStyle = i => {
   return `background:color-mix(in srgb, ${c} 15%, transparent);color:${c}`;
 };
 // Where a row opens: refHref (ui.js) — one table for every ref on the console.
+
+// An item's steps: one line each under the title, in the calendar's one glyph
+// language, with its own Did it · Skip; a closed one keeps Undo. The item
+// closes itself when the last one does (hub, calendar/steps.go). Shared with
+// the chat card (ui.js askCard), so both draw the same rows.
+function calStepsHTML(i) {
+  const steps = i.steps || [];
+  if (!steps.length) return '';
+  const id = i.cal_id || (i.item ? i.id : '');
+  const live = !!id && !i.coming;
+  return `<div class="cal-steps">${steps.map(s => {
+    const g = s.mark === 'done' ? '✓' : s.mark === 'wont' ? '✕' : '○';
+    const t = s.mark === 'wont' ? `<s>${esc(s.title)}</s>` : esc(s.title);
+    const btns = !live ? ''
+      : s.state === 'open' ? `<button class="sm" onclick="closeCalStep('${esc(id)}',${s.n},'done')">Did it</button><button class="sm" onclick="closeCalStep('${esc(id)}',${s.n},'wont')">Skip</button>`
+      : `<span class="small muted">${esc(s.state)}</span><button class="sm" onclick="closeCalStep('${esc(id)}',${s.n},'open')">Undo</button>`;
+    return `<div class="cal-step${s.state === 'open' ? '' : ' closed'}"><span class="tick">${g}</span><span class="grow">${t}</span>${btns}</div>`;
+  }).join('')}</div>`;
+}
+
+async function closeCalStep(id, n, outcome) {
+  return act(() => post(`/calendar/${id}/steps/${n}`, { outcome, by: 'owner' }), 'step ' + n + ' ' + outcome,
+    async () => { await pageRedraw(); refreshBadges(); });
+}
 
 async function resolveCal(id, state) {
   return act(() => post(`/calendar/${id}/resolve`, { state, by: 'owner' }), 'item ' + state,
