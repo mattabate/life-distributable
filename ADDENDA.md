@@ -178,3 +178,46 @@ Entry format:
 - How: same merge as add-0008. By hand: `ComposerField.swift`,
   `RespondSheet.swift`, `RecsView.swift`, `ThreadDetail.swift`,
   `ConfigView.swift`, `views/threads.js`, `views/config.js`, `app.css`.
+
+## add-0012 · 2026-10-18 · Calendar: one item, several steps
+- For: everyone
+- Offer: One calendar item can hold several steps (`lifectl cal add
+  --step "…"` per step, `lifectl cal <id> steps`), each closed on its own
+  with Did it or Skip, and Undo once closed, on the calendar page and the
+  item's chat card (web, phone, desktop). The item closes when its last
+  step does, and its title reads "(2 of 3)" when some were skipped. New
+  endpoints: `PUT /calendar/{id}/steps`, `POST /calendar/{id}/steps/{n}`.
+  An on-the-day step is now missed 24 hours after its set time instead
+  of at midnight, and stays in Due until then.
+- How: same merge as add-0008. By hand: `calendar/calendar.go`,
+  `calendar/steps.go`, `store/steps.go`, `server/calendar.go`,
+  `server/routes.go`, `threads/asks.go`, `cmd/lifectl/main.go`,
+  `views/calendar.js`, `views/calgrid.js`, `ui.js`, `app.css`,
+  `Models.swift`, `HubClient.swift`, `CalendarView.swift`,
+  `AskCards.swift`, `shared/api.md`.
+
+## add-0013 · 2026-10-18 · Sessions list and chat pane, decluttered
+- For: everyone
+- Offer: A Your turn card is the session's name and the one thing it
+  needs, opening on its newest card; "and N more" expands the older
+  cards in place and "Show less" folds them. A working session is one
+  line: a blue dot, its name and when it last moved. In a chat the
+  turn's end rides on its last block's line, a done install or decision
+  folds to one line, and the head is the name on the left with the
+  pills, model, dollars and tokens on the right. On the desktop the
+  build number moves into the status dot's hover, and hover cards are
+  no longer cut by a card's border. A picked chip stays blue under the
+  pointer.
+- How: same merge as add-0008. By hand: `attention/attention.go`,
+  `store/close.go`, `views/threads.js`, `ui.js`, `skin.css`,
+  `ThreadRows.swift`, `ThreadDetail.swift`, `Card.swift`,
+  `RootView.swift`, `MacFonts.swift`, `shared/api.md`.
+
+## add-0014 · 2026-10-18 · Sessions start sooner
+- For: everyone
+- Offer: The hub reads a running session's output every second (was
+  three), and launches sessions with no MCP servers, so account
+  connectors no longer connect at launch or ride the first prompt. A
+  phone UI flow with an unknown step now fails instead of passing.
+- How: same merge as add-0008. By hand: `cmd/hub/main.go`,
+  `threads/runner.go`, `LifeUITests/FlowTests.swift`.

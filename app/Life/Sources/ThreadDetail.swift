@@ -315,6 +315,33 @@ struct ThreadDetail: View {
         draft.focusRequest += 1
     }
 
+    /// Desktop: a turn's end line folded into the line of its last block,
+    /// "6 tool calls · turn ended · today 11:56 PM · $1.31" where it was two
+    /// rows. Only when the reply row is nothing but that line and comes
+    /// straight after a finished block with no card under it; any other reply
+    /// keeps its own row. `tails` is keyed by the starter, `skip` holds the
+    /// replies that draw no row.
+    var mergedEnds: (tails: [Int: (line: String, reply: Int)], skip: Set<Int>) {
+        var tails: [Int: (line: String, reply: Int)] = [:], skip: Set<Int> = []
+        #if targetEnvironment(macCatalyst)
+        let vis = visibleRows
+        for (i, r) in vis.enumerated() where i + 1 < vis.count {
+            guard !r.live, let last = r.chain.last, last.card == nil, !last.live,
+                  !last.events.isEmpty || (last.count?.steps ?? 0) > 0 else { continue }
+            let n = vis[i + 1].m
+            guard n.role != "owner", n.role != "system", n.kind != "schedule", n.kind != "error",
+                  n.run_id != nil, n.run_id == r.m.run_id,
+                  n.text.isEmpty, (n.attachments ?? []).isEmpty else { continue }
+            var line = dayClock(n.ts)
+            if n.cost_usd > 0 { line += " · " + usd(n.cost_usd) }
+            if n.id == lastTurnID { line = "turn ended · " + line }
+            tails[r.m.id] = (line, n.id)
+            skip.insert(n.id)
+        }
+        #endif
+        return (tails, skip)
+    }
+
     /// A message that opened a run (as opposed to the reply that ended it).
     func startsRun(_ m: ThreadMessage) -> Bool { m.run_id != nil && m.role != "claude" && m.kind != "error" }
 
@@ -463,8 +490,9 @@ struct ThreadDetail: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }.buttonStyle(.plain).padding(.horizontal)
                         }
+                        let ends = mergedEnds
                         ForEach(visibleRows) { r in
-                            bubble(r.m).id(r.m.id)
+                            if !ends.skip.contains(r.m.id) { bubble(r.m).id(r.m.id) }
                             ForEach(asksByMessage[r.m.id] ?? []) { a in
                                 AskCard(a: a, goals: goals, reload: { await load() }).id(a.id)
                             }
@@ -475,8 +503,13 @@ struct ThreadDetail: View {
                             // running.
                             ForEach(r.chain) { p in
                                 if !p.events.isEmpty || p.live || (p.count?.steps ?? 0) > 0 {
+                                    let end = p.id == r.chain.last?.id ? ends.tails[r.m.id] : nil
                                     RunActivity(events: p.events, live: p.live, count: p.count,
+                                                tail: end?.line ?? "",
                                                 open: { await loadBlock(r.count) }).id("run-\(p.id)")
+                                        // The folded reply row's anchor, so a
+                                        // scroll to it still lands here.
+                                        .background(alignment: .bottom) { if let end { Color.clear.frame(height: 1).id(end.reply) } }
                                 }
                                 if let ref = p.card { chainCard(ref) }
                             }
@@ -1372,43 +1405,46 @@ extension ThreadDetail {
     /// box, the title, its pills (the live ones are the controls — hovered,
     /// running reads Stop, speaking reads Stop speaking), the grey model pill,
     /// and at the right the schedule · next · $ · tokens line.
+    /// The title alone on the left, and at the right everything about the
+    /// session in one run: its pills, the model, schedule · $ · tokens.
+    /// ← only on a chat pushed over another page; beside the Sessions list
+    /// the list is the way back.
     var macHead: some View {
         HStack(spacing: 8) {
-            Button {
-                if pushed { dismiss() } else { snap.desk = nil; snap.deskGen += 1 }
-            } label: {
-                Text("←").font(.system(size: 13)).foregroundStyle(Web.muted)
-                    .frame(width: 30, height: 30)
-                    .background(Web.panel, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Web.lineStrong, lineWidth: 1) }
-                    .contentShape(Rectangle())
+            if pushed {
+                Button { dismiss() } label: {
+                    Text("←").font(.system(size: 13)).foregroundStyle(Web.muted)
+                        .frame(width: 30, height: 30)
+                        .background(Web.panel, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Web.lineStrong, lineWidth: 1) }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Back")
+            Text(md(thread.title)).font(.system(size: 15, weight: .semibold)).tracking(-0.18)
+                .lineLimit(1).truncationMode(.tail)
+                .padding(.leading, pushed ? 4 : 0)
+                .layoutPriority(1)
+            Spacer(minLength: 12)
             HStack(spacing: 6) {
-                Text(md(thread.title)).font(.system(size: 15, weight: .semibold)).tracking(-0.18)
-                    .lineLimit(1).truncationMode(.tail)
-                    .padding(.trailing, 6)
-                    .layoutPriority(1)
                 HStack(spacing: 4) {
                     ForEach(Array(headPills.enumerated()), id: \.offset) { _, p in
                         HeadPill(pill: p, act: headAct(p))
                     }
-                }.fixedSize()
+                }
                 if let m = thread.modelShort {
                     Text(m).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Web.muted)
                         .padding(.horizontal, 7).frame(height: 20)
                         .background(Web.code, in: RoundedRectangle(cornerRadius: 6))
-                        .fixedSize()
+                }
+                if !headMeta.isEmpty {
+                    Text(headMeta).font(.system(size: 12.5)).monospacedDigit().foregroundStyle(Web.muted)
+                        .lineLimit(1)
+                        .padding(.leading, 2).padding(.trailing, 4)
                 }
             }
-            .padding(.leading, 4)
-            Spacer(minLength: 12)
-            if !headMeta.isEmpty {
-                Text(headMeta).font(.system(size: 12.5)).monospacedDigit().foregroundStyle(Web.muted)
-                    .lineLimit(1).truncationMode(.head)
-                    .padding(.trailing, 4)
-            }
+            .fixedSize()
         }
         .padding(.horizontal, 16)
         .frame(height: 52)
@@ -1651,6 +1687,9 @@ struct RunActivity: View {
     /// are only what this screen happened to draw, so counting them made the
     /// number move as the page slid.
     var count: StepCount? = nil
+    /// The turn's end folded onto this line ("turn ended · today 11:56 PM ·
+    /// $1.31"), ThreadDetail.mergedEnds; empty for any other block.
+    var tail: String = ""
     /// Fetch this block's own events, called once when the owner opens it.
     var open: (() async -> Void)? = nil
     @State private var expanded: Bool? = nil
@@ -1677,7 +1716,7 @@ struct RunActivity: View {
     /// as the console's activityHTML does.
     var headline: String {
         if live && events.isEmpty && (count?.steps ?? 0) == 0 { return "starting…" }
-        return summary
+        return tail.isEmpty ? summary : summary + " · " + tail
     }
     /// Steps the hub counted that this screen has not read yet — shown as one
     /// line inside the open block while the ranged read runs.

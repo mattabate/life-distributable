@@ -435,6 +435,9 @@ func main() {
 		// lifectl cal <id> done|dismiss|reopen ["what happened"]
 		// lifectl cal add "title" [--detail d] [--goal g]   NO --on = a soon item: the owner's to-do with no due day, never overdue
 		// lifectl cal <id> soon                        an open owner step loses its day and becomes a soon item
+		// lifectl cal add … --step "a" --step "b"       one item, several steps, each closed on its own
+		// lifectl cal <id> steps "a" "b"                replace an open item's steps
+		// lifectl cal <id> step <n> done|skip|reopen    close one step
 		// lifectl cal <from-id> into <to-id>            fold a duplicate into the keeper (also: cal <from-id> <to-id>)
 		if len(os.Args) > 2 && os.Args[2] == "add" {
 			need(4)
@@ -447,8 +450,13 @@ func main() {
 			thread := fs.String("thread", os.Getenv("LIFE_THREAD_ID"), "session the ask/run lands in (default $LIFE_THREAD_ID)")
 			repeat := fs.String("repeat", "", "daily|weekly|monthly|yearly|every<N>d (e.g. every2d)")
 			nag := fs.Int("nag", 0, "minutes between reminders after it is due (owner items; default 360)")
-			due := fs.String("due", "", "owner/homework: on = its day only, missed at midnight, never overdue (a chore: water the plants) | by = any time up to its day, overdue after (an assignment, a deadline). Default: on for --repeat daily, else by")
+			due := fs.String("due", "", "owner/homework: on = its day only, missed 24 hours after its minute, never overdue (a chore: water the plants) | by = any time up to its day, overdue after (an assignment, a deadline). Default: on for --repeat daily, else by")
 			distinct := fs.String("distinct", "", "why this is not the near-duplicate the hub names (it refuses a session's item that repeats an open one within 3 days)")
+			steps := []string{}
+			fs.Func("step", "one step of the item, in order (repeat the flag): one push, one row, each step closed on its own (`cal <id> step <n> done|skip`)", func(s string) error {
+				steps = append(steps, s)
+				return nil
+			})
 			fs.Parse(os.Args[4:])
 			// No --on = a SOON item: a to-do of the owner's with no due day.
 			// It is never overdue, never nagged, raises no ask, and belongs to no
@@ -462,7 +470,7 @@ func main() {
 			}
 			src := actor()
 			c.call("POST", "/api/v1/calendar", map[string]any{"title": titleArg(os.Args[3]), "day": *on, "soon": soon, "at": *at, "kind": *kind, "detail": text(*detail),
-				"goal_id": *goal, "thread_id": *thread, "repeat": *repeat, "nag_min": *nag, "source": src, "due": *due, "distinct": *distinct})
+				"goal_id": *goal, "thread_id": *thread, "repeat": *repeat, "nag_min": *nag, "source": src, "due": *due, "distinct": *distinct, "steps": steps})
 			return
 		}
 		// lifectl cal <from-id> into <to-id> (or <from-id> <to-id>): fold one
@@ -517,6 +525,22 @@ func main() {
 				}
 				put("scope", *scope, false)
 				c.call("PATCH", "/api/v1/calendar/"+id, body)
+				return
+			}
+			if os.Args[3] == "steps" {
+				// lifectl cal <id> steps "a" "b" ... replace an open item's steps
+				// (none given = no steps).
+				c.call("PUT", "/api/v1/calendar/"+id+"/steps", map[string]any{"steps": append([]string{}, os.Args[4:]...)})
+				return
+			}
+			if os.Args[3] == "step" {
+				// lifectl cal <id> step <n> done|skip|reopen: close one step.
+				need(6)
+				outcome := map[string]string{"done": "done", "did": "done", "skip": "wont", "wont": "wont", "reopen": "open", "open": "open"}[os.Args[5]]
+				if outcome == "" {
+					die("cal step: done|skip|reopen")
+				}
+				c.call("POST", "/api/v1/calendar/"+id+"/steps/"+os.Args[4], map[string]string{"outcome": outcome, "by": actor()})
 				return
 			}
 			if os.Args[3] == "soon" {

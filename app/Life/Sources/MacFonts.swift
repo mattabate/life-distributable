@@ -72,11 +72,15 @@ struct WebHeading: View {
 
 extension View {
     /// The console's `.card`: white, 1px hairline, radius 10, 13×16 padding.
+    /// The hairline is under the content, not over it, so a hover card that
+    /// rises past the card's top edge is not cut by it.
     func webCard(padding: CGFloat = 14) -> some View {
         self.padding(.vertical, padding - 1).padding(.horizontal, padding + 2)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Web.panel, in: RoundedRectangle(cornerRadius: 10))
-            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Web.line, lineWidth: 1) }
+            .background {
+                RoundedRectangle(cornerRadius: 10).fill(Web.panel)
+                    .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Web.line, lineWidth: 1) }
+            }
     }
 
     /// The light grey page, content wall to wall with 16 at the edges (the

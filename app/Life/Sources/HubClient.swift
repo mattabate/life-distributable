@@ -510,6 +510,9 @@ final class HubClient {
     func calendar(from: String = "", to: String = "") async throws -> CalView { try await request("GET", "/api/v1/calendar?from=\(from)&to=\(to)") }
     /// One item by id — where a `cal-…` id tapped in a card's text lives (Refs.swift).
     func calItem(_ id: String) async throws -> CalItem { try await request("GET", "/api/v1/calendar/\(id)") }
+    /// One step of an item: done | wont | open (its undo). The hub closes the
+    /// item when the last step closes.
+    func closeCalStep(_ id: String, n: Int, outcome: String) async throws -> CalItem { try await request("POST", "/api/v1/calendar/\(id)/steps/\(n)", body: ["outcome": outcome, "by": "owner"]) }
     func resolveCalItem(_ id: String, state: String, note: String = "") async throws -> CalItem { try await request("POST", "/api/v1/calendar/\(id)/resolve", body: ["state": state, "by": "owner", "note": note]) }
     /// Move/retitle a still-scheduled item: any of day, at ("" = all day),
     /// title, detail, repeat. What a drag in the grid writes.

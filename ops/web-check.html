@@ -327,7 +327,9 @@ setTimeout(async () => {
   check('a running session with no run block shows working…', workingShown() && !liveBlock(), 'shown: ' + workingShown());
   check('the working line says the turn\'s calls, clock and dollars', /^\s*working · 23 tool calls · today \d+:\d\d [AP]M · \$1\.12$/.test(workingText()), workingText());
   const sideFacts = sessionCardHTML({ ...THREAD, activity: 'Run the verify proof again' }, {});
-  check('the session card says the same facts, no step label', sideFacts.includes('23 tool calls · today') && sideFacts.includes('$1.12') && !sideFacts.includes('verify proof'), sideFacts);
+  // The list card is one line now: a blue dot, the name, when.
+  check('a working session card is the dot, the name and when, no calls, dollars or step label', sideFacts.includes('sess-dot') && sideFacts.includes('sess-ago')
+    && !sideFacts.includes('tool calls') && !sideFacts.includes('$1.12') && !sideFacts.includes('verify proof'), sideFacts);
 
   // The run in flight: its block carries the count and the pulse; the line
   // under it keeps the clock and dollars, like "turn ended · …".

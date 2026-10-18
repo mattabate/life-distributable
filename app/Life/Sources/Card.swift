@@ -135,7 +135,7 @@ struct Card: View {
     /// The closed card's record ("done · 2h ago", "denied by app").
     var line: String = ""
     /// Set → one grey folded line headed with this word ("dismissed",
-    /// "read"); tap to unfold the body and `buttons` (Reopen).
+    /// "read", "done"); tap to unfold the body and `buttons` (Reopen).
     var folded: String? = nil
     var buttons: [CardButton] = []
     /// Under the buttons: an approval's audit trail.
@@ -293,7 +293,7 @@ struct Card: View {
         VStack(alignment: .leading, spacing: 6) {
             Button { withAnimation(.snappy) { unfolded.toggle() } } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: word == "read" ? "checkmark.circle" : "xmark.circle")
+                    Image(systemName: word == "dismissed" ? "xmark.circle" : "checkmark.circle")
                     Text("\(word) ·").textCase(.uppercase).font(.caption2.weight(.semibold))
                     Text(md(title)).font(.subheadline).lineLimit(unfolded ? nil : 1).multilineTextAlignment(.leading)
                     Spacer(minLength: 0)

@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS cal_items_day ON cal_items(day, state);`,
 	// any other (2026-09-25; until then --on dropped --say).
 	`ALTER TABLE cal_items ADD COLUMN say TEXT NOT NULL DEFAULT ''`,
 	// due (2026-09-26): WHEN a dated step of the owner's is owed — `on` its
-	// day only (a missed one closes as missed at midnight, never Overdue:
+	// day only (a missed one closes as missed 24 hours after its minute, never Overdue:
 	// watering the plants early does not count) or `by` its day (owed from the
 	// day its period opens, Overdue after: a weekly assignment). '' on agent and
 	// note items and on a soon to-do (no day). See `dueOf`.
@@ -94,6 +94,18 @@ CREATE INDEX IF NOT EXISTS cal_events_item ON cal_events(item_id, id);`,
 INSERT INTO item_events (item_id,ts,actor,from_state,to_state,note)
 	SELECT item_id,ts,actor,CASE from_state WHEN 'fired' THEN 'open' ELSE from_state END,CASE to_state WHEN 'fired' THEN 'open' ELSE to_state END,note FROM cal_events ORDER BY id;
 UPDATE items SET ` + store.ItemStampSet + ` WHERE src='cal';`,
+	// item_steps: an item's steps, each closed on its own; id `<item>.<n>`,
+	// state open | done | skipped | missed, every move in item_step_events
+	// (store.StepLog). A repeat's next row gets the same titles, all open.
+	`CREATE TABLE IF NOT EXISTS item_steps (
+	id TEXT PRIMARY KEY, item_id TEXT NOT NULL, n INTEGER NOT NULL, title TEXT NOT NULL,
+	state TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+	resolved_at TEXT, resolved_by TEXT);
+CREATE INDEX IF NOT EXISTS item_steps_item ON item_steps(item_id, n);
+CREATE TABLE IF NOT EXISTS item_step_events (
+	id INTEGER PRIMARY KEY, step_id TEXT NOT NULL, ts TEXT NOT NULL,
+	actor TEXT NOT NULL, from_state TEXT NOT NULL, to_state TEXT NOT NULL, note TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS item_step_events_step ON item_step_events(step_id, id);`,
 }
 
 // setItem is the ONE writer of an item's state: query is the row's own write
@@ -195,6 +207,9 @@ type Item struct {
 	// Soon: no day — read-only on a row (day == ""); on POST it is the explicit
 	// "I mean no day", so a forgotten `day` is still an error.
 	Soon bool `json:"soon,omitempty"`
+	// Steps: the things this one item holds, in order, each closed on its own
+	// (steps.go). On POST, titles alone will do.
+	Steps []store.Step `json:"steps,omitempty"`
 	// Distinct: POST only, never stored - a session's reason that this item is
 	// not the near-duplicate Add would otherwise refuse.
 	Distinct string `json:"distinct,omitempty"`
@@ -305,6 +320,12 @@ type Entry struct {
 	// not an item, no buttons, nothing to drag; `id` is `<item id>@<day>` and
 	// `ref` points at the occurrence that does exist.
 	Coming bool `json:"coming,omitempty"`
+	// Steps: the item's steps, each with its own Did / Skip
+	// (POST /calendar/{id}/steps/{n}); a coming row shows them all open.
+	// Part: "N of M" done once some are closed and not all done, the
+	// skipped part visible on the bar after the title.
+	Steps []store.Step `json:"steps,omitempty"`
+	Part  string       `json:"part,omitempty"`
 }
 
 // stampEntry fills Lane / Closed / Item / Move / Why / KindLabel from the
@@ -534,8 +555,8 @@ func ownerKind(kind string) bool { return kind == "owner" || kind == "homework" 
 // a step not taken.
 // A today item with no time is not overdue — the day is not over.
 func overdueItem(it Item, today, hhmm string) bool {
-	// An on-the-day step is never owed after its day: midnight closes it as
-	// missed (missDay), and inside its day it is Due, not Overdue.
+	// An on-the-day step is never Overdue: it is Due until 24 hours after its
+	// moment (missAt), then missDay closes it as missed.
 	if !ownerKind(it.Kind) || (it.State != "scheduled" && it.State != "fired") || it.Day == "" || it.Due == "on" {
 		return false
 	}
@@ -702,7 +723,7 @@ func (c *Calendar) Add(it Item) (Item, error) {
 		it.NagMin = c.DefaultNag
 	}
 	// A practice is one reminder, never a nag: it fires, it pushes once, and
-	// midnight (or the next occurrence) closes it as missed (a practice missed
+	// the next occurrence closes it as missed (a practice missed
 	// on Tuesday is not done twice on Wednesday). An on-the-day chore is the
 	// same (Water the plants).
 	if !ownerKind(it.Kind) || it.Kind == "homework" || it.Due == "on" || soon {
@@ -730,6 +751,9 @@ func (c *Calendar) Add(it Item) (Item, error) {
 		VALUES (?,'cal',?,?,?,?,?,?,?,?,?,?,?,'scheduled',?,?,?,?,?,?,?)`,
 		it.ID, ts(now), ts(now), it.Title, strings.TrimSpace(it.Detail), it.Kind, it.Day, it.At, it.Repeat, nullable(it.GoalID), nullable(it.ThreadID), it.Source, it.NagMin, nullable(it.PrevID), it.AskKind, it.CheckHint, it.Surface, strings.TrimSpace(it.Say), it.Due)
 	if err != nil {
+		return Item{}, err
+	}
+	if err := c.putSteps(it.ID, cleanSteps(it.Steps), now); err != nil {
 		return Item{}, err
 	}
 	log.Printf("calendar: %s %s on %s %s: %s", it.ID, it.Kind, it.Day, it.At, it.Title)
@@ -1308,7 +1332,11 @@ func (it Item) legacyAsk() string {
 }
 
 func (c *Calendar) Get(id string) (Item, error) {
-	return scanItem(c.db.QueryRow(`SELECT `+cols+` FROM items WHERE id=? AND src='cal'`, id))
+	it, err := scanItem(c.db.QueryRow(`SELECT `+cols+` FROM items WHERE id=? AND src='cal'`, id))
+	if err == nil {
+		it.Steps = store.LoadSteps(c.db, id)[id]
+	}
+	return it, err
 }
 
 // List items with day in [from,to] (inclusive; "" = unbounded). state "" = all.
@@ -1472,10 +1500,10 @@ func (c *Calendar) DueAhead() ([]Item, error) {
 	today := now.Format("2006-01-02")
 	day0, _ := time.ParseInLocation("2006-01-02", today, time.Local)
 	rows, err := c.db.Query(`SELECT `+cols+` FROM items
-		WHERE src='cal' AND kind IN ('owner','homework') AND state IN ('scheduled','open') AND day>=? AND day<=?
+		WHERE src='cal' AND kind IN ('owner','homework') AND state IN ('scheduled','open') AND (day>=? OR (due='on' AND day=?)) AND day<=?
 		  AND NOT (due<>'on' AND day=? AND at<>'' AND at<=?)
 		ORDER BY day, at, created_at`,
-		today, day0.AddDate(0, 0, 6).Format("2006-01-02"), today, now.Format("15:04"))
+		today, day0.AddDate(0, 0, -1).Format("2006-01-02"), day0.AddDate(0, 0, 6).Format("2006-01-02"), today, now.Format("15:04"))
 	if err != nil {
 		return nil, err
 	}
@@ -1741,6 +1769,7 @@ func (c *Calendar) resolveLocked(it Item, state, by, note string, quiet bool) {
 		// The row forgets the close; cal_events keeps it (the done/dismissed
 		// move is already on the trail) and appends the reopen.
 		c.setItem(id, by, note, `UPDATE items SET state='scheduled', updated_at=?, fired_at=NULL, ask_id=NULL, nag_count=0, last_nag_at=NULL, resolved_at=NULL, resolved_by=NULL, resolution='' WHERE id=?`, ts(now), id)
+		c.reopenSteps(id, by, now)
 		// A reopened agent item gets a fresh wake (its old one was delivered
 		// or cancelled).
 		if it.Kind == "agent" {
@@ -1750,6 +1779,11 @@ func (c *Calendar) resolveLocked(it Item, state, by, note string, quiet bool) {
 		}
 	} else {
 		c.setItem(id, by, note, `UPDATE items SET state=?, updated_at=?, resolved_at=?, resolved_by=?, resolution=? WHERE id=?`, state, ts(now), ts(now), by, strings.TrimSpace(note), id)
+		if state == "done" {
+			c.closeOpenSteps(id, "done", by, now)
+		} else {
+			c.closeOpenSteps(id, "skipped", by, now)
+		}
 		if ask := it.legacyAsk(); ask != "" {
 			if a, err := c.thr.GetAsk(ask); err == nil && a.Active() {
 				if quiet {
@@ -1828,6 +1862,19 @@ func (c *Calendar) fireAt(it Item) time.Time {
 	return time.Date(d.Year(), d.Month(), d.Day(), h, m, 0, 0, time.Local)
 }
 
+// missAt: when an on-the-day step stops being owed, a full day after its
+// moment rather than the midnight after it. An all-day one counts from
+// DefaultHour. Same clock time the next day, so a DST night does not shift it
+// by an hour.
+func (c *Calendar) missAt(it Item) time.Time {
+	return c.fireAt(it).AddDate(0, 0, 1)
+}
+
+// missedNow: an on-the-day step of a past day whose 24 hours are up.
+func (c *Calendar) missedNow(it Item, now time.Time) bool {
+	return it.Due == "on" && it.Day != "" && it.Day < now.Format("2006-01-02") && !now.Before(c.missAt(it))
+}
+
 func nextDay(day, repeat string) string {
 	d, _ := time.ParseInLocation("2006-01-02", day, time.Local)
 	n := cadence.Step(repeat, d)
@@ -1878,6 +1925,9 @@ func (c *Calendar) spawnNext(it Item) {
 	// against the row itself or a same-goal sibling citing the same rec.
 	next := Item{Title: it.Title, Detail: it.Detail, Kind: it.Kind, Day: nd, At: it.At, Repeat: it.Repeat, GoalID: it.GoalID, ThreadID: it.ThreadID, Source: it.Source, NagMin: it.NagMin, PrevID: it.ID, Due: it.Due,
 		Surface: it.Surface, AskKind: it.AskKind, CheckHint: it.CheckHint, Distinct: "next occurrence of " + it.ID}
+	for _, t := range store.StepTitles(store.LoadSteps(c.db, it.ID)[it.ID]) {
+		next.Steps = append(next.Steps, store.Step{Title: t})
+	}
 	if _, err := c.Add(next); err != nil {
 		log.Printf("calendar: next occurrence of %s: %v", it.ID, err)
 	}
@@ -1907,9 +1957,8 @@ func (c *Calendar) Tick() {
 		log.Printf("calendar tick: %v", err)
 		return
 	}
-	today := now.Format("2006-01-02")
 	for _, it := range items {
-		if it.Due == "on" && it.Day != "" && it.Day < today {
+		if c.missedNow(it, now) {
 			continue // missDay closed it
 		}
 		switch it.State {
@@ -2074,28 +2123,34 @@ func (c *Calendar) missPrevious(it Item, now time.Time) {
 // missLocked closes one occurrence as missed, by the hub, and its ask with it.
 // Missed is a record on the calendar, not a debt.
 func (c *Calendar) missLocked(id, ask, why string, now time.Time) {
-	c.setItem(id, "hub", "missed", `UPDATE items SET state='dismissed', updated_at=?, resolved_at=?, resolved_by='hub', resolution='missed' WHERE id=?`, ts(now), ts(now), id)
+	// Steps miss one by one: the open ones close as missed, and an item with
+	// any step done closes done, its missed part on the row.
+	state, note := "dismissed", "missed"
+	c.closeOpenSteps(id, "missed", "hub", now)
+	if st, words, ok := store.StepsFate(store.LoadSteps(c.db, id)[id]); ok && st == "done" {
+		state, note = "done", words
+	}
+	c.setItem(id, "hub", note, `UPDATE items SET state=?, updated_at=?, resolved_at=?, resolved_by='hub', resolution=? WHERE id=?`, state, ts(now), ts(now), note, id)
 	if ask != "" {
 		if a, err := c.thr.GetAsk(ask); err == nil && a.Active() {
-			c.thr.ResolveAsk(ask, "dismissed", "hub", why)
+			c.thr.ResolveAsk(ask, state, "hub", why)
 		}
 	}
 }
 
-// missDay: an on-the-day step whose day is over closes as missed (plants watered
-// late one week are not good until the next). One that
-// never fired (the hub was down) keeps its chain going.
+// missDay: an on-the-day step 24 hours past its moment closes as missed (plants
+// watered late one week are not good until the next). One that never fired
+// (the hub was down) keeps its chain going.
 func (c *Calendar) missDay(items []Item, now time.Time) {
-	today := now.Format("2006-01-02")
 	for _, it := range items {
-		if it.Due != "on" || it.Day == "" || it.Day >= today || (it.State != "scheduled" && it.State != "fired") {
+		if !c.missedNow(it, now) || (it.State != "scheduled" && it.State != "fired") {
 			continue
 		}
-		c.missLocked(it.ID, it.legacyAsk(), "missed — its day is over", now)
+		c.missLocked(it.ID, it.legacyAsk(), "missed - 24 hours went by", now)
 		if it.State == "scheduled" && it.Repeat != "" {
 			c.spawnNext(it)
 		}
-		log.Printf("calendar: %s missed (%s is over)", it.ID, it.Day)
+		log.Printf("calendar: %s missed (24 hours after %s %s)", it.ID, it.Day, it.At)
 	}
 }
 
@@ -2325,6 +2380,7 @@ func (c *Calendar) Agenda(from, to string) (View, error) {
 		v.Days = append(v.Days, Day{Day: d, Entries: es})
 	}
 	c.stampLive(&v)
+	c.stampSteps(&v)
 	return v, nil
 }
 

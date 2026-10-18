@@ -719,7 +719,14 @@ func (m *Manager) launch(t Thread) error {
 	// stream-json both ways (needs --verbose in -p mode): one JSON line per
 	// step out, so Poll can show tool calls / thinking live and settle each
 	// turn on its result line; user messages in, so the owner can steer.
-	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"}
+	// No MCP servers: the CLI otherwise connects every claude.ai connector on
+	// the account at each launch and hands their tool schemas to the model on
+	// every cold first call. A hub session cannot use them (it is
+	// non-interactive, so their OAuth never completes, and the owner's data
+	// reaches a session through lifectl only), and every token off the cold
+	// prompt is time off "starting".
+	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
+		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`}
 	if len(m.AllowedTools) > 0 {
 		args = append(args, "--allowedTools", strings.Join(m.AllowedTools, ","))
 	}

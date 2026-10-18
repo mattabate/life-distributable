@@ -158,6 +158,10 @@ type Ask struct {
 	ResolvedBy   string     `json:"resolved_by,omitempty"`
 	Resolution   string     `json:"resolution,omitempty"`
 	SupersededBy string     `json:"superseded_by,omitempty"`
+	// Steps: a fired calendar item's own steps, each closed on its own from
+	// the card (POST /calendar/{id}/steps/{n}): one card, one push, however
+	// many things it holds (store.Step).
+	Steps []store.Step `json:"steps,omitempty"`
 	// ThreadRunning: the session that raised this is running RIGHT NOW — on
 	// this ask or on something else — so the card can say so while the owner
 	// answers it. A card whose session is still running need not be acted on
@@ -687,7 +691,25 @@ func (m *Manager) GetAsk(id string) (Ask, error) {
 	a, err := scanAsk(m.db.QueryRow(`SELECT `+askCols+` FROM `+askFrom+` WHERE a.id=? AND `+askIs, id))
 	a.WaitingToSpeak = err == nil && m.Voice.CardWaiting(a.ID)
 	a.Speaking = err == nil && m.Voice.CardSpeaking(a.ID, time.Now())
+	if err == nil && a.CalID != "" {
+		a.Steps = store.LoadSteps(m.db, a.CalID)[a.CalID]
+	}
 	return a, err
+}
+
+// stepsOn puts each fired calendar item's steps on its card: one read for
+// the list, after its rows are closed (never a query inside a row loop).
+func (m *Manager) stepsOn(asks []Ask) {
+	var ids []string
+	for _, a := range asks {
+		if a.CalID != "" {
+			ids = append(ids, a.CalID)
+		}
+	}
+	steps := store.LoadSteps(m.db, ids...)
+	for i := range asks {
+		asks[i].Steps = steps[asks[i].CalID]
+	}
 }
 
 // WroteSince: whether the owner wrote into the session after `t`. A card's
@@ -846,7 +868,12 @@ func (m *Manager) ListAsks(state, threadID string, limit int) ([]Ask, error) {
 		a.Speaking = m.Voice.CardSpeaking(a.ID, now)
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	m.stepsOn(out)
+	return out, nil
 }
 
 // ResolveAsk moves an ask to done|dismissed|open (reopen). by is "owner",

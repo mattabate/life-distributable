@@ -1,6 +1,7 @@
 package calendar
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -56,7 +57,7 @@ func TestDueTrayCoversTheRepeatsWeek(t *testing.T) {
 
 // An on-the-day chore (watering the plants early does not cover the rest of
 // the week): it fires once with no nag, closes with a tick when no session
-// is behind it, is never Overdue, and midnight closes it as missed — the
+// is behind it, is never Overdue, and 24 hours on (not midnight) closes it as missed - the
 // chain goes on. A step a session waits on still needs the owner's words.
 func TestOnTheDayChoreIsMissedNotOverdue(t *testing.T) {
 	c, th, n := newTest(t)
@@ -98,11 +99,24 @@ func TestOnTheDayChoreIsMissedNotOverdue(t *testing.T) {
 	if !tick {
 		t.Fatal("entry should say due=on, tick=true")
 	}
-	// Thursday: missed, the next Wednesday is up, nothing nagged.
+	// Past midnight it is still the owner's, and still Due: not until 24
+	// hours have gone by.
 	now = time.Date(2026, 10, 1, 0, 5, 0, 0, time.Local)
 	c.Tick()
+	if got, _ = c.Get(it.ID); got.State != "fired" {
+		t.Fatalf("midnight must not close it: %+v", got)
+	}
+	if v, _ = c.Agenda("2026-09-27", "2026-10-03"); len(v.Due) != 1 || v.Due[0].ID != it.ID {
+		t.Fatalf("yesterday's chore inside its 24 hours is Due: %+v", v.Due)
+	}
+	// Thursday 09:00, 24 hours on: missed, the next Wednesday is up, nothing nagged.
+	now = time.Date(2026, 10, 1, 9, 0, 0, 0, time.Local)
+	c.Tick()
 	if got, _ = c.Get(it.ID); got.State != "dismissed" || got.Resolution != "missed" || got.ResolvedBy != "hub" {
-		t.Fatalf("expected missed at midnight: %+v", got)
+		t.Fatalf("expected missed 24 hours on: %+v", got)
+	}
+	if v, _ = c.Agenda("2026-09-27", "2026-10-03"); len(v.Due) != 0 {
+		t.Fatalf("a missed chore leaves Due: %+v", v.Due)
 	}
 	if a, _ := th.GetAsk(got.AskID); a.Active() {
 		t.Fatalf("its ask should close too: %+v", a)
@@ -111,8 +125,10 @@ func TestOnTheDayChoreIsMissedNotOverdue(t *testing.T) {
 	if len(next) != 1 || next[0].Due != "on" {
 		t.Fatalf("chain: %+v", next)
 	}
-	if len(n.msgs) != 0 {
-		t.Fatalf("a chore never nags: %v", n.msgs)
+	for _, m := range n.msgs { // Sweep Venmo, a by-the-day step, may nag
+		if strings.Contains(m, "Water the plants") {
+			t.Fatalf("a chore never nags: %v", n.msgs)
+		}
 	}
 	// A tick closes the next one with no words; a session's step needs them.
 	if _, err := c.Resolve(next[0].ID, "done", "owner", ""); err != nil {

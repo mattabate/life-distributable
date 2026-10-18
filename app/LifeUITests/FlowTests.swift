@@ -149,6 +149,7 @@ final class FlowTests: XCTestCase {
             XCTAssertTrue(ok, "not on screen: \(arg)")
         default:
             log("unknown step: \(verb)")
+            XCTFail("unknown step: \(verb)")
         }
     }
 

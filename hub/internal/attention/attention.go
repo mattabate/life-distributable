@@ -34,9 +34,11 @@
 package attention
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"life/hub/internal/actions"
 	"life/hub/internal/calendar"
@@ -343,7 +345,7 @@ func (b *Board) tally(a store.Dated, running map[string]bool) {
 }
 
 // build: every active ask and every proposal, bundled by session with
-// approvals first, asks in the order they were raised. A running session's
+// approvals first, then asks, each newest first. A running session's
 // items are still counted — its row wears "N for you" under Working — which
 // is what Working reports. One rule for both surfaces, so the two lists match.
 func (b *Board) build(asks, acts []store.Dated, running map[string]bool, title map[string]string) {
@@ -426,6 +428,7 @@ func bundle(acts, asks []store.Dated, running map[string]bool, title map[string]
 	out := make([]Session, 0, len(order))
 	for _, id := range order {
 		r := by[id]
+		r.acts, r.asks = newestFirst(r.acts), newestFirst(r.asks)
 		s := Session{ID: id, Running: running[id], N: len(r.acts) + len(r.asks),
 			Actions: actObjs(r.acts), Asks: askObjs(r.asks)}
 		switch {
@@ -441,37 +444,32 @@ func bundle(acts, asks []store.Dated, running map[string]bool, title map[string]
 		if len(r.acts) > 0 {
 			s.First = r.acts[0].ID
 		} else {
-			s.First = lead(r.asks).ID
+			s.First = r.asks[0].ID
 		}
 		out = append(out, s)
 	}
 	return out
 }
 
-// askRank: the order the owner works a session's cards, and so the order a
-// row names them — what blocks the session (0), then answers to read (1),
-// then a build to install (2). The build is the phone's job and can wait for
-// the next one; naming it first over a read hid the read.
-func askRank(a store.Dated) int {
-	switch a.AskKind {
-	case "read":
-		return 1
-	case "install":
-		return 2
-	}
-	return 0
+// newestFirst: a session's cards, the last raised first. THE ROW LEADS WITH
+// THE NEWEST CARD: the cell and a click on the row land where the chat is
+// now, and "and N more" opens the older ones. A blocking ask used to lead
+// over a read, which put a days-old decision above the answer just asked for.
+func newestFirst(rows []store.Dated) []store.Dated {
+	out := slices.Clone(rows)
+	slices.Reverse(out)
+	sort.SliceStable(out, func(i, j int) bool { return raised(out[i]).After(raised(out[j])) })
+	return out
 }
 
-// lead: the card a session's asks open on — the lowest askRank, first raised
-// among equals. Callers pass at least one row.
-func lead(asks []store.Dated) store.Dated {
-	best := asks[0]
-	for _, a := range asks[1:] {
-		if askRank(a) < askRank(best) {
-			best = a
-		}
+func raised(r store.Dated) time.Time {
+	switch o := r.Obj.(type) {
+	case threads.Ask:
+		return o.CreatedAt
+	case actions.Action:
+		return o.CreatedAt
 	}
-	return best
+	return time.Time{}
 }
 
 // DetailCap: how much of a card's body rides on a session row. Three clamped
@@ -479,9 +477,8 @@ func lead(asks []store.Dated) store.Dated {
 // session. A board polled every 6s does not carry a 2KB proposal per thread.
 const DetailCap = 400
 
-// firstByThread: the card a session's row opens on — its first approval,
-// else its asks by askRank (blocking, read, install; first raised among
-// equals) — same rule as the bundle heading. Todo is its title, detail its
+// firstByThread: the card a session's row opens on: its newest approval,
+// else its newest ask (newestFirst), the same rule as the bundle. Todo is its title, detail its
 // (capped) body. An install card gets no detail: "Install app build N" is the
 // whole instruction, and its body only repeats the build's changelog.
 func firstByThread(acts, asks []store.Dated) (first, todo, detail map[string]string) {
@@ -495,7 +492,7 @@ func firstByThread(acts, asks []store.Dated) (first, todo, detail map[string]str
 			detail[id] = body
 		}
 	}
-	for _, x := range acts {
+	for _, x := range newestFirst(acts) {
 		// A proposal's row carries no Detail (actions.Row says why); its case
 		// is argued in the Action itself, which rides along in Obj.
 		body := ""
@@ -504,17 +501,12 @@ func firstByThread(acts, asks []store.Dated) (first, todo, detail map[string]str
 		}
 		take(x.ThreadID, x.ID, x.Title, body)
 	}
-	for rank := 0; rank <= 2; rank++ {
-		for _, a := range asks {
-			if askRank(a) != rank {
-				continue
-			}
-			body := a.Detail
-			if a.AskKind == "install" {
-				body = ""
-			}
-			take(a.ThreadID, a.ID, a.Title, body)
+	for _, a := range newestFirst(asks) {
+		body := a.Detail
+		if a.AskKind == "install" {
+			body = ""
 		}
+		take(a.ThreadID, a.ID, a.Title, body)
 	}
 	return first, todo, detail
 }

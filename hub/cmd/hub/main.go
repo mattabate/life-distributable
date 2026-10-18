@@ -291,9 +291,12 @@ func main() {
 		}
 		return acts.DecideQuiet(id, outcome == "approved", via, note)
 	}
+	// Every second, not three: a session's first step sat in its .out file
+	// for up to 3 s before anything drew it. Poll reads one indexed query
+	// and the new bytes of each live run's file, so a second costs nothing.
 	go func() {
 		for {
-			time.Sleep(3 * time.Second)
+			time.Sleep(time.Second)
 			thr.Poll()
 		}
 	}()

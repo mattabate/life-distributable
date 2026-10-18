@@ -18,7 +18,10 @@ body { -webkit-font-smoothing: antialiased; }
 /* ---- controls: one shape ---- */
 button, .btn { border-radius: var(--radius); border-color: var(--line-strong); font-weight: 500;
   box-shadow: 0 1px 0 rgba(0, 0, 0, .04); line-height: 1.3; }
-button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--code); }
+/* a picked (.on) button keeps its own fill under the pointer: this rule ties
+   `.chips-row button.on` and loads later, so it painted the picked chip grey
+   behind its white words; :not() keeps it at (0,2,1) */
+button:hover:not(:disabled, .on) { border-color: var(--line-strong); background: var(--code); }
 button.primary, a.btn.primary { box-shadow: none; font-weight: 600; }
 button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
 button.sm, .btn.sm { padding: 5px 11px; font-size: 13px; }
@@ -54,11 +57,12 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .sess-t { order: 0; font-size: 14.5px; font-weight: 600; line-height: 1.35; }
 .sess-t.unread { font-weight: 700; }
 .sess-foot { order: 1; margin-top: 7px; gap: 5px; font-size: 12px; font-variant-numeric: tabular-nums; }
-/* a running card's current turn: a railed row under the state line, so the card says one state, not two */
-.card.sess > .sess-run { order: 2; margin: 10px -14px 0; padding: 9px 14px 9px 13px; border-top: 1px solid var(--line);
-  border-left: 3px solid var(--accent); color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-.card.sess:not(:has(> .ask.mini)) > .sess-run { margin-bottom: -12px; border-radius: 0 0 0 9px; }
-.card.sess:has(> .sess-run) > .ask.mini:first-of-type { margin-top: 0; }
+/* the name line: a blue dot while it runs, and on a Working card (no cells)
+   when it last moved at the right */
+.sess-h { order: 0; display: flex; align-items: baseline; gap: 8px; }
+.sess-h .sess-t { flex: 1; min-width: 0; }
+.sess-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); align-self: center; }
+.sess-ago { flex: none; font-variant-numeric: tabular-nums; }
 .card.sess > .ask.mini, .card.sess > .more-cards { order: 3; }
 /* its open cards: rows under a hairline, a tint rail each — not boxes in a box */
 .card.sess > .ask.mini { margin: 10px -14px 0; padding: 9px 14px 9px 13px; border: 0; border-radius: 0;
@@ -98,7 +102,11 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
   background: color-mix(in srgb, var(--red) 12%, var(--panel)); color: var(--red); }
 .chat-head .pill-act:hover .w, .chat-head .pill-act:focus-visible .w { visibility: hidden; }
 .chat-head .pill-act:hover .h, .chat-head .pill-act:focus-visible .h { visibility: visible; }
-.chat-head .head-meta { flex: 0 1 auto; min-width: 0; margin: 0 4px 0 12px; font-size: 12.5px; line-height: 20px;
+/* the name alone on the left; its pills, the model and the money in one run at
+   the right; the back arrow only on a narrow window, where the list is not
+   beside it */
+.chat-head > .head-id { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.chat-head .head-meta { flex: 0 1 auto; min-width: 0; margin: 0 4px 0 2px; font-size: 12.5px; line-height: 20px;
   font-variant-numeric: tabular-nums; text-align: right; }
 .chat-head > button, .chat-head > .btn { height: 30px; padding: 0 12px; align-items: center;
   justify-content: center; font-size: 13px; flex: 0 0 auto; }
@@ -141,6 +149,8 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .run > summary::before { opacity: .55; }
 .msg.end { margin: 0 0 8px; }
 .msg.end .end-line { padding: 2px 0; font-size: 11.5px; }
+/* its line rides on the block above it (mergeTurnEnd) */
+.msg.end.merged { display: none; }
 .msgs > .ask, .msgs > details.ask { margin: 6px 0 18px; max-width: 860px; }
 
 /* ---- the one card: white, a hairline, a tint rail, the verb as a chip ---- */

@@ -104,7 +104,9 @@ struct AskCard: View {
              waiting: !closed && a.waiting_to_speak == true,
              speaking: !closed && a.speaking == true,
              hush: { Task { await cardAct(busy: $busy, error: $error, reload: reload) { try await hub.hushVoice(card: a.id) } } },
-             extra: paused && !closed ? AnyView(PauseBar(from: a.created_at, to: a.resumes_at!)) : nil,
+             // A calendar item's steps: each its own Did it · Skip, on the one card.
+             extra: paused && !closed ? AnyView(PauseBar(from: a.created_at, to: a.resumes_at!))
+                : (a.steps ?? []).isEmpty ? nil : AnyView(CalStepsList(calID: a.cal_id, steps: a.steps ?? [])),
              closed: closed,
              line: a.resolution.flatMap { $0.isEmpty ? nil : $0 } ?? (a.state == "superseded" ? "replaced by a newer card" : ""),
              // A dismissed card — or a read marked Read —

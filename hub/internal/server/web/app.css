@@ -608,6 +608,12 @@ textarea { resize: vertical; }
 .card.cal.closed .t { color: var(--muted); }
 .card.cal .tick { display: inline-block; width: 1.3em; color: var(--muted); }
 .card.cal .t s { text-decoration-thickness: 1.5px; }
+/* An item's steps: one line each, its own Did it · Skip. */
+.cal-steps { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.cal-step { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.cal-step .tick { display: inline-block; width: 1.3em; color: var(--muted); }
+.cal-step .grow { flex: 1; }
+.cal-step.closed .grow { color: var(--muted); }
 
 .pill.amber { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
 .pill.purple { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
