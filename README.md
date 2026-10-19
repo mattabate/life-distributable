@@ -242,7 +242,7 @@ is also the list of what the agent can do to your Mac.
 
 ## Who made this
 
-[Matt Abate](https://mattabate.com). Questions and ideas:
+[Matt Abate](https://mattabate.com), [@_laundry_matt_ on X](https://x.com/_laundry_matt_). Questions and ideas:
 [open an issue][issues]. Want it set up for you or your team? Get in touch
 through [mattabate.com](https://mattabate.com).
 
