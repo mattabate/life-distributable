@@ -303,9 +303,13 @@ struct MacTopBar: View {
             Button { tab = "settings" } label: { Image(systemName: "gearshape") }
                 .buttonStyle(.plain).foregroundStyle(tab == "settings" ? Color.accentColor : .secondary)
                 .help("Settings").padding(.leading, 4)
-            // The build lives in the dot's hover, not beside it.
+            // The build in the corner: an install card names a build, so this
+            // is how the owner checks it took.
             Circle().fill(store.error == nil ? Color.green : Color.red).frame(width: 8, height: 8)
-                .help((store.error ?? "Hub reachable") + " · build \(appVersionLabel)").padding(.leading, 6)
+                .help(store.error ?? "Hub reachable").padding(.leading, 6)
+            // Narrow windows too: the buttons fold to icons, the build stays.
+            Text(appVersionLabel).font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
+                .fixedSize()
         }
     }
 

@@ -210,7 +210,7 @@ func (a Ask) Step() bool { return a.CalID != "" && a.CalID == a.ID }
 
 // stand stamps the card's standing from its own fields.
 func (a *Ask) stand() {
-	chore := a.Class == ClassStep && store.Chore("owner", a.CalDay, a.ThreadID)
+	chore := a.Class == ClassStep && store.Chore("owner", a.CalDay, "", "", a.ThreadID)
 	s := store.AskStanding(a.Kind, a.Class, a.State, a.Resolution, a.ResolvedBy, chore)
 	a.Open, a.Closed, a.Folded, a.Lane, a.Reopen = s.Open, s.Closed, s.Folded, s.Lane, s.Reopen
 }

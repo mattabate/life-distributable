@@ -77,7 +77,8 @@ func CardKind(p string) string {
 // ItemStampSet derives verb, win and lane from the row's own columns (the SET
 // half of an UPDATE). A rec is accepted and waits in its own lane, soon; a
 // proposal is approved, now. A cal row is on its day, or by it (`due`), or
-// soon with no day; a dated step no session is behind is a chore (Chore). An
+// soon with no day; a dated step no session is behind, owed on its day or
+// repeating, is a chore (Chore — a one-off `by` step stays `mine`). An
 // ask is now, in the owner's lane — homework's when it is a practice, the chores'
 // when a chore minted it.
 var ItemStampSet = `verb = CASE src WHEN 'rec' THEN 'accept' WHEN 'action' THEN 'approve' ELSE
@@ -87,7 +88,7 @@ var ItemStampSet = `verb = CASE src WHEN 'rec' THEN 'accept' WHEN 'action' THEN 
 		CASE WHEN day='' THEN 'soon' WHEN due IN ('on','by') THEN due ELSE 'on' END ELSE 'now' END,
 	lane = CASE src WHEN 'rec' THEN 'recs' WHEN 'action' THEN 'mine' WHEN 'cal' THEN
 		CASE kind WHEN 'agent' THEN 'scheduled' WHEN 'homework' THEN 'homework'
-			WHEN 'owner' THEN CASE WHEN day<>'' AND COALESCE(thread_id,'') IN ('','calendar') THEN 'chores' ELSE 'mine' END
+			WHEN 'owner' THEN CASE WHEN day<>'' AND COALESCE(thread_id,'') IN ('','calendar') AND NOT (due='by' AND repeat='') THEN 'chores' ELSE 'mine' END
 			ELSE 'mine' END
 		ELSE CASE WHEN class='practice' THEN 'homework'
 			WHEN class='step' AND COALESCE(thread_id,'') IN ('','calendar') THEN 'chores' ELSE 'mine' END END`

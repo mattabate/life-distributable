@@ -229,6 +229,19 @@ func (it Item) Slot() (day, at string) {
 	return t.Format("2006-01-02"), t.Format("15:04")
 }
 
+// Cancelled: a won't-do row closed BEFORE its day. A dismissal — the owner's,
+// a session's, a merge's, a chain ended early — whose resolved minute falls on
+// an earlier local day than the row's own is a cancellation, not a skip: the
+// row stays in the table (nothing is deleted) but no surface draws it. A skip
+// or miss on or after its day is still "Skipped"; a done row is never
+// cancelled, whenever it closed.
+func (it Item) Cancelled() bool {
+	if it.Day == "" || it.ResolvedAt == nil || !(store.Wont(it.State) || it.State == "superseded") {
+		return false
+	}
+	return it.ResolvedAt.Local().Format("2006-01-02") < it.Day
+}
+
 // Entry: one row of the merged agenda (items + projected schedules + undated
 // asks + every other object with a date: actions, deferred recs). This is
 // the ONE read model over everything dated (Phase 2, 2026-08-26): the board
@@ -326,6 +339,11 @@ type Entry struct {
 	// skipped part visible on the bar after the title.
 	Steps []store.Step `json:"steps,omitempty"`
 	Part  string       `json:"part,omitempty"`
+	// Cancelled: a won't-do item closed BEFORE its day (Item.Cancelled). Both
+	// surfaces drop such a row from every list once, at the fetch — no bar,
+	// no popout line, no Due dot, no strip mark — so the week ahead shows only
+	// what is still planned. The row itself stays.
+	Cancelled bool `json:"cancelled,omitempty"`
 }
 
 // stampEntry fills Lane / Closed / Item / Move / Why / KindLabel from the
@@ -340,7 +358,8 @@ func stampEntry(e *Entry) {
 	e.Tick = e.Item && !e.Soon && !e.Did && sessionless(e.Kind, e.ThreadID) && ownerKind(e.Kind)
 
 	// A rec is purple its whole life; homework keeps its blue whoever closed
-	// it, and a chore (a dated step no session is behind) its own lane; a
+	// it, and a chore (a dated step no session is behind, owed on its day or
+	// repeating — a one-off `by` step is `mine`) its own lane; a
 	// record is its doer's; a pending approval is the owner's; a prompt an agent wrote
 	// for a minute is a scheduled run its whole life, done or dismissed (one
 	// colour for one kind); anything new falls to grey.
@@ -351,7 +370,7 @@ func stampEntry(e *Entry) {
 		e.Lane = "homework"
 	case e.Kind == "agent":
 		e.Lane = "scheduled"
-	case isCal && !e.Soon && store.Chore(e.Kind, e.Day, e.ThreadID):
+	case isCal && !e.Soon && store.Chore(e.Kind, e.Day, e.Due, e.Repeat, e.ThreadID):
 		e.Lane = "chores"
 	case e.Did:
 		// A did row whose doer is the owner (store.Owner) is red; anyone else — the
@@ -508,6 +527,7 @@ func entryFrom(d Dated) Entry {
 	}
 	if it, ok := d.Obj.(Item); ok {
 		e.Due = it.Due
+		e.Cancelled = it.Cancelled()
 	}
 	stampEntry(&e)
 	return e

@@ -221,3 +221,24 @@ Entry format:
   phone UI flow with an unknown step now fails instead of passing.
 - How: same merge as add-0008. By hand: `cmd/hub/main.go`,
   `threads/runner.go`, `LifeUITests/FlowTests.swift`.
+
+## add-0015 · 2026-10-19 · Calendar: cancelled rows vanish, one-off steps stay yours
+- For: everyone
+- Offer: A step dismissed before its day is a cancellation, not a skip:
+  the calendar no longer draws it anywhere (grid, Due, Overdue, the
+  record strip), on the console, phone and desktop. A skip on or after
+  its day still reads Skipped, and nothing is deleted. A one-off step
+  you filed for "by" a day, with no session behind it, stays in your
+  own lane instead of the chores lane; chores are steps owed on their
+  day or repeating.
+- How: same merge as add-0008. By hand: `calendar/calendar.go`,
+  `store/close.go`, `store/items.go`, `threads/asks.go`,
+  `views/calendar.js`, `views/calgrid.js`, `Models.swift`,
+  `shared/api.md`.
+
+## add-0016 · 2026-10-19 · Desktop: the build number is back in the corner
+- For: desktop
+- Offer: The top bar shows the app's build at the right corner again,
+  narrow windows included, so you can tell an install took. The status
+  dot's hover says only whether the hub is reachable.
+- How: same merge as add-0008. By hand: `RootView.swift`.

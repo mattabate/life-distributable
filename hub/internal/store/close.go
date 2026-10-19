@@ -205,10 +205,14 @@ func DoerLane(by string) string {
 	return "agents"
 }
 
-// Chore: a dated step of the owner's that no session is behind (watering
-// the plants, an errand they filed themselves) — the chores lane, apart from a step a session waits on. It closes with a tick, not words.
-func Chore(kind, day, thread string) bool {
-	return kind == "owner" && day != "" && (thread == "" || thread == "calendar")
+// Chore: a dated step of the owner's that no session is behind AND that is
+// owed on its day or repeats (a morning routine, watering the plants) — the
+// chores lane, apart from a step a session waits on. A one-off step owed BY a
+// day with no session behind it (a remind-me they filed) is still their task,
+// in their own lane. Either closes with a tick, not words. An empty `due`
+// is read as `on`, the way ItemStampSet's window does.
+func Chore(kind, day, due, repeat, thread string) bool {
+	return kind == "owner" && day != "" && (thread == "" || thread == "calendar") && !(due == "by" && repeat == "")
 }
 
 // AskStanding: open and answered are live; done, dismissed and superseded are
