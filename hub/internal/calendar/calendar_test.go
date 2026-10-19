@@ -1323,14 +1323,24 @@ func TestEntryIsStampedOnceForBothSurfaces(t *testing.T) {
 	if lane(Entry{Kind: "action", State: "proposed"}) != "mine" || lane(Entry{Kind: "action", State: "approved"}) != "agents" {
 		t.Error("action lanes")
 	}
-	// A chore: a dated step of the owner's no session is behind (step 10) —
-	// its own lane open or closed; a session's step and a "soon" to-do stay
-	// the owner's.
+	// A chore: a dated step of the owner's no session is behind (step 10),
+	// owed on its day or repeating — its own lane open or closed; a session's
+	// step and a "soon" to-do stay the owner's.
 	if lane(Entry{Kind: "owner", Day: "2026-09-27", Ref: "cal:c", State: "scheduled"}) != "chores" ||
+		lane(Entry{Kind: "owner", Day: "2026-09-27", Ref: "cal:c", Due: "on", State: "scheduled"}) != "chores" ||
+		lane(Entry{Kind: "owner", Day: "2026-09-27", Ref: "cal:c", Due: "by", Repeat: "weekly", State: "scheduled"}) != "chores" ||
 		lane(Entry{Kind: "owner", Day: "2026-09-27", Ref: "cal:c", ThreadID: "calendar", Did: true, Actor: "owner"}) != "chores" ||
 		lane(Entry{Kind: "owner", Day: "2026-09-27", Ref: "cal:c", ThreadID: "t-1", State: "fired"}) != "mine" ||
 		lane(Entry{Kind: "owner", Day: "2026-09-27", Ref: "cal:c", Soon: true}) != "mine" {
 		t.Error("chore lanes")
+	}
+	// A one-off step of the owner's owed BY a day with no session behind it
+	// is their task, not a chore; it keeps its tick.
+	if lane(Entry{Kind: "owner", Day: "2026-10-19", Ref: "cal:c", Due: "by", State: "scheduled"}) != "mine" ||
+		lane(Entry{Kind: "owner", Day: "2026-10-19", Ref: "cal:c", Due: "by", ThreadID: "calendar", State: "fired"}) != "mine" ||
+		lane(Entry{Kind: "owner", Day: "2026-10-19", Ref: "cal:c", Due: "by", ThreadID: "calendar", Did: true, Actor: "owner"}) != "mine" ||
+		!st(Entry{Kind: "owner", Day: "2026-10-19", Ref: "cal:c", Due: "by", State: "scheduled"}).Tick {
+		t.Error("a sessionless one-off by step is mine")
 	}
 	// Closed is one rule.
 	for _, e := range []Entry{{State: "done"}, {State: "accepted"}, {State: "declined"}, {Did: true}, {Kind: "action", State: "approved"}} {
@@ -1367,5 +1377,45 @@ func TestEntryIsStampedOnceForBothSurfaces(t *testing.T) {
 		if got := st(e).KindLabel; got != want {
 			t.Errorf("%+v: kind label %q, want %q", e, got, want)
 		}
+	}
+}
+
+// A won't-do row closed BEFORE its day is a cancellation, not a skip. The hub
+// says so once (`cancelled`) and both surfaces drop the row; a skip on or
+// after its day and a done row whenever it closed keep their marks. Nothing
+// is deleted.
+func TestARowDismissedBeforeItsDayIsCancelled(t *testing.T) {
+	c, _, _ := newTest(t)
+	now := time.Date(2026, 10, 19, 9, 0, 0, 0, time.Local)
+	c.Now = func() time.Time { return now }
+	ahead, _ := c.Add(Item{Title: "Movies at 3:30", Day: "2026-10-21", At: "15:30", Kind: "owner", Due: "by"})
+	today, _ := c.Add(Item{Title: "Haircut", Day: "2026-10-19", At: "10:00", Kind: "owner", Due: "by"})
+	done, _ := c.Add(Item{Title: "Order bath mats", Day: "2026-10-22", Kind: "owner", Due: "by"})
+	for _, x := range []struct{ id, state string }{{ahead.ID, "dismissed"}, {today.ID, "dismissed"}, {done.ID, "done"}} {
+		if _, err := c.Resolve(x.id, x.state, "hub", "plans changed"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v, err := c.Agenda("2026-10-19", "2026-10-25")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Entry{}
+	for _, d := range v.Days {
+		for _, e := range d.Entries {
+			got[e.Ref] = e
+		}
+	}
+	if e := got["cal:"+ahead.ID]; !e.Cancelled || !e.Closed || e.Mark != "wont" {
+		t.Fatalf("dismissed two days early should be cancelled, still a row: %+v", e)
+	}
+	if e := got["cal:"+today.ID]; e.Cancelled || e.Mark != "wont" {
+		t.Fatalf("dismissed on its day is a skip: %+v", e)
+	}
+	if e := got["cal:"+done.ID]; e.Cancelled || e.Mark != "done" {
+		t.Fatalf("done early is done: %+v", e)
+	}
+	if it, _ := c.Get(ahead.ID); it.State != "dismissed" || !it.Cancelled() {
+		t.Fatalf("the row stays, dismissed: %+v", it)
 	}
 }

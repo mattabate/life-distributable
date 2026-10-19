@@ -29,6 +29,8 @@ async function drawCalendar(view, rest) {
       [from, to] = calFetchRange();
       c = await get(`/calendar?from=${from}&to=${to}`);
     }
+    // A row cancelled before its day is dropped here, once (calPrune).
+    c = calPrune(c);
     calLast = c;
     await calDrawGrid(view, c);
   };

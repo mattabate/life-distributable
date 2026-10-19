@@ -212,6 +212,26 @@ final class DecodeTests: XCTestCase {
         XCTAssertTrue(v.days.first?.entries.first?.isOpen ?? false)
     }
 
+    /// A won't-do row closed before its day is a cancellation (hub `cancelled`):
+    /// `forThisDevice` drops it from every list once; a skip on the day (no
+    /// stamp) stays the struck row.
+    func testCancelledRowIsPruned() throws {
+        let v = try decode(CalView.self, """
+        {"from":"2026-10-19","to":"2026-10-25","today":"2026-10-19",
+         "anytime":[],
+         "overdue":[{"id":"cal-x","day":"2026-10-21","kind":"owner","title":"Movies","state":"dismissed","ref":"cal:cal-x","lane":"mine","closed":true,"mark":"wont","item":true,"kind_label":"your step","cancelled":true}],
+         "due":[{"id":"cal-y","day":"2026-10-19","kind":"owner","title":"Haircut","state":"dismissed","ref":"cal:cal-y","lane":"mine","closed":true,"mark":"wont","item":true,"kind_label":"your step"}],
+         "days":[{"day":"2026-10-21","entries":[
+           {"id":"cal-x","day":"2026-10-21","kind":"owner","title":"Movies","state":"dismissed","ref":"cal:cal-x","lane":"mine","closed":true,"mark":"wont","item":true,"kind_label":"your step","cancelled":true},
+           {"id":"cal-y","day":"2026-10-19","kind":"owner","title":"Haircut","state":"dismissed","ref":"cal:cal-y","lane":"mine","closed":true,"mark":"wont","item":true,"kind_label":"your step"}]}]}
+        """)
+        XCTAssertEqual(v.days.first?.entries.count, 2)
+        let d = v.forThisDevice
+        XCTAssertEqual(d.overdue.map(\.id), [])
+        XCTAssertEqual(d.due?.map(\.id), ["cal-y"])
+        XCTAssertEqual(d.days.first?.entries.map(\.id), ["cal-y"])
+    }
+
     func testRec() throws {
         let r = try decode(Rec.self, """
         {"id":"rec-1a2b3c4d","created_at":"2026-08-26T09:00:00Z","updated_at":"2026-08-26T09:00:00Z","title":"Try the standing desk",

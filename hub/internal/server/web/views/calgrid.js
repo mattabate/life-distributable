@@ -208,6 +208,16 @@ const calColor = e => calLaneOf(e).color;
 // any record. It is a LOOK (✓ or ✕, muted), never a filter: the past always shows.
 const calClosed = e => !!e.closed;
 const calShown = e => !calState.off.has(calLaneOf(e).key);
+// A won't-do row closed BEFORE its day is a cancellation, not a skip (the
+// hub's `cancelled`). It is drawn nowhere — no bar, no popout line, no Due
+// dot, no strip mark — so the response is pruned ONCE, as it arrives, and
+// every list below it (`days`, `due`, `overdue`, `soon`, `anytime`) is already
+// clean. The row stays in the hub.
+const calPrune = c => {
+  const keep = es => (es || []).filter(e => !e.cancelled);
+  return { ...c, anytime: keep(c.anytime), overdue: keep(c.overdue), due: keep(c.due), soon: keep(c.soon),
+    days: (c.days || []).map(d => ({ ...d, entries: keep(d.entries) })) };
+};
 // ---------- who can be dragged where ----------
 // The hub's `move`: '' = nowhere. 'item' = a cal item still scheduled or
 // fired (a drag on a fired one is a reschedule): PATCH day/at. 'run' = a

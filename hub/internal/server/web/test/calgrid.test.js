@@ -618,3 +618,20 @@ test('the rail trays: Overdue rows wear their day, Do soon its added day, Anytim
   assert.match(calRailHTML({ ...cal, soon: [todo] }), /Do soon <span class="cal-n">1<\/span>/);
   assert.equal(calFind({ soon: [todo] }, 'quartet'), todo);
 });
+
+// The hub stamps `cancelled` on a won't-do row closed before its day; the page
+// drops it from every list once, as the response arrives, so no bar, popout
+// line, Due dot or strip mark can draw it. A skip on the day (no stamp) stays
+// the struck row.
+test('a row cancelled before its day is pruned from every list once', () => {
+  const gone = { id: 'cal-x', ref: 'cal:cal-x', kind: 'owner', day: '2026-10-21', title: 'Movies', state: 'dismissed', lane: 'mine', closed: true, mark: 'wont', cancelled: true };
+  const skip = { id: 'cal-y', ref: 'cal:cal-y', kind: 'owner', day: '2026-10-19', title: 'Haircut', state: 'dismissed', lane: 'mine', closed: true, mark: 'wont' };
+  const c = calPrune({ today: '2026-10-19', anytime: [gone], overdue: [gone, skip], due: [gone], soon: undefined,
+    days: [{ day: '2026-10-21', entries: [gone, skip] }] });
+  assert.deepEqual(c.anytime, []);
+  assert.deepEqual(c.overdue, [skip]);
+  assert.deepEqual(c.due, []);
+  assert.deepEqual(c.soon, []);
+  assert.deepEqual(c.days, [{ day: '2026-10-21', entries: [skip] }]);
+  assert.equal(c.today, '2026-10-19');
+});

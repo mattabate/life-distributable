@@ -1101,6 +1101,10 @@ struct CalEntry: Codable, Identifiable, Hashable {
     var due: String?
     /// No session waits on it: Did it / Skip, no words (hub `sessionless`).
     var tick: Bool?
+    /// A won't-do row closed BEFORE its day: drawn nowhere —
+    /// `CalView.forThisDevice` drops it from every list once, so grid, Day
+    /// view, Due and the strip never see it. The row stays on the hub.
+    var cancelled: Bool?
     /// When the item behind the row is owed: now | on | by |
     /// soon. Absent on a row that is no item (a run, a job).
     var window: String?
@@ -1200,10 +1204,12 @@ struct CalView: Codable {
     var days: [CalDay]
 
     /// The same view without the other device's install rows (Anytime holds
-    /// the open build, a day its installed record) — `Ask.isOtherDeviceInstall`.
+    /// the open build, a day its installed record) — `Ask.isOtherDeviceInstall`
+    /// — and without the rows cancelled before their day (`CalEntry.cancelled`),
+    /// pruned once here so every list and the grid agree.
     var forThisDevice: CalView {
         var v = self
-        let keep = { (e: CalEntry) in !e.isOtherDeviceInstall }
+        let keep = { (e: CalEntry) in !e.isOtherDeviceInstall && e.cancelled != true }
         v.anytime = anytime.filter(keep); v.overdue = overdue.filter(keep)
         v.due = due?.filter(keep); v.soon = soon?.filter(keep)
         v.days = days.map { CalDay(day: $0.day, entries: $0.entries.filter(keep)) }
