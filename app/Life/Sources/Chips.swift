@@ -177,7 +177,7 @@ struct FlowRow: Layout {
             let slack = Swift.max(bounds.width - row.width, 0)
             var x = bounds.minX + (alignment == .center ? slack / 2 : alignment == .trailing ? slack : 0)
             for _ in 0..<row.count {
-                let size = subviews[i].sizeThatFits(.unspecified)
+                let size = fit(subviews[i], width: bounds.width)
                 subviews[i].place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(size))
                 x += size.width + spacing
                 i += 1
@@ -190,7 +190,7 @@ struct FlowRow: Layout {
         var rows: [(count: Int, width: CGFloat, height: CGFloat)] = []
         var count = 0, w: CGFloat = 0, h: CGFloat = 0
         for v in subviews {
-            let size = v.sizeThatFits(.unspecified)
+            let size = fit(v, width: width)
             if count > 0 && w + spacing + size.width > width {
                 rows.append((count, w, h))
                 count = 0; w = 0; h = 0
@@ -201,6 +201,16 @@ struct FlowRow: Layout {
         }
         if count > 0 { rows.append((count, w, h)) }
         return rows
+    }
+
+    /// A child at its natural size, but never wider than the row: one wider
+    /// than the whole width is asked again at that width, so a long file name
+    /// truncates inside the card instead of running off the phone.
+    private func fit(_ v: LayoutSubview, width: CGFloat) -> CGSize {
+        let size = v.sizeThatFits(.unspecified)
+        guard size.width > width, width.isFinite else { return size }
+        let capped = v.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        return CGSize(width: Swift.min(capped.width, width), height: capped.height)
     }
 }
 

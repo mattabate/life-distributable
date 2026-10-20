@@ -242,3 +242,25 @@ Entry format:
   narrow windows included, so you can tell an install took. The status
   dot's hover says only whether the hub is reachable.
 - How: same merge as add-0008. By hand: `RootView.swift`.
+
+## add-0017 · 2026-10-20 · SVG pictures draw everywhere
+- For: everyone
+- Offer: An SVG a session attaches (a drawn diagram or grid) shows as a
+  picture in the chat on the console, the phone and the desktop app, and
+  opens full size in the lightbox. The apps draw it to a PNG first, so
+  Quick Look no longer spins on one. The hub serves an `.svg` blob with a
+  sandboxing Content-Security-Policy, so opening the file on its own runs
+  no script.
+- How: same merge as add-0008. By hand: `server/obs.go`, `web/ui.js`,
+  `Attachments.swift`, `MacLightbox.swift`.
+
+## add-0018 · 2026-10-20 · Send waits for every picked photo
+- For: phone, desktop
+- Offer: Photos picked from the library load all at once, in the order
+  you picked them, each a grey tile until it lands. Send waits for the
+  last one, so none stays behind in the emptied box. A long file name on
+  an attachment chip truncates inside its card instead of running off the
+  screen, and a document chip shows its link text instead of the blob's
+  hash.
+- How: same merge as add-0008. By hand: `Attachments.swift`,
+  `ThreadDetail.swift`, `Chips.swift`, `StyledText.swift`.

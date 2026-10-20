@@ -525,9 +525,9 @@ struct FileStrip: View {
                     } else if isAudioRef(f.ref) {
                         BlobAudio(ref: f.ref)
                     } else {
-                        BlobDocument(ref: f.ref)
+                        BlobDocument(ref: f.ref, title: f.caption)
                     }
-                    if !f.caption.isEmpty {
+                    if !f.caption.isEmpty && (isImageRef(f.ref) || isAudioRef(f.ref)) {
                         Text(f.caption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             .frame(maxWidth: Self.tile.width, alignment: .leading)
                     }

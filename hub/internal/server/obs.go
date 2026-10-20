@@ -258,5 +258,11 @@ func (s *Server) getBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	// An SVG is a document that can carry script: drawn in an <img> it runs
+	// none, but "open the file" loads it on the hub's own origin. Sandboxed,
+	// it is a picture there too.
+	if strings.EqualFold(filepath.Ext(p), ".svg") {
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:")
+	}
 	http.ServeFile(w, r, p)
 }

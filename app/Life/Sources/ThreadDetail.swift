@@ -945,6 +945,9 @@ struct ThreadDetail: View {
     }
 
     func send(confirmed: Bool = false) {
+        // A picture still being read out of Photos goes WITH this message:
+        // the spinner shows, the send waits for it, then takes the lot.
+        if attachments.loading > 0 { sending = true; Task { await attachments.settle(); send(confirmed: confirmed) }; return }
         let t = draft.text
         let armed = replies
         if !armed.isEmpty, !confirmed, !t.contains(where: { !$0.isWhitespace }), attachments.isEmpty {
