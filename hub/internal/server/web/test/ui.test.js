@@ -182,6 +182,8 @@ test('md: a line that is only a hub file draws the file; anywhere else it is a l
   assert.ok(two.endsWith('<p>end</p>'), two);
   // Not a picture: a chip.
   assert.ok(md('[bill](https://h/api/v1/blobs/sha256/00/abc.pdf)').includes('📎 abc.pdf'));
+  // A drawn SVG is a picture.
+  assert.ok(md('![grid](https://h/api/v1/blobs/sha256/00/g.svg)').includes('<img src="/api/v1/blobs/sha256/00/g.svg"'));
   // A sound: a player in place.
   assert.ok(md('[af_heart](https://h/api/v1/blobs/sha256/00/v.m4a)').includes('<audio controls preload="none" src="/api/v1/blobs/sha256/00/v.m4a"></audio>'));
   // Inside a sentence, in a list, or climbing out of the blob route: not a file.

@@ -401,8 +401,9 @@ function mdCopy(btn) {
 // Blobs are stored under their original extension, so an attachment that is a
 // picture can be shown as one instead of as the word "attachment" - the
 // thumbnail links to the full file. HEIC only decodes in Safari, hence the
-// onerror fallback to a plain link.
-const isImageRef = r => /\.(png|jpe?g|gif|webp|heic|heif|avif)$/i.test(String(r || ''));
+// onerror fallback to a plain link. An SVG (a session's drawn diagram) is a
+// picture too.
+const isImageRef = r => /\.(png|jpe?g|gif|webp|heic|heif|avif|svg)$/i.test(String(r || ''));
 const isAudioRef = r => /\.(m4a|mp3|wav|aac|caf)$/i.test(String(r || ''));
 function attachHTML(ref) {
   const url = '/api/v1/blobs/' + esc(ref);

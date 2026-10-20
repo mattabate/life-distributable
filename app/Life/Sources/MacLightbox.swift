@@ -36,7 +36,10 @@ enum MacLightbox {
             guard let data = try? await hub.blob(ref) else { box.fail(); return }
             box.data = data
             if box.image == nil {
-                guard let img = await decodeFull(data) else { box.fail(); return }
+                // An SVG is drawn to a PNG first (pictureBlob); "open the
+                // file" still hands over the SVG itself.
+                guard let pic = isSVGRef(ref) ? try? await pictureBlob(ref, hub: hub) : data,
+                      let img = await decodeFull(pic) else { box.fail(); return }
                 full.setObject(img, forKey: ref as NSString)
                 box.show(img)
             }

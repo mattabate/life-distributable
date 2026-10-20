@@ -6,6 +6,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import QuickLook
 import AVFoundation
+import WebKit
 
 /// A document (a PDF, a CSV, an export) attached to a message, as opposed to
 /// a picture: the bytes go up untouched under their own name, so the hub
@@ -33,9 +34,21 @@ final class AttachmentDraft {
     /// Documents, after the pictures (their refs follow the pictures' too).
     var files: [AttachedFile] = []
     var uploading = false
+    /// Pictures and files still on their way into the box: library picks
+    /// being read out of Photos, dropped files being copied. Each is a grey
+    /// tile in the strip, and a send WAITS for them: a Send while the last
+    /// pick was still loading used to go without it and leave it in the
+    /// emptied box.
+    var loading = 0
 
-    var isEmpty: Bool { images.isEmpty && files.isEmpty }
-    var count: Int { images.count + files.count }
+    /// Nothing in the box and nothing on its way.
+    var isEmpty: Bool { images.isEmpty && files.isEmpty && loading == 0 }
+    var count: Int { images.count + files.count + loading }
+
+    /// Returns once everything on its way has landed (or failed).
+    func settle() async {
+        while loading > 0 { try? await Task.sleep(for: .milliseconds(50)) }
+    }
 
     /// What the File picker offers, and what the box takes dropped or pasted.
     nonisolated static let fileTypes: [UTType] = [.pdf, .image, .commaSeparatedText, .json, .plainText]
@@ -89,8 +102,13 @@ final class AttachmentDraft {
     @discardableResult
     func take(dropped providers: [NSItemProvider]) -> Bool {
         let files = providers.filter(Self.isFile)
+        loading += files.count
         for p in files {
-            Self.loadFile(p) { [weak self] f in if let f { self?.add(f, picturesAsImages: true) } }
+            Self.loadFile(p) { [weak self] f in
+                guard let self else { return }
+                if let f { add(f, picturesAsImages: true) }
+                loading -= 1
+            }
         }
         return !files.isEmpty
     }
@@ -177,6 +195,9 @@ final class AttachmentDraft {
     func upload(to hub: HubClient, threadID: String?) async throws -> [String] {
         uploading = true
         defer { uploading = false }
+        // A pick still being read out of Photos joins the send, never the
+        // next message's box.
+        await settle()
         let imgs = images
         let docs = files
         let jobs: [(Data, CGSize)] = await Task.detached(priority: .userInitiated) {
@@ -275,6 +296,13 @@ struct AttachBar: View {
                         ForEach(Array(draft.files.enumerated()), id: \.element.id) { i, f in
                             FileChip(file: f) { draft.removeFile(at: i) }
                         }
+                        // One grey tile per picture still on its way in: four
+                        // picked show as four, and Send waits for them.
+                        ForEach(0..<draft.loading, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: 10).fill(.quaternary)
+                                .frame(width: 72, height: 72)
+                                .overlay { ProgressView() }
+                        }
                     }.padding(.vertical, 2)
                 }
             }
@@ -361,10 +389,23 @@ struct AttachBar: View {
 extension AttachmentDraft {
     /// Load picked library items, remembering their asset ids (available because
     /// the pickers are bound to `.shared()`).
+    ///
+    /// All of them at once (Photos reads a 12 MP HEIC into JPEG bytes per
+    /// pick, a second or more each, and one after another was seconds of
+    /// Send-with-some-of-them), then into the box in the order picked.
+    /// `loading` holds their tiles in the strip meanwhile.
     func load(_ items: [PhotosPickerItem]) async {
-        for item in items {
-            if let d = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: d) { add(img, assetID: item.itemIdentifier) }
+        loading += items.count
+        defer { loading -= items.count }
+        let loaded: [(Int, UIImage)] = await withTaskGroup(of: (Int, UIImage?).self) { group in
+            for (i, item) in items.enumerated() {
+                group.addTask { (i, (try? await item.loadTransferable(type: Data.self)).flatMap { UIImage(data: $0) }) }
+            }
+            var out: [(Int, UIImage)] = []
+            for await (i, img) in group { if let img { out.append((i, img)) } }
+            return out.sorted { $0.0 < $1.0 }
         }
+        for (i, img) in loaded { add(img, assetID: items[i].itemIdentifier) }
     }
 }
 
@@ -414,13 +455,13 @@ struct BlobImage: View {
             // blurry (the owner 2026-09-30: "it's also low quality within the
             // context of the cells").
             let scale = max(2, UIScreen.main.scale)
-            guard let d = try? await hub.blob(ref),
+            guard let d = try? await pictureBlob(ref, hub: hub),
                   let img = await Self.thumbnail(d, height: maxHeight, scale: scale) else { failed = true; return }
             Self.cache.setObject(img, forKey: ref as NSString)
             image = img
             MacLightbox.openIfShotAsks(ref: ref, hub: hub)
             #else
-            guard let d = try? await hub.blob(ref),
+            guard let d = try? await pictureBlob(ref, hub: hub),
                   let img = await Self.thumbnail(d, max: Int(maxHeight * 3)) else { failed = true; return }
             Self.cache.setObject(img, forKey: ref as NSString)
             image = img
@@ -475,11 +516,60 @@ struct BlobImage: View {
 }
 
 /// Is this blob ref a picture? The hub stores a blob under its upload's own
-/// extension, and the same list decides on the hub (threads.isImageBlob)
-/// and in the console (threads.js isImageRef).
+/// extension, and the same list decides in the console (ui.js isImageRef).
+/// SVG is a picture here too (a session's drawn diagram), though not to the
+/// hub's threads.isImageBlob: uploads are never SVG.
 func isImageRef(_ ref: String) -> Bool {
     let ext = (ref as NSString).pathExtension.lowercased()
-    return ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "avif"].contains(ext)
+    return ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "avif", "svg"].contains(ext)
+}
+
+func isSVGRef(_ ref: String) -> Bool { (ref as NSString).pathExtension.lowercased() == "svg" }
+
+/// A blob's bytes as something ImageIO decodes: the file itself, or for an
+/// SVG a PNG drawn from it. ImageIO and UIImage cannot read SVG, and Quick
+/// Look on the Mac app spins forever on one.
+@MainActor
+func pictureBlob(_ ref: String, hub: HubClient) async throws -> Data {
+    let d = try await hub.blob(ref)
+    guard isSVGRef(ref) else { return d }
+    if let c = SVGRaster.cache.object(forKey: ref as NSString) { return c as Data }
+    guard let png = await SVGRaster.png(d) else { throw APIError(error: "svg did not draw") }
+    SVGRaster.cache.setObject(png as NSData, forKey: ref as NSString)
+    return png
+}
+
+/// SVG → PNG through WebKit: the SVG drawn into a canvas in a page that is
+/// never shown, so it needs no window. The long side is drawn at up to
+/// `maxPixel`, a small drawing scaled up (at most 4×) so it stays sharp.
+@MainActor
+enum SVGRaster {
+    static let cache = NSCache<NSString, NSData>()
+
+    static func png(_ svg: Data, maxPixel: Int = 2400) async -> Data? {
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 16, height: 16))
+        // Width and height from the root's own attributes, else its viewBox
+        // (an SVG with only a viewBox has no natural size of its own).
+        let js = """
+        const text = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+        const root = new DOMParser().parseFromString(text, 'image/svg+xml').documentElement;
+        const vb = (root.getAttribute('viewBox') || '').trim().split(/[\\s,]+/).map(Number);
+        const num = a => { const v = parseFloat(root.getAttribute(a)); return /%/.test(root.getAttribute(a) || '') ? NaN : v; };
+        let w = num('width'), h = num('height');
+        if (!(w > 0) || !(h > 0)) { if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) { w = vb[2]; h = vb[3]; } else { w = h = 1024; } }
+        const img = new Image();
+        img.src = 'data:image/svg+xml;base64,' + b64;
+        await img.decode();
+        const k = Math.min(maxPx / Math.max(w, h), 4);
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        return c.toDataURL('image/png');
+        """
+        guard let r = try? await web.callAsyncJavaScript(js, arguments: ["b64": svg.base64EncodedString(), "maxPx": maxPixel], contentWorld: .page),
+              let url = r as? String, let comma = url.firstIndex(of: ",") else { return nil }
+        return Data(base64Encoded: String(url[url.index(after: comma)...]))
+    }
 }
 
 /// A picture is drawn, anything else (a PDF shared from another app) is a
@@ -499,11 +589,14 @@ struct BlobAttachment: View {
 struct BlobDocument: View {
     @Environment(HubClient.self) private var hub
     let ref: String
+    /// The link's [text] when it has one ("Shipping slip PDF"): a blob's
+    /// own name is its hash.
+    var title: String = ""
     @State private var local: URL?
     @State private var fetching = false
     @State private var failed = false
 
-    var name: String { String(ref.split(separator: "/").last ?? "file") }
+    var name: String { title.isEmpty ? String(ref.split(separator: "/").last ?? "file") : title }
 
     var body: some View {
         Button {
@@ -578,13 +671,15 @@ struct BlobAudio: View {
 
 /// A blob as a file Quick Look can open. Quick Look wants a file with the
 /// real name; blobs are immutable, so one copy per ref in the temp dir is
-/// right for the app's lifetime.
+/// right for the app's lifetime. An SVG goes as its drawn PNG: Quick Look
+/// spins on the SVG itself.
 @MainActor
 func blobTempFile(_ ref: String, hub: HubClient) async -> URL? {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("blobs", isDirectory: true)
-    let url = dir.appendingPathComponent(String(ref.split(separator: "/").last ?? "file"))
+    var url = dir.appendingPathComponent(String(ref.split(separator: "/").last ?? "file"))
+    if isSVGRef(ref) { url = url.deletingPathExtension().appendingPathExtension("png") }
     if FileManager.default.fileExists(atPath: url.path) { return url }
-    guard let d = try? await hub.blob(ref) else { return nil }
+    guard let d = try? await pictureBlob(ref, hub: hub) else { return nil }
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     return (try? d.write(to: url, options: .atomic)) != nil ? url : nil
 }

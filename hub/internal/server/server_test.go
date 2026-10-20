@@ -630,8 +630,20 @@ func TestObservationsUpload(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer secret")
 	w = httptest.NewRecorder()
 	s.ServeHTTP(w, r)
-	if w.Code != 200 || w.Body.String() != "not really a jpeg" {
+	if w.Code != 200 || w.Body.String() != "not really a jpeg" || w.Header().Get("Content-Security-Policy") != "" {
 		t.Fatal(w.Code, w.Body.String())
+	}
+	// An SVG is a picture, sandboxed when opened on its own.
+	svgRef, _, err := s.obs.PutBlob(strings.NewReader(`<svg xmlns="http://www.w3.org/2000/svg"/>`), "svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r = httptest.NewRequest("GET", "/api/v1/blobs/"+svgRef, nil)
+	r.Header.Set("Authorization", "Bearer secret")
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != 200 || w.Header().Get("Content-Type") != "image/svg+xml" || !strings.HasPrefix(w.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Fatal(w.Code, w.Header())
 	}
 	r = httptest.NewRequest("POST", "/api/v1/observations", strings.NewReader(`{"source":"app","kind":"note","payload":{"text":"hi"}}`))
 	r.Header.Set("Authorization", "Bearer secret")
