@@ -262,6 +262,25 @@ final class DecodeTests: XCTestCase {
         XCTAssertTrue(later.startsNewSession)
     }
 
+    /// The "Coming up" clock: a wake in another year says the year, and the
+    /// open strip draws five, then "N more".
+    func testPromptWhenLabelAndComingUpWindow() throws {
+        let cal = Calendar.current
+        let now = cal.date(from: DateComponents(year: 2026, month: 10, day: 21, hour: 17, minute: 0))!
+        func wake(_ y: Int, _ mo: Int, _ d: Int, _ h: Int, _ mi: Int) throws -> Prompt {
+            let t = cal.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi))!
+            return try decode(Prompt.self, #"{"id":"p-3","created_at":"2026-10-21T00:00:00Z","author":"hub","target":"t-1","not_before":"\#(t.ISO8601Format())","text":"x","state":"queued"}"#)
+        }
+        XCTAssertEqual(try wake(2026, 10, 21, 17, 47).whenLabel(now: now), "in 47m")
+        XCTAssertTrue(try wake(2026, 10, 22, 10, 0).whenLabel(now: now).hasPrefix("tomorrow "))
+        XCTAssertFalse(try wake(2026, 11, 5, 9, 0).whenLabel(now: now).contains("2026"))
+        XCTAssertTrue(try wake(2027, 11, 5, 10, 30).whenLabel(now: now).contains("2027"))
+        XCTAssertEqual(comingUpShown(24, all: false), 5)
+        XCTAssertEqual(comingUpShown(24, all: true), 24)
+        XCTAssertEqual(comingUpShown(3, all: false), 3)
+        XCTAssertEqual(comingUpMoreLabel(19), "19 more")
+    }
+
     func testModelSettingMissingKeys() throws {
         let m = try decode(ModelSetting.self, #"{"default_model":"claude-opus-5"}"#)
         XCTAssertEqual(m.default_model, "claude-opus-5")

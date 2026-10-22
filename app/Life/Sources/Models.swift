@@ -814,16 +814,25 @@ struct Prompt: Codable, Identifiable, Hashable {
     var pending: Bool { state == "queued" }
     var standing: Bool { !(`repeat` ?? "").isEmpty }
     /// "in 40m", "Thu 09:00", "tomorrow 09:00" — when this wakes the session.
-    var whenLabel: String {
+    var whenLabel: String { whenLabel(now: Date()) }
+    func whenLabel(now: Date) -> String {
         guard let t = not_before else { return "now" }
-        let secs = t.timeIntervalSinceNow
+        let secs = t.timeIntervalSince(now)
         if secs <= 0 { return "now" }
         if secs < 3600 { return "in \(max(1, Int(secs / 60)))m" }
-        if Calendar.current.isDateInToday(t) { return t.formatted(.dateTime.hour().minute()) }
-        if Calendar.current.isDateInTomorrow(t) { return "tomorrow " + t.formatted(.dateTime.hour().minute()) }
+        let cal = Calendar.current
+        if cal.isDate(t, inSameDayAs: now) { return t.formatted(.dateTime.hour().minute()) }
+        if let tomorrow = cal.date(byAdding: .day, value: 1, to: now), cal.isDate(t, inSameDayAs: tomorrow) {
+            return "tomorrow " + t.formatted(.dateTime.hour().minute())
+        }
         // Past this week a weekday alone is ambiguous: a Sep 24 wake and an
         // Oct 1 wake both read "Thu 8:00 AM" in the same list, and the folded "Coming up" bar is nothing BUT that time.
         if secs < 6 * 86400 { return t.formatted(.dateTime.weekday(.abbreviated).hour().minute()) }
+        // Past this year the day alone is wrong: a wake next November read
+        // "Nov 5 10:30 AM" at the foot of a list that ended in March.
+        if cal.component(.year, from: t) != cal.component(.year, from: now) {
+            return t.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
+        }
         return t.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
     var startsNewSession: Bool { target == "new" || target.hasPrefix("new-or:") }

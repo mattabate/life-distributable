@@ -19,8 +19,10 @@ func TestCalendarMergeAndNearDuplicate(t *testing.T) {
 		s.ServeHTTP(w, r)
 		return w
 	}
-	keep, _ := s.Cal.Add(calendar.Item{Title: "Autopay check", Day: "2026-10-20", Kind: "owner"})
-	add := `{"title":"autopay check","day":"2026-10-21","kind":"agent","source":"claude:thread:x"%s}`
+	// Days far ahead: an agent item dated today fires on Add and a fired item
+	// cannot merge, so a fixture near today goes stale.
+	keep, _ := s.Cal.Add(calendar.Item{Title: "Autopay check", Day: "2030-10-20", Kind: "owner"})
+	add := `{"title":"autopay check","day":"2030-10-21","kind":"agent","source":"claude:thread:x"%s}`
 	if w := do("POST", "/api/v1/calendar", strings.Replace(add, "%s", "", 1)); w.Code != 400 || !strings.Contains(w.Body.String(), "near-duplicate of "+keep.ID) {
 		t.Fatal(w.Code, w.Body.String())
 	}
