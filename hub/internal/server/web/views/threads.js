@@ -840,6 +840,7 @@ async function refreshThread(id, first) {
   chatState.lastAsks = askKey;
   chatState.lastActs = actKey;
   chatState.lastPrompts = promptKey;
+  chatState.queued = queued || [];
   chatState.lastRecs = recKey;
   el.dataset.status = t.status;
 
@@ -1417,6 +1418,36 @@ async function threadAct(what) {
 // than no fold at all.
 const promptWords = p => p.title || p.text || (p.repeat ? 'the default check-in' : '(no words)');
 const queuedIsOpen = () => localStorage.getItem('queuedOpen') === '1';
+// Open, the strip draws the NEXT FIVE and an "N more" button: two dozen wakes
+// filled the screen. The button draws the rest for this visit (queuedAll,
+// back to five on leaving the chat). The phone's ComingUpStrip folds the same
+// way. The list no longer scrolls inside itself.
+const QUEUED_WINDOW = 5;
+let queuedAll = false;
+onLeave.push(() => { queuedAll = false; });
+function queuedMore() {
+  queuedAll = true;
+  const q = document.getElementById('queued');
+  if (!q) return;
+  q.outerHTML = queuedHTML(chatState.queued);
+  wireQueued();
+}
+// The strip's fold outlives the redraw and the page (localStorage queuedOpen).
+function wireQueued() {
+  const q = document.getElementById('queued');
+  if (q) q.addEventListener('toggle', () => localStorage.setItem('queuedOpen', q.open ? '1' : '0'));
+}
+// A wake's clock: `when`, with the year once it differs (a wake next
+// November read "Nov 5 10:30 AM" at the foot of a list that ended in March).
+const wakeWhen = (iso, now) => {
+  if (!iso) return 'now';
+  const d = new Date(iso); now = now || new Date();
+  const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return t;
+  const day = d.toLocaleDateString([], d.getFullYear() === now.getFullYear()
+    ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  return day + ' ' + t;
+};
 function queuedHTML(prompts) {
   const ps = (prompts || []).filter(p => p.state === 'queued')
     .sort((a, b) => (a.not_before || '').localeCompare(b.not_before || ''));
@@ -1424,7 +1455,7 @@ function queuedHTML(prompts) {
   const mine = p => p.author === 'owner' ? 'you' : p.author === 'hub' ? 'the hub' : 'this session';
   const row = p => `<div class="row qrow">
       ${p.repeat ? `<span class="pill done" title="standing check-in">${esc(cadenceWords(p.repeat))}</span>` : ''}
-      <span class="pill">${esc(p.repeat ? 'next ' : '')}${esc(p.not_before ? when(p.not_before) : 'now')}</span>
+      <span class="pill">${esc(p.repeat ? 'next ' : '')}${esc(wakeWhen(p.not_before))}</span>
       ${p.target === 'new' ? '<span class="pill">new session</span>' : ''}
       ${p.outcome ? pill(p.outcome) : ''}
       <span class="grow trunc small" title="${esc(p.text || '')}">${esc(promptWords(p))} <span class="muted">· from ${esc(mine(p))}</span></span>
@@ -1438,13 +1469,15 @@ function queuedHTML(prompts) {
     <div class="row qrow"><span class="hl small muted">Coming up</span>${row(ps[0])}</div>
   </div>`;
   const next = ps[0];
+  const shown = queuedAll ? ps : ps.slice(0, QUEUED_WINDOW);
+  const hidden = ps.length - shown.length;
   return `<details class="queued" id="queued"${queuedIsOpen() ? ' open' : ''}>
     <summary>
       <span class="hl small muted">Coming up · ${ps.length}</span>
-      <span class="pill">next ${esc(next.not_before ? when(next.not_before) : 'now')}</span>
+      <span class="pill">next ${esc(wakeWhen(next.not_before))}</span>
       <span class="grow trunc small muted">${esc(promptWords(next))}</span>
     </summary>
-    <div class="qlist">${ps.map(row).join('')}</div>
+    <div class="qlist">${shown.map(row).join('')}${hidden ? `<div class="row qrow"><button class="sm" onclick="queuedMore()">${hidden} more</button></div>` : ''}</div>
   </details>`;
 }
 
@@ -1667,9 +1700,7 @@ const cardFold = (ref, id, back) => cardMove(...CARD_FOLD[ref](id, back));
 // owner opened across the 5 s redraw.
 function wireChat() {
   wireComposer('chat');
-  // The queued strip's fold outlives the redraw and the page (queuedHTML).
-  const q = document.getElementById('queued');
-  if (q) q.addEventListener('toggle', () => localStorage.setItem('queuedOpen', q.open ? '1' : '0'));
+  wireQueued();
   const msgs = document.getElementById('msgs');
   if (!msgs) return;
   wireDrop(msgs, 'chat');

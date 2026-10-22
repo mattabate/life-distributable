@@ -264,3 +264,13 @@ Entry format:
   hash.
 - How: same merge as add-0008. By hand: `Attachments.swift`,
   `ThreadDetail.swift`, `Chips.swift`, `StyledText.swift`.
+
+## add-0019 · 2026-10-22 · Coming up shows the next five
+- For: everyone
+- Offer: Open, a chat's "Coming up" strip lists the next five wakes and an
+  "N more" button that shows the rest for that visit, instead of a long
+  list that filled the screen. A wake in another year says the year. On
+  the phone and desktop the strip's words now open and close with the bar
+  instead of sliding in half a second later.
+- How: same merge as add-0008. By hand: `views/threads.js`, `app.css`,
+  `Models.swift`, `ThreadDetail.swift`.

@@ -758,8 +758,8 @@ textarea { resize: vertical; }
    the composer, because it is the same lane as typing a message — and on the
    same gutter, so it lines up with the box under it.
    It folds (2026-08-29): shut, the bar alone stands in for the list — count,
-   when the next one fires, its words if they fit. The scroll lives on the list
-   inside, so the bar itself never scrolls out of reach. */
+   when the next one fires, its words if they fit. Open, the next five and an
+   "N more" button: no scroll box inside the strip. */
 .queued {
   border-top: 1px solid var(--line); flex: 0 0 auto; padding: 8px var(--gutter);
 }
@@ -775,7 +775,7 @@ textarea { resize: vertical; }
 /* Open, the bar is the count alone: the next wake's time and words are on its
    own row underneath, and a run is never drawn twice. */
 .queued[open] > summary .pill, .queued[open] > summary .trunc { display: none; }
-.queued .qlist { max-height: 22vh; overflow: auto; margin-top: 4px; }
+.queued .qlist { margin-top: 4px; }
 .queued .qrow { gap: 8px; padding: 3px 0; }
 /* One wake: no fold, nothing to open - the label and the row on one line. */
 .queued.one > .qrow { padding: 0; }

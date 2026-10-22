@@ -2034,6 +2034,13 @@ struct ThreadSettings: View {
     }
 }
 
+/// How many wakes an open "Coming up" strip draws: the next five, or every
+/// one once the owner asked for the rest. Below five there is nothing to hide.
+let comingUpWindow = 5
+func comingUpShown(_ count: Int, all: Bool) -> Int { all ? count : min(count, comingUpWindow) }
+/// The row under the five: "19 more", the console's words.
+func comingUpMoreLabel(_ hidden: Int) -> String { "\(hidden) more" }
+
 extension Prompt {
     /// One short line for the "Coming up" list. A calendar wake's `text` is its
     /// title, a blank line, and the whole instruction — printing that put the
@@ -2055,11 +2062,13 @@ extension Prompt {
 /// listed it. Folded at rest and remembered under the console's key
 /// (queuedOpen); shut it is the count, when the next one fires and its
 /// words; open, every wake with Cancel (Turn off on a standing row).
-/// Nothing queued = no strip.
+/// Nothing queued = no strip. Open, the next five and an "N more" row that
+/// shows the rest, this visit only; the console's strip folds the same way.
 struct ComingUpStrip: View {
     let prompts: [Prompt]
     let cancel: (Prompt) -> Void
     @AppStorage("queuedOpen") private var open = false
+    @State private var all = false
 
     var body: some View {
         if let next = prompts.first {
@@ -2083,11 +2092,23 @@ struct ComingUpStrip: View {
                             Spacer(minLength: 0)
                         }
                         .contentShape(Rectangle())
+                        // The words stay with the bar. The button style
+                        // animates its press release and the label's other
+                        // animatable attributes inherit it, so the rows
+                        // snapped open or shut while the count, chevron and
+                        // next-wake pill slid into place half a second later.
+                        .transaction { $0.animation = nil }
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Coming up, \(prompts.count), next \(next.whenLabel)")
                     if open {
-                        ForEach(prompts) { p in row(p).padding(.top, 6) }
+                        let shown = comingUpShown(prompts.count, all: all)
+                        ForEach(prompts.prefix(shown)) { p in row(p).padding(.top, 6) }
+                        if shown < prompts.count {
+                            Button(comingUpMoreLabel(prompts.count - shown)) { all = true }
+                                .font(small).buttonStyle(.borderless).padding(.top, 6)
+                                .accessibilityLabel("Show the \(prompts.count - shown) later wakes")
+                        }
                     }
                 }
             }
