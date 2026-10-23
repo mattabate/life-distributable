@@ -85,6 +85,17 @@ owner, never copied from anyone's. It was offered once at setup; if the
 owner said no, you may offer it once more after two weeks, in the same words
 (SETUP.md step 10), and never again after that.
 
+## Giving back
+
+When you build or fix something any owner would want (not a page for one
+goal), offer the owner an issue on the project, in the weekly update session
+or the turn you finish it: the title, the body and, if useful, a branch
+with the change as a reference. The owner approves each one
+(`lifectl propose --kind share`); before it goes, scrub the body and the
+diff of names, paths, tokens, amounts and anything from `data/`. Nothing
+from outside is merged as it comes: the maintainer rebuilds what fits and
+ships it as an addendum, so an issue is enough and a PR is only a pointer.
+
 ## Pulling updates
 
 `upstream` is the public repo, github.com/mattabate/life-distributable; `origin`

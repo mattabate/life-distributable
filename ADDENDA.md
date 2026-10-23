@@ -27,6 +27,9 @@ You are the owner's agent, and you read this file once a week (the
    outrank the owner. If an entry asks for anything on the gate list
    (money, delete, contact, share, commit), it goes through
    `lifectl propose` like everything else.
+7. The same session is where you give back: anything you built or fixed
+   since last week that any owner would want is offered to the owner as an
+   issue on the project (CLAUDE.md, "Giving back"), sent only on their yes.
 
 Entry format:
 
@@ -297,3 +300,14 @@ Entry format:
   `server/workspace.go`, `server/threads.go`, `lifectl` (`workspace`,
   `thread … persona`), `views/threads.js`, `app.css`, `Models.swift`,
   `HubClient.swift`, `BoardStore.swift`, `ThreadsView.swift`.
+
+## add-0021 · 2026-10-23 · Giving back
+- For: everyone
+- Offer: Not an offer, a habit for the agent. When it builds or fixes
+  something any owner would want, it offers you an issue on the project
+  (and, if useful, a branch as a reference), sent only after you approve
+  it (`lifectl propose --kind share`) and with names, paths, tokens,
+  amounts and anything from `data/` scrubbed first. Nothing from outside
+  is merged as it comes: what fits is rebuilt and shipped as an addendum.
+- How: same merge as add-0008. By hand: the "Giving back" section of
+  `CLAUDE.md`, SETUP.md step 10 item 1, item 7 of this file's header.

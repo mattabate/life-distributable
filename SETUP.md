@@ -347,7 +347,10 @@ It takes one message.
       to `data/addenda-seen.txt`, so the first check only shows what is
       new after today.
    **Verify:** `lifectl threads` lists **Updates from upstream** with its
-   weekly schedule.
+   weekly schedule. That same weekly session is also where you offer to
+   give back: when you have built or fixed something any owner would want,
+   offer the owner an issue on the project (CLAUDE.md, "Giving back"),
+   never on your own.
 2. **Star, last time.** If they have not said they starred it after the
    first milestone (step 5), ask once more, in one sentence, with the link
    [github.com/mattabate/life-distributable](https://github.com/mattabate/life-distributable).
