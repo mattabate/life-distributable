@@ -311,3 +311,34 @@ Entry format:
   is merged as it comes: what fits is rebuilt and shipped as an addendum.
 - How: same merge as add-0008. By hand: the "Giving back" section of
   `CLAUDE.md`, SETUP.md step 10 item 1, item 7 of this file's header.
+
+## add-0022 · 2026-10-23 · Sub-sessions sit on their parent's card
+- For: everyone
+- Offer: A session that another session started (with `prompt --new` or
+  `thread new`) is now a row on its parent's card in the Sessions list,
+  instead of a card of its own: its title, a blue dot while it runs, its
+  own card's tint and verb when it has one, else a gray "running" or
+  "idle". Three show, then "and N more". A listed sub-session brings its
+  parent onto the list with it. Web, phone and desktop.
+- How: same merge as add-0008. By hand: `threads.parent_id` (migration +
+  backfill from the opening message's author) in `threads/threads.go` and
+  `prompts.go`, the parent pull in `attention/attention.go`, `views/threads.js`,
+  `skin.css`, `Models.swift`, `ThreadsView.swift`, `ThreadRows.swift`.
+
+## add-0023 · 2026-10-23 · Tables are a real grid in the apps
+- For: everyone
+- Offer: Pipe tables in a card or chat on the phone and desktop now draw
+  as a grid: each cell wraps by words in its own column, columns share
+  widths the way a browser table does, with rules under the header and
+  between rows. A phone too narrow for the grid still stacks the rows.
+- How: same merge as add-0008. By hand: `StyledText.swift` (the table
+  segment and grid), `MarkdownTableTests.swift`.
+
+## add-0024 · 2026-10-23 · New tool grants reach running sessions
+- For: everyone
+- Offer: A session process started before you granted a new command (a
+  `prompt_tools` line) used to keep asking for it. Now the hub notices the
+  stale list before the next message and resumes the session on a fresh
+  process with the current grants.
+- How: same merge as add-0008. By hand: `threads/runner.go` (the launch's
+  `<run>.tools` file and `toolsStale`), `policy_test.go`.

@@ -1041,3 +1041,42 @@ func TestMacInstallCardIsItsOwnDevice(t *testing.T) {
 		t.Fatalf("mac build setting: %v %d", err, m.MacBuild())
 	}
 }
+
+// A session another session started records it (parent_id), so the lists
+// can draw it nested; one the owner started has none, a standing role never
+// shows one, and the backfill reads it off the opening message of a session
+// made before the column.
+func TestParentIsTheSessionThatStartedIt(t *testing.T) {
+	m, _, _ := setup(t)
+	scout, _ := m.Create("", "life", "", "Scout speech models.", "", "", nil)
+	bench, err := m.CreateBy("claude:thread:"+scout.ID, "Bench test", "life", "", "Run the bench.", "", "", nil)
+	if err != nil || bench.ParentID != scout.ID || scout.ParentID != "" {
+		t.Fatalf("%v %q %q", err, bench.ParentID, scout.ParentID)
+	}
+	brief := func(id string) string {
+		ths, _ := m.ListBrief()
+		for _, x := range ths {
+			if x.ID == id {
+				return x.ParentID
+			}
+		}
+		return "?"
+	}
+	if brief(bench.ID) != scout.ID {
+		t.Fatal(brief(bench.ID))
+	}
+	m.db.Exec(`UPDATE threads SET persona='assistant' WHERE id=?`, bench.ID)
+	if got, _ := m.Get(bench.ID); got.ParentID != "" || brief(bench.ID) != "" {
+		t.Fatalf("a role is never nested: %q %q", got.ParentID, brief(bench.ID))
+	}
+	m.db.Exec(`UPDATE threads SET persona='', parent_id='' WHERE id=?`, bench.ID)
+	if _, err := m.db.Exec(PromptsSchema[len(PromptsSchema)-1]); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := m.Get(bench.ID); got.ParentID != scout.ID {
+		t.Fatalf("backfill: %q", got.ParentID)
+	}
+	if got, _ := m.Get(scout.ID); got.ParentID != "" {
+		t.Fatalf("backfill gave the owner's session a parent: %q", got.ParentID)
+	}
+}

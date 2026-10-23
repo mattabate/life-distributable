@@ -100,8 +100,31 @@ async function drawList(activeID, reuse) {
   // dollars).
   const bundles = {};
   for (const x of b.sessions || []) bundles[x.id] = x;
+  // A SESSION ANOTHER ONE STARTED IS A ROW INSIDE THAT ONE'S CARD: a thread
+  // whose `parent_id` is filed on this list is a cell on its parent's card,
+  // like an open card: its title, its state, its own card's tint and verb
+  // when it has one, three rows and then "and N more".
+  const filed = new Set(threads.filter(t => sectionOf(b, t)).map(t => t.id));
+  const nested = t => t.parent_id && t.parent_id !== t.id && filed.has(t.parent_id);
+  const kids = {};
+  for (const t of threads) if (nested(t) && filed.has(t.id)) (kids[t.parent_id] ||= []).push(t);
+  const subCell = k => {
+    const c = sessionCards(bundles[k.id])[0];
+    const href = `#/sessions/${encodeURIComponent(k.id)}${b.first[k.id] ? '/' + encodeURIComponent(b.first[k.id]) : ''}`;
+    const live = k.status === 'running';
+    return `<a class="ask mini sub ${c ? c.tint : 'quiet'}" href="${href}">
+      <div class="t"><span class="verb">${esc(c ? c.verb : live ? 'running' : 'idle')}</span>${live ? '<span class="sess-dot"></span>' : ''}${mdInline(k.title || k.id, false)}</div></a>`;
+  };
+  const subCells = t => {
+    const list = kids[t.id] || [];
+    if (!list.length) return '';
+    const key = 'subs ' + t.id, shown = moreOpen.has(key) ? list.length : SUB_CELLS;
+    return list.slice(0, shown).map(subCell).join('')
+      + (list.length > SUB_CELLS ? `<a class="small muted more-cards" href="#" onclick="event.preventDefault();toggleMoreCards('${esc(key)}')">${shown > SUB_CELLS ? 'Show less' : `and ${list.length - SUB_CELLS} more`}</a>` : '');
+  };
   const group = (label, list, count) => !list.length ? '' :
-    `<h3>${label}${count ? ` <span class="muted">· ${count}</span>` : ''}</h3>` + list.map(t => {
+    `<h3>${label}${count ? ` <span class="muted">· ${count}</span>` : ''}</h3>` + list.map(t => card(t)).join('');
+  const card = t => {
       const n = by(t.id);
       // EVERY OPEN CARD IS ITS OWN CELL: the board's bundle for this
       // session, drawn one cell per card. The one-card todo/detail below is
@@ -138,12 +161,13 @@ async function drawList(activeID, reuse) {
           + (cards.length > ROW_CARDS ? `<a class="small muted more-cards" href="#" onclick="event.preventDefault();toggleMoreCards('${esc(t.id)}')">${shown > ROW_CARDS ? 'Show less' : `and ${more} more`}</a>`
             : cards.length && more > 0 ? `<a class="small muted more-cards" href="#/sessions/${encodeURIComponent(t.id)}">and ${more} more</a>` : '')
           + (todo ? `<div class="small wrap2" style="margin-top:6px;color:var(--${tone})">→ ${mdInline(todo, false)}</div>` : '')
-          + (detail ? `<div class="small muted wrap3" style="margin-top:2px">${detail}</div>` : ''),
+          + (detail ? `<div class="small muted wrap3" style="margin-top:2px">${detail}</div>` : '')
+          + subCells(t),
         // The cells and the blue dot say what the count and RUNNING pills
         // did; only the live audio pills stay (speaking, waiting).
         pills: audioPills(b, t),
       });
-    }).join('');
+  };
   // A SESSION ON THIS LIST IS WORKING OR WAITING ON THE OWNER — Your turn or Working
   // — and the hub files it (board `section`) and words each heading (board
   // `headings`: "3 in 2 sessions · 1 working"). The phone draws the same
@@ -156,7 +180,7 @@ async function drawList(activeID, reuse) {
   // every page.
   paint(list, `
     ${(b.headings || NO_HEADINGS).map(h => {
-      const rows = threads.filter(t => sectionOf(b, t) === h.key);
+      const rows = threads.filter(t => sectionOf(b, t) === h.key && !nested(t));
       return group(h.label, h.show ? rows.slice(0, h.show) : rows, rows.length ? h.count : 0);
     }).join('')}
     ${threads.length ? `<a class="all-link${activeID === ALL ? ' on' : ''}" href="#/sessions/all"><span>All sessions</span><span class="muted">${threads.length}</span></a>`
@@ -223,6 +247,8 @@ function sessionCards(bundle) {
 // How many of a session's open cards its row draws; the rest is "and N more"
 // (one, like the desktop's `deskCards`).
 const ROW_CARDS = 1;
+// …and how many of its sub-sessions, the rest "and N more".
+const SUB_CELLS = 3;
 // "AND N MORE" OPENS THE REST IN PLACE: the row's older cards drop in under
 // the newest one, each its own cell; "Show less" folds them. Kept per session
 // across the list's repaints.

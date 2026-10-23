@@ -197,6 +197,28 @@ func (b *Board) headings(ths []threads.Thread) {
 			b.Pills[t.ID] = append(b.Pills[t.ID], threads.StatusPill(rest))
 		}
 	}
+	// A listed sub-session pulls the session that started it (ParentID) onto
+	// the list, under the more urgent heading of the two, so the surfaces can
+	// draw the child nested under it. The child keeps its own entry; the
+	// counts stay the cards' and their sessions'.
+	rank := map[string]int{"working": 1, "your_turn": 2}
+	alive := map[string]bool{}
+	for _, t := range ths {
+		alive[t.ID] = true
+	}
+	for moved := true; moved; { // until a grandchild has reached the top
+		moved = false
+		for _, t := range ths {
+			sec, ok := b.Section[t.ID]
+			if !ok || t.ParentID == "" || !alive[t.ParentID] {
+				continue
+			}
+			if rank[sec] > rank[b.Section[t.ParentID]] {
+				b.Section[t.ParentID] = sec
+				moved = true
+			}
+		}
+	}
 	inSessions := func(cards, n int) string {
 		s := strconv.Itoa(cards) + " in " + strconv.Itoa(n) + " session"
 		if n != 1 {

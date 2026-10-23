@@ -357,6 +357,11 @@ func (m *Manager) runRef(id, author, role, kind, text string, attachments []stri
 					m.sendEOF(r)
 					return nil
 				}
+				if m.toolsStale(r) {
+					log.Printf("thread %s: process predates the current prompt_tools: closing it", id)
+					m.sendEOF(r)
+					return nil
+				}
 			}
 			// Live process: hand the message straight to claude's stdin — it
 			// is steered into the current turn or starts the next one.
@@ -736,6 +741,10 @@ func (m *Manager) launch(t Thread) error {
 	if len(m.AllowedTools) > 0 {
 		args = append(args, "--allowedTools", strings.Join(m.AllowedTools, ","))
 	}
+	// The list the process launched with, for toolsStale.
+	if err := os.WriteFile(base+".tools", []byte(strings.Join(m.AllowedTools, ",")), 0o600); err != nil {
+		return err
+	}
 	if t.ClaudeSessionID != "" && !lean {
 		args = append(args, "--resume", t.ClaudeSessionID)
 	}
@@ -1029,6 +1038,20 @@ func (m *Manager) deliveredAfter(r run, t time.Time) []int64 {
 		}
 	}
 	return out
+}
+
+// toolsStale: a live process keeps the --allowedTools it launched with, so a
+// prompt_tools line added since (and a hub restart) never reached it, and a
+// session fed message after message never relaunches. Such a process is
+// closed before the next message instead of handed it; the conversation
+// resumes on a fresh one with the current list. A run from before the .tools
+// file counts as stale.
+func (m *Manager) toolsStale(r run) bool {
+	if r.in == "" || len(m.AllowedTools) == 0 {
+		return false
+	}
+	b, err := os.ReadFile(strings.TrimSuffix(r.in, ".in") + ".tools")
+	return err != nil || string(b) != strings.Join(m.AllowedTools, ",")
 }
 
 // sendEOF asks the feeder to close claude's stdin; the process exits after
@@ -1918,7 +1941,9 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 		// live process now, or the next launch once this one has exited.
 		m.noAnswerNote(threadID, silent)
 		if _, err := os.Stat(r.out + ".done"); err != nil && r.in != "" && r.eof == 0 {
-			if t, err := m.Get(threadID); err == nil && m.deliver(t, r) == nil {
+			if m.toolsStale(r) {
+				m.sendEOF(r)
+			} else if t, err := m.Get(threadID); err == nil && m.deliver(t, r) == nil {
 				r.busy = 1
 				r.turns++
 				now = time.Now() // the boundary is past the note, so it is not late

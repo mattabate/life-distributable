@@ -147,6 +147,11 @@ CREATE INDEX IF NOT EXISTS thread_events_thread ON thread_events(thread_id, id);
 	// is still recognised by its old name in older chat, notes and files.
 	`ALTER TABLE threads ADD COLUMN persona TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE threads ADD COLUMN former_titles TEXT NOT NULL DEFAULT ''`,
+	// parent_id: the session that started this one, from the opening
+	// message's author claude:thread:<id> (createVia; backfilled in
+	// PromptsSchema, once thread_messages.author exists). A sub-session is
+	// drawn under the session that spun it off.
+	`ALTER TABLE threads ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
 }
 
 // ModelCost: one model's share of a chat's bill. Model is the CLI's model id,
@@ -180,7 +185,10 @@ type Thread struct {
 	// goal, else the policy default), judgment, build, or a model id.
 	ModelClass string `json:"model_class"`
 	// Persona: the role this session plays (team mode), "" for none.
-	Persona         string     `json:"persona,omitempty"`
+	Persona string `json:"persona,omitempty"`
+	// ParentID: the session that started this one (`prompt --new`, `thread
+	// new`), '' when the owner or the hub did. The lists draw a child under it.
+	ParentID        string     `json:"parent_id,omitempty"`
 	Status          string     `json:"status"`
 	ClaudeSessionID string     `json:"claude_session_id,omitempty"`
 	Schedule        string     `json:"schedule"`
@@ -663,9 +671,13 @@ func (m *Manager) createVia(author, title, project, goalID, prompt, schedule, sc
 	now := time.Now()
 	t := Thread{ID: slug(title), CreatedAt: now, UpdatedAt: now, Title: title, Project: project, GoalID: goalID, Status: "idle", Schedule: schedule, SchedulePrompt: schedulePrompt}
 	t.ModelClass = m.DefaultModel() // pinned here, for this thread's whole life
+	t.ParentID = strings.TrimPrefix(author, "claude:thread:")
+	if t.ParentID == author {
+		t.ParentID = ""
+	}
 	// schedule/schedule_prompt are derived from the standing prompt row; the columns stay (append-only) and are written empty.
-	_, err := m.db.Exec(`INSERT INTO threads (id,created_at,updated_at,title,project,goal_id,model_class,status,schedule,schedule_prompt) VALUES (?,?,?,?,?,?,?,?,'','')`,
-		t.ID, ts(now), ts(now), t.Title, t.Project, nullable(goalID), t.ModelClass, t.Status)
+	_, err := m.db.Exec(`INSERT INTO threads (id,created_at,updated_at,title,project,goal_id,model_class,status,schedule,schedule_prompt,parent_id) VALUES (?,?,?,?,?,?,?,?,'','',?)`,
+		t.ID, ts(now), ts(now), t.Title, t.Project, nullable(goalID), t.ModelClass, t.Status, t.ParentID)
 	if err != nil {
 		return Thread{}, err
 	}
@@ -1177,7 +1189,7 @@ func (m *Manager) Get(id string) (Thread, error) {
 	if !validID.MatchString(id) {
 		return Thread{}, errors.New("bad id")
 	}
-	row := m.db.QueryRow(`SELECT t.id,t.created_at,t.updated_at,t.title,t.project,t.goal_id,t.model_class,t.persona,t.status,t.claude_session_id,`+schedCols+`,t.last_run_at,t.unread,`+costCol+`,`+tokCols+`,
+	row := m.db.QueryRow(`SELECT t.id,t.created_at,t.updated_at,t.title,t.project,t.goal_id,t.model_class,t.persona,t.parent_id,t.status,t.claude_session_id,`+schedCols+`,t.last_run_at,t.unread,`+costCol+`,`+tokCols+`,
 		(SELECT text FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
 		(SELECT ts FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
 		`+openAsksCol+`,
@@ -1276,7 +1288,7 @@ func (m *Manager) list(where string) ([]Thread, error) {
 	// nobody had talked to in a day could sit above the one the owner had just
 	// messaged. A thread with no
 	// message yet (created without a prompt) falls back to its updated_at.
-	rows, err := m.db.Query(`SELECT t.id,t.created_at,t.updated_at,t.title,t.project,t.goal_id,t.model_class,t.persona,t.status,t.claude_session_id,` + schedCols + `,t.last_run_at,t.unread,` + costCol + `,` + tokCols + `,
+	rows, err := m.db.Query(`SELECT t.id,t.created_at,t.updated_at,t.title,t.project,t.goal_id,t.model_class,t.persona,t.parent_id,t.status,t.claude_session_id,` + schedCols + `,t.last_run_at,t.unread,` + costCol + `,` + tokCols + `,
 		(SELECT substr(text,1,600) FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
 		(SELECT ts FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
 		` + openAsksCol + `,
@@ -1308,7 +1320,7 @@ func (m *Manager) list(where string) ([]Thread, error) {
 // schedule, preview, last tool…), which the board paid on every poll only to
 // read three columns: 13 ms vs 0.35 ms on a DB of ~300 threads.
 func (m *Manager) ListBrief() ([]Thread, error) {
-	rows, err := m.db.Query(`SELECT id, title, COALESCE(goal_id,''), status FROM threads WHERE status != 'archived'`)
+	rows, err := m.db.Query(`SELECT id, title, COALESCE(goal_id,''), status, CASE WHEN persona='' THEN parent_id ELSE '' END FROM threads WHERE status != 'archived'`)
 	if err != nil {
 		return nil, err
 	}
@@ -1317,7 +1329,7 @@ func (m *Manager) ListBrief() ([]Thread, error) {
 	now := time.Now()
 	for rows.Next() {
 		var t Thread
-		if err := rows.Scan(&t.ID, &t.Title, &t.GoalID, &t.Status); err != nil {
+		if err := rows.Scan(&t.ID, &t.Title, &t.GoalID, &t.Status, &t.ParentID); err != nil {
 			return nil, err
 		}
 		t.Speaking = m.Voice.Is(t.ID, now)
@@ -1849,7 +1861,7 @@ func scan(r scanner) (Thread, error) {
 	var t Thread
 	var c, u string
 	var goal, sid, nextRun, last, lastMsg, lastTS, activity, lastKind, turnAt sql.NullString
-	if err := r.Scan(&t.ID, &c, &u, &t.Title, &t.Project, &goal, &t.ModelClass, &t.Persona, &t.Status, &sid, &t.Schedule, &t.SchedulePrompt, &nextRun, &last, &t.Unread, &t.CostUSD,
+	if err := r.Scan(&t.ID, &c, &u, &t.Title, &t.Project, &goal, &t.ModelClass, &t.Persona, &t.ParentID, &t.Status, &sid, &t.Schedule, &t.SchedulePrompt, &nextRun, &last, &t.Unread, &t.CostUSD,
 		&t.Tokens.In, &t.Tokens.Out, &t.Tokens.CacheRead, &t.Tokens.CacheWrite, &lastMsg, &lastTS, &t.NeedsYou, &activity, &lastKind,
 		&t.TurnTools, &t.TurnCostUSD, &turnAt); err != nil {
 		return t, err
@@ -1858,6 +1870,9 @@ func scan(r scanner) (Thread, error) {
 		if x := parseTS(turnAt.String); !x.IsZero() {
 			t.TurnAt = &x
 		}
+	}
+	if t.Persona != "" {
+		t.ParentID = "" // a standing role is never drawn under whoever made it
 	}
 	t.Tokens.sum()
 	t.LastMessageKind = lastKind.String

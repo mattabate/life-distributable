@@ -75,6 +75,10 @@ var PromptsSchema = []string{
 	// FIRST of them, so every reader of one reference keeps working.
 	`ALTER TABLE prompts ADD COLUMN replies TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE thread_messages ADD COLUMN replies TEXT NOT NULL DEFAULT ''`,
+	// threads.parent_id for the sessions started before it was stored: the
+	// author of a session's first message, when another session wrote it.
+	`UPDATE threads SET parent_id = substr((SELECT author FROM thread_messages m WHERE m.thread_id=threads.id ORDER BY id LIMIT 1), 15)
+		WHERE parent_id='' AND (SELECT author FROM thread_messages m WHERE m.thread_id=threads.id ORDER BY id LIMIT 1) LIKE 'claude:thread:%'`,
 }
 
 const stmtMessageAuthor = `ALTER TABLE thread_messages ADD COLUMN author TEXT NOT NULL DEFAULT ''`

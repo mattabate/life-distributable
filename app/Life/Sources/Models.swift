@@ -522,6 +522,10 @@ struct Thread: Codable, Identifiable, Hashable {
     var waiting_to_speak: Bool?
     /// The rung its wakes start on: "" (auto), judgment, build, or a model id.
     var model_class: String?
+    /// The session that started this one (a new session from its chat); the
+    /// list draws it as a row on that session's card. nil for one the owner
+    /// started, or from an older hub.
+    var parent_id: String?
     /// Team mode: the role this session plays (its key) and the words under
     /// its name on the people grid ("Executive assistant"). Absent = none.
     var persona: String?
