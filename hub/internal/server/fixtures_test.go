@@ -97,6 +97,8 @@ func fixtureRoutes(id fixtureIDs) []fixtureRoute {
 		{"goals_id_notes", "/api/v1/goals/" + id.goal + "/notes?limit=30"},
 		{"sources", "/api/v1/sources"},
 		{"threads", "/api/v1/threads"},
+		{"threads_persona", "/api/v1/threads?persona=1"},
+		{"workspace", "/api/v1/workspace"},
 		{"threads_id", "/api/v1/threads/" + id.thread},
 		{"threads_id_messages", "/api/v1/threads/" + id.thread + "/messages?limit=200"},
 		{"threads_id_events", "/api/v1/threads/" + id.thread + "/events?since=0&limit=1000"},
@@ -158,6 +160,14 @@ func seedFixtures(t *testing.T, s *Server, db *store.DB) fixtureIDs {
 	db.Exec(`INSERT INTO thread_events (thread_id, run_id, ts, kind, title, body, summary) VALUES (?,'r1',?,'text','','Looking at the cash','')`, id.thread, store.TS(now))
 	quiet, err := s.thr.Create("Water the plants", "life", id.goal, "p", "", "", nil)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// The quiet one plays the executive assistant (team mode) with one file
+	// in its workspace, so the roles list and the workspace listing carry a row.
+	if _, err := s.thr.Update(quiet.ID, map[string]string{"persona": "assistant"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WS.Write("assistant", "appointments.md", []byte("# Appointments\n\nDentist is Tuesday."), "owner"); err != nil {
 		t.Fatal(err)
 	}
 	s.thr.Voice.Mark(quiet.ID, now.Add(time.Minute))

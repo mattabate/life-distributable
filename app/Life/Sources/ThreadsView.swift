@@ -141,6 +141,19 @@ struct ThreadsView: View {
                     if threads.isEmpty && error == nil {
                         Text("No sessions yet").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 4)
                     }
+                    // The people grid (team mode; the console's `.foot-links.team`):
+                    // a card per role, two across, its name, its role, its count.
+                    if !store.team.isEmpty {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                            ForEach(store.team) { t in
+                                Button { showAll = false; selected = OpenAsk(thread: t, message: nil) } label: {
+                                    teamCard(t, on: selected?.thread.id == t.id && !showAll)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.top, 12)
+                    }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 14)
             }
@@ -233,6 +246,37 @@ struct ThreadsView: View {
                 Text("No sessions yet").font(.subheadline).foregroundStyle(.secondary)
             }
         }
+        // The people (team mode): one row per role, its name, its role and
+        // its open count, the console's grid under All sessions.
+        if !store.team.isEmpty {
+            Section {
+                ForEach(store.team) { t in
+                    NavigationLink(value: OpenAsk(thread: t, message: nil)) { teamCard(t, on: false) }
+                }
+            }
+        }
+    }
+
+    /// One role's card: the session's name, the role under it, how many cards
+    /// it has open for the owner on the right.
+    @ViewBuilder func teamCard(_ t: Thread, on: Bool) -> some View {
+        let n = turn.forYou[t.id] ?? 0
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(t.title).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
+                Text(t.role ?? "").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            Text("\(n)").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(.secondary)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(Color.secondary.opacity(0.15), in: Capsule())
+        }
+        #if targetEnvironment(macCatalyst)
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? Color.primary.opacity(0.3) : Color.primary.opacity(0.1)))
+        .contentShape(Rectangle())
+        #endif
     }
 
     /// One heading and its rows; a heading with no rows is not drawn. With no

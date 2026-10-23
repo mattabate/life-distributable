@@ -68,6 +68,23 @@ when a goal needs one; none ships.
 Building a page for a goal (data first, a page only when the owner asks):
 the recipe is in `hub/CLAUDE.md`, read it when that is the task.
 
+## Team mode
+
+Optional, off by default (`team_mode` in `ops/hub.json`;
+`ops/py.sh setup.py hub --team yes|no`). On, some sessions take a standing
+role: a `personas` row in `hub/internal/threads/persona.go` (Role, Covers,
+Who, Lane, Brief), a lane in `routeLanes` (`route.go`), and
+`lifectl thread <id> persona <key>` to give a session the role. The router
+(a local Ollama model, else the cloud's small one) sends each new message
+from the app or console to the role whose lane it is, or starts a session as
+before; `POST /api/v1/route` is the dry run. A role's own files live in
+`data/people/<key>/` (`lifectl workspace`); only that session or the owner
+writes them. One role ships, the executive assistant who owns the calendar
+session. Adding a role is those three steps; every brief is written for this
+owner, never copied from anyone's. It was offered once at setup; if the
+owner said no, you may offer it once more after two weeks, in the same words
+(SETUP.md step 10), and never again after that.
+
 ## Pulling updates
 
 `upstream` is the public repo, github.com/mattabate/life-distributable; `origin`

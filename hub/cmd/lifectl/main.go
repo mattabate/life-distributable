@@ -707,6 +707,7 @@ func main() {
 		// lifectl thread <id> schedule <when|off>
 		// lifectl thread <id> goal <goal-id|off>
 		// lifectl thread <id> model <auto|judgment|build|claude-…>
+		// lifectl thread <id> persona <key|off>        (team mode)
 		// lifectl thread <id> checkin | stop | archive | events
 		if len(os.Args) < 3 {
 			usage()
@@ -760,6 +761,11 @@ func main() {
 			// rung this thread's wakes start on (ops/hub.json model_policy)
 			need(5)
 			c.call("PATCH", "/api/v1/threads/"+id, map[string]string{"model_class": os.Args[4]})
+		case "persona":
+			// lifectl thread <id> persona <key|off>  — the role this session
+			// plays (team mode; the hub refuses with how to turn it on when off)
+			need(5)
+			c.call("PATCH", "/api/v1/threads/"+id, map[string]string{"persona": os.Args[4]})
 		case "checkin":
 			c.call("POST", "/api/v1/threads/"+id+"/checkin", nil)
 		case "stop":
@@ -772,6 +778,35 @@ func main() {
 		default:
 			usage()
 		}
+	case "workspace":
+		// lifectl workspace [persona]                       list a role's files (all roles bare)
+		// lifectl workspace cat <persona>/<name>            print one
+		// lifectl workspace put <name> text|@file [--persona p]   write (a session writes its own)
+		if len(os.Args) >= 3 && os.Args[2] == "cat" {
+			need(4)
+			role, name, ok := strings.Cut(os.Args[3], "/")
+			if !ok || role == "" || name == "" {
+				die("workspace cat <persona>/<name>")
+			}
+			c.raw("/api/v1/workspace/" + role + "/" + name)
+			return
+		}
+		if len(os.Args) >= 3 && os.Args[2] == "put" {
+			need(5)
+			fs := flag.NewFlagSet("workspace put", flag.ExitOnError)
+			role := fs.String("persona", os.Getenv("LIFE_THREAD_ID"), "whose workspace (a session's own by default)")
+			fs.Parse(os.Args[5:])
+			if *role == "" {
+				die("from a shell, name the role: --persona assistant")
+			}
+			c.call("PUT", "/api/v1/workspace/"+*role+"/"+os.Args[3], map[string]string{"text": text(os.Args[4]), "by": actor()})
+			return
+		}
+		path := "/api/v1/workspace"
+		if len(os.Args) >= 3 {
+			path += "?persona=" + url.QueryEscape(os.Args[2])
+		}
+		c.call("GET", path, nil)
 	case "spend":
 		days := "30"
 		if len(os.Args) > 2 {
@@ -936,6 +971,26 @@ func (c client) call(method, path string, body any) {
 	}
 }
 
+// raw GETs a path and prints the body as it is (a workspace file is text,
+// not JSON).
+func (c client) raw(path string) {
+	req, _ := http.NewRequest("GET", c.base+path, nil)
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		die("%v", err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		die("%s", strings.TrimSpace(string(out)))
+	}
+	os.Stdout.Write(out)
+	if len(out) > 0 && out[len(out)-1] != '\n' {
+		fmt.Println()
+	}
+}
+
 // actor is who is acting: the calling session (claude:thread:<LIFE_THREAD_ID>)
 // or, from a plain shell, the owner ("owner", the wire value) — the one `source`/`by`/`author` every write sends.
 func actor() string {
@@ -1045,7 +1100,8 @@ gate      propose --title t --detail d [--kind money|delete|contact|share|commit
           relay <session-id> "text|@file" [--why "…"] [--say "…"] [--thread id]
 sessions  threads [--q words] [--archived] · thread new "prompt" [--goal g] [--schedule w] [--title t] [--project p]
           thread <id> [send text|@file|- | schedule when|off ["check-in prompt"] | goal g|off
-            | model auto|judgment|build|claude-… | checkin | stop | archive | events]
+            | model auto|judgment|build|claude-… | persona key|off | checkin | stop | archive | events]
+          workspace [persona] · workspace cat <persona>/<name> · workspace put <name> text|@file [--persona p]
           prompt "text" [--thread id | --new [--title t] [--goal g]] [--in 30m | --on YYYY-MM-DD [--at HH:MM]]
             [--re ask:id|action:id|rec:id|cal:id|message:id] [--outcome done|wont|approved|denied]
           prompt cancel <id> · prompts [queued|delivered|cancelled|failed] [--thread id]

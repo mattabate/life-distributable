@@ -522,7 +522,20 @@ struct Thread: Codable, Identifiable, Hashable {
     var waiting_to_speak: Bool?
     /// The rung its wakes start on: "" (auto), judgment, build, or a model id.
     var model_class: String?
+    /// Team mode: the role this session plays (its key) and the words under
+    /// its name on the people grid ("Executive assistant"). Absent = none.
+    var persona: String?
+    var role: String?
     var modelShort: String? { model_label.flatMap { $0.isEmpty ? nil : $0 } ?? model.flatMap { $0.isEmpty ? nil : shortModel($0) } }
+}
+
+/// One file in a role's workspace (team mode, `GET /api/v1/workspace`).
+struct WorkspaceFile: Codable, Hashable {
+    var persona: String
+    var name: String
+    var bytes: Int
+    var updated_at: String
+    var head: String?
 }
 
 /// One model's share of a chat's bill. `model` is the CLI's id

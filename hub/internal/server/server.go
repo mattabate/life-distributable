@@ -31,6 +31,7 @@ import (
 	"life/hub/internal/syncruns"
 	"life/hub/internal/threads"
 	"life/hub/internal/usage"
+	"life/hub/internal/workspace"
 )
 
 // The console, served under /static/. Globbed per file type rather than `web`
@@ -89,6 +90,8 @@ type Server struct {
 	// Runs: the sync_runs log every clock syncer's runs land in; Sources
 	// health reads a connector's last run and failing streak from it.
 	Runs *syncruns.Log
+	// WS: the roles' workspaces (team mode; nil = the routes answer 503).
+	WS *workspace.Store
 
 	mux *http.ServeMux
 	// StatusExtra lets main inject environment facts (profile expiry…).

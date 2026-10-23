@@ -32,6 +32,8 @@ final class FixtureDecodeTests: XCTestCase {
         ("goals_id_notes", [GoalNote].self),
         ("sources", SourcesInventory.self),
         ("threads", [Life.Thread].self),
+        ("threads_persona", [Life.Thread].self),
+        ("workspace", [WorkspaceFile].self),
         ("threads_id", Life.Thread.self),
         ("threads_id_messages", [ThreadMessage].self),
         ("threads_id_events", [ThreadEvent].self),

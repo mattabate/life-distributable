@@ -11,15 +11,15 @@
           "from": "The app reads HealthKit whenever it is open (Sources › Apple Health) — everything Health already holds on the first sync, then the last few days on every launch",
           "storage": "observations table in data/life.db (SQLite, append-only): one row per metric per day (steps, distance, energy, exercise, heart rate, resting HR, HRV, VO2max, weight, body fat), one per night of sleep, one per workout",
           "status": "live",
-          "last": "2026-10-18T09:34:45.692834Z",
+          "last": "2026-10-23T05:36:10.448885Z",
           "total": 3,
           "summary": "iPhone (Life app)",
           "kinds": [
             {
               "kind": "steps",
               "n": 3,
-              "first": "2026-10-16T09:34:45.692834Z",
-              "last": "2026-10-18T09:34:45.692834Z",
+              "first": "2026-10-21T05:36:10.448885Z",
+              "last": "2026-10-23T05:36:10.448885Z",
               "note": "one row per day — the day's total"
             }
           ],
@@ -27,7 +27,7 @@
             {
               "label": "iPhone (Life app)",
               "via": "phone",
-              "last": "2026-10-18T09:34:45.692834Z"
+              "last": "2026-10-23T05:36:10.448885Z"
             }
           ],
           "brand": {

@@ -1,15 +1,15 @@
 [
   {
     "id": "split-my-brokerage-cash-sensibly-00000001",
-    "created_at": "2026-10-18T09:34:45.69337Z",
-    "updated_at": "2026-10-18T09:34:45.701641Z",
+    "created_at": "2026-10-23T05:36:10.449327Z",
+    "updated_at": "2026-10-23T05:36:10.458125Z",
     "title": "Split my brokerage cash sensibly",
     "project": "life",
     "model_class": "",
     "status": "running",
     "schedule": "",
     "schedule_prompt": "",
-    "last_run_at": "2026-10-18T09:34:45.701641Z",
+    "last_run_at": "2026-10-23T05:36:10.458125Z",
     "unread": 2,
     "cost_usd": 0,
     "tokens": 0,
@@ -18,10 +18,10 @@
     "tokens_cache_read": 0,
     "tokens_cache_write": 0,
     "last_message": "Booked for Tuesday",
-    "last_message_at": "2026-10-18T09:34:45.701279Z",
+    "last_message_at": "2026-10-23T05:36:10.457828Z",
     "last_message_kind": "decision",
     "activity": "listed",
-    "turn_at": "2026-10-18T09:34:45.701641Z",
+    "turn_at": "2026-10-23T05:36:10.458125Z",
     "needs_you": 1,
     "pill": {
       "word": "running",
@@ -30,16 +30,17 @@
   },
   {
     "id": "water-the-plants-00000002",
-    "created_at": "2026-10-18T09:34:45.695052Z",
-    "updated_at": "2026-10-18T09:34:45.697311Z",
+    "created_at": "2026-10-23T05:36:10.450977Z",
+    "updated_at": "2026-10-23T05:36:10.454103Z",
     "title": "Water the plants",
     "project": "life",
     "goal_id": "get-smarter",
     "model_class": "",
+    "persona": "assistant",
     "status": "running",
     "schedule": "",
     "schedule_prompt": "",
-    "last_run_at": "2026-10-18T09:34:45.695938Z",
+    "last_run_at": "2026-10-23T05:36:10.451874Z",
     "unread": 1,
     "cost_usd": 0,
     "tokens": 0,
@@ -48,15 +49,16 @@
     "tokens_cache_read": 0,
     "tokens_cache_write": 0,
     "last_message": "p",
-    "last_message_at": "2026-10-18T09:34:45.695289Z",
+    "last_message_at": "2026-10-23T05:36:10.451223Z",
     "last_message_kind": "message",
-    "turn_at": "2026-10-18T09:34:45.695938Z",
+    "turn_at": "2026-10-23T05:36:10.451874Z",
     "needs_you": 1,
     "speaking": true,
     "waiting_to_speak": true,
     "pill": {
       "word": "running",
       "tone": "running"
-    }
+    },
+    "role": "Executive assistant"
   }
 ]

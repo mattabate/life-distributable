@@ -35,6 +35,11 @@
       { id: TIDY, title: 'Tidy the weekly digest', status: 'running',
         last_message: 'Working through the dates.', last_message_at: iso(1) },
     ],
+    // Team mode's people grid: the sessions with a role (a full path with its
+    // query is matched before the query is dropped).
+    '/threads?persona=1': [
+      { id: TIDY, title: 'Tidy the weekly digest', status: 'running', persona: 'assistant', role: 'Executive assistant' },
+    ],
     '/asks': [
       // surface: 'web' = laptop work, so this list is the only place it is
       // anyone's turn (the phone folds it away).
@@ -129,6 +134,7 @@
   }
 
   function fixture(path) {
+    if (FIX[path]) return FIX[path];
     const clean = path.split('?')[0];
     if (FIX[clean]) return FIX[clean];
     const s = shared(clean);
