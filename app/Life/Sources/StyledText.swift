@@ -40,13 +40,17 @@ struct StyledText: View {
         // one is a stack: text view, box, text view. Anything else — nearly
         // every message — stays the single text view it was.
         // A line that is only a hub file is the file itself (`blobLine`).
-        if text.contains("```") || text.contains("/api/v1/blobs/") {
-            VStack(alignment: .leading, spacing: 6) {
+        // A pipe table is a grid of its own too, unless the text is a
+        // clamped preview (`lines`), where it stays one stacked text view.
+        if text.contains("```") || text.contains("/api/v1/blobs/")
+            || (lines == nil && (text.hasPrefix("|") || text.contains("\n|") || text.contains("\n |"))) {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(mdSegments(text).enumerated()), id: \.offset) { _, seg in
                     switch seg {
                     case .text(let t): SelectableText(attributed: cached(t), tint: UIColor(color), chat: chatHook, lines: lines)
                     case .code(let code, let lang): CodeBlock(code: code, lang: lang, style: style)
                     case .files(let files): FileStrip(files: files)
+                    case .table(let rows, let header, let align): tableView(rows, header: header, align: align)
                     }
                 }
             }
@@ -75,13 +79,17 @@ struct StyledText: View {
     private static let markerWidth: CGFloat = 14
     private static let hang: CGFloat = 19
 
-    private func build(_ text: String) -> NSAttributedString {
+    private func baseFont() -> UIFont {
         #if targetEnvironment(macCatalyst)
         let plain = macSize.map { UIFont.systemFont(ofSize: $0) } ?? UIFont.preferredFont(forTextStyle: style)
         #else
         let plain = UIFont.preferredFont(forTextStyle: style)
         #endif
-        let base = bold ? plain.bolded() : plain
+        return bold ? plain.bolded() : plain
+    }
+
+    private func build(_ text: String) -> NSAttributedString {
+        let base = baseFont()
         let heading = base.bolded()
         let ui = UIColor(color)
         var paras: [NSAttributedString] = []
@@ -103,18 +111,11 @@ struct StyledText: View {
             // "the markdown formatting is kind of weird and bad").
             let gapBefore: CGFloat = blank && !paras.isEmpty ? base.pointSize * 0.55 : 0
             blank = false
-            // A pipe table ("| Date | Buy |"): the run of pipe rows from here becomes rows
-            // of tab-separated cells over shared tab stops, header bold.
-            if trimmedAll.hasPrefix("|"), let first = mdTableRow(trimmedAll), mdTableSeparator(trimmedAll) == nil {
-                var rows: [[String]] = [first]
-                var hasHeader = false
-                if i < lines.count, mdTableSeparator(lines[i]) != nil { hasHeader = true; i += 1 }
-                while i < lines.count, lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("|"),
-                      let r = mdTableRow(lines[i]) {
-                    if mdTableSeparator(lines[i]) == nil { rows.append(r) }
-                    i += 1
-                }
-                paras.append(contentsOf: table(rows, header: hasHeader, base: base, color: ui))
+            // A pipe table that reaches here sits in a clamped preview (body
+            // cuts every other one out as a grid): one record per row.
+            if let (seg, next) = mdTable(lines, at: i - 1), case .table(let rows, let header, _) = seg {
+                paras.append(contentsOf: stacked(rows, header: header, base: base, color: ui))
+                i = next
                 continue
             }
             let leading = raw.prefix { $0 == " " || $0 == "\t" }.reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
@@ -162,22 +163,48 @@ struct StyledText: View {
         return out
     }
 
-    /// Rows of a pipe table as paragraphs of one text view: every column
-    /// starts at a tab stop shared by all rows, each stop the widest cell in
-    /// that column (capped, so one long cell cannot push the rest off the
-    /// phone) plus a gap. The last column has no cap — it wraps, and its
-    /// continuation lines hang under its own start, not under column one.
-    /// The header row is bold. No rules: a hairline would need attachments,
-    /// and the alignment already reads as a table.
+    /// A pipe table as a real grid. Tab stops in the prose's text view let a
+    /// cell wider than its stop push the rest of its row one stop over, so
+    /// headers sat over the wrong values, and the last column wrapped a word
+    /// per line in whatever width was left. Now each cell wraps by words
+    /// inside its own column, widths shared out the way a browser's table
+    /// does (MdTableLayout), with the console's rules under the header and
+    /// between rows.
     ///
-    /// A table wider than the phone's text column (five columns on a read
-    /// card ran the last one off the edge) stacks instead: each row's first
-    /// cell bold on its own line, the rest as "Header value · Header value"
-    /// under it, wrapping like prose.
-    private static let cellCap: CGFloat = 150
-    private static let cellGap: CGFloat = 14
-    /// The narrowest the last, wrapping column may be before the table stacks.
-    private static let lastMin: CGFloat = 110
+    /// A table whose columns cannot fit the phone's text column even at one
+    /// word each (five columns on a read card ran the last one off the edge)
+    /// stacks instead: each row's first cell bold on its own line, the rest
+    /// as "Header value · Header value" under it.
+    @ViewBuilder
+    private func tableView(_ rows: [[String]], header: Bool, align: [NSTextAlignment]) -> some View {
+        let model = tableModel(rows, header: header)
+        if model.least <= Self.tableBudget {
+            MdTableGrid(model: model, align: align, rule: color)
+        } else {
+            SelectableText(attributed: model.stacked, tint: UIColor(color), chat: chatHook)
+        }
+    }
+
+    private static let tableCache = NSCache<NSString, MdTableModel>()
+    private func tableModel(_ rows: [[String]], header: Bool) -> MdTableModel {
+        let key = "\(style.rawValue)|\(bold)|\(color)|\(typeSize)|\(macSize ?? 0)|\(header)|\(rows)" as NSString
+        if let hit = Self.tableCache.object(forKey: key) { return hit }
+        let base = baseFont(), ui = UIColor(color)
+        let cols = rows.map(\.count).max() ?? 0
+        let cells = rows.enumerated().map { (r, row) in
+            (0..<cols).map { c in inline(c < row.count ? row[c] : "", base: header && r == 0 ? base.bolded() : base, color: ui) }
+        }
+        let flat = NSMutableAttributedString()
+        for (k, p) in stacked(rows, header: header, base: base, color: ui).enumerated() {
+            if k > 0 { flat.append(NSAttributedString(string: "\n", attributes: [.font: base])) }
+            flat.append(p)
+        }
+        let model = MdTableModel(cells: cells, header: header, stacked: flat)
+        Self.tableCache.countLimit = 100
+        Self.tableCache.setObject(model, forKey: key)
+        return model
+    }
+
     /// The phone's text column inside a card; the Mac's columns are wide.
     private static var tableBudget: CGFloat {
         #if targetEnvironment(macCatalyst)
@@ -188,41 +215,6 @@ struct StyledText: View {
         return w - 80
         #endif
     }
-    private func table(_ rows: [[String]], header: Bool, base: UIFont, color: UIColor) -> [NSAttributedString] {
-        let cols = rows.map(\.count).max() ?? 0
-        guard cols > 0 else { return [] }
-        let cells: [[NSAttributedString]] = rows.enumerated().map { (r, row) in
-            let font = header && r == 0 ? base.bolded() : base
-            return (0..<cols).map { c in inline(c < row.count ? row[c] : "", base: font, color: color) }
-        }
-        var stops: [CGFloat] = []      // where column c (c ≥ 1) starts
-        var x: CGFloat = 0
-        for c in 0..<(cols - 1) {
-            let widest = cells.map { ceil($0[c].size().width) }.max() ?? 0
-            x += min(widest, Self.cellCap) + Self.cellGap
-            stops.append(x)
-        }
-        let lastWidest = cells.map { ceil($0[cols - 1].size().width) }.max() ?? 0
-        if cols > 1, x + min(lastWidest, Self.lastMin) > Self.tableBudget {
-            return stacked(rows, header: header, base: base, color: color)
-        }
-        return cells.map { row in
-            let p = NSMutableParagraphStyle()
-            p.lineBreakMode = .byWordWrapping
-            p.paragraphSpacing = 3
-            p.tabStops = stops.map { NSTextTab(textAlignment: .left, location: $0) }
-            p.defaultTabInterval = Self.cellGap
-            p.headIndent = stops.last ?? 0
-            let line = NSMutableAttributedString()
-            for (c, cell) in row.enumerated() {
-                if c > 0 { line.append(NSAttributedString(string: "\t", attributes: [.font: base, .foregroundColor: color])) }
-                line.append(cell)
-            }
-            line.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: line.length))
-            return line
-        }
-    }
-
     /// The too-wide table, one record per row: first cell bold, then the
     /// other cells after their header in the secondary colour.
     private func stacked(_ rows: [[String]], header: Bool, base: UIFont, color: UIColor) -> [NSAttributedString] {
@@ -461,9 +453,7 @@ func mdTableRow(_ line: String) -> [String]? {
 }
 
 /// "|---|:--:|---:|" → one alignment per column, nil when the line is not a
-/// separator row. The phone lays every column out left-aligned; the
-/// alignment is parsed so the row is recognised (and dropped), and so both
-/// renderers agree on what is a separator.
+/// separator row. The grid aligns each column by it, as the console does.
 func mdTableSeparator(_ line: String) -> [NSTextAlignment]? {
     guard let cells = mdTableRow(line), !cells.isEmpty else { return nil }
     var out: [NSTextAlignment] = []
@@ -485,6 +475,25 @@ enum MdSegment: Equatable {
     /// Hub blobs on lines in a row (blank lines between are fine): one strip
     /// of small tiles, pictures or file chips.
     case files([MdFile])
+    /// A pipe table: its rows (the header first when `header`), and one
+    /// alignment per column from the separator row.
+    case table([[String]], header: Bool, align: [NSTextAlignment])
+}
+
+/// A pipe table starting at `lines[i]`: the header row, an optional
+/// separator, then every pipe row after it. Returns the segment and the
+/// index past the table, or nil when `lines[i]` does not open one.
+func mdTable(_ lines: [String], at i: Int) -> (MdSegment, Int)? {
+    let t = lines[i].trimmingCharacters(in: .whitespaces)
+    guard t.hasPrefix("|"), let first = mdTableRow(t), mdTableSeparator(t) == nil else { return nil }
+    var rows = [first], j = i + 1
+    var align: [NSTextAlignment] = []
+    if j < lines.count, let a = mdTableSeparator(lines[j]) { align = a; j += 1 }
+    while j < lines.count, lines[j].trimmingCharacters(in: .whitespaces).hasPrefix("|"), let r = mdTableRow(lines[j]) {
+        if mdTableSeparator(lines[j]) == nil { rows.append(r) }
+        j += 1
+    }
+    return (.table(rows, header: !align.isEmpty, align: align), j)
 }
 
 struct MdFile: Equatable, Hashable {
@@ -537,6 +546,148 @@ struct FileStrip: View {
     }
 }
 
+/// A pipe table's cells, rendered once, with each column's narrowest (its
+/// longest word) and widest (its longest cell on one line) widths.
+final class MdTableModel {
+    let cells: [[AttributedString]]
+    let header: Bool
+    let minW: [CGFloat], maxW: [CGFloat]
+    /// The one-record-per-row text, for a phone too narrow for the grid.
+    let stacked: NSAttributedString
+    static let gap: CGFloat = 16
+    /// The grid at its narrowest: every column one word wide.
+    var least: CGFloat { minW.reduce(0, +) + Self.gap * CGFloat(max(minW.count - 1, 0)) }
+
+    init(cells ns: [[NSAttributedString]], header: Bool, stacked: NSAttributedString) {
+        let cols = ns.first?.count ?? 0
+        let width = { (s: NSAttributedString) in ceil(s.size().width) + 1 }
+        // A word longer than this (a URL as its own text) breaks inside
+        // itself rather than widening its column past the page.
+        let wordCap: CGFloat = 220
+        let words = { (s: NSAttributedString) -> CGFloat in
+            var widest: CGFloat = 0
+            let str = s.string as NSString
+            str.enumerateSubstrings(in: NSRange(location: 0, length: str.length), options: .byWords) { _, _, enclosing, _ in
+                let w = width(s.attributedSubstring(from: enclosing).trimmed)
+                widest = max(widest, w)
+            }
+            return min(widest, wordCap)
+        }
+        minW = (0..<cols).map { c in ns.map { words($0[c]) }.max() ?? 0 }
+        maxW = (0..<cols).map { c in ns.map { width($0[c]) }.max() ?? 0 }
+        cells = ns.map { $0.map(MdTableModel.swiftUI) }
+        self.header = header
+        self.stacked = stacked
+    }
+
+    /// UIKit runs → SwiftUI runs: a `Text` ignores a UIFont attribute.
+    private static func swiftUI(_ s: NSAttributedString) -> AttributedString {
+        var out = AttributedString()
+        s.enumerateAttributes(in: NSRange(location: 0, length: s.length)) { attrs, range, _ in
+            var run = AttributedString(s.attributedSubstring(from: range).string)
+            if let f = attrs[.font] as? UIFont { run.font = Font(f as CTFont) }
+            if let c = attrs[.foregroundColor] as? UIColor { run.foregroundColor = Color(c) }
+            if let c = attrs[.backgroundColor] as? UIColor { run.backgroundColor = Color(c) }
+            if let u = attrs[.link] as? URL { run.link = u } else if let u = attrs[.link] as? String { run.link = URL(string: u) }
+            if attrs[.strikethroughStyle] != nil { run.strikethroughStyle = .single }
+            out += run
+        }
+        return out
+    }
+}
+
+private extension NSAttributedString {
+    /// Without the whitespace a word enumeration's enclosing range carries.
+    var trimmed: NSAttributedString {
+        let s = string as NSString
+        var lo = 0, hi = s.length
+        while lo < hi, CharacterSet.whitespacesAndNewlines.contains(UnicodeScalar(s.character(at: lo)) ?? " ") { lo += 1 }
+        while hi > lo, CharacterSet.whitespacesAndNewlines.contains(UnicodeScalar(s.character(at: hi - 1)) ?? " ") { hi -= 1 }
+        return attributedSubstring(from: NSRange(location: lo, length: hi - lo))
+    }
+}
+
+/// The grid: cells wrap by words in their own column, a rule under the
+/// header (the text colour) and a faint one between rows, as the console's
+/// `.md-table` (app.css) draws it.
+private struct MdTableGrid: View {
+    let model: MdTableModel
+    let align: [NSTextAlignment]
+    let rule: Color
+
+    var body: some View {
+        let rows = model.cells.count
+        MdTableLayout(cols: model.minW.count, minW: model.minW, maxW: model.maxW, align: align) {
+            ForEach(0..<rows, id: \.self) { r in
+                ForEach(0..<model.minW.count, id: \.self) { c in
+                    Text(model.cells[r][c])
+                        .multilineTextAlignment(c < align.count && align[c] == .right ? .trailing : c < align.count && align[c] == .center ? .center : .leading)
+                }
+            }
+            ForEach(0..<rows, id: \.self) { r in
+                Rectangle().fill(r == rows - 1 ? .clear : model.header && r == 0 ? rule.opacity(0.7) : rule.opacity(0.15))
+            }
+        }
+        .textSelection(.enabled)
+    }
+}
+
+/// Column widths as a browser's auto table layout shares them: every column
+/// gets its longest word, and what is left of the width on offer goes to
+/// each column in proportion to how much more it would take to sit on one
+/// line. A table that fits on one line per row is as wide as it is, no wider.
+/// Subviews: rows × cols cells in reading order, then one rule per row.
+private struct MdTableLayout: Layout {
+    let cols: Int
+    let minW: [CGFloat], maxW: [CGFloat]
+    let align: [NSTextAlignment]
+    static let pad: CGFloat = 5
+
+    private func widths(_ proposed: CGFloat?) -> [CGFloat] {
+        guard let p = proposed, p.isFinite else { return maxW }
+        let avail = p - MdTableModel.gap * CGFloat(cols - 1)
+        let natural = maxW.reduce(0, +), least = minW.reduce(0, +)
+        if natural <= avail { return maxW }
+        if least >= avail || natural <= least { return minW }
+        let share = (avail - least) / (natural - least)
+        return zip(minW, maxW).map { floor($0 + ($1 - $0) * share) }
+    }
+
+    private func heights(_ w: [CGFloat], _ s: Subviews) -> [CGFloat] {
+        let rows = cols == 0 ? 0 : s.count / (cols + 1)
+        return (0..<rows).map { r in
+            (0..<cols).map { c in s[r * cols + c].sizeThatFits(ProposedViewSize(width: w[c], height: nil)).height }
+                .max().map { ceil($0) + 2 * Self.pad } ?? 0
+        }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let w = widths(proposal.width)
+        return CGSize(width: w.reduce(0, +) + MdTableModel.gap * CGFloat(max(cols - 1, 0)),
+                      height: heights(w, subviews).reduce(0, +))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let w = widths(bounds.width)
+        let hs = heights(w, subviews)
+        let total = w.reduce(0, +) + MdTableModel.gap * CGFloat(max(cols - 1, 0))
+        var y = bounds.minY
+        for (r, h) in hs.enumerated() {
+            var x = bounds.minX
+            for c in 0..<cols {
+                let a = c < align.count ? align[c] : .left
+                let (px, anchor): (CGFloat, UnitPoint) = a == .right ? (x + w[c], .topTrailing) : a == .center ? (x + w[c] / 2, .top) : (x, .topLeading)
+                subviews[r * cols + c].place(at: CGPoint(x: px, y: y + Self.pad), anchor: anchor,
+                                             proposal: ProposedViewSize(width: w[c], height: nil))
+                x += w[c] + MdTableModel.gap
+            }
+            subviews[hs.count * cols + r].place(at: CGPoint(x: bounds.minX, y: y + h - 1), anchor: .topLeading,
+                                                proposal: ProposedViewSize(width: total, height: 1))
+            y += h
+        }
+    }
+}
+
 func mdSegments(_ text: String) -> [MdSegment] {
     var out: [MdSegment] = []
     var prose: [String] = []
@@ -558,6 +709,9 @@ func mdSegments(_ text: String) -> [MdSegment] {
                 files.append(f); i += 1
             }
             out.append(.files(files)); continue
+        }
+        if let (table, next) = mdTable(lines, at: i) {
+            flush(); out.append(table); i = next; continue
         }
         guard let m = lines[i].wholeMatch(of: /(\s*)(`{3,})\s*([\w.+#-]*)\s*/) else {
             prose.append(lines[i]); i += 1; continue

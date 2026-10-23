@@ -217,6 +217,49 @@ func TestMessageRelaunchesOffCappedProcess(t *testing.T) {
 	}
 }
 
+// A prompt_tools line added after a process launched never reached it, and a
+// session fed message after message kept that process. The idle process is
+// closed and the message relaunches with the current list, with --resume.
+func TestMessageRelaunchesOffStaleToolList(t *testing.T) {
+	m, _, cmds := setup(t)
+	m.AllowedTools = []string{"Read"}
+	th, _ := m.Create("", "life", "", "Run the conversion test.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	in := inFile(t, m, th.ID)
+	appendOut(t, out, `{"type":"system","subtype":"init","session_id":"sess-5"}
+{"type":"result","subtype":"success","is_error":false,"result":"Needs a converter.","total_cost_usd":0.02,"session_id":"sess-5"}
+`)
+	m.Poll()
+	m.AllowedTools = []string{"Read", "Bash(convert:*)"}
+	n := len(*cmds)
+	if err := m.Send(th.ID, "try again"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(in); !strings.HasSuffix(string(b), eofSentinel+"\n") || strings.Contains(string(b), "try again") {
+		t.Fatalf("in-file: %q", string(b))
+	}
+	if len(*cmds) != n {
+		t.Fatalf("launched early: %v", (*cmds)[n:])
+	}
+	os.WriteFile(out+".done", nil, 0o644)
+	m.Poll()
+	if len(*cmds) != n+1 || !strings.Contains((*cmds)[n], "Bash(convert:*)") || !strings.Contains((*cmds)[n], "'--resume' 'sess-5'") {
+		t.Fatalf("%v", (*cmds)[n:])
+	}
+	// Same list: the next message goes to the live process.
+	appendOut(t, pendingOut(t, m, th.ID), `{"type":"system","subtype":"init","session_id":"sess-5"}
+{"type":"result","subtype":"success","is_error":false,"result":"Ran it.","total_cost_usd":0.02,"session_id":"sess-5"}
+`)
+	m.Poll()
+	n = len(*cmds)
+	if err := m.Send(th.ID, "thanks"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(inFile(t, m, th.ID)); len(*cmds) != n || !strings.Contains(string(b), "thanks") {
+		t.Fatalf("%v %q", (*cmds)[n:], string(b))
+	}
+}
+
 // No tool-call cap, at any number: an old backstop steered a review turn
 // into stopping mid-pass, and deep explorations are allowed. A long turn runs:
 // nothing is written to its stdin, no session is killed, no system card is

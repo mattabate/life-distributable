@@ -61,4 +61,12 @@ final class MarkdownTableTests: XCTestCase {
         XCTAssertEqual(mdSegments("![before](/api/v1/blobs/sha256/00/b.png)\n\n![after](/api/v1/blobs/sha256/00/a.png)\nend"),
                        [.files([MdFile(ref: "sha256/00/b.png", caption: "before"), MdFile(ref: "sha256/00/a.png", caption: "after")]), .text("end")])
     }
+
+    /// A table is its own segment, the grid: the paragraph above stays prose
+    /// even with no blank line between.
+    func testATableIsItsOwnSegment() {
+        XCTAssertEqual(mdSegments("Your steer:\n| a | b |\n|---|--:|\n| 1 | 2 |\nafter"),
+                       [.text("Your steer:"), .table([["a", "b"], ["1", "2"]], header: true, align: [.left, .right]), .text("after")])
+        XCTAssertEqual(mdSegments("| a | b |\n| c | d |"), [.table([["a", "b"], ["c", "d"]], header: false, align: [])])
+    }
 }

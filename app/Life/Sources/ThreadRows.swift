@@ -137,12 +137,28 @@ struct SessionCell: Identifiable, Hashable {
     let tone: String
     /// One of the owner's own dated steps that sits in this chat — uncounted.
     let step: Bool
+    /// A sub-session's row (`quiet` when it has no card of its own): the
+    /// session it opens, the card to land on, and whether it is running.
+    var sub: Thread? = nil
+    var subFirst: String? = nil
 
     var color: Color {
-        switch tone { case "read": .accentColor; case "install": .teal; case "error": .secondary; default: .red }
+        switch tone { case "read": .accentColor; case "install": .teal; case "error", "quiet": .secondary; default: .red }
     }
     var mark: String {
-        switch tone { case "read": "text.alignleft"; case "install": "square.and.arrow.down"; case "error": "exclamationmark.triangle"; default: "hand.raised.fill" }
+        if tone == "quiet" { return sub?.status == "running" ? "circle.fill" : "circle" }
+        return switch tone { case "read": "text.alignleft"; case "install": "square.and.arrow.down"; case "error": "exclamationmark.triangle"; default: "hand.raised.fill" }
+    }
+
+    /// A session another one started, as a row on that one's card: its title,
+    /// its first open card's tint and verb if it has one, else gray and
+    /// "running"/"idle". The console's `subCell`.
+    static func sub(_ k: Thread, board b: Board) -> SessionCell {
+        let c = b.bundleOf(k).map(cells)?.first
+        return SessionCell(id: "sub " + k.id, title: k.title,
+                           verb: c?.verb ?? (k.status == "running" ? "running" : "idle"),
+                           tone: c?.tone ?? "quiet", step: false,
+                           sub: k, subFirst: b.first[k.id].flatMap { $0.isEmpty ? nil : $0 })
     }
 
     /// The bundle as cells: approvals first (the session is stopped on them),
@@ -180,7 +196,8 @@ struct MiniCard: View {
         Button(action: tap) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: c.mark).font(.caption2.weight(.semibold)).foregroundStyle(c.color).padding(.top, 3)
+                    Image(systemName: c.mark).font(.caption2.weight(.semibold))
+                        .foregroundStyle(c.tone == "quiet" && c.sub?.status == "running" ? Color.accentColor : c.color).padding(.top, 3)
                     Text(md(c.title)).font(.subheadline.weight(.medium)).multilineTextAlignment(.leading)
                     Spacer(minLength: 4)
                     Text(c.verb).font(.caption2).foregroundStyle(c.color).layoutPriority(1)
@@ -188,8 +205,8 @@ struct MiniCard: View {
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(c.color.opacity(c.tone == "error" ? 0.08 : 0.1), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(alignment: .leading) { RoundedRectangle(cornerRadius: 1.5).fill(c.color.opacity(c.tone == "error" ? 0.4 : 0.9)).frame(width: 3).padding(.vertical, 4).padding(.leading, 1) }
+            .background(c.color.opacity(c.tone == "error" || c.tone == "quiet" ? 0.08 : 0.1), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(alignment: .leading) { RoundedRectangle(cornerRadius: 1.5).fill(c.color.opacity(c.tone == "error" || c.tone == "quiet" ? 0.4 : 0.9)).frame(width: 3).padding(.vertical, 4).padding(.leading, 1) }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -217,6 +234,10 @@ struct WebMiniCard: View {
         Button(action: tap) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if c.sub?.status == "running" {
+                        Circle().fill(Color.accentColor).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                            .padding(.trailing, -1)
+                    }
                     Text(md(c.title)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 4)
@@ -232,7 +253,7 @@ struct WebMiniCard: View {
             // (A Divider in an overlay lays out vertically — it drew a line
             // down the middle of every card in build 1496.)
             .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
-            .overlay(alignment: .leading) { Rectangle().fill(c.tone == "error" ? Color.secondary.opacity(0.5) : c.color).frame(width: 3) }
+            .overlay(alignment: .leading) { Rectangle().fill(c.tone == "error" ? Color.secondary.opacity(0.5) : c.tone == "quiet" ? Color.primary.opacity(0.12) : c.color).frame(width: 3) }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -274,10 +295,16 @@ struct ThreadRow: View {
     var on = false
     /// The desktop: "and N more" opened, the older cards drawn under the newest.
     @State private var moreOpen = false
+    /// The sessions this one started, a row each under its own cards.
+    var subs: [SessionCell] = []
+    /// How many of them the card draws before "and N more" (console SUB_CELLS).
+    static let subRows = 3
+    @State private var subsOpen = false
 
-    init(t: Thread, board b: Board, on: Bool = false) {
+    init(t: Thread, board b: Board, on: Bool = false, subs: [Thread] = []) {
         self.t = t
         self.on = on
+        self.subs = subs.map { SessionCell.sub($0, board: b) }
         forYou = b.forYou[t.id] ?? 0
         cells = b.bundleOf(t).map(SessionCell.cells) ?? []
         let open = b.open?[t.id] ?? 0
@@ -295,6 +322,8 @@ struct ThreadRow: View {
     var tone: Color { PillChip.tone(pills) }
 
     func open(_ card: String?) { nav.card = OpenAsk(thread: t, message: nil, card: card) }
+    func open(sub c: SessionCell) { if let k = c.sub { nav.card = OpenAsk(thread: k, message: nil, card: c.subFirst) } }
+    var subsShown: ArraySlice<SessionCell> { subs.prefix(subsOpen ? subs.count : Self.subRows) }
 
     var body: some View {
         #if targetEnvironment(macCatalyst)
@@ -325,7 +354,7 @@ struct ThreadRow: View {
                 Text(md(t.title)).font(.system(size: 14.5, weight: t.unread > 0 ? .bold : .semibold))
                     .foregroundStyle(.primary).multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
-                if cells.isEmpty, todo?.isEmpty ?? true, let d = t.last_message_at {
+                if cells.isEmpty, subs.isEmpty, todo?.isEmpty ?? true, let d = t.last_message_at {
                     Text(shortAgo(d)).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).layoutPriority(1)
                 }
             }
@@ -338,14 +367,23 @@ struct ThreadRow: View {
             if let todo, !todo.isEmpty, cells.isEmpty {
                 Text(md(todo)).font(.system(size: 13, weight: .medium)).foregroundStyle(tone).lineLimit(2).padding(.top, 8)
             }
-            if !cells.isEmpty {
+            if !cells.isEmpty || !subs.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(cells.prefix(moreOpen ? cells.count : Self.deskCards)) { c in WebMiniCard(c: c) { open(c.id) } }
-                    if more > 0 || cells.count > Self.deskCards {
+                    if !cells.isEmpty, more > 0 || cells.count > Self.deskCards {
                         // "And N more" opens the older cards in place; the
                         // console's toggleMoreCards.
                         Button { if cells.count > Self.deskCards { moreOpen.toggle() } else { open(nil) } } label: {
                             Text(moreOpen ? "Show less" : "and \(more) more").font(.system(size: 12.5)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 14).padding(.vertical, 8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
+                        }.buttonStyle(.plain)
+                    }
+                    ForEach(subsShown) { c in WebMiniCard(c: c) { open(sub: c) } }
+                    if subs.count > Self.subRows {
+                        Button { subsOpen.toggle() } label: {
+                            Text(subsOpen ? "Show less" : "and \(subs.count - Self.subRows) more").font(.system(size: 12.5)).foregroundStyle(.secondary)
                                 .padding(.horizontal, 14).padding(.vertical, 8)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
@@ -384,6 +422,12 @@ struct ThreadRow: View {
                 // Lands on the first card the row did not draw.
                 Button { open(cells[min(Self.rowCards, cells.count - 1)].id) } label: {
                     Text("and \(more) more").font(.caption).foregroundStyle(.secondary)
+                }.buttonStyle(.plain)
+            }
+            ForEach(subsShown) { c in MiniCard(c: c) { open(sub: c) } }
+            if subs.count > Self.subRows {
+                Button { subsOpen.toggle() } label: {
+                    Text(subsOpen ? "Show less" : "and \(subs.count - Self.subRows) more").font(.caption).foregroundStyle(.secondary)
                 }.buttonStyle(.plain)
             }
             if let todo, !todo.isEmpty {

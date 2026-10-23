@@ -55,8 +55,17 @@ struct ThreadsView: View {
     /// The sessions under one heading, newest activity first (the hub's
     /// /threads order), cut to what the heading says it shows.
     func rows(_ h: BoardHeading) -> [Thread] {
-        let all = threads.filter { turn.sectionOf($0) == h.key }
+        let all = threads.filter { turn.sectionOf($0) == h.key && !nested($0) }
         return h.show > 0 ? Array(all.prefix(h.show)) : all
+    }
+    /// A session another one started is a row on that one's card, whatever
+    /// heading it would have had; views/threads.js drawList draws the same.
+    func nested(_ t: Thread) -> Bool {
+        guard let p = t.parent_id, p != t.id else { return false }
+        return threads.contains { $0.id == p && turn.sectionOf($0) != nil }
+    }
+    func subs(_ t: Thread) -> [Thread] {
+        threads.filter { $0.parent_id == t.id && nested($0) && turn.sectionOf($0) != nil }
     }
     var body: some View {
         #if targetEnvironment(macCatalyst)
@@ -121,7 +130,7 @@ struct ThreadsView: View {
                                 .font(.system(size: 11.5, weight: .semibold)).tracking(0.8).foregroundStyle(.secondary)
                                 .padding(.horizontal, 4).padding(.top, first ? 4 : 16).padding(.bottom, 2)
                         case .row(let t):
-                            ThreadRow(t: t, board: turn, on: selected?.thread.id == t.id && !showAll)
+                            ThreadRow(t: t, board: turn, on: selected?.thread.id == t.id && !showAll, subs: subs(t))
                         }
                     }
                     Button { selected = nil; showAll = true } label: {
@@ -297,10 +306,10 @@ struct ThreadsView: View {
     @ViewBuilder func row(_ t: Thread) -> some View {
         #if targetEnvironment(macCatalyst)
         // The session open on the right is tinted, as in the console.
-        ThreadRow(t: t, board: turn)
+        ThreadRow(t: t, board: turn, subs: subs(t))
             .listRowBackground(selected?.thread.id == t.id ? Color.accentColor.opacity(0.1) : nil)
         #else
-        ThreadRow(t: t, board: turn)
+        ThreadRow(t: t, board: turn, subs: subs(t))
         #endif
     }
 
