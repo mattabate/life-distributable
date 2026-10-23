@@ -55,6 +55,7 @@ def cmd_hub(a):
     cfg["owner_name"] = a.owner
     cfg["usage_opt_in"] = a.usage == "yes"
     cfg["surfaces"] = a.surfaces
+    cfg["team_mode"] = a.team == "yes"
     cfg["listen_addr"] = "%s:%d" % (ip, a.port)
     cfg["public_host"] = "%s:%d" % (host, a.port)
     cfg["cert_file"] = "~/life/ops/secrets/%s.crt" % host
@@ -67,8 +68,8 @@ def cmd_hub(a):
     with open(HUB_JSON, "w") as f:
         json.dump(cfg, f, indent=2)
         f.write("\n")
-    print("wrote ops/hub.json: owner %s, hub https://%s:%d, apps %s"
-          % (a.owner, host, a.port, ", ".join(a.surfaces)))
+    print("wrote ops/hub.json: owner %s, hub https://%s:%d, apps %s, team mode %s"
+          % (a.owner, host, a.port, ", ".join(a.surfaces), "on" if cfg["team_mode"] else "off"))
 
 
 SURFACES = ("phone", "desktop", "web")
@@ -145,6 +146,7 @@ def cmd_show(_):
     mark(bool(cfg), "ops/hub.json")
     chosen = cfg.get("surfaces") or list(SURFACES)
     print("       apps: %s" % ", ".join(chosen))
+    print("       team mode: %s" % ("on" if cfg.get("team_mode") else "off"))
     host = cfg.get("public_host", "").split(":")[0]
     mark(bool(host) and os.path.exists(os.path.join(SECRETS, host + ".crt")), "TLS certificate (ops/renew-cert.sh)")
     mark(os.path.exists(os.path.join(SECRETS, "hub.token")), "hub token (made on first hub start)")
@@ -167,6 +169,8 @@ def main():
                    help="send the weekly anonymous usage heartbeat (SETUP.md step 5)")
     h.add_argument("--surfaces", type=surfaces, default=list(SURFACES),
                    help="which apps: comma list of phone,desktop,web (default all three)")
+    h.add_argument("--team", choices=["yes", "no"], default="no",
+                   help="team mode: sessions with roles and a router (SETUP.md step 10; default no)")
     h.add_argument("--port", type=int, default=8443)
     h.add_argument("--force", action="store_true")
     h.add_argument("--resolve", action="store_true", help="store claude's resolved real path")

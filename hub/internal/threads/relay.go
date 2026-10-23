@@ -28,12 +28,19 @@ const peersCap = 20
 // live ones with what each is doing this minute, and the standing (scheduled)
 // ones with their lane — so a task can be handed to the session that knows it.
 func (m *Manager) peersHeader(self string) string {
-	rows, err := m.db.Query(`SELECT t.id, t.title, t.status, COALESCE(t.goal_id,''),
+	// Team mode: a session with a role is listed whatever its status (done,
+	// idle or scheduled), as the one to relay its lane to.
+	roleRows := "0"
+	if m.TeamMode {
+		roleRows = "1"
+	}
+	rows, err := m.db.Query(`SELECT t.id, t.title, t.status, COALESCE(t.goal_id,''), t.persona, t.former_titles,
 		COALESCE((SELECT p.repeat FROM prompts p WHERE p.target=t.id AND p.state='queued' AND p.repeat!='' ORDER BY p.created_at DESC LIMIT 1),''),
 		COALESCE((SELECT COALESCE(NULLIF(e.summary,''), e.title) FROM thread_events e WHERE e.thread_id=t.id AND e.kind='tool_use' ORDER BY e.id DESC LIMIT 1),''),
 		COALESCE((SELECT a.title FROM items a WHERE a.src='ask' AND a.thread_id=t.id AND a.state IN ('open','answered') ORDER BY a.created_at DESC LIMIT 1),'')
 		FROM threads t
 		WHERE t.id != ? AND (t.status IN ('running','needs_you')
+			OR (`+roleRows+` AND t.persona != '' AND t.status != 'archived')
 			OR (t.status='idle' AND EXISTS (SELECT 1 FROM prompts p WHERE p.target=t.id AND p.state='queued' AND p.repeat!='')))
 		ORDER BY CASE t.status WHEN 'running' THEN 0 WHEN 'needs_you' THEN 1 ELSE 2 END, t.updated_at DESC LIMIT ?`, self, peersCap)
 	if err != nil {
@@ -42,9 +49,18 @@ func (m *Manager) peersHeader(self string) string {
 	defer rows.Close()
 	var b strings.Builder
 	for rows.Next() {
-		var id, title, status, goal, sched, doing, card string
-		if rows.Scan(&id, &title, &status, &goal, &sched, &doing, &card) != nil {
+		var id, title, status, goal, role, former, sched, doing, card string
+		if rows.Scan(&id, &title, &status, &goal, &role, &former, &sched, &doing, &card) != nil {
 			continue
+		}
+		p, hasRole := personas[role]
+		hasRole = hasRole && m.TeamMode
+		if hasRole {
+			// The name now, with any it replaced: older chat may use one.
+			title = aka(title, splitFormer(former))
+			if status == "running" || status == "needs_you" {
+				title += ", " + p.Who // a standing line says it below
+			}
 		}
 		st, tail := "working", ""
 		switch {
@@ -52,6 +68,14 @@ func (m *Manager) peersHeader(self string) string {
 			st = "waiting on the owner"
 			if card != "" {
 				tail = " — their card: " + firstLine(card, 80)
+			}
+		case hasRole && status != "running":
+			st = "standing, " + p.Who
+			tail = " — " + p.Lane
+			if m.Workspace != nil {
+				if n := m.Workspace(role); n > 0 {
+					tail += fmt.Sprintf("; its workspace holds %d files: `lifectl workspace %s`", n, role)
+				}
 			}
 		case status == "idle":
 			st = "standing " + sched
@@ -61,15 +85,22 @@ func (m *Manager) peersHeader(self string) string {
 		if goal != "" {
 			st += ", goal " + goal
 		}
-		fmt.Fprintf(&b, "\n  %s (%s): %s%s", id, st, firstLine(title, 90), tail)
+		fmt.Fprintf(&b, "\n  %s (%s): %s%s", id, st, firstLine(title, 160), tail)
 	}
 	if b.Len() == 0 {
 		return ""
 	}
-	return peersHead + b.String() + "\n\n"
+	head := peersHead
+	if m.TeamMode {
+		head = strings.TrimSuffix(head, "]") + peersTeam + "]"
+	}
+	return head + b.String() + "\n\n"
 }
 
 const peersHead = "[Other sessions right now — live ones first with what each is doing, then the standing ones and their lane. Do not redo their work. A task or fact that belongs with one of them (it is live on that work, or has the experience): `lifectl relay <id> \"…\"` — the owner approves the card, the hub delivers; a live session over a standing one. A session that knows a topic but is not listed: `lifectl threads --q <word>`. Never for chat or status.]"
+
+// peersTeam: appended inside peersHead's brackets in team mode.
+const peersTeam = " A standing session's workspace is its own files, what it knows of its lane: read them (`lifectl workspace cat <role>/<name>`) before asking it."
 
 const boardHead = "[Open for the owner right now across every session — their whole board, oldest first. Their message to you may resolve one of these too, even another session's, or make its words stale: close it with what happened (`lifectl ask <id> done \"…\"`, `lifectl cal <id> done`), or reword it so it reads true now (`lifectl ask <id> set --title \"…\" --say \"…\" [--detail @file]`, `lifectl cal <id> set …`). Only what their words actually settle; the rest stays theirs. Never raise a card that repeats one here — that thing is already in hand.]"
 

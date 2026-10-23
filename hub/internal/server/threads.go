@@ -23,15 +23,25 @@ type threadOut struct {
 	ModelLabel    string       `json:"model_label,omitempty"`
 	ScheduleLabel string       `json:"schedule_label,omitempty"`
 	Pill          threads.Pill `json:"pill"`
+	// Role: the words under a role's name on its card (team mode), "" for a
+	// plain session.
+	Role string `json:"role,omitempty"`
 }
 
 func newThreadOut(t threads.Thread, model string) threadOut {
 	return threadOut{Thread: t, Model: model, ModelLabel: threads.ModelLabel(model),
-		ScheduleLabel: threads.ScheduleLabel(t.Schedule), Pill: threads.StatusPill(t.Status)}
+		ScheduleLabel: threads.ScheduleLabel(t.Schedule), Pill: threads.StatusPill(t.Status), Role: threads.RoleOf(t.Persona)}
 }
 
 func (s *Server) listThreads(w http.ResponseWriter, r *http.Request) {
-	ts, err := s.thr.Find(r.URL.Query().Get("q"), r.URL.Query().Get("archived") == "1")
+	var ts []threads.Thread
+	var err error
+	if r.URL.Query().Get("persona") == "1" {
+		// The roles, in role order (empty with team mode off).
+		ts, err = s.thr.Personas()
+	} else {
+		ts, err = s.thr.Find(r.URL.Query().Get("q"), r.URL.Query().Get("archived") == "1")
+	}
 	if err != nil {
 		jsonErr(w, 500, err.Error())
 		return
@@ -59,12 +69,45 @@ func (s *Server) createThread(w http.ResponseWriter, r *http.Request) {
 	if in.Project == "" {
 		in.Project = "life"
 	}
+	// Team mode: a plain new message from one of the owner's surfaces (no
+	// title, goal or schedule chosen) goes past the router first, which may
+	// hand it to the session that owns that work. lifectl's new sessions and
+	// scheduled ones are never routed.
+	if s.thr.TeamMode && via(in.Via) != "" && in.Title == "" && in.GoalID == "" && in.Schedule == "" && in.Project == "life" {
+		t, routed, err := s.thr.CreateRouted(in.Prompt, in.Attachments, via(in.Via))
+		if err != nil {
+			jsonErr(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 201, struct {
+			threads.Thread
+			Routed bool `json:"routed"`
+		}{t, routed})
+		return
+	}
 	t, err := s.thr.CreateVia(in.Title, in.Project, in.GoalID, in.Prompt, in.Schedule, in.SchedulePrompt, in.Attachments, via(in.Via))
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
 	}
 	writeJSON(w, 201, t)
+}
+
+// routeDry: where the router would send a message, without sending it (team
+// mode; `lifectl api POST /api/v1/route '{"prompt": "…"}'`). `model` tries
+// another Ollama model in place of the default.
+func (s *Server) routeDry(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Prompt, Model string }
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || strings.TrimSpace(in.Prompt) == "" {
+		jsonErr(w, 400, "need {prompt}")
+		return
+	}
+	if !s.thr.TeamMode {
+		jsonErr(w, 404, "team mode is off (team_mode in ops/hub.json)")
+		return
+	}
+	id, why := s.thr.RouteWith(in.Prompt, in.Model)
+	writeJSON(w, 200, map[string]string{"thread_id": id, "why": why})
 }
 
 func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
@@ -155,10 +198,12 @@ func (s *Server) sendThread(w http.ResponseWriter, r *http.Request) {
 	s.threadAfter(w, r, 202)
 }
 
-// via: the only surface value the hub stores today. Anything else (a typo,
-// a client inventing one) is "", i.e. no stamp — the column is not free text.
+// via: the surface values the hub stores: "console" (the web console, whose
+// messages get the trail stamp) and "app" (the phone and desktop apps).
+// Anything else (a typo, a client inventing one) is "", i.e. no stamp and no
+// routing — the column is not free text.
 func via(v string) string {
-	if v == "console" {
+	if v == "console" || v == "app" {
 		return v
 	}
 	return ""

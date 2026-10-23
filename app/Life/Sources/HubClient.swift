@@ -495,10 +495,15 @@ final class HubClient {
     /// Start a session from the owner's words and pictures alone: no title
     /// (the hub auto-titles), no goal, no cadence — the session infers both
     /// from the message.
+    /// `via: "app"`: with team mode on the hub may route the message to the
+    /// session that owns that work; the Thread that comes back is the chat
+    /// it landed in.
     func createThread(prompt: String, attachments: [String] = []) async throws -> Thread {
-        struct B: Encodable { var prompt: String; var attachments: [String] }
+        struct B: Encodable { var prompt: String; var attachments: [String]; var via = "app" }
         return try await request("POST", "/api/v1/threads", body: B(prompt: prompt, attachments: attachments))
     }
+    /// The sessions with a role, in role order; `[]` when team mode is off.
+    func personaThreads() async throws -> [Thread] { try await request("GET", Self.threadsPath + "?persona=1") }
     func sendThread(_ id: String, text: String, attachments: [String] = []) async throws -> Thread {
         struct B: Encodable { var text: String; var attachments: [String] }
         return try await request("POST", "/api/v1/threads/\(id)/messages", body: B(text: text, attachments: attachments))

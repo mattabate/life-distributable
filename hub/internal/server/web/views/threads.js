@@ -80,8 +80,11 @@ async function drawList(activeID, reuse) {
   // moment ago, so it is not asked for twice.
   const gen = route.gen;
   listSide = activeID;
-  const [threads, b] = await Promise.all([
+  // `team`: the sessions with a role (team mode; `[]` when it is off, so the
+  // grid under All sessions is not drawn).
+  const [threads, b, team] = await Promise.all([
     get('/threads'), reuse && board ? board : loadBoard().catch(() => board || EMPTY_BOARD),
+    get('/threads?persona=1').catch(() => []),
   ]);
   const list = document.getElementById('list');
   if (!list || gen !== route.gen) return;
@@ -157,7 +160,9 @@ async function drawList(activeID, reuse) {
       return group(h.label, h.show ? rows.slice(0, h.show) : rows, rows.length ? h.count : 0);
     }).join('')}
     ${threads.length ? `<a class="all-link${activeID === ALL ? ' on' : ''}" href="#/sessions/all"><span>All sessions</span><span class="muted">${threads.length}</span></a>`
-      : emptyHTML('No sessions yet.')}`);
+      : emptyHTML('No sessions yet.')}
+    ${(team || []).length ? `<div class="foot-links team">${team.map(t =>
+      `<a class="all-link person${t.id === activeID ? ' on' : ''}" href="#/sessions/${encodeURIComponent(t.id)}"><span><strong>${esc(t.title)}</strong><span class="muted">${esc(t.role || '')}</span></span><span class="count">${by(t.id)}</span></a>`).join('')}</div>` : ''}`);
 }
 
 // The heading a session is filed under: the board's word for it, else (a

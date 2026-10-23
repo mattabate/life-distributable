@@ -88,6 +88,12 @@ type Config struct {
 	// Surfaces: the setup answer to "which apps?" (phone, desktop, web);
 	// empty = all three. `setup.py show` reads it to list what is left.
 	Surfaces []string `json:"surfaces"`
+	// TeamMode: the opt-in layer where long-lived sessions play named roles
+	// (threads.Persona), a new message from the app is routed to the role
+	// that owns it, and each role keeps its own files (internal/workspace).
+	// Off by default: one plain session per message. `ops/py.sh setup.py hub
+	// --team yes` writes it; a restart applies it.
+	TeamMode bool `json:"team_mode"`
 	// Root is the repo checkout (~/life), derived at load time from the
 	// config file's location (<root>/ops/hub.json); never written in the file.
 	Root string `json:"-"`

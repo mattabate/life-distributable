@@ -274,3 +274,26 @@ Entry format:
   instead of sliding in half a second later.
 - How: same merge as add-0008. By hand: `views/threads.js`, `app.css`,
   `Models.swift`, `ThreadDetail.swift`.
+
+## add-0020 · 2026-10-23 · Team mode (optional, off by default)
+- For: everyone
+- Offer: An optional team mode. Some sessions take a standing role; the
+  first and only one shipped is an executive assistant who owns your
+  calendar, your schedule and log, the home and plans with friends. A
+  router reads each new message from the app or the console and sends it
+  to the role that owns it, or starts a new session as before. Each role
+  keeps its own files (a workspace) that every session can read. The
+  people show as cards under All sessions. It can give you a head start in
+  some directions, but owners who start with less generally have a better
+  long-term experience, so it ships switched off and nothing changes
+  unless you turn it on.
+- How: same merge as add-0008. Then, only if the owner says yes: set
+  `"team_mode": true` in `ops/hub.json` (or
+  `ops/py.sh setup.py hub --team yes --force` with the owner's existing
+  `--owner`, `--usage` and `--surfaces`), `ops/hub.sh restart`, then
+  `lifectl thread calendar persona assistant`. Off again: `"team_mode":
+  false` and a restart; roles and workspaces are kept but idle. By hand:
+  `threads/persona.go`, `threads/route.go`, `internal/workspace`,
+  `server/workspace.go`, `server/threads.go`, `lifectl` (`workspace`,
+  `thread … persona`), `views/threads.js`, `app.css`, `Models.swift`,
+  `HubClient.swift`, `BoardStore.swift`, `ThreadsView.swift`.

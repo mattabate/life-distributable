@@ -141,6 +141,12 @@ CREATE INDEX IF NOT EXISTS thread_events_thread ON thread_events(thread_id, id);
 	// the web console tab; "" = anything else). A console message gets a
 	// one-line stamp naming the time; no history is ever pasted into a prompt.
 	`ALTER TABLE thread_messages ADD COLUMN via TEXT NOT NULL DEFAULT ''`,
+	// persona: the role a long-lived session plays (team mode; `personas`
+	// below), "" for a plain session. former_titles: the names the owner gave
+	// it before its current title, oldest first, "|"-joined, so a renamed role
+	// is still recognised by its old name in older chat, notes and files.
+	`ALTER TABLE threads ADD COLUMN persona TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE threads ADD COLUMN former_titles TEXT NOT NULL DEFAULT ''`,
 }
 
 // ModelCost: one model's share of a chat's bill. Model is the CLI's model id,
@@ -172,7 +178,9 @@ type Thread struct {
 	GoalID    string    `json:"goal_id,omitempty"`
 	// ModelClass: which rung this thread's wakes start on — "" (auto: by
 	// goal, else the policy default), judgment, build, or a model id.
-	ModelClass      string     `json:"model_class"`
+	ModelClass string `json:"model_class"`
+	// Persona: the role this session plays (team mode), "" for none.
+	Persona         string     `json:"persona,omitempty"`
 	Status          string     `json:"status"`
 	ClaudeSessionID string     `json:"claude_session_id,omitempty"`
 	Schedule        string     `json:"schedule"`
@@ -306,7 +314,22 @@ type Manager struct {
 	// Surfaces: the apps the owner chose at setup (config surfaces: phone,
 	// desktop, web). The preamble names them so a session builds a change
 	// for those and leaves the rest until asked. Empty reads as all three.
-	Surfaces     []string
+	Surfaces []string
+	// TeamMode mirrors config team_mode: when on, sessions may play roles
+	// (Persona), a new message from the app is routed to the role whose lane
+	// holds it (route.go), and each role has a workspace. Off (the default),
+	// every one of those is bypassed: a new message is a new session,
+	// Personas() is empty and a persona cannot be set.
+	TeamMode bool
+	// Workspace counts a role's files (workspace.Store.Count), so the peers
+	// header can say a role has notes worth reading. nil = never mentioned.
+	Workspace func(key string) int
+	// Pick asks a cheap model where a new-session message belongs (route.go
+	// haikuPick); swappable for tests, nil = no fallback router.
+	Pick func(prompt string) (string, error)
+	// Local is the local router (route.go ollamaPick), tried before Pick;
+	// nil = none.
+	Local        func(prompt string, lanes []RouteLane, ids []string) (string, error)
 	ClaudeBin    string
 	RunsDir      string
 	ProjectDir   func(string) (string, bool)
@@ -472,6 +495,8 @@ func New(db *store.DB, claudeBin, runsDir, prefix string, projDir func(string) (
 		Run: func(n string, a ...string) ([]byte, error) { return exec.Command(n, a...).CombinedOutput() }}
 	m.Summarize = m.haikuSummarize
 	m.Describe = m.haikuSummarize
+	m.Pick = m.haikuPick
+	m.Local = ollamaPick
 	m.Probe = m.probeModel
 	m.CLIVersion = m.cliVersion
 	m.boardSeen = map[string]boardSent{}
@@ -666,8 +691,15 @@ func (m *Manager) CreateIdle(id, title, project string) (Thread, error) {
 		return Thread{}, fmt.Errorf("unknown project %q", project)
 	}
 	now := time.Now()
-	_, err := m.db.Exec(`INSERT INTO threads (id,created_at,updated_at,title,project,status,schedule,schedule_prompt) VALUES (?,?,?,?,?,'done','','')`,
-		id, ts(now), ts(now), title, project)
+	// In team mode the calendar's home session is the executive assistant:
+	// the role that owns the owner's calendar, so every step with no session
+	// of its own fires with someone who knows the schedule.
+	persona := ""
+	if m.TeamMode && id == StepThread {
+		persona = PersonaAssistant
+	}
+	_, err := m.db.Exec(`INSERT INTO threads (id,created_at,updated_at,title,project,status,schedule,schedule_prompt,persona) VALUES (?,?,?,?,?,'done','','',?)`,
+		id, ts(now), ts(now), title, project, persona)
 	if err != nil {
 		return Thread{}, err
 	}
@@ -1073,6 +1105,9 @@ func (m *Manager) systemPreamble(t Thread) string {
 	if t.Schedule != "" {
 		sched = "This thread has a schedule (" + t.Schedule + "): you are woken with a check-in prompt on that cadence, with full memory of this conversation.\n"
 	}
+	if m.TeamMode {
+		sched += "Team mode is on: some sessions play a named role (the people at the foot of the Sessions list); a message that belongs to a role's lane goes to that session with `lifectl relay <id> \"…\"`, and a role's own files are `lifectl workspace <role>`.\n"
+	}
 	owner, who := m.owner(), ""
 	if owner != "the owner" {
 		who = "You work for " + owner + " (\"the owner\" in hub messages; they/their). "
@@ -1142,7 +1177,7 @@ func (m *Manager) Get(id string) (Thread, error) {
 	if !validID.MatchString(id) {
 		return Thread{}, errors.New("bad id")
 	}
-	row := m.db.QueryRow(`SELECT t.id,t.created_at,t.updated_at,t.title,t.project,t.goal_id,t.model_class,t.status,t.claude_session_id,`+schedCols+`,t.last_run_at,t.unread,`+costCol+`,`+tokCols+`,
+	row := m.db.QueryRow(`SELECT t.id,t.created_at,t.updated_at,t.title,t.project,t.goal_id,t.model_class,t.persona,t.status,t.claude_session_id,`+schedCols+`,t.last_run_at,t.unread,`+costCol+`,`+tokCols+`,
 		(SELECT text FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
 		(SELECT ts FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
 		`+openAsksCol+`,
@@ -1226,6 +1261,12 @@ func (m *Manager) List(includeArchived bool) ([]Thread, error) {
 	if includeArchived {
 		where = ""
 	}
+	return m.list(where)
+}
+
+// list: List's query under one WHERE clause (Personas narrows it to the
+// sessions with a role).
+func (m *Manager) list(where string) ([]Thread, error) {
 	// The list carries a PREVIEW of the last message: scan trims it to a few
 	// lines, and substr keeps SQLite from handing over a whole long reply per
 	// row just to throw it away.
@@ -1235,7 +1276,7 @@ func (m *Manager) List(includeArchived bool) ([]Thread, error) {
 	// nobody had talked to in a day could sit above the one the owner had just
 	// messaged. A thread with no
 	// message yet (created without a prompt) falls back to its updated_at.
-	rows, err := m.db.Query(`SELECT t.id,t.created_at,t.updated_at,t.title,t.project,t.goal_id,t.model_class,t.status,t.claude_session_id,` + schedCols + `,t.last_run_at,t.unread,` + costCol + `,` + tokCols + `,
+	rows, err := m.db.Query(`SELECT t.id,t.created_at,t.updated_at,t.title,t.project,t.goal_id,t.model_class,t.persona,t.status,t.claude_session_id,` + schedCols + `,t.last_run_at,t.unread,` + costCol + `,` + tokCols + `,
 		(SELECT substr(text,1,600) FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
 		(SELECT ts FROM thread_messages m WHERE m.thread_id=t.id ORDER BY id DESC LIMIT 1),
 		` + openAsksCol + `,
@@ -1706,7 +1747,7 @@ func (m *Manager) CostByTrigger(since time.Time) []spend.Bucket {
 	return out
 }
 
-// Update mutable fields: title, schedule, schedule_prompt, status (archive/unarchive/done), goal_id, model_class.
+// Update mutable fields: title, schedule, schedule_prompt, status (archive/unarchive/done), goal_id, model_class, persona.
 func (m *Manager) Update(id string, patch map[string]string) (Thread, error) {
 	t, err := m.Get(id)
 	if err != nil {
@@ -1716,8 +1757,24 @@ func (m *Manager) Update(id string, patch map[string]string) (Thread, error) {
 	for k, v := range patch {
 		switch k {
 		case "title":
+			// A role renamed keeps its old name on record: the chat, notes
+			// and files behind it still say it (personaWith, aka).
+			if t.Persona != "" && t.Title != "" && t.Title != v {
+				m.addFormerTitle(id, t.Title, v)
+			}
 			t.Title = v
 			m.db.Exec(`UPDATE threads SET title_auto=0 WHERE id=?`, id) // manual rename pins it
+		case "persona":
+			if !m.TeamMode {
+				return t, errors.New("team mode is off: set team_mode in ops/hub.json (`ops/py.sh setup.py hub --team yes`), restart the hub, then try again")
+			}
+			if v == "off" {
+				v = ""
+			}
+			if v != "" && !IsPersona(v) {
+				return t, fmt.Errorf("persona must be off or one of %s", strings.Join(personaNames(), "|"))
+			}
+			t.Persona = v
 		case "schedule":
 			t.Schedule = v
 		case "schedule_prompt":
@@ -1763,8 +1820,8 @@ func (m *Manager) Update(id string, patch map[string]string) (Thread, error) {
 		}
 	}
 	before, _ := m.Get(id)
-	_, err = m.db.Exec(`UPDATE threads SET title=?, goal_id=?, model_class=?, status=?, updated_at=? WHERE id=?`,
-		t.Title, nullable(t.GoalID), t.ModelClass, t.Status, ts(time.Now()), id)
+	_, err = m.db.Exec(`UPDATE threads SET title=?, goal_id=?, model_class=?, persona=?, status=?, updated_at=? WHERE id=?`,
+		t.Title, nullable(t.GoalID), t.ModelClass, t.Persona, t.Status, ts(time.Now()), id)
 	if err != nil {
 		return t, err
 	}
@@ -1792,7 +1849,7 @@ func scan(r scanner) (Thread, error) {
 	var t Thread
 	var c, u string
 	var goal, sid, nextRun, last, lastMsg, lastTS, activity, lastKind, turnAt sql.NullString
-	if err := r.Scan(&t.ID, &c, &u, &t.Title, &t.Project, &goal, &t.ModelClass, &t.Status, &sid, &t.Schedule, &t.SchedulePrompt, &nextRun, &last, &t.Unread, &t.CostUSD,
+	if err := r.Scan(&t.ID, &c, &u, &t.Title, &t.Project, &goal, &t.ModelClass, &t.Persona, &t.Status, &sid, &t.Schedule, &t.SchedulePrompt, &nextRun, &last, &t.Unread, &t.CostUSD,
 		&t.Tokens.In, &t.Tokens.Out, &t.Tokens.CacheRead, &t.Tokens.CacheWrite, &lastMsg, &lastTS, &t.NeedsYou, &activity, &lastKind,
 		&t.TurnTools, &t.TurnCostUSD, &turnAt); err != nil {
 		return t, err

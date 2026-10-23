@@ -517,7 +517,13 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 	if !midTurn {
 		peers = m.boardBlocks(t.ID, fresh)
 	}
-	return m.asksHeader(t.ID) + peers + prompt, nil
+	// Team mode: a session with a role reads its brief every turn, after the
+	// board and before the message (persona.go).
+	role := ""
+	if m.TeamMode && !midTurn && t.Persona != "" {
+		role = personaWith(t, m.formerTitles(t.ID)) + "\n\n"
+	}
+	return m.asksHeader(t.ID) + peers + role + prompt, nil
 }
 
 // recapTurns / recapChars: how much of the conversation a lean wake is given.

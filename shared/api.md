@@ -318,13 +318,18 @@ Each owner message or scheduled check-in resumes the same Claude Code conversati
 
 ### GET /api/v1/threads
 Query `archived=1` to include archived; `q=<words>` keeps only the sessions whose title, goal, standing prompt, last message or cards (any ask the session ever raised) carry every word (case-insensitive) — `lifectl threads --q <word>`, how an agent finds the session with experience in a task before `lifectl relay`. Newest **message** first — the `ts` of the last message on the thread, whoever wrote it (the owner, the agent, a calendar item, the hub), so the list reads as the order things were said; `updated_at` is NOT the sort key (ask closures, status flips and cost settlements bump it too), and only a thread with no message yet falls back to it. Both surfaces keep this order as given. `last_message` is a preview here (a few lines, "…"-ended); `GET /threads/{id}` carries the whole text.
+Query `persona=1` (team mode): only the sessions that play a role, in role order, each carrying `persona` (the role's key) and `role` (its words, "Executive assistant"); `[]` when team mode is off. Both surfaces draw them as the people grid at the foot of the Sessions list.
 
 ### POST /api/v1/threads
-Body `{prompt, title?, project?=life, goal_id?, schedule?, schedule_prompt?, attachments?: [blob_ref], via?}` → 201 Thread (status running). `prompt` may be empty if `attachments` is not (title becomes "Photo <date>"). 400 on an unknown blob ref. `via: "console"` (the web console sends it) makes the session's copy of the message end with a one-line stamp — the time and the `ops/py.sh trail.py at HH:MM` / `motion --at HH:MM` commands that read the console's own log (`console/trail`, `console/motion` observations) for that minute; the log itself is never put in the prompt. Any other value is stored as "".
+Body `{prompt, title?, project?=life, goal_id?, schedule?, schedule_prompt?, attachments?: [blob_ref], via?}` → 201 Thread (status running). `prompt` may be empty if `attachments` is not (title becomes "Photo <date>"). 400 on an unknown blob ref. `via: "console"` (the web console sends it) makes the session's copy of the message end with a one-line stamp — the time and the `ops/py.sh trail.py at HH:MM` / `motion --at HH:MM` commands that read the console's own log (`console/trail`, `console/motion` observations) for that minute; the log itself is never put in the prompt. `via: "app"` is the phone and the desktop app. Any other value is stored as "".
+**Routing (team mode):** a plain message from a surface (`via` set, no `title`, `goal_id` or `schedule`, project `life`) goes past the router first: a local model (Ollama, `qwen3:8b`) or the cloud's small model reads the roles and the live sessions and may hand the message to the session that owns that work, which then answers in its own chat. The reply is that session, with `routed: true`; a message nothing owns is a new session as before (`routed: false`). lifectl's `thread new` and scheduled sessions are never routed.
+
+### POST /api/v1/route
+Team mode. Body `{prompt, model?}` → `{thread_id, why}`: where the router would send this message, without sending it (`thread_id` "" = a new session). `model` tries another Ollama model. 404 when team mode is off.
 
 ### GET /api/v1/threads/{id}
 ### PATCH /api/v1/threads/{id}
-Body `{title|schedule|schedule_prompt|goal_id|model_class|status(idle|done|archived)}`. `model_class` (2026-08-26): which rung this thread's wakes start on — `auto` (= "", the goal's class from `ops/hub.json model_policy`, else the default class), a class name (`judgment` = the ladder's top rung, `build` = opus) or a model id; 400 on an unknown class. A change to `schedule`/`schedule_prompt` (also `POST /threads` with a schedule) appends a `system` message of kind `schedule` to the conversation ("Checks back daily at 09:00 · next … \n\n<instructions>", or "Standing instructions cleared…") — the app shows it as a green card so the owner sees when and why an agent will wake. GET …/messages returns only the NEWEST such row (2026-10-06: one card per session), its "next" read live off the standing prompt and its `ts` moved to just after the latest check-in run that started after it. `status=archived` behaves like POST …/archive (kills + clears schedule). `status=idle` on an archived thread un-archives it (conversation resumes).
+Body `{title|schedule|schedule_prompt|goal_id|model_class|persona|status(idle|done|archived)}`. `persona` (team mode): the role this session plays — a key from the roles table (`assistant`) or `off`; 400 on an unknown key, and 400 with how to turn it on when team mode is off. Renaming a session with a role records the old title, so its brief can say what it used to be called. `model_class` (2026-08-26): which rung this thread's wakes start on — `auto` (= "", the goal's class from `ops/hub.json model_policy`, else the default class), a class name (`judgment` = the ladder's top rung, `build` = opus) or a model id; 400 on an unknown class. A change to `schedule`/`schedule_prompt` (also `POST /threads` with a schedule) appends a `system` message of kind `schedule` to the conversation ("Checks back daily at 09:00 · next … \n\n<instructions>", or "Standing instructions cleared…") — the app shows it as a green card so the owner sees when and why an agent will wake. GET …/messages returns only the NEWEST such row (2026-10-06: one card per session), its "next" read live off the standing prompt and its `ts` moved to just after the latest check-in run that started after it. `status=archived` behaves like POST …/archive (kills + clears schedule). `status=idle` on an archived thread un-archives it (conversation resumes).
 **One clock (2026-08-28):** a session's schedule IS its standing prompt row (`author: hub`, `target: <id>`, `repeat: <schedule>`, `text: <schedule_prompt>`); `schedule`, `schedule_prompt` and `next_run_at` on the Thread are read off that row (`next_run_at` = its `not_before`: the time the clock will actually fire, so a wake held while the session works shows as already due). Setting `schedule` cancels the old row and queues a new one (`every@` counts from `last_run_at`); `""`/`off`/`manual` cancels it; 400 on a cadence that is not `daily@HH:MM | weekly@Mon HH:MM | every@<duration>`. `POST /prompts/{id}/cancel` on the standing row is the same as `schedule: ""` (and posts the same card). Archiving cancels every queued prompt aimed at the session.
 
 ### GET /api/v1/threads/{id}/messages
@@ -355,6 +360,21 @@ End the session: kill any running run, clear the schedule (so it is never woken 
 
 ### POST /api/v1/threads/{id}/read
 Clear unread → 204.
+
+## Workspaces (team mode)
+
+A role's own files: what it knows of its lane, under `data/people/<persona>/`, next to the blobs. Every session reads them; only the role's own session (`by: claude:thread:<its id>`) or the owner writes, so one role's notes are never another's to edit. Every write keeps the old copy under `.versions/`. Markdown, JSON and CSV only; a name is one or two path segments of letters, digits, `.`, `-`, `_`; a file is at most 16 MB. All three answer 404 "team mode is off" when the switch is off, and 503 when the hub has no workspace folder.
+
+File: `{persona, name, bytes, updated_at, head? (the first heading or line of a markdown file)}`.
+
+### GET /api/v1/workspace
+Query `persona` (a role's key or the id of a session playing it; absent = every role) → `[File]`, name order. 404 on an unknown persona.
+
+### GET /api/v1/workspace/{persona}/{name...}
+The file itself, `text/markdown` / `application/json` / `text/csv` by its name. 404 when missing.
+
+### PUT /api/v1/workspace/{persona}/{name...}
+Body `{text, by}` (JSON) or the raw file with any other content type → 200 File. 403 when `by` is a session other than the role's own; 400 on a bad name. `lifectl workspace put <name> text|@file` from a session writes its own; from a shell, `--persona <key>`.
 
 ## Asks — what agents need from the owner (docs/ASKS.md)
 

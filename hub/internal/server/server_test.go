@@ -27,6 +27,7 @@ import (
 	"life/hub/internal/syncruns"
 	"life/hub/internal/threads"
 	"life/hub/internal/usage"
+	"life/hub/internal/workspace"
 )
 
 func newTest(t *testing.T) *Server {
@@ -55,7 +56,13 @@ func newTestDB(t *testing.T) (*Server, *store.DB) {
 	th, _ := threads.New(db, "/usr/local/bin/claude", filepath.Join(t.TempDir(), "runs"), "life", func(p string) (string, bool) { return "/tmp", p == "life" }, nil, nil)
 	th.Summarize = nil // no claude in tests
 	th.Run = func(string, ...string) ([]byte, error) { return nil, nil }
+	// Team mode on, with no router: the role routes answer, a new message
+	// is still a new session.
+	th.TeamMode = true
+	th.Pick, th.Local = nil, nil
 	s := New(cfg, "secret", q, sc, gs, ob, th)
+	s.WS = &workspace.Store{Dir: filepath.Join(t.TempDir(), "people"), Role: th.PersonaOf, Known: threads.IsPersona}
+	th.Workspace = s.WS.Count
 	s.Runs, _ = syncruns.New(db)
 	rc, _ := recs.New(db)
 	s.SetRecs(rc)

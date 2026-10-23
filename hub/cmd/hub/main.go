@@ -36,6 +36,7 @@ import (
 	"life/hub/internal/syncruns"
 	"life/hub/internal/threads"
 	heartbeat "life/hub/internal/usage"
+	"life/hub/internal/workspace"
 )
 
 func main() {
@@ -142,6 +143,16 @@ func main() {
 	}
 	thr.OwnerName = cfg.OwnerName
 	thr.Surfaces = cfg.Surfaces
+	thr.TeamMode = cfg.TeamMode
+	if cfg.TeamMode {
+		// The calendar's home session is the executive assistant from the
+		// day the switch goes on (idempotent; threads.CreateIdle does the
+		// same for a fresh database).
+		db.Exec(`UPDATE threads SET persona=? WHERE id=? AND persona='' AND status != 'archived'`, threads.PersonaAssistant, threads.StepThread)
+		// The router's local model stays paged in (nothing when Ollama is
+		// not there: routes fall to the cloud model).
+		go thr.WarmLocal()
+	}
 	thr.BlobPath = ob.BlobPath
 	thr.IntakePath = ob.IntakePath
 	thr.AutoCompactWindow = cfg.AutoCompactWindow
@@ -303,6 +314,10 @@ func main() {
 	h := server.New(cfg, token, acts, sch, gs, ob, thr)
 	h.Push = push
 	h.Runs = runLog
+	// Workspaces (team mode): one folder per role under data/people/, next to
+	// the blobs; a role's own session or the owner writes, every session reads.
+	h.WS = &workspace.Store{Dir: filepath.Join(filepath.Dir(cfg.BlobDir), "people"), Role: thr.PersonaOf, Known: threads.IsPersona}
+	thr.Workspace = h.WS.Count
 	h.UseBudget(guard)
 	if push != nil {
 		// One voice at a time: a push waits while a card is heard or replayed.

@@ -361,3 +361,14 @@ It takes one message.
    personal details. It describes the step and what went wrong.
 4. **Tell them how to pass it on.** One sentence: a friend installs it by
    pasting the one sentence from the README into Claude Code on their Mac.
+5. **Team mode, once.** Ask, in these words: *"There is an optional team
+   mode: some sessions take a standing role (the first one is an executive
+   assistant who owns your calendar), a router sends each new message to
+   the role that owns it, and each role keeps its own files. It can give
+   you a head start in some directions, but owners who start with less
+   generally have a better long-term experience. It is off; want it on?"*
+   Default is no, and no is the better answer today. If they say yes:
+   `ops/py.sh setup.py hub --team yes --force` with the same `--owner`,
+   `--usage` and `--surfaces` as step 5, `ops/hub.sh restart`, then
+   `lifectl thread calendar persona assistant`. Whatever they answer, do
+   not ask again for two weeks (CLAUDE.md, "Team mode").
