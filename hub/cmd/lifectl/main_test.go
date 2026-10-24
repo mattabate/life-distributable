@@ -61,3 +61,17 @@ func TestPrintRows(t *testing.T) {
 		t.Fatalf("got\n%q\nwant\n%q", b.String(), want)
 	}
 }
+
+// A calendar day is {day, entries}: its rows print under it, not an empty day.
+func TestPrintRowsCalendarDays(t *testing.T) {
+	var v any
+	json.Unmarshal([]byte(`{"days":[{"day":"2030-05-29","entries":[{"id":"cal-1","kind":"note","day":"2030-05-29","title":"Dentist"}]},{"day":"2030-05-30","entries":[]}]}`), &v)
+	var b strings.Builder
+	if n := printRows(&b, "", v); n != 1 {
+		t.Fatalf("%d rows:\n%s", n, b.String())
+	}
+	want := "days:\n2030-05-29\n  cal-1  note  2030-05-29  Dentist\n2030-05-30\n"
+	if b.String() != want {
+		t.Fatalf("got\n%q\nwant\n%q", b.String(), want)
+	}
+}

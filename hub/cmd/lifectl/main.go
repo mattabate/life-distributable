@@ -327,6 +327,11 @@ func main() {
 		outcome := fs.String("outcome", "", "done|wont (about an ask), approved|denied (about a proposal)")
 		thread := fs.String("thread", os.Getenv("LIFE_THREAD_ID"), "session to prompt (default $LIFE_THREAD_ID)")
 		fs.Parse(os.Args[3:])
+		// A word after the text is never meant: `prompt p-1234 cancel` would
+		// send "p-1234" to the session at once and drop "cancel".
+		if fs.NArg() > 0 {
+			die(fmt.Sprintf("prompt: %q after the text - quote the text as one argument; to cancel a prompt: lifectl prompt cancel <id>", fs.Arg(0)))
+		}
 		author := actor()
 		target := *thread
 		if *newT {
@@ -864,9 +869,28 @@ func printRows(w io.Writer, key string, v any) int {
 		}
 		n := 0
 		for _, e := range x {
-			if o, ok := e.(map[string]any); ok {
+			o, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			if _, id := o["id"]; id {
 				fmt.Fprintln(w, rowLine(o))
 				n++
+				continue
+			}
+			// A group without an id (a calendar day: {day, entries}) is a
+			// heading over its rows; printing only the heading showed every
+			// dated item as an empty day.
+			fmt.Fprintln(w, strings.TrimSpace(rowLine(o)))
+			for _, k := range sortedKeys(o) {
+				if rows, ok := o[k].([]any); ok {
+					for _, r := range rows {
+						if ro, ok := r.(map[string]any); ok {
+							fmt.Fprintln(w, "  "+rowLine(ro))
+							n++
+						}
+					}
+				}
 			}
 		}
 		return n
@@ -875,18 +899,22 @@ func printRows(w io.Writer, key string, v any) int {
 			fmt.Fprintln(w, rowLine(x))
 			return 1
 		}
-		keys := make([]string, 0, len(x))
-		for k := range x {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
 		n := 0
-		for _, k := range keys {
+		for _, k := range sortedKeys(x) {
 			n += printRows(w, k, x[k])
 		}
 		return n
 	}
 	return 0
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func rowLine(o map[string]any) string {

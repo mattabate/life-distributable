@@ -550,6 +550,9 @@ textarea { resize: vertical; }
 .ask.folded { --tint: var(--line); background: transparent; padding: 5px 13px; color: var(--muted); }
 .ask.folded > summary { cursor: pointer; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ask.folded[open] { padding: 11px 13px; color: inherit; background: var(--panel); }
+/* Open, a title its message already says (a read's cut first words) goes:
+   the body is the card. */
+.ask.folded[open] > summary .echo { display: none; }
 /* Deep-linked from a "Your turn" card: it opens directly on that card, and
    says which one it is, once. */
 .ask.flash { animation: flash 1.6s ease-out; }

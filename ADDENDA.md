@@ -342,3 +342,32 @@ Entry format:
   process with the current grants.
 - How: same merge as add-0008. By hand: `threads/runner.go` (the launch's
   `<run>.tools` file and `toolsStale`), `policy_test.go`.
+
+## add-0025 · 2026-10-24 · An open read card no longer repeats itself
+- For: everyone
+- Offer: A read card you marked Read folds to one line. Opened again, it
+  used to draw its title (the message's first words cut with "…") over the
+  same message whole. Open, the head line now says only "read" and the
+  chevron when the message or body already says the title. Web, phone and
+  desktop.
+- How: same merge as add-0008. By hand: `web/ui.js` (`saidCovers` over the
+  body too, the summary's `echo` span), `web/app.css`, `Card.swift`
+  (`titled`, `foldedBody`), a folded read in `ops/web-preview.html`.
+
+## add-0026 · 2026-10-24 · The Calendar badge counts what the page shows
+- For: everyone
+- Offer: The Calendar tab's number is now exactly the rows in the page's
+  Overdue and Due trays. It counted every open step dated today on its own
+  terms, so it could say 7 over a Due tray of 2.
+- How: same merge as add-0008. By hand: `calendar/calendar.go`
+  (`DueIDs`, `DueCount` over today's agenda).
+
+## add-0027 · 2026-10-24 · lifectl: calendar days list their items; prompt refuses a stray word
+- For: everyone
+- Offer: `lifectl cal <from> <to>` printed each day as an empty heading;
+  each day now lists its items under it. And `lifectl prompt <text> <word>`
+  (an unquoted text, or `prompt <id> cancel`) used to send the first word
+  at once and drop the rest; it now refuses and says how to quote it or
+  cancel a prompt.
+- How: same merge as add-0008. By hand: `cmd/lifectl/main.go`
+  (`printRows`, `sortedKeys`, the `prompt` arg check), `main_test.go`.
