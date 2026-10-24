@@ -18,6 +18,7 @@ struct ThreadDetail: View {
     /// card that was tapped. Scrolled to once that card has been placed.
     var focusCard: String? = nil
     @State private var focusLanded = false
+    @State private var posedCard: String?
     /// Opened from a calendar row's Approve/Deny: the chat bar is armed with
     /// that pick once, on open, so the words are typed here where the composer
     /// is (the calendar sheet has none).
@@ -217,7 +218,44 @@ struct ThreadDetail: View {
     /// Held asks
     /// are deliberately kept off "Your turn" while their session works, so
     /// the session itself is the only place they can appear.
-    func placeAsks(_ all: [Ask]) {
+    #if targetEnvironment(macCatalyst) || targetEnvironment(simulator)
+    /// LIFE_SHOT_STEPCARD=1: a morning-routine card posed on this chat's
+    /// newest card, two of its steps staged on the bar (ops/mac-screens.sh,
+    /// ops/screens.sh). Nothing is sent.
+    func poseStepCard() {
+        guard ProcessInfo.processInfo.environment["LIFE_SHOT_STEPCARD"] == "1" else { return }
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard var a = asks.last else { print("shot-stepcard: no card in this chat"); return }
+            a.id = "cal-shot0001"; a.cal_id = a.id; a.title = "Do the morning routine"; a.detail = ""
+            a.kind = "physical"; a.state = "active"; a.outcomes = StepCardShot.outcomes
+            a.message_id = nil; a.created_at = .now
+            a.open = true; a.resolved_at = nil; a.resolution = nil
+            a.class = "physical"; a.verb = "do"; a.said = nil; a.superseded_by = nil
+            a.steps = [CalStep(n: 1, title: "Stretch", state: "done", mark: "done"),
+                       CalStep(n: 2, title: "Read 10 pages", state: "open", mark: "todo"),
+                       CalStep(n: 3, title: "Water the plants", state: "open", mark: "todo")]
+            StepCardShot.posed = a
+            placeAsks(asks)
+            posedCard = a.id
+            arm(ArmedReply(kind: .step, id: "cal-shot0001.2", title: "Read 10 pages", outcome: "done", outcomes: ArmedReply.stepOutcomes))
+            arm(ArmedReply(kind: .step, id: "cal-shot0001.3", title: "Water the plants", outcome: "wont", outcomes: ArmedReply.stepOutcomes))
+        }
+    }
+    #endif
+
+    /// The card to scroll to, once placed: the focus card, or a shot's posed one.
+    private var focusScroll: FocusScroll? {
+        if let p = posedCard { return FocusScroll(id: p, anchor: .bottom) }
+        if focusLanded, let f = focusCard { return FocusScroll(id: f, anchor: .center) }
+        return nil
+    }
+
+    func placeAsks(_ given: [Ask]) {
+        var all = given
+        #if targetEnvironment(macCatalyst) || targetEnvironment(simulator)
+        if let p = StepCardShot.posed, !all.contains(where: { $0.id == p.id }) { all.append(p) }
+        #endif
         asks = all
         var by: [Int: [Ask]] = [:], tail: [Ask] = []
         let order = ordered
@@ -610,12 +648,14 @@ struct ThreadDetail: View {
                 }
                 // The focus card (board `first`) is placed after the messages
                 // draw, so the scroll to it waits for that.
-                .onChange(of: focusLanded) { _, landed in
-                    guard landed, let f = focusCard else { return }
+                // A shot's posed card (LIFE_SHOT_STEPCARD) is scrolled to
+                // the same way, at the foot.
+                .onChange(of: focusScroll) { _, target in
+                    guard let target else { return }
                     Task { @MainActor in
                         for delay in [0, 120, 400] {
                             try? await Task.sleep(for: .milliseconds(delay))
-                            proxy.scrollTo(f, anchor: .center)
+                            proxy.scrollTo(target.id, anchor: target.anchor)
                         }
                     }
                 }
@@ -660,9 +700,11 @@ struct ThreadDetail: View {
         // composer — attaches the file.
         .dropsFiles(into: attachments)
         #endif
-        .environment(\.askReply, AskReplyHook { a, outcome in
+        .environment(\.askReply, AskReplyHook({ a, outcome in
             arm(ArmedReply(kind: .ask, id: a.id, title: a.title, outcome: outcome, outcomes: a.outcomes ?? []))
-        })
+        }, step: { a, s, outcome in
+            arm(ArmedReply(kind: .step, id: "\(a.cal_id ?? a.id).\(s.n)", title: s.title, outcome: outcome, outcomes: ArmedReply.stepOutcomes))
+        }))
         // Every card in this chat draws its armed pick as the primary button
         // (Card.swift `outcomeButtons`).
         .environment(\.armedPicks, Dictionary(replies.map { ($0.ref, $0.outcome) }, uniquingKeysWith: { _, b in b }))
@@ -725,6 +767,9 @@ struct ThreadDetail: View {
             store.pause()
             #endif
             if let r = armOnOpen, !armedOnOpen { armedOnOpen = true; arm(r) }
+            #if targetEnvironment(macCatalyst) || targetEnvironment(simulator)
+            poseStepCard()
+            #endif
         }
         // Back from the background: the change loop may be parked on a
         // request the OS froze, so read the session now (as RootView does).
@@ -950,7 +995,10 @@ struct ThreadDetail: View {
         if attachments.loading > 0 { sending = true; Task { await attachments.settle(); send(confirmed: confirmed) }; return }
         let t = draft.text
         let armed = replies
-        if !armed.isEmpty, !confirmed, !t.contains(where: { !$0.isWhitespace }), attachments.isEmpty {
+        // Steps ticked with no words are the point of a wordless Send: no
+        // "Are you sure?" for them.
+        let ticksOnly = !armed.isEmpty && armed.allSatisfy { $0.kind == .step && !$0.outcome.isEmpty }
+        if !armed.isEmpty, !confirmed, !ticksOnly, !t.contains(where: { !$0.isWhitespace }), attachments.isEmpty {
             confirmingEmpty = true
             return
         }
@@ -1234,9 +1282,18 @@ struct ThreadDetail: View {
         case "rec": title = recs.first { $0.id == id }.map { "💡 " + $0.title } ?? id
         case "ask": title = asks.first { $0.id == id }?.title ?? id
         case "action": title = actions.first { $0.id == id }.map { "🔴 " + $0.title } ?? id
+        case "step": title = "📅 " + stepTitle(id)
         default: title = "\(kind) \(id)"
         }
         return "\(verdict) · \(title)"
+    }
+
+    /// A `step:<item>.<n>`: that row's own name, off the item's card in this
+    /// chat; "step n" when the card isn't here.
+    func stepTitle(_ id: String) -> String {
+        guard let dot = id.lastIndex(of: "."), let n = Int(id[id.index(after: dot)...]) else { return id }
+        let item = String(id[..<dot])
+        return asks.first { ($0.cal_id ?? $0.id) == item }?.steps?.first { $0.n == n }?.title ?? "step \(n)"
     }
 
     /// Read one folded block's own steps when the owner opens it — one ranged
@@ -1576,6 +1633,7 @@ extension ThreadDetail {
             case "rec": title = recs.first { $0.id == id }?.title ?? id
             case "ask": title = asks.first { $0.id == id }?.title ?? id
             case "action": title = actions.first { $0.id == id }?.title ?? id
+            case "step": title = "📅 " + stepTitle(id)
             default: title = "\(kind) \(id)"
             }
             return MacReplyLine(label: r.label ?? r.outcome ?? "", title: mdPlain(title))
@@ -2174,13 +2232,31 @@ struct ComingUpStrip: View {
     }
 }
 
+/// A card to scroll the chat to, and where in the view it lands.
+struct FocusScroll: Equatable {
+    let id: String
+    let anchor: UnitPoint
+}
+
+#if targetEnvironment(macCatalyst) || targetEnvironment(simulator)
+/// The posed card's own words (LIFE_SHOT_STEPCARD): a step item's.
+@MainActor enum StepCardShot {
+    /// Kept through every reload of the chat while the shot is taken.
+    static var posed: Ask?
+    static let outcomes = [AskOutcome(value: "done", label: "Done"), AskOutcome(value: "wont", label: "Won't do"), AskOutcome(value: "", label: "Reply")]
+}
+#endif
+
 /// One card armed on the chat bar (several can be at once). `ref`
 /// is what the hub takes — "ask:<id>" / "rec:<id>" / "action:<id>" — and
 /// `outcome` the pick: a read's "done", a rec's accepted/declined, a
 /// proposal's approved/denied, or "" for words alone.
 struct ArmedReply: Identifiable, Hashable {
-    enum Kind { case ask, rec, action }
+    /// `step`: one step of an item's card, "step:<item>.<n>".
+    enum Kind { case ask, rec, action, step }
     let kind: Kind
+    /// A step's chips, the row's own words.
+    static let stepOutcomes = [AskOutcome(value: "done", label: "Did it"), AskOutcome(value: "wont", label: "Skip"), AskOutcome(value: "", label: "Reply")]
     let id: String
     let title: String
     var outcome: String
@@ -2188,7 +2264,7 @@ struct ArmedReply: Identifiable, Hashable {
     /// comes from.
     var outcomes: [AskOutcome] = []
     var ref: String {
-        switch kind { case .ask: "ask:" + id; case .rec: "rec:" + id; case .action: "action:" + id }
+        switch kind { case .ask: "ask:" + id; case .rec: "rec:" + id; case .action: "action:" + id; case .step: "step:" + id }
     }
     /// The banner's word for the pick: the hub's label for it — the word on
     /// the button tapped (I did this · Won't do · Decided · Accepted…).
@@ -2197,13 +2273,13 @@ struct ArmedReply: Identifiable, Hashable {
     /// of replying to").
     var label: String {
         if let l = outcomes.first(where: { $0.value == outcome && !$0.value.isEmpty })?.label { return l }
-        return kind == .ask ? "Replying to" : "Reply"
+        return kind == .ask || kind == .step ? "Replying to" : "Reply"
     }
     /// The banner's mark: the card's own icon and colour.
     var icon: String {
-        switch kind { case .ask: "arrowshape.turn.up.left.fill"; case .rec: "lightbulb.fill"; case .action: "hand.raised.fill" }
+        switch kind { case .ask, .step: "arrowshape.turn.up.left.fill"; case .rec: "lightbulb.fill"; case .action: "hand.raised.fill" }
     }
     var tint: Color {
-        switch kind { case .ask: Color.accentColor; case .rec: .purple; case .action: .red }
+        switch kind { case .ask, .step: Color.accentColor; case .rec: .purple; case .action: .red }
     }
 }

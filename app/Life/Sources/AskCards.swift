@@ -32,7 +32,9 @@ struct OpenAsk: Identifiable, Hashable {
 /// else the button opens the Respond sheet on that pick instead.
 @MainActor final class AskReplyHook {
     let arm: (Ask, String) -> Void
-    init(_ arm: @escaping (Ask, String) -> Void) { self.arm = arm }
+    /// One step of an item's card, staged on the bar.
+    let step: (Ask, CalStep, String) -> Void
+    init(_ arm: @escaping (Ask, String) -> Void, step: @escaping (Ask, CalStep, String) -> Void) { self.arm = arm; self.step = step }
 }
 
 private struct AskReplyHookKey: EnvironmentKey { static let defaultValue: AskReplyHook? = nil }
@@ -104,9 +106,10 @@ struct AskCard: View {
              waiting: !closed && a.waiting_to_speak == true,
              speaking: !closed && a.speaking == true,
              hush: { Task { await cardAct(busy: $busy, error: $error, reload: reload) { try await hub.hushVoice(card: a.id) } } },
-             // A calendar item's steps: each its own Did it · Skip, on the one card.
+             // A calendar item's steps: each its own Did it · Skip · Reply, on
+             // the one card, staged on the chat's bar until Send.
              extra: paused && !closed ? AnyView(PauseBar(from: a.created_at, to: a.resumes_at!))
-                : (a.steps ?? []).isEmpty ? nil : AnyView(CalStepsList(calID: a.cal_id, steps: a.steps ?? [])),
+                : (a.steps ?? []).isEmpty ? nil : AnyView(CalStepsList(calID: a.cal_id, steps: a.steps ?? [], stage: stepStage)),
              closed: closed,
              line: a.resolution.flatMap { $0.isEmpty ? nil : $0 } ?? (a.state == "superseded" ? "replaced by a newer card" : ""),
              // A dismissed card — or a read marked Read —
@@ -199,6 +202,16 @@ struct AskCard: View {
     /// anywhere else it opens the sheet on that chip.
     func respond(_ outcome: String) {
         if let h = askReply { h.arm(a, outcome) } else { responding = Pick(outcome: outcome) }
+    }
+
+    /// Inside a session, its steps stage on the bar; elsewhere nil, and the
+    /// rows close at once as on the calendar.
+    var stepStage: StepStage? {
+        guard let h = askReply else { return nil }
+        let a = a, item = a.cal_id ?? a.id
+        var armed: [Int: String] = [:]
+        for s in a.steps ?? [] { armed[s.n] = armedPicks["step:\(item).\(s.n)"] }
+        return StepStage(armed: armed, arm: { h.step(a, $0, $1) })
     }
 
     /// The Mac install card's click: the hub's `mac` lane. On the Mac itself,

@@ -43,8 +43,11 @@ xcrun simctl install "$UDID" "$APP"
 for tab in "${TABS[@]}"; do
   # "thread:<id>" opens Sessions and pushes that conversation, so the chat
   # bubbles themselves can be looked at, not only the board.
-  thread=""; name="$tab"; compose=""
+  thread=""; name="$tab"; compose=""; stepcard=""
   case "$tab" in thread:*) thread="${tab#thread:}"; tab=sessions; name="thread-$thread";; esac
+  # "stepcard:<id>" is that chat with a morning-routine card posed in it and
+  # two of its steps staged on the bar (nothing is sent; ops/mac-screens.sh).
+  case "$tab" in stepcard:*) thread="${tab#stepcard:}"; stepcard=1; tab=sessions; name="stepcard-$thread";; esac
   # "compose" opens the new-session sheet with the draft box focused — the
   # composer's typing state, which no tab screenshot ever shows.
   case "$tab" in compose) tab=sessions; compose=1;; esac
@@ -74,7 +77,7 @@ for tab in "${TABS[@]}"; do
   # SEND_ERROR=decider ops/screens.sh thread:<id> — the chat opens with the
   # refused-send banner (the decider-code case) staged above the composer.
   SIMCTL_CHILD_LIFE_HUB_TOKEN="$TOKEN" SIMCTL_CHILD_LIFE_TAB="$tab" SIMCTL_CHILD_LIFE_THREAD="$thread" \
-    SIMCTL_CHILD_LIFE_COMPOSE="$compose" SIMCTL_CHILD_LIFE_MORE="$more" SIMCTL_CHILD_LIFE_MONEY="$money" SIMCTL_CHILD_LIFE_SEND_ERROR="${SEND_ERROR:-}" SIMCTL_CHILD_LIFE_OPEN="$open" SIMCTL_CHILD_LIFE_CAL_MODE="$calmode" SIMCTL_CHILD_LIFE_CAL_DAY="${LIFE_CAL_DAY:-}" \
+    SIMCTL_CHILD_LIFE_COMPOSE="$compose" SIMCTL_CHILD_LIFE_MORE="$more" SIMCTL_CHILD_LIFE_MONEY="$money" SIMCTL_CHILD_LIFE_SEND_ERROR="${SEND_ERROR:-}" SIMCTL_CHILD_LIFE_OPEN="$open" SIMCTL_CHILD_LIFE_CAL_MODE="$calmode" SIMCTL_CHILD_LIFE_CAL_DAY="${LIFE_CAL_DAY:-}" SIMCTL_CHILD_LIFE_SHOT_STEPCARD="$stepcard" \
     xcrun simctl launch "$UDID" "$BUNDLE" >/dev/null
   sleep 5   # first hub round-trips + list render (+ the push into a thread)
   xcrun simctl io "$UDID" screenshot --type=png "$OUT/$PREFIX$name.png" >/dev/null

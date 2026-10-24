@@ -8,6 +8,39 @@ import (
 	"life/hub/internal/calendar"
 )
 
+// Away over the wire: POST /away, GET /away lists it, a step filed on one of
+// its days answers `away`, one off it does not, and /end takes it off.
+func TestAwayOverTheWire(t *testing.T) {
+	s := newTest(t)
+	do := func(method, url, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, url, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer secret")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	w := do("POST", "/api/v1/away", `{"title":"Trip","from":"2030-06-07","until":"2030-06-13"}`)
+	if w.Code != 201 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	id := strings.SplitN(strings.SplitN(w.Body.String(), `"id":"`, 2)[1], `"`, 2)[0]
+	if w := do("GET", "/api/v1/away", ""); w.Code != 200 || !strings.Contains(w.Body.String(), id) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := do("POST", "/api/v1/calendar", `{"title":"Go to the fair","day":"2030-06-09","kind":"owner"}`); w.Code != 201 || !strings.Contains(w.Body.String(), `"away":"The owner is away on 2030-06-09: Trip 2030-06-07..2030-06-13`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := do("POST", "/api/v1/calendar", `{"title":"Unpack","day":"2030-06-14","kind":"owner"}`); w.Code != 201 || strings.Contains(w.Body.String(), `"away"`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := do("POST", "/api/v1/away/"+id+"/end", `{"note":"moved"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"ended"`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := do("POST", "/api/v1/away/"+id+"/end", `{}`); w.Code != 404 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
 // The merge verb over the wire: 400 without `into`, 200 with the keeper, and
 // a session's near-duplicate add is refused until it says why.
 func TestCalendarMergeAndNearDuplicate(t *testing.T) {

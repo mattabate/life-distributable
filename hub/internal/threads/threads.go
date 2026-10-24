@@ -452,6 +452,13 @@ type Manager struct {
 	// CalHeader frames the owner's answer to a calendar step from the item's own
 	// row (its title, done vs won't). nil = a one-line frame naming the id.
 	CalHeader func(calID, outcome string) string
+	// AwayLine: the preamble's line naming the days the owner is away (the
+	// calendar's away spans), "" for none. nil = no line.
+	AwayLine func() string
+	// ClaimStep / StepHeader: the same two for ONE step of an item
+	// (`step:<item>.<n>`), marked in the message the owner sent.
+	ClaimStep  func(stepID, outcome, note string)
+	StepHeader func(stepID, outcome string) string
 	// RunJob fires a scheduled job when its standing row (target job:<name>)
 	// comes due — wired to sched.Fire. It answers "started" (the run began;
 	// promptID is on the run row), "held" (gated shut or still running:
@@ -1119,6 +1126,9 @@ func (m *Manager) systemPreamble(t Thread) string {
 	}
 	if m.TeamMode {
 		sched += "Team mode is on: some sessions play a named role (the people at the foot of the Sessions list); a message that belongs to a role's lane goes to that session with `lifectl relay <id> \"…\"`, and a role's own files are `lifectl workspace <role>`.\n"
+	}
+	if m.AwayLine != nil {
+		sched += m.AwayLine()
 	}
 	owner, who := m.owner(), ""
 	if owner != "the owner" {

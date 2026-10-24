@@ -1043,22 +1043,39 @@ function replyOneHTML(threadID, ref, label, askById, recById) {
     const title = a ? mdInline(a.title, false) : esc(id);
     return `<div class="re small muted">↩ <b>${esc(label)}</b> · <a href="#/sessions/${esc(threadID)}/${esc(id)}" onclick="focusAsk('${esc(id)}');return false">${title}</a></div>`;
   }
-  if (type === 'cal') {
+  if (type === 'cal' || type === 'step') {
     // The step's name, not its id, so a session started from a row says
-    // what it is about. One GET per step, cached; the line fills in when it lands.
-    const known = calTitleCache[id];
-    if (known === undefined) {
-      calTitleCache[id] = null;
-      get('/calendar/' + encodeURIComponent(id)).then(i => {
-        calTitleCache[id] = (i && i.title) || '';
-        for (const el of document.querySelectorAll(`[data-caltitle="${id}"]`)) el.innerHTML = mdInline(calTitleCache[id] || id, false);
-      }).catch(() => { calTitleCache[id] = ''; });
+    // what it is about. One GET per item, cached; the line fills in when it
+    // lands. A `step:<item>.<n>` is one row of that item: its own name.
+    const [item, n] = calRefItem(ref);
+    const known = calTitle(ref);
+    if (calItemCache[item] === undefined) {
+      calItemCache[item] = null;
+      get('/calendar/' + encodeURIComponent(item)).then(i => {
+        calItemCache[item] = i || {};
+        for (const el of document.querySelectorAll('[data-calref]')) if (calRefItem(el.dataset.calref)[0] === item) el.innerHTML = mdInline(calTitle(el.dataset.calref) || item, false);
+      }).catch(() => { calItemCache[item] = {}; });
     }
-    return `<div class="re small muted">↩ <b>${esc(label)}</b> · 📅 <a href="${refHref(ref) || '#/calendar'}" data-caltitle="${esc(id)}">${known ? mdInline(known, false) : esc(id)}</a></div>`;
+    const href = refHref('cal:' + item) || '#/calendar';
+    return `<div class="re small muted">↩ <b>${esc(label)}</b> · 📅 <a href="${href}" data-calref="${esc(ref)}">${known ? mdInline(known, false) : esc(n ? `step ${n}` : id)}</a></div>`;
   }
   return `<div class="re small muted">↩ <b>${esc(label)}</b> · ${esc(type)} ${esc(id)}</div>`;
 }
-const calTitleCache = {};
+// Item by id, from /calendar/{id}: null while the GET is out, {} if it failed.
+const calItemCache = {};
+// cal:<item> → [item, 0]; step:<item>.<n> → [item, n].
+function calRefItem(ref) {
+  const [type, id = ''] = ref.split(':'), dot = id.lastIndexOf('.');
+  return type === 'step' && dot > 0 ? [id.slice(0, dot), +id.slice(dot + 1)] : [id, 0];
+}
+// A cal:/step: ref's name: the item's title, or the step's own.
+function calTitle(ref) {
+  const [item, n] = calRefItem(ref), i = calItemCache[item];
+  if (!i) return '';
+  if (!n) return i.title || '';
+  const s = (i.steps || []).find(x => x.n === n);
+  return s ? s.title : '';
+}
 
 // The newest session row: the one end line that says "turn ended".
 // Repeating it on every reply says nothing, so every earlier reply row is its
@@ -1317,7 +1334,8 @@ const chatRecHTML = r => recHTML(r, chatOpened('rec', r.id), chatArmed('rec', r.
 // untouched.
 let chatArmedWas = new Set();
 function chatPaintArmed() {
-  const now = new Set(composerCards('chat').map(c => c.ref + ':' + c.id));
+  // A step's strip repaints the card its row is on (`card`).
+  const now = new Set(composerCards('chat').map(c => c.card || c.ref + ':' + c.id));
   for (const ref of new Set([...chatArmedWas, ...now])) {
     const i = ref.indexOf(':'), kind = ref.slice(0, i), id = ref.slice(i + 1);
     const el = document.getElementById('ask-card-' + id);
@@ -1565,6 +1583,26 @@ const replyOf = (a, outcome) => {
 function armReply(ask, outcome) {
   composerArm('chat', replyOf(ask, outcome));
   focusAsk(ask.id);
+}
+
+// One step of an item's card, staged as its own strip on the bar: Send names
+// it `step:<item>.<n>` with the pick, the hub closes it then; nothing moves
+// before.
+function armStepReply(askID, n, outcome) {
+  const a = chatState.cards['ask:' + askID];
+  const s = a && (a.steps || []).find(x => x.n === n);
+  if (!s) return;
+  composerArm('chat', stepReplyOf(a, s, outcome));
+  focusAsk(a.id);
+}
+function stepReplyOf(a, s, outcome) {
+  const outcomes = [{ value: 'done', label: 'Did it' }, { value: 'wont', label: 'Skip' }, { value: '', label: 'Reply' }];
+  return {
+    ref: 'step', id: (a.cal_id || a.id) + '.' + s.n, card: 'ask:' + a.id, title: s.title || '', kind: 'step', label: 'Step',
+    outcomes, outcome: outcome || '',
+    means: { done: 'ticked off when you send', wont: 'skipped when you send', '': 'the step stays open, your words go to the session' },
+    href: `#/sessions/${a.thread_id || chatState.id}/${a.id}`,
+  };
 }
 
 // A rec card's three buttons arm the same composer, so a rec is answered from

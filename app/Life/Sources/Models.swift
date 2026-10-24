@@ -1217,6 +1217,15 @@ struct CalDay: Codable, Identifiable, Hashable {
     var id: String { day }
 }
 
+struct CalAway: Codable, Identifiable, Hashable {
+    var id: String
+    var title: String
+    var detail: String?
+    var from: String
+    var until: String?
+    var state: String?
+}
+
 struct CalView: Codable {
     var from: String
     var to: String
@@ -1228,6 +1237,13 @@ struct CalView: Codable {
     /// The owner's open to-dos with no due day, oldest first ("Do soon").
     var soon: [CalEntry]?
     var days: [CalDay]
+    /// Spans the owner is away: a band over those days, never an item.
+    var away: [CalAway]?
+
+    /// The live spans touching `day` (an ended one is plans changed).
+    func away(on day: String) -> [CalAway] {
+        (away ?? []).filter { $0.state != "ended" && $0.from <= day && ($0.until ?? $0.from) >= day }
+    }
 
     /// The same view without the other device's install rows (Anytime holds
     /// the open build, a day its installed record) — `Ask.isOtherDeviceInstall`

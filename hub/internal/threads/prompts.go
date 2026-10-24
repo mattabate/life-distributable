@@ -195,7 +195,7 @@ func (p *Prompt) normalizeReplies() error {
 			kind, r.Ref = "cal", "cal:"+id
 		}
 		if !refTypes[kind] || id == "" {
-			return fmt.Errorf("in_reply_to must be <ask|action|rec|cal|message>:<id>, got %q", r.Ref)
+			return fmt.Errorf("in_reply_to must be <ask|action|rec|cal|step|message>:<id>, got %q", r.Ref)
 		}
 		if r.Outcome != "" {
 			want, ok := refOutcomes[r.Outcome]
@@ -257,14 +257,16 @@ func decodeReplies(col, ref, outcome string) []Reply {
 
 // Reference types a prompt may answer. A reference the hub cannot render is
 // refused at Queue rather than silently becoming prose.
-var refTypes = map[string]bool{"ask": true, "action": true, "rec": true, "cal": true, "message": true}
+// `step:<item>.<n>` is one step of an item: the composer stacks one per Did it
+// / Skip picked, and they move only when the message is sent.
+var refTypes = map[string]bool{"ask": true, "action": true, "rec": true, "cal": true, "step": true, "message": true}
 
 // Outcomes, by what they can be said about. "" is always allowed (words only).
 // done|wont are said about an ask, or about one of the owner's own
 // calendar steps: closing a `cal:` item from either surface is this prompt
 // with words, never a bare button (ClaimCal).
 var refOutcomes = map[string]map[string]bool{
-	"done": {"ask": true, "cal": true}, "wont": {"ask": true, "cal": true},
+	"done": {"ask": true, "cal": true, "step": true}, "wont": {"ask": true, "cal": true, "step": true},
 	"approved": {"action": true}, "denied": {"action": true},
 	// A rec's three answers (the fourth, "just reply", is "" with words). The
 	// rec itself is decided by POST /recs/{id}/decide before the prompt is
@@ -386,6 +388,13 @@ func (m *Manager) Queue(p Prompt) (Prompt, error) {
 				if m.ClaimCal != nil {
 					m.ClaimCal(id, r.Outcome, p.Text)
 				}
+			case kind == "step" && (r.Outcome == "done" || r.Outcome == "wont"):
+				// One step, marked when the message was sent. With no words
+				// there is nothing for the session to act on.
+				if m.ClaimStep != nil {
+					m.ClaimStep(id, r.Outcome, p.Text)
+				}
+				quiet = true
 			case kind == "rec" && (r.Outcome == "accepted" || r.Outcome == "declined"):
 				// A verdict on a rec is recorded on the ledger row the moment
 				// it is given, wherever the words are going (the Recs page's
@@ -968,6 +977,13 @@ func (m *Manager) refHeader(ref, outcome, msgKind string) string {
 			verdict = "DEFERRED"
 		}
 		return fmt.Sprintf("[The owner %s recommendation %s from the ledger. Their words follow — this is their answer, not a new task.]\n", verdict, id)
+	case "step":
+		if m.StepHeader != nil {
+			if h := m.StepHeader(id, outcome); h != "" {
+				return h
+			}
+		}
+		return fmt.Sprintf("[The owner marked calendar step %s %s. Their words follow.]\n", id, outcome)
 	case "cal":
 		if msgKind == "decision" {
 			if m.CalHeader != nil {
