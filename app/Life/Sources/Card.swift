@@ -194,9 +194,9 @@ struct Card: View {
     /// `saidCovers`. Then the title stays for rows and the card leads with
     /// the message alone.
     private var titled: Bool {
-        guard !said.isEmpty else { return true }
         let t = SessionCell.plain(title).lowercased()
-        return t.isEmpty || !SessionCell.plain(said).lowercased().contains(t)
+        guard !t.isEmpty else { return true }
+        return ![said, text].contains { !$0.isEmpty && SessionCell.plain($0).lowercased().contains(t) }
     }
 
     /// Hear the spoken message again; tap again to stop.
@@ -294,8 +294,13 @@ struct Card: View {
             Button { withAnimation(.snappy) { unfolded.toggle() } } label: {
                 HStack(spacing: 6) {
                     Image(systemName: word == "dismissed" ? "xmark.circle" : "checkmark.circle")
-                    Text("\(word) ·").textCase(.uppercase).font(.caption2.weight(.semibold))
-                    Text(md(title)).font(.subheadline).lineLimit(unfolded ? nil : 1).multilineTextAlignment(.leading)
+                    // Open, the body says it all: a read's title is its
+                    // message's first words cut with "…", and drawn over the
+                    // message it read as one paragraph truncated above the
+                    // same one whole.
+                    let echo = unfolded && !titled
+                    Text(echo ? word : "\(word) ·").textCase(.uppercase).font(.caption2.weight(.semibold))
+                    if !echo { Text(md(title)).font(.subheadline).lineLimit(unfolded ? nil : 1).multilineTextAlignment(.leading) }
                     Spacer(minLength: 0)
                     Image(systemName: unfolded ? "chevron.up" : "chevron.down").font(.caption2)
                 }.foregroundStyle(.secondary).contentShape(Rectangle())

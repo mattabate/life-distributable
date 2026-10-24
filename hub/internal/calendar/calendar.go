@@ -1458,19 +1458,32 @@ func (c *Calendar) listDated(from, to, state string) ([]Item, error) {
 // Today showed no number on the tab. Notes and agent runs fire and close
 // themselves and are the hub's work, not the owner's, so they never count. Counted over the calendar's share
 // of store.Items (Open), not a query of its own.
+//
+// It is exactly the page's Overdue and Due trays, never Do soon: counting
+// open items on its own drifted from what the page lists, so the tab could
+// say 7 over a Due tray of 2. DueIDs is that set.
 func (c *Calendar) DueCount() (int, error) {
-	rows, err := c.Open()
+	ids, err := c.DueIDs()
+	return len(ids), err
+}
+
+// DueIDs: the ids in the Overdue and Due trays of today's agenda, in order.
+func (c *Calendar) DueIDs() ([]string, error) {
+	today := c.Now().Format("2006-01-02")
+	v, err := c.Agenda(today, today)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	today, n := c.Now().Format("2006-01-02"), 0
-	for _, r := range rows {
-		it, ok := r.Obj.(Item)
-		if ok && r.Kind != "note" && it.Day != "" && it.Day <= today {
-			n++
+	out, seen := []string{}, map[string]bool{}
+	for _, es := range [][]Entry{v.Overdue, v.Due} {
+		for _, e := range es {
+			if e.ID != "" && !seen[e.ID] {
+				seen[e.ID] = true
+				out = append(out, e.ID)
+			}
 		}
 	}
-	return n, nil
+	return out, nil
 }
 
 // Overdue: every open `owner` item whose moment has passed — a past day, fired

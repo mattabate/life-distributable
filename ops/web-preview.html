@@ -52,6 +52,16 @@
         detail: 'The cabin is free the **first** and the **third** weekend of April.',
         outcomes: [{ value: 'done', label: 'Decided' }, { value: '', label: 'Reply' }] },
     ],
+    // The digest chat's own cards: a read the owner marked Read (folded),
+    // titled from its message's first words cut with "…": open, the summary
+    // drops the title.
+    [`/asks?state=all&thread=${TIDY}`]: [
+      { id: 'ask-f01d', message_id: 3, title: 'The digest now goes out Sunday at 8, with the week\'s dates…', state: 'done', created_at: iso(5),
+        resolved_at: iso(4), kind: 'read', closed: true, folded: 'read', reopen: true, surface: 'any',
+        thread_id: TIDY, thread_title: 'Tidy the weekly digest',
+        said: 'The digest now goes out Sunday at 8, with the week\'s dates on top and the open asks under them.',
+        outcomes: [{ value: 'done', label: 'Read it' }] },
+    ],
     '/board': { surface: 'web', count: 3, working: 1, for_you: { [TRIP]: 2, [TIDY]: 1 },
       reads: {}, installs: {}, first: { [TRIP]: 'act-0002' },
       todo: { [TRIP]: 'Book the cabin: $480 for two nights' },
@@ -67,6 +77,12 @@
       { id: 2, thread_id: TRIP, role: 'claude', ts: iso(30), run_id: 'r1', text: 'Two fit. The lake cabin is $480 for two nights and refundable; booking it is a money step, so it is on your board.', cost_usd: 1.42 },
     ],
     [`/threads/${TRIP}/steps`]: [],
+    [`/threads/${TIDY}`]: { id: TIDY, title: 'Tidy the weekly digest', status: 'idle', model: 'claude-fable-5-1', cost_usd: 0.31, last_message_at: iso(6) },
+    [`/threads/${TIDY}/messages`]: [
+      { id: 3, thread_id: TIDY, role: 'owner', author: 'owner', ts: iso(8), run_id: 'r2', text: 'Move the digest to Sunday morning.' },
+    ],
+    [`/threads/${TIDY}/steps`]: [],
+    [`/threads/${TIDY}/events`]: [],
     [`/threads/${TRIP}/events`]: [],
     '/prompts': [],
     '/recs': { recs: [

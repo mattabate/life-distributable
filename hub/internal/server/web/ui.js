@@ -776,12 +776,12 @@ function cardHTML(c, opened) {
   // APPROVE, the Sessions cell's corner word) on a line of their own. Under
   // it the title, when the message does not already say it, then the message
   // in plain body type.
-  const titled = !c.said || !saidCovers(c.said, c.title);
+  const titled = !saidCovers(c.said, c.title) && !saidCovers(c.body, c.title);
   const head = `<div class="card-h">${c.mark}<span class="verb">${esc(c.verb || '')}</span></div>`;
   const said = c.said ? `<div class="said">${esc(c.said)}</div>` : '';
   if (c.folded) {
     return `<details class="ask folded" id="ask-card-${id}" data-k="${c.ref}:${id}" data-def="0"${opened ? ' open' : ''}>
-      <summary><span class="muted">${c.folded} ·</span> ${mdInline(c.title)}</summary>
+      <summary><span class="muted">${c.folded}</span><span class="${titled ? '' : 'echo'}"><span class="muted"> ·</span> ${mdInline(c.title)}</span></summary>
       ${said}${body}
       <div class="acts">${acts}</div></details>`;
   }
@@ -795,11 +795,14 @@ function cardHTML(c, opened) {
 // Markdown compared as words: links to their text, marks and a cut title's
 // "…" dropped. Used to spot a body line that only repeats the title.
 const plainText = s => (s || '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`#…]/g, '').trim();
-// saidCovers: does the spoken message already say the title? Compared plain,
-// case folded, the way the phone's SessionCell.body drops a title-repeating line.
+// saidCovers: does the spoken message (or the body) already say the title?
+// Compared plain, case folded, the way the phone's SessionCell.body drops a
+// title-repeating line. A folded card open hides the title it covers: a read's
+// title is its message's first words cut with "…", and drawn over the message
+// it read as one paragraph truncated above the same one whole.
 function saidCovers(said, title) {
   const t = plainText(title).toLowerCase();
-  return !!t && plainText(said).toLowerCase().includes(t);
+  return !!t && !!said && plainText(said).toLowerCase().includes(t);
 }
 // The hub's outcomes as the row, in the hub's order — the same order the
 // composer strip draws its chips — never a different order on the bar than
