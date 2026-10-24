@@ -106,6 +106,20 @@ CREATE TABLE IF NOT EXISTS item_step_events (
 	id INTEGER PRIMARY KEY, step_id TEXT NOT NULL, ts TEXT NOT NULL,
 	actor TEXT NOT NULL, from_state TEXT NOT NULL, to_state TEXT NOT NULL, note TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS item_step_events_step ON item_step_events(step_id, id);`,
+	// item_step_plans: a step skipped ahead on a later day of a repeat, before
+	// that day has its row (PlanStep). item_id = the chain's newest row,
+	// carried forward as it spawns; newest row per (day, n) wins.
+	`CREATE TABLE IF NOT EXISTS item_step_plans (
+	id INTEGER PRIMARY KEY, item_id TEXT NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL,
+	state TEXT NOT NULL, actor TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS item_step_plans_item ON item_step_plans(item_id, day);`,
+	// away: days the owner cannot be booked, a span with a label (away.go).
+	// Not an item: nothing fires, nags or counts.
+	`CREATE TABLE IF NOT EXISTS away (
+	id TEXT PRIMARY KEY, created_at TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+	day_from TEXT NOT NULL, day_until TEXT NOT NULL, source TEXT NOT NULL DEFAULT '',
+	state TEXT NOT NULL DEFAULT 'on', note TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS away_days ON away(state, day_until);`,
 }
 
 // setItem is the ONE writer of an item's state: query is the row's own write
@@ -213,6 +227,9 @@ type Item struct {
 	// Distinct: POST only, never stored - a session's reason that this item is
 	// not the near-duplicate Add would otherwise refuse.
 	Distinct string `json:"distinct,omitempty"`
+	// Away: POST's answer only, never stored - the item's day falls on a span
+	// the owner is away (AwayOn), so the session that filed it reads it at once.
+	Away string `json:"away,omitempty"`
 }
 
 // Slot: where the row sits — its own day and time, or for a soon item the
@@ -547,6 +564,7 @@ type View struct {
 	Due     []Entry `json:"due"`     // every open step of the owner's due today (DueAhead, day <= today)
 	Soon    []Entry `json:"soon"`    // "Do soon": DueAhead's later days — a repeat's step before its day in its own week
 	Days    []Day   `json:"days"`
+	Away    []Away  `json:"away"` // the spans the owner is away that touch [from,to] (away.go)
 }
 
 // Item kinds. `homework` (2026-09-11) is a step of the OWNER's that comes from
@@ -637,7 +655,10 @@ func New(db *store.DB, thr *threads.Manager) (*Calendar, error) {
 	thr.OnDelivered = c.OnDelivered
 	thr.ClaimCal = c.claim
 	thr.CalHeader = c.header
+	thr.ClaimStep = c.claimStep
+	thr.StepHeader = c.stepHeader
 	thr.ResolveCal = c.resolveCard
+	thr.AwayLine = c.AwayLine
 	c.unprefixDatedAsks()
 	return c, nil
 }
@@ -1961,8 +1982,10 @@ func (c *Calendar) spawnNext(it Item) {
 	for _, t := range store.StepTitles(store.LoadSteps(c.db, it.ID)[it.ID]) {
 		next.Steps = append(next.Steps, store.Step{Title: t})
 	}
-	if _, err := c.Add(next); err != nil {
+	if nx, err := c.Add(next); err != nil {
 		log.Printf("calendar: next occurrence of %s: %v", it.ID, err)
+	} else {
+		c.carryPlans(it.ID, nx)
 	}
 }
 
@@ -2270,7 +2293,10 @@ func (c *Calendar) Agenda(from, to string) (View, error) {
 		return View{}, errors.New("to must be YYYY-MM-DD")
 	}
 	toEnd := toT.AddDate(0, 0, 1)
-	v := View{From: from, To: to, Today: today, Anytime: []Entry{}, Overdue: []Entry{}, Due: []Entry{}, Soon: []Entry{}, Days: []Day{}}
+	v := View{From: from, To: to, Today: today, Anytime: []Entry{}, Overdue: []Entry{}, Due: []Entry{}, Soon: []Entry{}, Days: []Day{}, Away: []Away{}}
+	if aw, err := c.Aways(from, to); err == nil {
+		v.Away = aw
+	}
 	byDay := map[string][]Entry{}
 	add := func(e Entry) { byDay[e.Day] = append(byDay[e.Day], e) }
 

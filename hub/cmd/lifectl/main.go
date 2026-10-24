@@ -443,13 +443,25 @@ func main() {
 		// lifectl cal add … --step "a" --step "b"       one item, several steps, each closed on its own
 		// lifectl cal <id> steps "a" "b"                replace an open item's steps
 		// lifectl cal <id> step <n> done|skip|reopen    close one step
+		// lifectl cal <id> step <n> skip --on D[,D...] ["why"]   that step on those days of the repeat only
 		// lifectl cal <from-id> into <to-id>            fold a duplicate into the keeper (also: cal <from-id> <to-id>)
+		// lifectl cal away                             the days the owner is away, from today
+		// lifectl cal away end <away-id> ["why"]        plans changed: take one off
+		if len(os.Args) > 2 && os.Args[2] == "away" {
+			if len(os.Args) > 4 && os.Args[3] == "end" {
+				c.call("POST", "/api/v1/away/"+os.Args[4]+"/end", map[string]string{"note": strings.Join(os.Args[5:], " ")})
+				return
+			}
+			c.call("GET", "/api/v1/away", nil)
+			return
+		}
 		if len(os.Args) > 2 && os.Args[2] == "add" {
 			need(4)
 			fs := flag.NewFlagSet("cal add", flag.ExitOnError)
 			on := fs.String("on", "", "YYYY-MM-DD (local)")
+			until := fs.String("until", "", "--kind away: the last day away (inclusive; default --on)")
 			at := fs.String("at", "", "HH:MM (owner/homework/note: default all day, the ask is raised 08:00; agent: always a minute — default 08:00, then 30 min past the other agent runs that day — so give the time it should run)")
-			kind := fs.String("kind", "owner", "owner = the owner's step (becomes an ask that day, nagged until done) | homework = a Learn step of the owner's, same lifecycle, its own light-blue lane | agent = run an agent with --detail as its instructions | note = reminder (read ask)")
+			kind := fs.String("kind", "owner", "owner = the owner's step (becomes an ask that day, nagged until done) | homework = a Learn step of the owner's, same lifecycle, its own light-blue lane | agent = run an agent with --detail as its instructions | note = reminder (read ask) | away = days they cannot be booked, --on to --until (fires nothing; every session sees it)")
 			detail := fs.String("detail", "", "what exactly, and why (@/path or - reads it from a file/stdin)")
 			goal := fs.String("goal", "", "goal id")
 			thread := fs.String("thread", os.Getenv("LIFE_THREAD_ID"), "session the ask/run lands in (default $LIFE_THREAD_ID)")
@@ -463,6 +475,16 @@ func main() {
 				return nil
 			})
 			fs.Parse(os.Args[4:])
+			if *kind == "away" {
+				if *on == "" {
+					die("cal add --kind away: --on YYYY-MM-DD (the first day) required")
+				}
+				c.call("POST", "/api/v1/away", map[string]string{"title": titleArg(os.Args[3]), "from": *on, "until": *until, "detail": text(*detail), "source": actor()})
+				return
+			}
+			if *until != "" {
+				die("cal add: --until is for --kind away")
+			}
 			// No --on = a SOON item: a to-do of the owner's with no due day.
 			// It is never overdue, never nagged, raises no ask, and belongs to no
 			// session (the hub drops thread_id too; `source` says who filed it).
@@ -540,12 +562,19 @@ func main() {
 			}
 			if os.Args[3] == "step" {
 				// lifectl cal <id> step <n> done|skip|reopen: close one step.
+				// ... skip|reopen --on D[,D...] ["why"]: that step on those days of
+				// the repeat only (days ahead included); the series is untouched.
 				need(6)
 				outcome := map[string]string{"done": "done", "did": "done", "skip": "wont", "wont": "wont", "reopen": "open", "open": "open"}[os.Args[5]]
 				if outcome == "" {
 					die("cal step: done|skip|reopen")
 				}
-				c.call("POST", "/api/v1/calendar/"+id+"/steps/"+os.Args[4], map[string]string{"outcome": outcome, "by": actor()})
+				body := map[string]any{"outcome": outcome, "by": actor()}
+				if len(os.Args) > 7 && os.Args[6] == "--on" {
+					body["days"] = strings.Split(os.Args[7], ",")
+					body["note"] = strings.Join(os.Args[8:], " ")
+				}
+				c.call("POST", "/api/v1/calendar/"+id+"/steps/"+os.Args[4], body)
 				return
 			}
 			if os.Args[3] == "soon" {
@@ -853,8 +882,9 @@ func (c client) list(path string) {
 	}
 }
 
-// rowFields: what a row line carries, in order; title last.
-var rowFields = []string{"id", "status", "state", "kind", "day", "cal_day", "at", "window", "schedule_label", "goal_id", "thread_title"}
+// rowFields: what a row line carries, in order; title last. from/until are an
+// away span's days.
+var rowFields = []string{"id", "status", "state", "kind", "day", "cal_day", "from", "until", "at", "window", "schedule_label", "goal_id", "thread_title"}
 
 // printRows prints every object found in v as one line, a nested array of
 // objects under a "key:" heading, and returns how many rows it printed.
@@ -1141,6 +1171,8 @@ calendar  cal [from] [to]
           cal add "title" [--on YYYY-MM-DD] [--at HH:MM] [--kind owner|homework|agent|note] [--due on|by]
             [--detail d] [--goal g] [--thread id] [--repeat daily|weekly|monthly|yearly|every<N>d] [--nag min]
             (no --on = soon: your to-do, no due day)
+          cal add "title" --kind away --on YYYY-MM-DD [--until YYYY-MM-DD] [--detail d]   days you cannot be booked
+          cal away · cal away end <away-id> ["why"]
           cal <id> [done|dismiss|reopen [note] | soon
             | set [--title t] [--detail d] [--day|--on d|none] [--at HH:MM|none] [--repeat r|none] [--due on|by]]
 goals     goals · goal new "title" "statement" [--horizon h] [--cadence c] [--sources s]

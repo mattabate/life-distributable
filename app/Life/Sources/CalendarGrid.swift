@@ -388,6 +388,9 @@ struct CalTimeGrid: View {
     /// (entry, new time). The day is not a drop target any more — there is one
     /// column, so a drag can only change the clock; the arrows change the day.
     var onMove: (CalEntry, String) -> Void
+    /// The spans the owner is away over this day: a bar over the band and the
+    /// clock hatched under it.
+    var away: [CalAway] = []
 
     /// The in-flight move. `@GestureState`, not `@State`: the system CANCELS a
     /// gesture without calling `.onEnded` (the scroll steals it, or the finger
@@ -455,6 +458,9 @@ struct CalTimeGrid: View {
             VStack(alignment: .leading, spacing: 0) {
                 // No column head: the page title above already says
                 // "Monday, Aug 31", and there is only the one day under it.
+                ForEach(away) { a in
+                    CalAwayBar(span: a).padding(.leading, Self.gutterW).padding(.trailing, Self.stripW).padding(.vertical, 2)
+                }
                 band(planW)
                 Divider()
                 ScrollViewReader { proxy in
@@ -469,6 +475,9 @@ struct CalTimeGrid: View {
                             }
                             // 12 PM's line, what the grid opens centred on.
                             Color.clear.frame(width: 1, height: 1).id("noon").padding(.top, Self.hourH * 12)
+                            if !away.isEmpty {
+                                CalAwayHatch().frame(width: planW, height: Self.hourH * 24).offset(x: Self.gutterW)
+                            }
                             lines(width: geo.size.width)
                             blocks(colW: planW)
                             strip(x: Self.gutterW + planW)
@@ -803,6 +812,36 @@ struct CalBlock: View {
         .contentShape(RoundedRectangle(cornerRadius: 4))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// `.cal-away`: a grey bar with the span's name over the days away. Not an
+/// item, so no tap, no drag, no count.
+struct CalAwayBar: View {
+    let span: CalAway
+    var body: some View {
+        Text(span.title)
+            .font(.system(size: 11.5, weight: .semibold)).lineLimit(1).truncationMode(.tail)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 18, maxHeight: 18, alignment: .leading)
+            .background(Color.secondary.opacity(0.22), in: RoundedRectangle(cornerRadius: 4))
+            .help(span.detail ?? span.title)
+    }
+}
+
+/// `.cal-col.away`: the day's clock hatched faintly under the bar.
+struct CalAwayHatch: View {
+    var body: some View {
+        Canvas { ctx, size in
+            var p = Path()
+            var x = -size.height
+            while x < size.width {
+                p.move(to: CGPoint(x: x, y: size.height)); p.addLine(to: CGPoint(x: x + size.height, y: 0))
+                x += 12
+            }
+            ctx.stroke(p, with: .color(Color.secondary.opacity(0.09)), lineWidth: 6)
+        }
+        .allowsHitTesting(false)
     }
 }
 

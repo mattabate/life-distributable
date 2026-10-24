@@ -1146,6 +1146,15 @@ body.cal-dragging { cursor: grabbing; }
 }
 .cal-col { position: relative; border-left: 1px solid var(--line); min-width: 0; }
 .cal-col.today { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+/* Away: a grey bar over the days away, the columns hatched under it. */
+.cal-away {
+  margin: 3px 3px 0; padding: 0 8px; height: 18px; line-height: 18px; border-radius: 4px;
+  background: color-mix(in srgb, var(--muted) 22%, transparent); color: var(--fg);
+  font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.cal-col.away, .cal-allday.away {
+  background-image: repeating-linear-gradient(135deg, color-mix(in srgb, var(--muted) 9%, transparent) 0 6px, transparent 6px 12px);
+}
 .cal-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); }
 /* The now line sits above the blocks and UNDER the two sticky rows: at
    z-index 20 it drew straight across the all-day band whenever the grid was

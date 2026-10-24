@@ -371,3 +371,39 @@ Entry format:
   cancel a prompt.
 - How: same merge as add-0008. By hand: `cmd/lifectl/main.go`
   (`printRows`, `sortedKeys`, the `prompt` arg check), `main_test.go`.
+
+## add-0028 · 2026-10-24 · Days you are away
+- For: everyone
+- Offer: You can mark days you are away (a trip, a holiday):
+  `lifectl cal add "Trip" --kind away --on 2030-07-01 --until 2030-07-05`.
+  Nothing fires for it; every session's preamble lists the coming ones, so
+  no one proposes or dates anything of yours on them, and a step dated on
+  one is answered with the span. The Calendar draws it as one grey named
+  band over its days with the columns hatched (web week, desktop week,
+  phone Day grid; the phone Schedule lists the day). It is not an item: no
+  count, tap or drag, and an ended span draws nothing.
+- How: same merge as add-0008. By hand: `calendar/away.go` (the `away`
+  table, spans, the preamble line), `calendar/calendar.go` (`View.Away`),
+  `server/calendar.go` + `routes.go` (`/api/v1/away`, `away` on GET
+  /calendar), `cmd/lifectl/main.go` (`--kind away --until`, `cal away`, a
+  span's row prints its from and until days), `threads/threads.go`
+  (`AwayLine`), `web/views/calgrid.js` + `app.css`, `CalendarGrid.swift`,
+  `CalendarWeek.swift`, `CalendarView.swift`, `Models.swift`, `shared/api.md`.
+
+## add-0029 · 2026-10-24 · Steps: one day only, and nothing moves until Send
+- For: everyone
+- Offer: Skipping one step of a repeating item for a few days no longer
+  means rewriting the whole series: `lifectl cal <id> step <n> skip --on
+  D[,D...] "why"` skips that step on those days only, coming rows show it
+  skipped already, and the series is untouched. And on a step item's chat
+  card each open step has Did it / Skip / Reply: a pick stacks as a chip in
+  the composer and closes only when you press Send (wordless, it marks them
+  without waking the session). The Calendar page keeps its one-tap buttons.
+  Web, desktop and phone.
+- How: same merge as add-0008. By hand: `calendar/steps.go` (`PlanStep`,
+  `carryPlans`, `claimStep`, `stepHeader`), `calendar/calendar.go`
+  (`item_step_plans`), `server/calendar.go` (`days` on POST
+  /calendar/{id}/steps/{n}), `threads/prompts.go` (the `step:<item>.<n>`
+  ref), `store/close.go`, `cmd/lifectl/main.go`, `web/views/threads.js`,
+  `web/ui.js`, `web/views/calendar.js`, `ThreadDetail.swift`,
+  `AskCards.swift`, `CalendarView.swift`, `shared/api.md`.

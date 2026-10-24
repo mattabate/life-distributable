@@ -33,7 +33,7 @@ func NewID(prefix string) string {
 // existed keep their shape, so the table below is the WHOLE list of shapes:
 // nothing else in the hub may switch on a prefix.
 var (
-	refKinds  = map[string]string{"ask": "ask", "cal": "cal", "rec": "rec", "p": "prompt", "per": "person"}
+	refKinds  = map[string]string{"ask": "ask", "cal": "cal", "rec": "rec", "p": "prompt", "per": "person", "away": "away"}
 	prefixed  = regexp.MustCompile(`^([a-z]+)-[0-9a-f]{4,8}$`)
 	stampedRe = regexp.MustCompile(`^\d{8}-\d{6}-[0-9a-f]{4,8}$`)
 )

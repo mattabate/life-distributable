@@ -184,6 +184,19 @@ struct CalWeekGrid: View {
     var onTapGroup: ([CalEntry]) -> Void
     /// (entry, new day, new time).
     var onMove: (CalEntry, String, String) -> Void
+    /// Spans the owner is away: one bar across their days in this week, the
+    /// columns hatched under it.
+    var away: [CalAway] = []
+
+    private var awayBars: [(span: CalAway, a: Int, b: Int)] {
+        let first = days[0], last = days[6]
+        return away.compactMap { s in
+            let until = s.until ?? s.from
+            guard s.state != "ended", s.from <= last, until >= first else { return nil }
+            return (s, days.firstIndex(of: max(s.from, first)) ?? 0, days.firstIndex(of: min(until, last)) ?? 6)
+        }
+    }
+    private func isAway(_ d: String) -> Bool { awayBars.contains { $0.span.from <= d && ($0.span.until ?? $0.span.from) >= d } }
 
     // The console's numbers (app.css `.cal-*`, calgrid.js): 44 an hour, a
     // 56 gutter, 17-line chips 2 apart, a 20-wide record strip.
@@ -219,6 +232,7 @@ struct CalWeekGrid: View {
             VStack(spacing: 0) {
                 heads(colW)
                 Web.line.frame(height: 1)
+                if !awayBars.isEmpty { awayRow(colW) }
                 allDay(colW)
                 Web.lineStrong.frame(height: 1)
                 ScrollViewReader { proxy in
@@ -273,6 +287,26 @@ struct CalWeekGrid: View {
         }
     }
 
+    /// The away row over the band: each bar from its first day's column to
+    /// its last, 3 in at both ends, 22 high.
+    private func awayRow(_ colW: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: Self.gutterW)
+                ForEach(days, id: \.self) { d in
+                    Group { if isAway(d) { CalAwayHatch() } else { Color.clear } }
+                        .frame(width: colW).overlay(alignment: .leading) { Web.line.frame(width: 1) }
+                }
+            }
+            ForEach(awayBars, id: \.span.id) { bar in
+                CalAwayBar(span: bar.span)
+                    .frame(width: CGFloat(bar.b - bar.a + 1) * colW - 6)
+                    .offset(x: Self.gutterW + CGFloat(bar.a) * colW + 3, y: 3)
+            }
+        }
+        .frame(height: 22, alignment: .topLeading)
+    }
+
     /// `.cal-allday`: the band is as tall as its fullest day (21 a chip + 8),
     /// never a box of its own that scrolls — the console grows it the same
     /// way. "All day" sits right in the gutter at 12.5, grey.
@@ -303,6 +337,7 @@ struct CalWeekGrid: View {
                 .padding(.horizontal, 3).padding(.top, 3).padding(.bottom, 1)
                 .frame(width: colW, alignment: .top)
                 .frame(maxHeight: .infinity, alignment: .top)
+                .background { if isAway(d) { CalAwayHatch() } }
                 .overlay(alignment: .leading) { Web.line.frame(width: 1) }
             }
         }
@@ -328,6 +363,7 @@ struct CalWeekGrid: View {
         let planW = colW - (strip ? Self.stripW : 0)
         return ZStack(alignment: .topLeading) {
             if d == today { Web.accent.opacity(0.05) }
+            if isAway(d) { CalAwayHatch() }
             ForEach(0..<24, id: \.self) { h in
                 Web.line.frame(height: 1).offset(y: CGFloat(h) * Self.hourH)
             }

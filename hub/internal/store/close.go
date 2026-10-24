@@ -127,6 +127,8 @@ func ReplyLabel(refKind, outcome, askKind string) string {
 		table = map[string]string{"accepted": "Accepted", "declined": "Declined", "deferred": "Later", "": "Replied"}
 	case "cal":
 		table = map[string]string{"done": "Did it", "wont": "Won't do", "": "About"}
+	case "step":
+		table = map[string]string{"done": "Did it", "wont": "Skipped", "": "About"}
 	}
 	if l, ok := table[outcome]; ok {
 		return l

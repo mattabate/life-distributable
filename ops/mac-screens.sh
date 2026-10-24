@@ -7,7 +7,9 @@
 #          behind Configuration and take a LIFE_TAB of their own),
 #          thread:<id> (Sessions with that chat open), goal:<id> (that goal's
 #          page), open:<id> (rec-…, cal-…, ask-…: its tab with that thing
-#          open, as after a tap on it in a card).
+#          open, as after a tap on it in a card),
+#          stepcard:<thread id> (that chat, a step item's card posed, two
+#          steps staged on the bar).
 # LIFE_CAL_DAY=YYYY-MM-DD puts the Calendar on that day's week.
 # Needs a desktop build first (`make mac`, or `make mac-build` unsigned).
 # WAIT=<seconds> for a slow page (default 6); W=<points> for a narrower
@@ -22,9 +24,12 @@ BIN="$ROOT/app/build-mac/Build/Products/Debug-maccatalyst/life.app/Contents/MacO
 [ -x "$BIN" ] || { echo "no desktop build; run: make mac (or make mac-build)" >&2; exit 1; }
 PAGES=("$@"); [ ${#PAGES[@]} -gt 0 ] || PAGES=(sessions recs calendar config settings)
 for p in "${PAGES[@]}"; do
-  tab="$p"; name="$p"; thread=""; goal=""; open=""
+  tab="$p"; name="$p"; thread=""; goal=""; open=""; stepcard=""
   case "$p" in
     thread:*) thread="${p#thread:}"; tab=sessions; name="thread-$thread";;
+    # stepcard:<thread id>: that chat with a morning-routine card posed in it
+    # and two of its steps staged on the bar (nothing is sent).
+    stepcard:*) thread="${p#stepcard:}"; stepcard=1; tab=sessions; name="stepcard-$thread";;
     goal:*) goal="${p#goal:}"; tab=goals; name="goal-$goal";;
     open:*) open="${p#open:}"; tab=sessions; name="open-$open";;
   esac
@@ -35,7 +40,7 @@ for p in "${PAGES[@]}"; do
   # killed one never leaves a "quit unexpectedly while reopening windows"
   # dialog behind. The copy also hides itself from the Dock.
   ApplePersistenceIgnoreState=YES \
-  LIFE_TAB="$tab" LIFE_THREAD="$thread" LIFE_GOAL="$goal" LIFE_OPEN="$open" LIFE_SHOT="$OUT/$name.png" LIFE_SHOT_WAIT="${WAIT:-6}" LIFE_SHOT_W="${W:-}" LIFE_SHOT_H="${H:-}" LIFE_SHOT_STEPS="${STEPS:-}" \
+  LIFE_TAB="$tab" LIFE_THREAD="$thread" LIFE_GOAL="$goal" LIFE_OPEN="$open" LIFE_SHOT="$OUT/$name.png" LIFE_SHOT_WAIT="${WAIT:-6}" LIFE_SHOT_W="${W:-}" LIFE_SHOT_H="${H:-}" LIFE_SHOT_STEPS="${STEPS:-}" LIFE_SHOT_STEPCARD="$stepcard" \
     "$BIN" >>"$ROOT/ops/logs/mac-screens.log" 2>&1 &
   pid=$!
   ( sleep 60; kill "$pid" 2>/dev/null ) & dog=$!; disown "$dog"

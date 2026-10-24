@@ -134,7 +134,8 @@ struct CalendarView: View {
                 CalWeekGrid(start: calWeekStart(anchor), today: today, byDay: byDay, filters: filters,
                             onTap: { open($0) },
                             onTapGroup: { group = CalGroup(entries: $0) },
-                            onMove: { e, day, at in Task { await move(e, day: day, at: at) } })
+                            onMove: { e, day, at in Task { await move(e, day: day, at: at) } },
+                            away: view?.away ?? [])
             }
         }
         .padding(.horizontal, 16).padding(.top, 10)
@@ -313,7 +314,8 @@ struct CalendarView: View {
                             entries: byDay[anchor] ?? [], filters: filters,
                             onTap: { open($0) },
                             onTapGroup: { group = CalGroup(entries: $0) },
-                            onMove: { e, at in Task { await move(e, day: anchor, at: at) } })
+                            onMove: { e, at in Task { await move(e, day: anchor, at: at) } },
+                            away: view?.away(on: anchor) ?? [])
                     .id(anchor)   // a new day redraws, but a reload keeps the scroll
             }
         }
@@ -574,7 +576,10 @@ struct CalendarView: View {
                         let coming = d.entries.filter { $0.coming == true }
                         let primary = d.entries.filter { !routine.contains($0) && !decided.contains($0) && $0.coming != true }
                         Section {
-                            if d.entries.isEmpty { Text("Nothing scheduled").foregroundStyle(.tertiary) }
+                            ForEach(v.away(on: d.day)) { a in
+                                CalAwayBar(span: a)
+                            }
+                            if d.entries.isEmpty && v.away(on: d.day).isEmpty { Text("Nothing scheduled").foregroundStyle(.tertiary) }
                             ForEach(primary) { row($0, day: d.day) }
                             if !coming.isEmpty {
                                 foldedRows(coming, day: d.day, key: d.day + "/coming", icon: "repeat",
@@ -632,7 +637,7 @@ struct CalendarView: View {
         // it was added (the Day grid does draw it there).
         var days = v.days.map { CalDay(day: $0.day, entries: $0.entries.filter { f.shows($0) && !($0.soon == true && !CalCals.isClosed($0)) }) }
         if !showPast {
-            days = days.filter { !$0.entries.isEmpty || $0.day == v.today }
+            days = days.filter { !$0.entries.isEmpty || $0.day == v.today || !v.away(on: $0.day).isEmpty }
         }
         if !showPast, !days.contains(where: { $0.day == v.today }) {
             days.insert(CalDay(day: v.today, entries: []), at: 0)
@@ -1353,11 +1358,29 @@ struct CalEntrySheet: View {
 /// one does; the list keeps the answer it got back. Drawn on the calendar's
 /// page and panel and on the item's chat card (AskCards). calID nil = read-only
 /// (a coming row).
+/// `stage` (the chat card): Did it · Skip · Reply arm the chat bar instead,
+/// and nothing moves until Send. The rows are then the card's own, redrawn as
+/// it reloads.
+struct StepStage {
+    /// Each step's pick on the bar, by step number, so the rows redraw as the
+    /// bar changes.
+    let armed: [Int: String]
+    let arm: (CalStep, String) -> Void
+}
+
 struct CalStepsList: View {
     @Environment(HubClient.self) private var hub
     let calID: String?
-    @State var steps: [CalStep]
+    let given: [CalStep]
+    var stage: StepStage? = nil
+    @State private var answered: [CalStep]?
     @State private var error: String?
+
+    init(calID: String?, steps: [CalStep], stage: StepStage? = nil) {
+        self.calID = calID; given = steps; self.stage = stage
+    }
+
+    private var steps: [CalStep] { answered ?? given }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1368,7 +1391,15 @@ struct CalStepsList: View {
                         .strikethrough(s.mark == "wont")
                         .foregroundStyle(s.isOpen ? .primary : .secondary)
                     Spacer(minLength: 4)
-                    if calID != nil {
+                    if calID != nil, let stage {
+                        if s.isOpen {
+                            staged(s, "done", "Did it", stage)
+                            staged(s, "wont", "Skip", stage)
+                            staged(s, "", "Reply", stage)
+                        } else {
+                            Text(s.state).font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else if calID != nil {
                         if s.isOpen {
                             Button("Did it") { Task { await close(s.n, "done") } }.buttonStyle(.bordered).controlSize(.small)
                                 .accessibilityIdentifier("step-\(s.n)-done")
@@ -1387,11 +1418,33 @@ struct CalStepsList: View {
         }
     }
 
+    /// One staged button: filled while it is the step's pick on the bar.
+    @ViewBuilder private func staged(_ s: CalStep, _ v: String, _ label: String, _ stage: StepStage) -> some View {
+        let id = "step-\(s.n)-\(v.isEmpty ? "reply" : v == "done" ? "done" : "skip")"
+        if stage.armed[s.n] == v {
+            // Its own fill: a system prominent button greys out in a window
+            // that is not key.
+            Button { stage.arm(s, v) } label: {
+                #if targetEnvironment(macCatalyst)
+                Text(label).font(.caption.weight(.semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Web.accent, in: RoundedRectangle(cornerRadius: 5))
+                #else
+                Text(label).foregroundStyle(.white)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Color.accentColor, in: Capsule())
+                #endif
+            }.buttonStyle(.plain).accessibilityIdentifier(id)
+        } else {
+            Button(label) { stage.arm(s, v) }.controlSize(.small).buttonStyle(.bordered).accessibilityIdentifier(id)
+        }
+    }
+
     private func close(_ n: Int, _ outcome: String) async {
         guard let id = calID else { return }
         do {
             let it = try await hub.closeCalStep(id, n: n, outcome: outcome)
-            steps = it.steps ?? steps
+            answered = it.steps ?? steps
             error = nil
         } catch { self.error = error.localizedDescription }
     }

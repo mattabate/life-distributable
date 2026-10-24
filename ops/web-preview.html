@@ -51,10 +51,27 @@
         surface: 'any', thread_id: TRIP, thread_title: 'Plan the spring trip',
         detail: 'The cabin is free the **first** and the **third** weekend of April.',
         outcomes: [{ value: 'done', label: 'Decided' }, { value: '', label: 'Reply' }] },
+      // An item with steps: each row's Did it · Skip · Reply stages on the
+      // bar; one is already closed.
+      { id: 'cal-0004', cal_id: 'cal-0004', title: 'Do the morning routine', state: 'active', created_at: iso(20), kind: 'physical',
+        surface: 'any', thread_id: TRIP, thread_title: 'Plan the spring trip',
+        outcomes: [{ value: 'done', label: 'Done' }, { value: 'wont', label: "Won't do" }, { value: '', label: 'Reply' }],
+        steps: [{ n: 1, title: 'Stretch', state: 'done', mark: 'done' }, { n: 2, title: 'Read 10 pages', state: 'open', mark: 'todo' },
+          { n: 3, title: 'Water the plants', state: 'open', mark: 'todo' }] },
     ],
+    '/calendar/cal-0004': { id: 'cal-0004', title: 'Do the morning routine', kind: 'owner', state: 'fired',
+      steps: [{ n: 1, title: 'Stretch', state: 'done', mark: 'done' }, { n: 2, title: 'Read 10 pages', state: 'open', mark: 'todo' },
+        { n: 3, title: 'Water the plants', state: 'open', mark: 'todo' }] },
     // The digest chat's own cards: a read the owner marked Read (folded),
     // titled from its message's first words cut with "…": open, the summary
     // drops the title.
+    [`/asks?state=all&thread=${TRIP}`]: [
+      { id: 'cal-0004', cal_id: 'cal-0004', message_id: 2, title: 'Do the morning routine', state: 'active', created_at: iso(20), kind: 'physical',
+        surface: 'any', thread_id: TRIP, thread_title: 'Plan the spring trip',
+        outcomes: [{ value: 'done', label: 'Done' }, { value: 'wont', label: "Won't do" }, { value: '', label: 'Reply' }],
+        steps: [{ n: 1, title: 'Stretch', state: 'done', mark: 'done' }, { n: 2, title: 'Read 10 pages', state: 'open', mark: 'todo' },
+          { n: 3, title: 'Water the plants', state: 'open', mark: 'todo' }] },
+    ],
     [`/asks?state=all&thread=${TIDY}`]: [
       { id: 'ask-f01d', message_id: 3, title: 'The digest now goes out Sunday at 8, with the week\'s dates…', state: 'done', created_at: iso(5),
         resolved_at: iso(4), kind: 'read', closed: true, folded: 'read', reopen: true, surface: 'any',
@@ -75,6 +92,8 @@
     [`/threads/${TRIP}/messages`]: [
       { id: 1, thread_id: TRIP, role: 'owner', author: 'owner', ts: iso(60), run_id: 'r1', text: 'Find us a cabin for a spring weekend, under $500.' },
       { id: 2, thread_id: TRIP, role: 'claude', ts: iso(30), run_id: 'r1', text: 'Two fit. The lake cabin is $480 for two nights and refundable; booking it is a money step, so it is on your board.', cost_usd: 1.42 },
+      { id: 4, thread_id: TRIP, role: 'owner', author: 'owner', ts: iso(10), run_id: 'r3', text: '',
+        replies: [{ ref: 'step:cal-0004.1', outcome: 'done', label: 'Did it' }] },
     ],
     [`/threads/${TRIP}/steps`]: [],
     [`/threads/${TIDY}`]: { id: TIDY, title: 'Tidy the weekly digest', status: 'idle', model: 'claude-fable-5-1', cost_usd: 0.31, last_message_at: iso(6) },
@@ -132,6 +151,7 @@
         { day: '2026-08-27', entries: [{ id: 'cal-0003', ref: 'cal:cal-0003', day: '2026-08-27', kind: 'agent', state: 'scheduled', title: 'Re-check the digest dates', detail: 'Confirm Sunday is counted once.', thread_id: TIDY }] },
       ],
       anytime: [{ id: 'ask:ask-1a2b', day: '', kind: 'ask', state: 'scheduled', title: 'Make a weather API key', ask_id: 'ask-1a2b', thread_id: TIDY }],
+      away: [{ id: 'away-0000feed', title: 'Trip', detail: 'Three days away', from: '2026-08-26', until: '2026-08-28', state: 'on' }],
     },
     '/status': { ok: true, jobs: 2, pending_actions: 2, quiet: true },
   };

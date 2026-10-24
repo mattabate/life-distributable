@@ -405,7 +405,14 @@ function calTimeGridHTML(cal, from, to) {
       <div class="num">${dd.getDate()}</div></div>`;
   }).join('');
 
-  const band = days.map(d => `<div class="cal-allday" data-day="${d}">${
+  // The days the owner is away (the hub's `away`): a bar over those columns
+  // atop the all-day band, and the columns shaded under it. Not an item: no
+  // click, no count, no drag target.
+  const away = calAwayBars(cal, days);
+  const awayDay = d => away.some(a => d >= a.from && d <= a.until);
+  const pin = (i, n) => away.length ? ` style="grid-row:${n};grid-column:${i + 1}"` : '';
+  const band = away.map(a => `<div class="cal-away" style="grid-row:1;grid-column:${a.a + 1} / ${a.b + 2}" title="${esc(a.detail || a.title)}">${esc(a.title)}</div>`).join('')
+    + days.map((d, i) => `<div class="cal-allday${awayDay(d) ? ' away' : ''}" data-day="${d}"${pin(i, 2)}>${
     calBandHTML(bandOf(d))}</div>`).join('');
 
   const hours = Array.from({ length: 24 }, (_, h) =>
@@ -413,7 +420,7 @@ function calTimeGridHTML(cal, from, to) {
 
   const cols = days.map(d => {
     const timed = planOf(d).filter(e => e.at);
-    return `<div class="cal-col${d === today ? ' today' : ''}" data-day="${d}">
+    return `<div class="cal-col${d === today ? ' today' : ''}${awayDay(d) ? ' away' : ''}" data-day="${d}">
       ${Array.from({ length: 24 }, (_, h) => `<div class="cal-line" style="top:${h * CAL_HOUR_H}px"></div>`).join('')}
       <div class="cal-plan${strip ? ' inset' : ''}">
         ${calLayout(timed).map(p => calBlockHTML(p.e, p)).join('')}
@@ -424,7 +431,7 @@ function calTimeGridHTML(cal, from, to) {
   // One scroller, sticky header rows inside it — never two scrollers side by
   // side, or the day headers drift off their columns by a scrollbar's width.
   const w = `grid-template-columns:repeat(${days.length}, minmax(0,1fr))`;
-  const bandH = allDayRows * 21 + 8;
+  const bandH = allDayRows * 21 + 8 + (away.length ? 22 : 0);
   return `<div class="cal-grid" id="cal-scroll"><div class="cal-inner">
     <div class="cal-corner head"></div>
     <div class="cal-cols head" style="${w}">${head}</div>
@@ -433,6 +440,18 @@ function calTimeGridHTML(cal, from, to) {
     <div class="cal-gut hours">${hours}</div>
     <div class="cal-cols body" style="${w};height:${24 * CAL_HOUR_H}px">${cols}</div>
   </div></div>`;
+}
+
+// The live away spans touching `days`, clipped to them: {title, detail, from,
+// until, a, b} with a..b the first and last column index. Ended spans go.
+function calAwayBars(cal, days) {
+  if (!days.length) return [];
+  const first = days[0], last = days[days.length - 1];
+  return (cal.away || []).filter(s => s.state !== 'ended' && s.from <= last && (s.until || s.from) >= first)
+    .map(s => {
+      const until = s.until || s.from;
+      return { ...s, until, a: Math.max(0, days.indexOf(s.from < first ? first : s.from)), b: days.indexOf(until > last ? last : until) };
+    });
 }
 
 // (The Recs band — `calSuggHTML` / `calRecChipHTML`, a sticky row of purple

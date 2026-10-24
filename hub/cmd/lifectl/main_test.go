@@ -75,3 +75,14 @@ func TestPrintRowsCalendarDays(t *testing.T) {
 		t.Fatalf("got\n%q\nwant\n%q", b.String(), want)
 	}
 }
+
+// An away span's line says which days it covers.
+func TestPrintRowsAwaySpan(t *testing.T) {
+	var v any
+	json.Unmarshal([]byte(`{"away":[{"id":"away-1","state":"on","from":"2030-05-31","until":"2030-06-12","title":"Trip"}]}`), &v)
+	var b strings.Builder
+	printRows(&b, "", v)
+	if want := "away:\naway-1  on  2030-05-31  2030-06-12  Trip\n"; b.String() != want {
+		t.Fatalf("got\n%q\nwant\n%q", b.String(), want)
+	}
+}

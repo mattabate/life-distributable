@@ -877,9 +877,11 @@ function askHTML(a, opened, armed) {
     ref: 'ask', id: a.id, title: a.title, verb: a.verb || 'for you',
     tint: paused && open ? 'paused' : err ? 'err-card' : read ? 'read' : install ? 'install' : '',
     mark: answered ? '⏳ ' : !open ? '✓ ' : paused ? PAUSE_MARK + ' ' : err ? '⚠︎ ' : read ? '🔵 ' : install ? '📲 ' : '🔴 ',
-    // An item's steps: each its own Did it · Skip, on the one card.
+    // An item's steps: each its own Did it · Skip · Reply, on the one card,
+    // staged on the chat's bar until Send.
     body: paused && open ? pauseBarHTML(a) : err ? '' : askBody(install && !mac ? askDetailShown(a.detail) : (a.detail || ''), 'ask:' + a.id)
-      + (a.steps && typeof calStepsHTML === 'function' ? calStepsHTML(a) : ''),
+      + (a.steps && typeof calStepsHTML === 'function' ? calStepsHTML(a, typeof armStepReply === 'function'
+        ? { card: a.id, armed: n => chatArmed('step', (a.cal_id || a.id) + '.' + n) } : undefined) : ''),
     said: a.said, thread: a.thread_id, acts, closed: open ? '' : esc(a.state),
     folded: a.folded === 'dismissed' ? '✕ dismissed' : a.folded ? '✓ ' + esc(a.folded) : '',
   }, opened);

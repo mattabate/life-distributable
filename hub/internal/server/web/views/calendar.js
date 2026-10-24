@@ -268,15 +268,23 @@ const calPillStyle = i => {
 // language, with its own Did it · Skip; a closed one keeps Undo. The item
 // closes itself when the last one does (hub, calendar/steps.go). Shared with
 // the chat card (ui.js askCard), so both draw the same rows.
-function calStepsHTML(i) {
+// `stage` (the chat card): Did it · Skip · Reply arm the composer instead,
+// and nothing moves until Send. stage.armed(n) is that step's pick on the
+// bar, undefined if none.
+function calStepsHTML(i, stage) {
   const steps = i.steps || [];
   if (!steps.length) return '';
   const id = i.cal_id || (i.item ? i.id : '');
   const live = !!id && !i.coming;
+  const staged = (s, v, label) => {
+    const on = stage.armed(s.n) === v;
+    return `<button class="sm${on ? ' primary' : ''}" onclick="armStepReply('${esc(stage.card)}',${s.n},'${v}')">${label}</button>`;
+  };
   return `<div class="cal-steps">${steps.map(s => {
     const g = s.mark === 'done' ? '✓' : s.mark === 'wont' ? '✕' : '○';
     const t = s.mark === 'wont' ? `<s>${esc(s.title)}</s>` : esc(s.title);
     const btns = !live ? ''
+      : stage ? (s.state === 'open' ? staged(s, 'done', 'Did it') + staged(s, 'wont', 'Skip') + staged(s, '', 'Reply') : `<span class="small muted">${esc(s.state)}</span>`)
       : s.state === 'open' ? `<button class="sm" onclick="closeCalStep('${esc(id)}',${s.n},'done')">Did it</button><button class="sm" onclick="closeCalStep('${esc(id)}',${s.n},'wont')">Skip</button>`
       : `<span class="small muted">${esc(s.state)}</span><button class="sm" onclick="closeCalStep('${esc(id)}',${s.n},'open')">Undo</button>`;
     return `<div class="cal-step${s.state === 'open' ? '' : ' closed'}"><span class="tick">${g}</span><span class="grow">${t}</span>${btns}</div>`;
