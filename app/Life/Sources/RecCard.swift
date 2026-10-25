@@ -9,8 +9,8 @@ import SwiftUI
 /// the chat bar with that pick so the decision is recorded and relayed into
 /// this chat exactly as one made on the Recs page is — then Dismiss, the
 /// silent close (expired, note "dismissed" — HubClient.cardFold),
-/// which folds the cell with Reopen inside. A decided rec is the grey card
-/// with the verdict: the ✓ of a rec. Pull stays pull — the cell is inside
+/// which folds the cell with Reopen inside. A decided rec is its row with the
+/// verdict: the ✓ of a rec. Pull stays pull: the cell is inside
 /// the session and notifies nobody.
 struct RecCard: View {
     @Environment(HubClient.self) private var hub
@@ -20,6 +20,8 @@ struct RecCard: View {
     /// "" for words alone).
     let decide: (String) -> Void
     var reload: () async -> Void = {}
+    /// The dollars of the turn that filed it, on its first card (ThreadDetail).
+    var cost: Double = 0
     @State private var busy = false
     @State private var error: String?
 
@@ -30,15 +32,14 @@ struct RecCard: View {
     private var stateWord: String { rec.status == "deferred" ? "later" : rec.status }
 
     var body: some View {
-        Card(tint: .purple, mark: open ? "lightbulb.fill" : "lightbulb",
-             caption: open ? "recommendation" : stateWord, right: rec.costLabel,
+        Card(tint: .purple, mark: "lightbulb.fill", caption: "recommendation", right: rec.costLabel,
+             cost: cost,
              title: rec.title, text: rec.because ?? rec.detail ?? "", lines: 3,
              meta: AnyView(chips),
-             closed: !open && !dismissed,
              // The record of what they chose, and where: the note itself is the
              // "↩ …" message under this cell, from either surface.
              line: decidedLine,
-             folded: rec.folded,
+             folded: open ? nil : dismissed ? "✕ dismissed" : (rec.status == "declined" ? "✕ " : "✓ ") + stateWord,
              buttons: buttons, busy: busy, error: error)
         .contextMenu {
             if open { Button { decide("") } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") } }

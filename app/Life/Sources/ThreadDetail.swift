@@ -1,5 +1,5 @@
-// One session's chat: ThreadDetail, its run activity rows and the settings
-// sheet.
+// One session's chat: ThreadDetail and the settings sheet. Every message and
+// closed card is one ChatRow; the tool calls are not drawn.
 import SwiftUI
 
 /// Rows drawn on open, and how many more each "Show earlier" adds.
@@ -29,24 +29,6 @@ struct ThreadDetail: View {
     @State private var foreground = true
     @Environment(\.scenePhase) private var scenePhase
     @State private var messages: [ThreadMessage] = []
-    @State private var events: [ThreadEvent] = []
-    /// Replies whose folded text the owner has tapped open (there is no white
-    /// cell: a reply row draws only as the "turn ended" line).
-    @State private var openReplies: Set<Int> = []
-    /// Long messages the owner has unfolded. Closed, a bubble past `isLongText` clamps to a screen's
-    /// worth behind "Show N more lines" when there are five or more behind
-    /// it (FoldedText). Same fold as the console's `.body.long` (views/threads.js msgHTML).
-    @State private var openLong: Set<Int> = []
-    func openLongBinding(_ id: Int) -> Binding<Bool> {
-        Binding(get: { openLong.contains(id) }, set: { if $0 { openLong.insert(id) } else { openLong.remove(id) } })
-    }
-    /// The hub's step count per message — the headline of every run block.
-    /// The phone holds only the events it DRAWS (the newest page, what
-    /// streams in, and any block the owner opens), so a count must not come from
-    /// them: a single turn regularly runs to hundreds of tool calls.
-    @State private var steps: [Int: StepCount] = [:]
-    /// Blocks whose own steps are being fetched right now (one at a time).
-    @State private var loadingBlocks: Set<Int> = []
     /// Every ask this session raised, shown as a card under the reply that
     /// raised it, so it can be answered here rather than from a bare id on
     /// another screen.
@@ -78,9 +60,8 @@ struct ThreadDetail: View {
     /// The draft lives in its own object, read only by `Composer`. As plain
     /// @State here, every keystroke — and every dictation partial, which
     /// arrives many times a second — invalidated this whole view, rebuilding
-    /// the (non-lazy) message list, re-sorting `ordered` and regrouping
-    /// `eventsByRun`. That is the composer getting slower the longer the text
-    /// and the thread.
+    /// the (non-lazy) message list and re-sorting `ordered`. That is the
+    /// composer getting slower the longer the text and the thread.
     @State private var draft = Draft()
     @State private var error: String?
     /// A send that the hub refused, kept apart from `error`: `load()` clears
@@ -114,17 +95,11 @@ struct ThreadDetail: View {
     @State private var queuedPrompts: [Prompt] = []
     @State private var pickingWhen = false
     @State private var pickWhenDate = Date().addingTimeInterval(3600)
-    /// The drawn rows, rebuilt only when the data behind them changes.
-    /// `turnRows` sorts every message, groups every event by run and slices
-    /// each run at its steering points — real work over hundreds of events —
-    /// and as a computed property in `body` it ran on every single view
-    /// update and made the chat slow.
-    @State private var rows: [TurnRow] = []
     /// How many of the newest rows are drawn. The stack below is deliberately
     /// NOT lazy (the opening scroll needs real targets), so a 90-message
-    /// session built every bubble — each one a UITextView — plus every
-    /// activity block before the first frame could appear, and tore them all
-    /// down again on the way back to Sessions. Older turns are one tap away.
+    /// session built every row before the first frame could appear, and tore
+    /// them all down again on the way back to Sessions. Older turns are one
+    /// tap away.
     @State private var shown = rowWindow
 
     /// The owner can always write — while the agent works the message is steered
@@ -151,19 +126,12 @@ struct ThreadDetail: View {
     @Environment(SnapState.self) private var snap
     #endif
 
-    /// Events grouped by run, in stream order.
-    var eventsByRun: [String: [ThreadEvent]] { Dictionary(grouping: events, by: \.run_id) }
-    /// The run currently in flight = the latest run id that has no reply yet.
-    var liveRun: String? {
+    /// When the turn in flight started: its starter, the latest message of a
+    /// run with no reply yet.
+    var liveSince: Date? {
         guard thread.status == "running" else { return nil }
         let replied = Set(messages.filter { $0.role == "claude" || $0.kind == "error" }.compactMap(\.run_id))
-        return messages.last { $0.run_id != nil && !replied.contains($0.run_id!) && $0.role != "claude" }?.run_id
-    }
-    /// Events of the live run that have no starter message in the list (shouldn't happen; shown anyway).
-    var orphanLive: [ThreadEvent] {
-        guard thread.status == "running", liveRun == nil else { return [] }
-        let known = Set(messages.compactMap(\.run_id))
-        return events.filter { !known.contains($0.run_id) }
+        return messages.last { $0.run_id != nil && !replied.contains($0.run_id!) && $0.role != "claude" }?.ts
     }
 
     /// Conversational order, not timestamp order. A message the owner sends while
@@ -172,7 +140,7 @@ struct ThreadDetail: View {
     /// activity block — sat above the previous reply, making the earlier
     /// reply look like it was mid-tool-chain and the later one orphaned.
     /// Turns are sequential and each is one run id (`<run>`, `<run>-t2`, …),
-    /// so a turn draws as one piece — starter(s) → activity → reply — and
+    /// so a turn draws as one piece (starter(s) → reply → its cards) and
     /// turns follow one another in the order they STARTED: the ts of each
     /// run's earliest message. That key never changes, so nothing jumps when
     /// a reply lands. (Keying a run by its LATEST message instead put a
@@ -192,19 +160,14 @@ struct ThreadDetail: View {
     /// The tail of the conversation — what a chat opens on. Anything older is
     /// behind "Show earlier"; a target further up (an ask card that was tapped) pulls
     /// the window back to cover it, see `widen`.
-    var visibleRows: [TurnRow] { rows.count <= shown ? rows : Array(rows.suffix(shown)) }
-
-    /// The newest session row: the one whose end line says "turn ended"
-    /// (the console's `lastTurnID`, views/threads.js).
-    var lastTurnID: Int? {
-        messages.last { $0.role != "owner" && $0.role != "system" && $0.kind != "schedule" }?.id
-    }
+    func visible(_ rows: [ThreadMessage]) -> [ThreadMessage] { rows.count <= shown ? rows : Array(rows.suffix(shown)) }
 
     /// Make sure a given message is inside the drawn window — the row the
     /// thread scrolls to on open, and any ask still waiting on the owner, which
     /// must never be hidden behind "Show earlier".
     func widen(toRow id: Int?) {
-        guard let id, let i = rows.firstIndex(where: { $0.m.id == id }) else { return }
+        let rows = ordered
+        guard let id, let i = rows.firstIndex(where: { $0.id == id }) else { return }
         shown = max(shown, rows.count - i + 2)
     }
 
@@ -259,12 +222,8 @@ struct ThreadDetail: View {
         asks = all
         var by: [Int: [Ask]] = [:], tail: [Ask] = []
         let order = ordered
-        let inChain = chainRefs
         let active = { (a: Ask) in !a.isClosed }
         for a in all {
-            // Raised mid-run: the run block draws it where it happened, not
-            // under a bubble.
-            if inChain.contains("ask:" + a.id) { continue }
             // Dismissed — or a read marked Read — folds to one grey line
             // where it was, with Reopen inside, so it can still be answered.
             if let mid = a.message_id, order.contains(where: { $0.id == mid }) {
@@ -295,9 +254,7 @@ struct ThreadDetail: View {
         actions = pending
         var by: [Int: [Action]] = [:], tail: [Action] = []
         let order = ordered
-        let inChain = chainRefs
         for a in pending {
-            if inChain.contains("action:" + a.id) { continue } // drawn where it was proposed
             if let host = order.last(where: { $0.ts <= a.created_at }) {
                 by[host.id, default: []].append(a)
                 if a.open == true || a.id == focusCard { widen(toRow: host.id) }
@@ -317,12 +274,15 @@ struct ThreadDetail: View {
         recs = all
         var by: [Int: [Rec]] = [:], tail: [Rec] = []
         let order = ordered
+        let newest = order.map(\.id).max() ?? 0
         for r in all {
             if let mid = r.message_id, order.contains(where: { $0.id == mid }) {
                 by[mid, default: []].append(r)
-            } else {
+            } else if r.message_id.map({ $0 == 0 || $0 > newest }) ?? true {
                 tail.append(r)
             }
+            // Its reply is older than the loaded messages: not drawn (it sat
+            // at the end, under the newest message); the Recs tab still holds it.
         }
         recsByMessage = by
         tailRecs = tail
@@ -332,18 +292,18 @@ struct ThreadDetail: View {
     /// (the console's composer does the same): the owner's note is typed where a
     /// message is, and the decision lands in this chat as "↩ Accepted ·
     /// <title>" over it — alongside whatever other cards are armed.
-    func recCell(_ r: Rec) -> some View {
+    func recCell(_ r: Rec, cost: Double = 0) -> some View {
         RecCard(rec: r, decide: { outcome in
             arm(ArmedReply(kind: .rec, id: r.id, title: r.title, outcome: outcome, outcomes: r.outcomes ?? []))
-        }, reload: { await load() }).id(r.id)
+        }, reload: { await load() }, cost: cost).id(r.id)
     }
 
     /// One proposal's cell: Approve · Deny · Reply each arm the chat bar
     /// with the action and that pick, exactly as a rec's buttons do. Send posts one prompt naming it; the hub decides the row.
-    func approvalCell(_ a: Action) -> some View {
+    func approvalCell(_ a: Action, cost: Double = 0) -> some View {
         ApprovalCard(a: a, inThread: true, arm: { outcome in
             arm(ArmedReply(kind: .action, id: a.id, title: a.title, outcome: outcome, outcomes: a.outcomes ?? []))
-        }) { await load() }.id(a.id)
+        }, cost: cost) { await load() }.id(a.id)
     }
 
     /// Arm a card without dropping the others; the same card again only
@@ -353,165 +313,44 @@ struct ThreadDetail: View {
         draft.focusRequest += 1
     }
 
-    /// Desktop: a turn's end line folded into the line of its last block,
-    /// "6 tool calls · turn ended · today 11:56 PM · $1.31" where it was two
-    /// rows. Only when the reply row is nothing but that line and comes
-    /// straight after a finished block with no card under it; any other reply
-    /// keeps its own row. `tails` is keyed by the starter, `skip` holds the
-    /// replies that draw no row.
-    var mergedEnds: (tails: [Int: (line: String, reply: Int)], skip: Set<Int>) {
-        var tails: [Int: (line: String, reply: Int)] = [:], skip: Set<Int> = []
+
+    /// The first card under a message: an empty reply's dollars ride on it
+    /// (the console's msgHTML), so the turn is one row, not a reply row and
+    /// a card.
+    func leadRef(_ m: ThreadMessage) -> String? {
+        if let a = asksByMessage[m.id]?.first { return "ask:" + a.id }
+        if let a = actionsByMessage[m.id]?.first { return "action:" + a.id }
+        return recsByMessage[m.id]?.first.map { "rec:" + $0.id }
+    }
+
+    func leadCost(_ m: ThreadMessage, _ ref: String) -> Double {
+        m.role == "claude" && leadRef(m) == ref ? m.cost_usd : 0
+    }
+
+    /// The working line under the chat, the console's paintWorking: a dot
+    /// and its words; on the phone, Stop beside it.
+    @ViewBuilder func workingLine(_ text: String, stop canStop: Bool = false) -> some View {
         #if targetEnvironment(macCatalyst)
-        let vis = visibleRows
-        for (i, r) in vis.enumerated() where i + 1 < vis.count {
-            guard !r.live, let last = r.chain.last, last.card == nil, !last.live,
-                  !last.events.isEmpty || (last.count?.steps ?? 0) > 0 else { continue }
-            let n = vis[i + 1].m
-            guard n.role != "owner", n.role != "system", n.kind != "schedule", n.kind != "error",
-                  n.run_id != nil, n.run_id == r.m.run_id,
-                  n.text.isEmpty, (n.attachments ?? []).isEmpty else { continue }
-            var line = dayClock(n.ts)
-            if n.cost_usd > 0 { line += " · " + usd(n.cost_usd) }
-            if n.id == lastTurnID { line = "turn ended · " + line }
-            tails[r.m.id] = (line, n.id)
-            skip.insert(n.id)
-        }
+        HStack(spacing: 7) {
+            LiveDot(color: Web.accent, size: 6)
+            Text(text).font(.system(size: 12.5)).foregroundStyle(Web.muted).monospacedDigit()
+        }.padding(.horizontal)
+        #else
+        HStack(spacing: 8) {
+            ProgressView()
+            Text(text).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+            Spacer()
+            if canStop {
+                Button { stop() } label: { Label("Stop", systemImage: "stop.fill").font(.caption.weight(.semibold)) }
+                    .buttonStyle(.bordered).tint(.orange).controlSize(.small).disabled(stopping)
+            }
+        }.padding(.horizontal)
         #endif
-        return (tails, skip)
-    }
-
-    /// A message that opened a run (as opposed to the reply that ended it).
-    func startsRun(_ m: ThreadMessage) -> Bool { m.run_id != nil && m.role != "claude" && m.kind != "error" }
-
-    /// One drawn row: a message plus the steps that belong under *it*, cut
-    /// into pieces at the cards the agent raised while it worked.
-    struct TurnRow: Identifiable {
-        let m: ThreadMessage
-        let chain: [TurnPiece]
-        let live: Bool
-        /// The hub's counts for this message (nil only for a run the hub has
-        /// not answered for yet — then the held events are all we can say).
-        let count: StepCount?
-        var id: Int { m.id }
-        var events: [ThreadEvent] { chain.flatMap(\.events) }
-    }
-
-    /// One piece of a run block: its steps, its own count, and the card drawn
-    /// after it. `card` is nil on the tail — the steps after the last card,
-    /// which is where a running session still is.
-    struct TurnPiece: Identifiable {
-        let id: String
-        let events: [ThreadEvent]
-        let count: StepCount?
-        let live: Bool
-        let card: String?
-    }
-
-    /// A message steered in mid-turn carries the SAME run_id as the message
-    /// that started the turn, and every starter drew that run's whole event
-    /// list — so the same "100 tool calls" block appeared twice, once above
-    /// the steering message and once below. Each starter
-    /// now shows only the steps between it and the next starter, which is
-    /// what steering is for: it breaks the chain where it actually landed.
-    /// Only the last starter carries the live dot.
-    func computeRows() -> [TurnRow] { Perf.time("computeRows") { computeRowsNow() } }
-
-    private func computeRowsNow() -> [TurnRow] {
-        let byRun = eventsByRun, live = liveRun
-        var starters: [String: [ThreadMessage]] = [:]
-        for m in ordered where startsRun(m) { starters[m.run_id!, default: []].append(m) }
-        var slice: [Int: [ThreadEvent]] = [:]
-        var lastStarter: [String: Int] = [:]
-        for (run, ms) in starters {
-            let evs = byRun[run] ?? []
-            lastStarter[run] = ms.last?.id
-            for (i, m) in ms.enumerated() {
-                // First starter also takes anything stamped before it.
-                let from = i == 0 ? Date.distantPast : m.ts
-                let to = i + 1 < ms.count ? ms[i + 1].ts : Date.distantFuture
-                slice[m.id] = evs.filter { $0.ts >= from && $0.ts < to }
-            }
-        }
-        return ordered.map { m in
-            let isLast = m.run_id.flatMap { lastStarter[$0] } == m.id
-            let isLive = isLast && m.run_id != nil && m.run_id == live
-            let c = steps[m.id]
-            return TurnRow(m: m, chain: pieces(m, slice[m.id] ?? [], c, isLive), live: isLive, count: c)
-        }
-    }
-
-    /// Cut one run block at the cards the agent raised while it ran. The hub
-    /// gives the cut and each piece's own count (`StepCount.segments`) — a
-    /// count must never be "what we happen to hold" (see `steps`), and the cut
-    /// must be the same one the console draws.
-    ///
-    /// A segment whose card this chat is not drawing — a proposal the pending
-    /// list no longer carries — is folded INTO the next piece rather than
-    /// left as a cut with nothing between, so the chain still reads as one run
-    /// of N steps.
-    func pieces(_ m: ThreadMessage, _ evs: [ThreadEvent], _ count: StepCount?, _ live: Bool) -> [TurnPiece] {
-        let segs = count?.segments ?? []
-        guard !segs.isEmpty else { return [TurnPiece(id: "\(m.id)", events: evs, count: count, live: live, card: nil)] }
-        var drawn: [StepSegment] = []
-        var carry: StepSegment?
-        for s in segs {
-            var acc = s
-            if let c = carry {
-                acc.tools += c.tools; acc.thoughts += c.thoughts; acc.steps += c.steps
-                acc.first_id = c.first_id == 0 ? s.first_id : (s.first_id == 0 ? c.first_id : min(c.first_id, s.first_id))
-                acc.last_id = max(c.last_id, s.last_id)
-            }
-            if let ref = s.ref, !ref.isEmpty, cardInChain(ref) == nil { carry = acc; continue }
-            drawn.append(acc)
-            carry = nil
-        }
-        if var c = carry { c.ref = nil; drawn.append(c) }
-        return drawn.enumerated().map { i, s in
-            TurnPiece(id: "\(m.id):\(i)",
-                      events: s.steps == 0 ? [] : evs.filter { $0.id >= s.first_id && $0.id <= s.last_id },
-                      count: count.map { StepCount(message_id: $0.message_id, run_id: $0.run_id, tools: s.tools, thoughts: s.thoughts,
-                                                   steps: s.steps, first_id: s.first_id, last_id: s.last_id, segments: nil) },
-                      live: live && i == drawn.count - 1,
-                      card: s.ref.flatMap { $0.isEmpty ? nil : $0 })
-        }
-    }
-
-    /// The object behind a segment's `ref`, if this chat is drawing it. A
-    /// proposal the pending list no longer carries is not.
-    func cardInChain(_ ref: String) -> ChatCard? {
-        let parts = ref.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2 else { return nil }
-        if parts[0] == "ask" {
-            guard let a = asks.first(where: { $0.id == parts[1] }) else { return nil }
-            return .ask(a)
-        }
-        guard let x = actions.first(where: { $0.id == parts[1] }) else { return nil }
-        return .action(x)
-    }
-
-    /// A card drawn inside the tool chain: the ordinary card, because
-    /// answering one mid-chain is the point — the reply is delivered into the
-    /// turn still running as a steering message and the agent carries on.
-    enum ChatCard { case ask(Ask), action(Action) }
-
-    @ViewBuilder func chainCard(_ ref: String) -> some View {
-        switch cardInChain(ref) {
-        case .ask(let a): AskCard(a: a, goals: goals, reload: { await load() }).id(a.id)
-        case .action(let x): approvalCell(x)
-        case nil: EmptyView()
-        }
-    }
-
-    /// Refs the run blocks are drawing, so `placeAsks`/`placeActions` leave
-    /// those cards alone instead of drawing them a second time under a bubble.
-    var chainRefs: Set<String> {
-        var out: Set<String> = []
-        for c in steps.values { for s in c.segments ?? [] { if let r = s.ref, !r.isEmpty, cardInChain(r) != nil { out.insert(r) } } }
-        return out
     }
 
     var body: some View {
-        let _ = Perf.event("ThreadDetail.body rows=\(rows.count) shown=\(shown) events=\(events.count)")
+        let rows = ordered
+        let _ = Perf.event("ThreadDetail.body rows=\(rows.count) shown=\(shown)")
         VStack(spacing: 0) {
             #if targetEnvironment(macCatalyst)
             macHead
@@ -521,76 +360,42 @@ struct ThreadDetail: View {
                     // Plain VStack (not lazy): rows exist as soon as messages
                     // load, so the initial scrollTo has real targets. That is
                     // affordable because only `shown` of them are built.
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
                         if rows.count > shown {
                             Button { withAnimation { shown += rowWindow * 2 } } label: {
                                 Label("Show \(min(rowWindow * 2, rows.count - shown)) earlier of \(rows.count)", systemImage: "chevron.up")
                                     .font(.caption).foregroundStyle(.secondary)
                             }.buttonStyle(.plain).padding(.horizontal)
                         }
-                        let ends = mergedEnds
-                        ForEach(visibleRows) { r in
-                            if !ends.skip.contains(r.m.id) { bubble(r.m).id(r.m.id) }
-                            ForEach(asksByMessage[r.m.id] ?? []) { a in
-                                AskCard(a: a, goals: goals, reload: { await load() }).id(a.id)
+                        ForEach(visible(rows)) { m in
+                            messageRow(m).id(m.id)
+                            ForEach(asksByMessage[m.id] ?? []) { a in
+                                AskCard(a: a, goals: goals, cost: leadCost(m, "ask:" + a.id), reload: { await load() }).id(a.id)
                             }
-                            ForEach(actionsByMessage[r.m.id] ?? []) { approvalCell($0) }
-                            ForEach(recsByMessage[r.m.id] ?? []) { recCell($0) }
-                            // The run block, cut at the cards raised while it
-                            // ran: fold · card · fold · card · the tail still
-                            // running.
-                            ForEach(r.chain) { p in
-                                if !p.events.isEmpty || p.live || (p.count?.steps ?? 0) > 0 {
-                                    let end = p.id == r.chain.last?.id ? ends.tails[r.m.id] : nil
-                                    RunActivity(events: p.events, live: p.live, count: p.count,
-                                                tail: end?.line ?? "",
-                                                open: { await loadBlock(r.count) }).id("run-\(p.id)")
-                                        // The folded reply row's anchor, so a
-                                        // scroll to it still lands here.
-                                        .background(alignment: .bottom) { if let end { Color.clear.frame(height: 1).id(end.reply) } }
-                                }
-                                if let ref = p.card { chainCard(ref) }
-                            }
+                            ForEach(actionsByMessage[m.id] ?? []) { approvalCell($0, cost: leadCost(m, "action:" + $0.id)) }
+                            ForEach(recsByMessage[m.id] ?? []) { recCell($0, cost: leadCost(m, "rec:" + $0.id)) }
                         }
                         ForEach(tailAsks) { a in
                             AskCard(a: a, goals: goals, reload: { await load() }).id(a.id)
                         }
                         ForEach(tailActions) { approvalCell($0) }
                         ForEach(tailRecs) { recCell($0) }
-                        if !orphanLive.isEmpty { RunActivity(events: orphanLive, live: true) }
+                        // THE working line, the console's paintWorking
+                        // (views/threads.js); keep them in step: "starting ·
+                        // N s" until the first tool call, then "working · "
+                        // and the turn's facts. Stop sits beside it on the
+                        // phone (it kills the tool chain mid-turn; the
+                        // conversation stays resumable); the desktop's is the
+                        // head's pill. All of it is inside `status ==
+                        // "running"`, so a stopped session shows none of it.
                         if thread.status == "running" {
-                            // Stop is right here while it works:
-                            // kills the tool chain mid-turn; the conversation
-                            // stays resumable with the next message.
-                            // THE working line, same as the web console's
-                            // `paintWorking` (views/threads.js); keep them in
-                            // step. A running turn ends the chat the way a
-                            // finished one does: its block, then "working ·
-                            // today 10:09 PM · $1.12" where "turn ended · …"
-                            // will go; with no live block yet the count rides
-                            // here too, behind the dot. The clock is the
-                            // turn's last output, so a hung turn shows an old
-                            // time. The whole row is inside
-                            // `status == "running"`, so a stopped session
-                            // shows none of it.
-                            let liveBlock = rows.contains { $0.live } || !orphanLive.isEmpty
-                            let working = (["working", thread.turnFacts(withCalls: !liveBlock)].filter { !$0.isEmpty }).joined(separator: " · ")
-                            #if targetEnvironment(macCatalyst)
-                            // The desktop's Stop is the head's running pill,
-                            // as on the console: here only the working line.
-                            HStack(spacing: 7) {
-                                if !liveBlock { LiveDot(color: Web.accent, size: 6) }
-                                Text(working).font(.system(size: 12.5)).foregroundStyle(Web.muted).monospacedDigit()
-                            }.padding(.horizontal)
-                            #else
-                            HStack(spacing: 8) {
-                                if !liveBlock { ProgressView() }
-                                Text(working).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
-                                Spacer()
-                                Button { stop() } label: { Label("Stop", systemImage: "stop.fill").font(.caption.weight(.semibold)) }
-                                    .buttonStyle(.bordered).tint(.orange).controlSize(.small).disabled(stopping)
-                            }.padding(.horizontal)
-                            #endif
+                            if (thread.turn_tools ?? 0) == 0, let s = liveSince {
+                                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                                    workingLine("starting · \(max(0, Int(ctx.date.timeIntervalSince(s)))) s", stop: true)
+                                }
+                            } else {
+                                workingLine((["working", thread.turnFacts()].filter { !$0.isEmpty }).joined(separator: " · "), stop: true)
+                            }
                         }
                         Color.clear.frame(height: 1).id("bottom")
                     }
@@ -784,10 +589,7 @@ struct ThreadDetail: View {
             if p == .active { Task { await load() } }
         }
         // Back: the board loop resumes on its own within 2 s (RootView) —
-        // kicking a refresh from here competed with the pop animation. The
-        // events the phone assembled (disk seed + every delta) are written
-        // back so the next open of this chat seeds from them, not from a
-        // 460 KB fetch (speed phase, 2026-08-26).
+        // kicking a refresh from here competed with the pop animation.
         // The board landed after this chat opened (a relaunch draws both at
         // once): its cards, until the chat's own fetch answers.
         .onChange(of: store.board?.bundleOf(thread)) { seedCards() }
@@ -795,8 +597,6 @@ struct ThreadDetail: View {
             #if !targetEnvironment(macCatalyst)
             store.resume()
             #endif
-            let key = hub.cacheKey(HubClient.eventsPath(thread.id)), evs = Array(events.suffix(1000))
-            if !evs.isEmpty { Task.detached { HubClient.remember(key: key, evs) } }
         }
         .task {
             #if targetEnvironment(simulator)
@@ -810,17 +610,11 @@ struct ThreadDetail: View {
             #endif
             // Paint from the phone's copy first: the chat as of the last open
             // draws before the first byte arrives, then `load` fetches what
-            // changed (messages/asks by ETag, events by `since`).
+            // changed (messages/asks by ETag).
             if messages.isEmpty {
-                let mk = hub.cacheKey(HubClient.messagesPath(thread.id)), ek = hub.cacheKey(HubClient.eventsPath(thread.id))
-                let seeded: ([ThreadMessage]?, [ThreadEvent]?) = await Task.detached {
-                    (HubClient.cachedValue(key: mk), HubClient.cachedValue(key: ek))
-                }.value
-                if messages.isEmpty, let m = seeded.0, !m.isEmpty {
-                    messages = m
-                    if let e = seeded.1 { events = e }
-                    rows = computeRows()
-                }
+                let mk = hub.cacheKey(HubClient.messagesPath(thread.id))
+                let seeded: [ThreadMessage]? = await Task.detached { HubClient.cachedValue(key: mk) }.value
+                if messages.isEmpty, let m = seeded, !m.isEmpty { messages = m }
             }
             seedCards()
             await load(); try? await hub.readThread(thread.id)
@@ -1065,8 +859,80 @@ struct ThreadDetail: View {
         }
     }
 
-    @ViewBuilder func bubble(_ m: ThreadMessage) -> some View {
-        if m.kind == "schedule" { scheduleCard(m) } else { chatBubble(m) }
+    /// One message is one row, the console's msgHTML: its label, its first
+    /// line, when (and an empty reply's dollars when no card under it carries
+    /// them), with the whole of it behind a tap. The owner's rows are grey.
+    @ViewBuilder func messageRow(_ m: ThreadMessage) -> some View {
+        let text = m.text
+        let line = text.split(separator: "\n").first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.map(String.init) ?? ""
+        let when = dayClock(m.ts) + (m.role == "claude" && m.cost_usd > 0 && leadRef(m) == nil ? " · " + usd(m.cost_usd) : "")
+        if m.kind == "error" {
+            // The CLI's "You've hit your session limit · resets 2:40am" is
+            // not a crash: the hub resumes the session then.
+            let paused = text.range(of: #"(?i)hit your (?:[a-z0-9 ]{0,24} )?limit[^\n]*?resets\s"#, options: .regularExpression) != nil
+            ChatRow(k: paused ? "⏸ Paused" : "⚠ Error", title: paused ? "session limit" : line, when: when, tone: paused ? .orange : .red) { rowBody(m) }
+        } else if m.kind == "schedule" {
+            // The check-in it set: when it comes back, then the instructions.
+            let cut = text.range(of: "\n\n")
+            ChatRow(k: "⏰ Check-in", title: cut.map { String(text[..<$0.lowerBound]) } ?? text, when: when, tone: .green) {
+                if let cut { StyledText(text: String(text[cut.upperBound...]), style: .subheadline, color: .secondary) }
+            }
+        } else if m.role == "claude" {
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !(m.attachments ?? []).isEmpty {
+                ChatRow(k: "Reply", title: line, when: when) { rowBody(m) }
+            }
+        } else if m.kind == "checkin" {
+            ChatRow(k: "⏰ Check-in", title: line, when: when, tone: .green) { rowBody(m) }
+        } else if m.role == "system" {
+            ChatRow(k: "Note", title: line, when: when) { rowBody(m) }
+        } else {
+            mineRow(m, line: line, when: when)
+        }
+    }
+
+    /// The owner's message, or one another session or the hub sent in their
+    /// place: the card it answered leads the title ("↩ Got it · …"), whole in
+    /// the body.
+    func mineRow(_ m: ThreadMessage, line: String, when: String) -> some View {
+        let a = m.author.flatMap { $0.isEmpty ? nil : $0 } ?? "owner"
+        let k = a == "owner" ? "You" : a == "hub" ? "Hub" : m.author_title.flatMap { $0.isEmpty ? nil : $0 } ?? "Session"
+        let re = replyList(m).first { !($0.label ?? $0.outcome ?? "").isEmpty }
+        var what = !line.isEmpty ? line : re.map { refTitle($0.ref) } ?? ""
+        if what.isEmpty, !(m.attachments ?? []).isEmpty { what = "📎" }
+        let title = re.map { "↩ " + ($0.label ?? $0.outcome ?? "") + (what.isEmpty ? "" : " · " + what) } ?? what
+        let by = a == "owner" ? nil : sentBy(m)
+        return ChatRow(k: k, title: title, when: when, mine: true) {
+            ForEach(replyLines(m), id: \.self) { r in
+                (Text("↩ ") + Text(r.label).bold() + Text(r.title.isEmpty ? "" : " · " + r.title))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    .padding(.leading, 9)
+                    .overlay(alignment: .leading) { Rectangle().fill(Color.primary.opacity(0.2)).frame(width: 2) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            rowBody(m)
+            if let by {
+                HStack(spacing: 8) {
+                    if let id = by.thread {
+                        Button { Task { if let t = try? await hub.thread(id) { openThread = t } } } label: {
+                            Text("sent by \(Text(by.who).underline())").lineLimit(1)
+                        }.buttonStyle(.plain)
+                    } else {
+                        Text("sent by \(by.who)").lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }.font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        // Hold a message down to ask about it.
+        .chatAbout(bubbleSubject(m))
+    }
+
+    /// A row's body: its attachments, then its words.
+    @ViewBuilder func rowBody(_ m: ThreadMessage) -> some View {
+        // By position: the same screenshot can be attached twice.
+        let refs = m.attachments ?? []
+        ForEach(refs.indices, id: \.self) { i in BlobAttachment(ref: refs[i], maxHeight: 240) }
+        if !m.text.isEmpty { StyledText(text: m.text, color: .primary).frame(maxWidth: .infinity, alignment: .leading) }
     }
 
     /// One message, described for a session that is about to be asked about it.
@@ -1084,166 +950,6 @@ struct ThreadDetail: View {
                            title: "\(m.role == "owner" ? "Your" : "Its") message, \(shortAgo(m.ts))",
                            facts: facts.joined(separator: "\n"),
                            code: nil)
-    }
-
-    /// Green card: the agent set (or cleared) standing instructions here —
-    /// when it checks back and what it is for. It says the job's name and the
-    /// time; the whole instruction (often a long prompt) stays behind a tap.
-    func scheduleCard(_ m: ThreadMessage) -> some View {
-        let lines = m.text.components(separatedBy: "\n\n")
-        let body = lines.dropFirst().joined(separator: "\n\n")
-        let open = openReplies.contains(m.id)
-        return VStack(alignment: .leading, spacing: 6) {
-            Label(lines.first ?? "", systemImage: "clock.badge.checkmark").font(.subheadline.weight(.semibold)).foregroundStyle(.green)
-            if !body.isEmpty {
-                Text(thread.title).font(.subheadline.weight(.semibold))
-                // Open, the instructions read as a quoted document, not more
-                // card: a small grey inset under its own label, so the job's
-                // name above stays the headline.
-                if open {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("INSTRUCTIONS").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                        StyledText(text: body, style: .footnote, color: .secondary)
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(uiColor: .systemBackground).opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
-                }
-            }
-            HStack(spacing: 4) {
-                Text(m.ts, style: .time)
-                if !body.isEmpty {
-                    Text("· \(open ? "Hide" : "Instructions")")
-                    Image(systemName: open ? "chevron.up" : "chevron.down")
-                }
-            }.font(.caption2).foregroundStyle(.secondary)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard !body.isEmpty else { return }
-            if open { openReplies.remove(m.id) } else { openReplies.insert(m.id) }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.green.opacity(0.35), lineWidth: 1) }
-        .padding(.horizontal)
-    }
-
-    @ViewBuilder func chatBubble(_ m: ThreadMessage) -> some View {
-        let mine = m.role == "owner"
-        // The CLI's "You've hit your session limit · resets 2:40am" is not a
-        // crash: the hub resumes the session then, so it draws as the turn's
-        // end line in amber, never a red bubble (the console's paused row).
-        let paused = m.kind == "error" && m.text.range(of: #"(?i)hit your (?:[a-z0-9 ]{0,24} )?limit[^\n]*?resets\s"#, options: .regularExpression) != nil
-        if !mine && (m.kind != "error" || paused) {
-            // THERE IS NO WHITE CELL: anything the owner must read or do is
-            // one of the special cells. A session's reply is the turn ENDING, never a
-            // text bubble: the cards the turn raised are the reply (the hub
-            // mints a read card from any reply text, so a new row
-            // is always empty), and the row is one muted line — that it
-            // ended, when, what it cost — in the card's colour. A row that
-            // still carries text (an older row, or words folded beside a card)
-            // keeps it behind the line, closed until tapped, for the record
-            // only. Same as the console's `.msg.end` (views/threads.js msgHTML).
-            let hasOld = !paused && (!m.text.isEmpty || !(m.attachments ?? []).isEmpty)
-            let open = openReplies.contains(m.id)
-            // Day, time, dollars; no tokens (the session total stays in the
-            // head), and "turn ended" only on the newest reply row, since
-            // repeating it on every row says nothing. The console's msgHTML `last`.
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    if paused { Text("turn paused · session limit ·") }
-                    else if m.id == lastTurnID { Text("turn ended ·") }
-                    Text(dayClock(m.ts))
-                    if m.cost_usd > 0 { Text("· " + usd(m.cost_usd)) }
-                    if hasOld { Text(open ? "· hide" : "· text").opacity(0.7) }
-                    Spacer()
-                }
-                .font(.caption2)
-                .foregroundStyle(paused ? Color.orange : m.kind == "read" ? Color.accentColor : Color.secondary)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    guard hasOld else { return }
-                    if open { openReplies.remove(m.id) } else { openReplies.insert(m.id) }
-                }
-                if hasOld && open {
-                    chatBubbleBox(m, mine: false).padding(.horizontal, -16).opacity(0.85)
-                }
-            }
-            .padding(.horizontal)
-        } else {
-            #if targetEnvironment(macCatalyst)
-            if mine { macMine(m) } else { chatBubbleBox(m, mine: false) }
-            #else
-            chatBubbleBox(m, mine: mine)
-            #endif
-        }
-    }
-
-    @ViewBuilder func chatBubbleBox(_ m: ThreadMessage, mine: Bool) -> some View {
-        HStack {
-            if mine { Spacer(minLength: 40) }
-            VStack(alignment: .leading, spacing: 4) {
-                if m.kind == "checkin" { Label("scheduled check-in", systemImage: "clock").font(.caption2).foregroundStyle(.secondary) }
-                if m.kind == "decision" { Label("your decision", systemImage: "checkmark.seal").font(.caption2).foregroundStyle(mine ? .white.opacity(0.8) : .secondary) }
-                if m.kind == "needs_you" { Label("Your turn", systemImage: "hand.raised.fill").font(.caption2.weight(.semibold)).foregroundStyle(.red) }
-                // Only read-asks under it: an answer, blue, not a stopped session.
-                if m.kind == "read" { Label("For you to read", systemImage: "text.alignleft").font(.caption2.weight(.semibold)).foregroundStyle(Color.accentColor) }
-                // What the owner's message answered, in the card's own word:
-                // a decision made on the Recs page (or on the cell above)
-                // shows here as "↩ Accepted · <rec>" over their note.
-                // One line per card it answered.
-                if mine {
-                    ForEach(replyLines(m), id: \.self) { line in
-                        Label(line, systemImage: "arrowshape.turn.up.left").font(.caption2.weight(.semibold))
-                            .foregroundStyle(Color.white.opacity(0.85)).lineLimit(2)
-                    }
-                }
-                // By position: the same screenshot can be attached twice.
-                let refs = m.attachments ?? []
-                ForEach(refs.indices, id: \.self) { i in BlobAttachment(ref: refs[i], maxHeight: 240) }
-                if !m.text.isEmpty {
-                    let color: Color = m.kind == "error" ? .red : mine ? .white : .primary
-                    if isLongText(m.text) {
-                        FoldedText(text: m.text, open: openLongBinding(m.id), color: color,
-                                   fadeTo: mine ? Color.accentColor : Color(.secondarySystemBackground)) { label, tap in
-                            Button(label, action: tap)
-                                .font(.caption.weight(.semibold))
-                                .buttonStyle(.bordered)
-                                .tint(mine ? .white : .accentColor)
-                                .controlSize(.small)
-                        }
-                    } else {
-                        StyledText(text: m.text, color: color)
-                    }
-                }
-                HStack {
-                    Text(dayClock(m.ts))
-                    if m.cost_usd > 0 { Text("· " + usd(m.cost_usd)) }
-                    if m.queued == true { Label("queued · delivered when it's ready", systemImage: "clock").lineLimit(1) }
-                    if m.steered == true { Label("steered in mid-turn", systemImage: "arrow.turn.right.down").lineLimit(1) }
-                    if let by = sentBy(m) {
-                        Spacer(minLength: 12)
-                        if let id = by.thread {
-                            Button { Task { if let t = try? await hub.thread(id) { openThread = t } } } label: {
-                                Text("sent by \(Text(by.who).underline())").lineLimit(1)
-                            }.buttonStyle(.plain)
-                        } else {
-                            Text("sent by \(by.who)").lineLimit(1)
-                        }
-                    }
-                }.font(.caption2).foregroundStyle(mine ? Color.white.opacity(0.7) : Color.secondary)
-            }
-            .padding(10)
-            .background(mine ? Color.accentColor : m.kind == "needs_you" ? Color.red.opacity(0.12) : m.kind == "read" ? Color.accentColor.opacity(0.10) : Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-            .overlay { if m.id == focusMessage { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.red.opacity(0.6), lineWidth: 1.5) } }
-            // Hold a message down to ask about it. Over the words themselves
-            // iOS's own selection wins, so StyledText puts "Chat about this"
-            // in the selection menu too — with the selected words quoted.
-            .chatAbout(bubbleSubject(m))
-            if !mine { Spacer(minLength: 40) }
-        }.padding(.horizontal)
     }
 
     /// Who wrote a row, for its lower-right corner; `thread` is set
@@ -1267,25 +973,28 @@ struct ThreadDetail: View {
     /// message answered (`replies` when there were several, else the
     /// in_reply_to/outcome pair); empty for a plain message. The verdict word
     /// is the hub's (`replies[].label`, store.ReplyLabel), the console's too.
-    func replyLines(_ m: ThreadMessage) -> [String] {
-        let list = (m.replies?.isEmpty == false) ? m.replies! : [PromptReply(ref: m.in_reply_to ?? "", outcome: m.outcome)]
-        return list.compactMap { replyLine(ref: $0.ref, label: $0.label ?? $0.outcome ?? "") }
+    func replyList(_ m: ThreadMessage) -> [PromptReply] {
+        (m.replies?.isEmpty == false) ? m.replies! : m.in_reply_to.map { [PromptReply(ref: $0, outcome: m.outcome)] } ?? []
     }
 
-    func replyLine(ref: String, label verdict: String) -> String? {
-        guard !ref.isEmpty else { return nil }
-        let parts = ref.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2 else { return nil }
-        let kind = parts[0], id = parts[1]
-        let title: String
-        switch kind {
-        case "rec": title = recs.first { $0.id == id }.map { "💡 " + $0.title } ?? id
-        case "ask": title = asks.first { $0.id == id }?.title ?? id
-        case "action": title = actions.first { $0.id == id }.map { "🔴 " + $0.title } ?? id
-        case "step": title = "📅 " + stepTitle(id)
-        default: title = "\(kind) \(id)"
+    func replyLines(_ m: ThreadMessage) -> [ReplyLine] {
+        replyList(m).compactMap { r in
+            r.ref.contains(":") ? ReplyLine(label: r.label ?? r.outcome ?? "", title: refTitle(r.ref)) : nil
         }
-        return "\(verdict) · \(title)"
+    }
+
+    /// The title of the card a ref names, when the chat holds it ("" otherwise).
+    func refTitle(_ ref: String) -> String {
+        let parts = ref.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return "" }
+        let id = parts[1]
+        switch parts[0] {
+        case "rec": return mdPlain(recs.first { $0.id == id }?.title ?? "")
+        case "ask": return mdPlain(asks.first { $0.id == id }?.title ?? "")
+        case "action": return mdPlain(actions.first { $0.id == id }?.title ?? "")
+        case "step": return stepTitle(id)
+        default: return ""
+        }
     }
 
     /// A `step:<item>.<n>`: that row's own name, off the item's card in this
@@ -1296,27 +1005,6 @@ struct ThreadDetail: View {
         return asks.first { ($0.cal_id ?? $0.id) == item }?.steps?.first { $0.n == n }?.title ?? "step \(n)"
     }
 
-    /// Read one folded block's own steps when the owner opens it — one ranged
-    /// read (`since`/`before` from the hub's count), however long the run is.
-    /// Anything already held is skipped, so the live block, which streams in
-    /// through `since`, never re-reads.
-    func loadBlock(_ c: StepCount?) async {
-        guard let c, c.steps > 0, !loadingBlocks.contains(c.message_id) else { return }
-        let have = events.filter { $0.id >= c.first_id && $0.id <= c.last_id }.count
-        guard have < c.steps else { return }
-        loadingBlocks.insert(c.message_id)
-        defer { loadingBlocks.remove(c.message_id) }
-        var since = c.first_id - 1
-        while since < c.last_id {
-            guard let page = try? await hub.threadEvents(thread.id, since: since, before: c.last_id + 1), !page.isEmpty else { break }
-            let known = Set(events.map(\.id))
-            events.append(contentsOf: page.filter { !known.contains($0.id) })
-            since = page[page.count - 1].id
-        }
-        events.sort { $0.id < $1.id }
-        rows = computeRows()
-    }
-
     /// The proposals this chat draws: all of its own — open ones with their
     /// buttons, dismissed ones folded, decided ones grey with who decided. A
     /// decided card used to leave the chat, so an approved proposal was only
@@ -1324,7 +1012,7 @@ struct ThreadDetail: View {
     func inChat(_ a: Action) -> Bool { a.thread_id == thread.id }
 
     /// Draw the session's open cards from the board until this chat's own
-    /// fetch lands. The opening paint is the saved messages and steps, which
+    /// fetch lands. The opening paint is the saved messages, which
     /// carry no cards, and `load` can be seconds away: the desktop app came
     /// back from an update on a running session whose row beside it read
     /// APPROVE while the chat showed "12 tool calls · now: thinking" and no
@@ -1345,9 +1033,7 @@ struct ThreadDetail: View {
         Perf.event("load start")
         defer { Perf.event("load end") }
         do {
-            let since = events.last?.id ?? 0
-            async let t = hub.thread(thread.id); async let m = hub.threadMessages(thread.id); async let e = hub.threadEvents(thread.id, since: since)
-            async let st = hub.threadSteps(thread.id)
+            async let t = hub.thread(thread.id); async let m = hub.threadMessages(thread.id)
             async let k = hub.threadAsks(thread.id)
             // Every state: a dismissed proposal keeps its folded line with
             // Reopen inside (2026-09-18), a decided one its grey card (09-30).
@@ -1355,50 +1041,34 @@ struct ThreadDetail: View {
             async let rc = hub.threadRecs(thread.id)
             // The wakes still to come, for the strip over the composer.
             async let qp = hub.prompts(state: "queued", thread: thread.id)
-            // The conversation is drawn as soon as the MESSAGES land. The
-            // event stream is by far the biggest response (hundreds of KB of
-            // tool output on a long session) and awaiting it first left the
-            // chat blank for seconds until it arrived. Steps fill in underneath a moment later.
+            // The conversation is drawn as soon as the MESSAGES land; the
+            // cards fill in after.
             let (freshThread, freshMessages) = try await (t, m)
             // Opened on a card: place the approvals BEFORE the first draw, so
             // the opening scroll (onChange of messages.count) has its target.
             // Every other time the approvals fill in after the messages.
             let early: [Action]? = focusCard != nil && messages.isEmpty ? (try? await p)?.filter(inChat) : nil
-            var moved = false
             let msgsMoved = freshMessages != messages
             // Only assign what actually changed: a plain reassignment every
             // poll (3s while running) rebuilt the whole message list even
             // when the hub returned exactly what we already had.
-            if freshThread != thread { thread = freshThread; moved = true }
-            if msgsMoved { messages = freshMessages; moved = true }
-            if moved { rows = computeRows(); moved = false }
+            if freshThread != thread { thread = freshThread }
+            if msgsMoved { messages = freshMessages }
             if let early { placeActions(early) }
             // Goals name the goal on an ask card and barely ever change —
             // re-fetching them on every 3s poll was a round trip for nothing.
             if goals.isEmpty, let g = try? await hub.goals() { goals = g }
-            var cardsMoved = false
             // The other device's install card is not this app's to draw
             // (the owner 2026-10-01); the board already left it out.
             let gotAsks = (try? await k)?.filter { !$0.isOtherDeviceInstall }
-            if let gotAsks, gotAsks != asks || (msgsMoved && !gotAsks.isEmpty) {
-                cardsMoved = gotAsks != asks
-                placeAsks(gotAsks)
-            }
+            if let gotAsks, gotAsks != asks || (msgsMoved && !gotAsks.isEmpty) { placeAsks(gotAsks) }
             // A fetch that failed keeps the cards already drawn (asks always
             // did): an approval must not leave the chat because one request
             // timed out — `?? []` read a failure as "no proposals".
             let mine: [Action]?
             if let early { mine = early } else { mine = (try? await p)?.filter(inChat) }
-            if let mine, mine != actions || (msgsMoved && !mine.isEmpty) {
-                cardsMoved = cardsMoved || mine != actions
-                placeActions(mine)
-            }
+            if let mine, mine != actions || (msgsMoved && !mine.isEmpty) { placeActions(mine) }
             if gotAsks != nil, mine != nil { cardsLoaded = true }
-            // A run block draws only the cards this chat holds (`pieces`), and
-            // `place…` leaves those to it: a card that arrives after the cut
-            // did — no new step, no new message — needs the blocks rebuilt, or
-            // it is drawn nowhere until the next step.
-            if cardsMoved, !steps.isEmpty { rows = computeRows() }
             // A rec moves under its reply when that lands, and changes
             // without a message when the owner decides it from the Recs page.
             if let rc = try? await rc, rc != recs || (msgsMoved && !rc.isEmpty) { placeRecs(rc) }
@@ -1412,48 +1082,7 @@ struct ThreadDetail: View {
             if let f = focusCard, !focusLanded, asks.contains(where: { $0.id == f }) || actions.contains(where: { $0.id == f }) {
                 focusLanded = true
             }
-            let fresh = try await e
-            if !fresh.isEmpty { events.append(contentsOf: fresh.filter { $0.id > since }); moved = true }
-            // The headline of every block: the hub's own count, so a number
-            // never depends on how much of the stream this screen holds.
-            var cutMoved = false
-            if let st = try? await st {
-                // uniquingKeysWith: a repeated message_id from the hub must
-                // never trap the app; the later row wins.
-                let byMsg = Dictionary(st.map { ($0.message_id, $0) }, uniquingKeysWith: { _, b in b })
-                if byMsg != steps { steps = byMsg; moved = true; cutMoved = true }
-            }
-            if moved { rows = computeRows() }
-            // The hub moved the cut — a card was raised mid-run, or answered
-            // away. Re-file them: one drawn inside a run block must not also
-            // sit under a bubble.
-            if cutMoved { placeAsks(asks); placeActions(actions) }
             error = nil
-            // Shell commands without a description get their English summary
-            // from Haiku a few seconds after the event: re-fetch the recent
-            // ones still blank.
-            //
-            // Only while they are still plausibly coming. The summary is
-            // written once, by describeAsync, right after the event — and that
-            // function gives up silently when the Describe call errors, so a
-            // row that missed its chance stays blank forever. Without a bound
-            // this filter kept handing the hub the same dead ids on every poll
-            // (3s while running, 15s idle) for as long as the chat stayed
-            // open, and the reply was always the same nothing. It is not
-            // hypothetical: 1089 tool_use rows in this hub are permanently
-            // blank across 27 chats, and several have 19 of them inside this
-            // very last-40 window — 19 ids re-asked every three seconds.
-            let stillComing = Date().addingTimeInterval(-120)
-            let blank = events.suffix(40)
-                .filter { $0.kind == "tool_use" && ($0.summary ?? "").isEmpty && $0.ts > stillComing }
-                .map(\.id)
-            if !blank.isEmpty, let filled = try? await hub.threadEvents(thread.id, ids: blank) {
-                var filledAny = false
-                for f in filled where !(f.summary ?? "").isEmpty {
-                    if let i = events.firstIndex(where: { $0.id == f.id }) { events[i] = f; filledAny = true }
-                }
-                if filledAny { rows = computeRows() }
-            }
         } catch { if !error.isCancellation { self.error = error.localizedDescription } }
     }
 }
@@ -1558,88 +1187,6 @@ extension ThreadDetail {
         }
     }
 
-    /// The owner's own message (skin.css): a soft grey block
-    /// against the right wall, dark text, the "↩ Read it · <card>" quote over
-    /// it, and only the time under it — "sent by the owner" dropped, any other
-    /// sender kept. At most 680 wide (860 for a long one).
-    @ViewBuilder func macMine(_ m: ThreadMessage) -> some View {
-        let long = isLongText(m.text)
-        HStack(spacing: 0) {
-            Spacer(minLength: 60)
-            VStack(alignment: .leading, spacing: 5) {
-                if m.kind == "checkin" { Text("⏰ scheduled check-in").font(.system(size: 12.5)).foregroundStyle(Web.muted) }
-                ForEach(macReplyLines(m), id: \.self) { r in
-                    (Text("↩ ") + Text(r.label).bold() + Text(" · " + r.title))
-                        .font(.system(size: 13)).foregroundStyle(Web.muted).lineLimit(2)
-                        .padding(.leading, 9)
-                        .overlay(alignment: .leading) { Rectangle().fill(Web.lineStrong).frame(width: 2) }
-                }
-                let refs = m.attachments ?? []
-                ForEach(refs.indices, id: \.self) { i in BlobAttachment(ref: refs[i], maxHeight: 180) }
-                if !m.text.isEmpty {
-                    if long {
-                        FoldedText(text: m.text, open: openLongBinding(m.id), color: .primary, fadeTo: Web.code) { label, tap in
-                            Button(label, action: tap).buttonStyle(WebButtonStyle(small: true))
-                        }
-                    } else {
-                        StyledText(text: m.text, color: .primary)
-                    }
-                }
-                HStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    if let by = sentBy(m), by.who != "you" {
-                        if let id = by.thread {
-                            Button { Task { if let t = try? await hub.thread(id) { openThread = t } } } label: {
-                                Text("sent by \(Text(by.who).underline())").lineLimit(1)
-                            }.buttonStyle(.plain)
-                        } else {
-                            Text("sent by \(by.who)").lineLimit(1)
-                        }
-                    }
-                    Text(macMeta(m))
-                }
-                .font(.system(size: 11)).foregroundStyle(Web.muted)
-                .padding(.top, -1)
-            }
-            .padding(.vertical, 11).padding(.horizontal, 16)
-            .background(Web.code, in: RoundedRectangle(cornerRadius: 16))
-            .overlay { if m.id == focusMessage { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.red.opacity(0.6), lineWidth: 1.5) } }
-            .chatAbout(bubbleSubject(m))
-            .frame(maxWidth: long ? 860 : 680, alignment: .trailing)
-        }
-        .padding(.horizontal)
-        // `.msg.owner { margin: 26px 0 16px }` against the stack's 12.
-        .padding(.top, 14).padding(.bottom, 4)
-    }
-
-    /// The block's foot: the day and time, and what that turn cost if it did
-    /// (no tokens).
-    func macMeta(_ m: ThreadMessage) -> String {
-        var s = dayClock(m.ts)
-        if m.cost_usd > 0 { s += " · " + usd(m.cost_usd) }
-        return s
-    }
-
-    /// The console's replyLineHTML: the verdict word bold, the card's title
-    /// plain, no emoji.
-    func macReplyLines(_ m: ThreadMessage) -> [MacReplyLine] {
-        let list = (m.replies?.isEmpty == false) ? m.replies! : [PromptReply(ref: m.in_reply_to ?? "", outcome: m.outcome)]
-        return list.compactMap { r in
-            let parts = r.ref.split(separator: ":", maxSplits: 1).map(String.init)
-            guard parts.count == 2 else { return nil }
-            let kind = parts[0], id = parts[1]
-            let title: String
-            switch kind {
-            case "rec": title = recs.first { $0.id == id }?.title ?? id
-            case "ask": title = asks.first { $0.id == id }?.title ?? id
-            case "action": title = actions.first { $0.id == id }?.title ?? id
-            case "step": title = "📅 " + stepTitle(id)
-            default: title = "\(kind) \(id)"
-            }
-            return MacReplyLine(label: r.label ?? r.outcome ?? "", title: mdPlain(title))
-        }
-    }
-
     /// The armed cards as the console's `.reply-strip`: a blue rail and an 8%
     /// blue wash across the top of the box, one line per card — its pick,
     /// its title — and × to drop that one.
@@ -1664,11 +1211,13 @@ extension ThreadDetail {
         .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
     }
 }
+#endif
 
-struct MacReplyLine: Hashable {
-    let label: String
-    let title: String
-}
+/// One "↩ <verdict> · <card>" line of the owner's message: the console's
+/// replyLineHTML.
+struct ReplyLine: Hashable { let label: String; let title: String }
+
+#if targetEnvironment(macCatalyst)
 
 /// One of the head's pills (skin.css `.chat-head .head-id .pill`): 20 tall,
 /// 11.5pt semibold, radius 6, in its tone. A live one (running, speaking,
@@ -1734,229 +1283,6 @@ struct HeadPill: View {
     }
 }
 #endif
-
-/// What the agent did during one run: tool calls (with their results),
-/// thinking and interim text, in order. ALWAYS collapsed to its one-line
-/// summary until the owner taps it — live or finished. A live run used to open itself,
-/// so opening a working session buried the conversation under its steps; the
-/// folded headline reads "N tool calls" behind the dot.
-struct RunActivity: View {
-    let events: [ThreadEvent]
-    let live: Bool
-    /// The hub's count for this block, counted in SQL over every event it
-    /// stored. It is the headline whenever it exists: the events held here
-    /// are only what this screen happened to draw, so counting them made the
-    /// number move as the page slid.
-    var count: StepCount? = nil
-    /// The turn's end folded onto this line ("turn ended · today 11:56 PM ·
-    /// $1.31"), ThreadDetail.mergedEnds; empty for any other block.
-    var tail: String = ""
-    /// Fetch this block's own events, called once when the owner opens it.
-    var open: (() async -> Void)? = nil
-    @State private var expanded: Bool? = nil
-    #if targetEnvironment(macCatalyst)
-    @State private var summaryHover = false
-    #endif
-    var isOpen: Bool { expanded ?? false }
-    /// LIFE_SHOT_STEPS=1 (ops/mac-screens.sh STEPS=1): every run block and
-    /// each of its rows open, so a shot shows the step UI itself.
-    static let shotSteps = ProcessInfo.processInfo.environment["LIFE_SHOT_STEPS"] == "1"
-
-    var tools: Int { count?.tools ?? events.filter { $0.kind == "tool_use" }.count }
-    var summary: String {
-        var parts: [String] = []
-        if tools > 0 { parts.append("\(tools) tool call\(tools == 1 ? "" : "s")") }
-        let th = count?.thoughts ?? events.filter { $0.kind == "thinking" }.count
-        if th > 0 { parts.append("\(th) thought\(th == 1 ? "" : "s")") }
-        let all = count?.steps ?? events.count
-        if parts.isEmpty { parts.append("\(all) step\(all == 1 ? "" : "s")") }
-        return parts.joined(separator: " · ")
-    }
-    /// No "now: <step>" behind the count: a raw step label reads as noise.
-    /// The working line under the chat carries the turn's clock and dollars,
-    /// as the console's activityHTML does.
-    var headline: String {
-        if live && events.isEmpty && (count?.steps ?? 0) == 0 { return "starting…" }
-        return tail.isEmpty ? summary : summary + " · " + tail
-    }
-    /// Steps the hub counted that this screen has not read yet — shown as one
-    /// line inside the open block while the ranged read runs.
-    var missing: Int { max(0, (count?.steps ?? 0) - rows.reduce(0) { $0 + 1 + ($1.1 == nil ? 0 : 1) }) }
-    /// Pair each tool_result with the tool_use before it.
-    var rows: [(ThreadEvent, ThreadEvent?)] {
-        var out: [(ThreadEvent, ThreadEvent?)] = []
-        for e in events {
-            if e.kind == "tool_result", let i = out.lastIndex(where: { $0.0.kind == "tool_use" && $0.1 == nil }) { out[i].1 = e } else { out.append((e, nil)) }
-        }
-        return out
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                let opening = !isOpen
-                withAnimation { expanded = opening }
-                // A folded block holds no events until it is opened: one
-                // ranged read here keeps a 500-step turn as cheap to open as
-                // a 5-step one.
-                if opening, let open { Task { await open() } }
-            } label: {
-                #if targetEnvironment(macCatalyst)
-                // The console's `.run > summary` (skin.css), the owner 2026-09-29:
-                // a faint ▸/▾, the headline in 12.5 grey, no gear; hovered, a
-                // grey wash behind the row.
-                // One mark leads the row: the pulse while the turn runs and
-                // the block is shut, ▾ open, ▸ finished. The whole row is the button.
-                HStack(spacing: 6) {
-                    Group {
-                        if live && !isOpen { LiveDot(color: Web.muted, size: 6) } else { Text(isOpen ? "▾" : "▸").opacity(0.55) }
-                    }.frame(width: 8)
-                    Text(headline).lineLimit(1)
-                }
-                .font(.system(size: 12.5)).foregroundStyle(Web.muted)
-                .padding(.vertical, 3).padding(.leading, 6).padding(.trailing, 8)
-                .background(summaryHover ? Web.code : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-                .padding(.leading, -6)
-                .contentShape(Rectangle())
-                .onHover { summaryHover = $0 }
-                #else
-                // The same one mark on the phone: the pulse leads a live shut
-                // block, the chevron and gear the rest.
-                HStack(spacing: 6) {
-                    if live && !isOpen {
-                        LiveDot(color: .secondary, size: 6).frame(width: 12)
-                    } else {
-                        Image(systemName: isOpen ? "chevron.down" : "chevron.right").font(.caption2.weight(.semibold))
-                        if !live { Image(systemName: "gearshape.2").font(.caption) }
-                    }
-                    Text(headline).font(.caption).lineLimit(1)
-                    Spacer()
-                }.foregroundStyle(.secondary)
-                #endif
-            }.buttonStyle(.plain)
-            if isOpen {
-                VStack(alignment: .leading, spacing: 4) {
-                    if missing > 0 {
-                        Text("loading \(missing) earlier step\(missing == 1 ? "" : "s")…")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    ForEach(rows, id: \.0.id) { r in EventRow(e: r.0, result: r.1) }
-                }.padding(.leading, 4)
-            }
-        }
-        #if targetEnvironment(macCatalyst)
-        // Flush with the column's left wall, at most 760 wide (`.activity`).
-        .frame(maxWidth: 760, alignment: .leading)
-        .padding(.horizontal)
-        #else
-        .padding(.horizontal)
-        .padding(.leading, 8)
-        #endif
-        .chatAbout(ChatSubject(screen: "Session activity", title: "What it did here · \(summary)", facts: runFacts))
-        .task {
-            if Self.shotSteps, expanded == nil {
-                expanded = true
-                if let open { await open() }
-            }
-        }
-    }
-
-    /// The run's steps in order, for "why did you do this?".
-    var runFacts: String {
-        let steps = events.prefix(30).map { e -> String in
-            switch e.kind {
-            case "tool_use": "- tool: \((e.summary ?? "").isEmpty ? e.title : e.summary!)"
-            case "thinking": "- thought: \(e.body.prefix(160))"
-            case "tool_result": "- result: \(e.body.prefix(160))"
-            default: "- said: \(e.body.prefix(200))"
-            }
-        }
-        return (steps + (events.count > 30 ? ["- …\(events.count - 30) more steps"] : [])).joined(separator: "\n")
-    }
-}
-
-/// One step of a run. Opened, it is one plain terminal block, not a stack of
-/// grey boxes (the owner 2026-10-05 23:28: "the UI just looks a little
-/// funky with these gray boxes… a light mode terminal display with lightly
-/// colored text"; the console's `.ev .io`). A thought: the purple line IS
-/// the thought — shut, its first line; open, all of it, nothing printed
-/// twice under it. A tool call: the call in blue (a shell command behind
-/// `$`, whole; any other tool's title line), what went in when the title
-/// cannot say it (an edit's lines), then the output in grey — its first
-/// `fold` lines, the rest behind "… N more lines" — or the error in red,
-/// whole ("the error is good"). A body that is still the input's JSON
-/// (stored before 10-05) is not shown: the title already says it. What the
-/// agent said mid-turn folds like the thought: two lines shut, all of it open.
-struct EventRow: View {
-    let e: ThreadEvent
-    let result: ThreadEvent?
-    @State private var open = RunActivity.shotSteps
-    @State private var whole = false
-    static let fold = 12
-    #if targetEnvironment(macCatalyst)
-    static let violet = Web.violet, red = Web.red, green = Web.green, blue = Web.accent
-    #else
-    static let violet = Color.purple, red = Color.red, green = Color.green, blue = Color.blue
-    #endif
-
-    var icon: String {
-        switch e.kind { case "thinking": "brain"; case "tool_use": "terminal"; case "text": "text.bubble"; default: "arrow.turn.down.right" }
-    }
-    var tint: Color { e.kind == "thinking" ? Self.violet : result?.title == "error" ? Self.red : .secondary }
-    /// Tool calls read as plain English ("List goals", "Read DESIGN.md").
-    var headline: String {
-        switch e.kind {
-        case "tool_use": (e.summary ?? "").isEmpty ? e.title : e.summary!
-        case "thinking": open ? e.body : "Thinking · " + (e.body.split(whereSeparator: \.isNewline).first.map(String.init) ?? "")
-        default: e.body
-        }
-    }
-    /// "Bash · grep …" → "Bash".
-    var tool: Substring { e.title.prefix { $0 != " " } }
-    /// The call line: a shell command whole behind `$`. Any other tool's
-    /// headline already names the call ("Edit app/…/x.swift"), so its block
-    /// holds only what went in (an edit's lines) and what came out.
-    var call: String { tool == "Bash" ? "$ " + e.body : "" }
-    var input: String { tool == "Bash" || e.body.hasPrefix("{") ? "" : e.body }
-    var outLines: [Substring] {
-        guard let r = result else { return [] }
-        return (r.body.isEmpty ? "(no output)" : r.body).split(separator: "\n", omittingEmptySubsequences: false)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Button { withAnimation { open.toggle() } } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: icon).font(.caption2).frame(width: 14)
-                    // Shut: a tool call or thought is one line, what the
-                    // agent said mid-turn two (the console's `.ev.said`);
-                    // open, all of it.
-                    Text(headline).font(.caption).lineLimit(open ? nil : (e.kind == "text" ? 2 : 1)).multilineTextAlignment(.leading)
-                    Spacer(minLength: 0)
-                    if result != nil, !open { Image(systemName: "checkmark").font(.caption2).foregroundStyle(result?.title == "error" ? Self.red : Self.green) }
-                }.foregroundStyle(tint)
-            }.buttonStyle(.plain)
-            if open, e.kind == "tool_use" {
-                let bad = result?.title == "error"
-                let shown = whole || bad ? outLines : Array(outLines.prefix(Self.fold))
-                VStack(alignment: .leading, spacing: 2) {
-                    if !call.isEmpty { Text(call).foregroundStyle(Self.blue) }
-                    if !input.isEmpty { Text(input).foregroundStyle(.secondary) }
-                    if result != nil {
-                        Text(shown.joined(separator: "\n")).foregroundStyle(bad ? Self.red : .secondary)
-                        if !whole, !bad, outLines.count > Self.fold {
-                            Button("… \(outLines.count - Self.fold) more lines") { withAnimation { whole = true } }
-                                .buttonStyle(.plain).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 20)
-            }
-        }
-    }
-}
 
 struct ThreadSettings: View {
     @Environment(HubClient.self) private var hub

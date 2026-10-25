@@ -116,22 +116,6 @@ final class DecodeTests: XCTestCase {
         XCTAssertNil(console.phoneLink)
     }
 
-    /// A run block cut at the card the agent raised mid-chain: the phone
-    /// draws fold · card · fold, each fold with the hub's own count for it.
-    func testStepsCarryTheirSegments() throws {
-        let s = try decode([StepCount].self, """
-        [{"message_id":7,"run_id":"r1","tools":40,"thoughts":4,"steps":50,"first_id":100,"last_id":200,
-          "segments":[{"ref":"ask:ask-1a2b3c4d","tools":10,"thoughts":1,"steps":12,"first_id":100,"last_id":140},
-                      {"ref":"action:act-1a2b3c4d","tools":5,"thoughts":0,"steps":5,"first_id":141,"last_id":160},
-                      {"tools":25,"thoughts":3,"steps":33,"first_id":161,"last_id":200}]},
-         {"message_id":9,"run_id":"r1","tools":1,"thoughts":0,"steps":1,"first_id":201,"last_id":201}]
-        """)
-        XCTAssertEqual(s.first?.segments?.count, 3)
-        XCTAssertEqual(s.first?.segments?.map(\.steps).reduce(0, +), s.first?.steps)
-        XCTAssertEqual(s.first?.segments?.last?.ref, nil)   // the tail: still running
-        XCTAssertNil(s.last?.segments)                      // no card: one fold, as before
-    }
-
     func testActionWithEvents() throws {
         let a = try decode(Action.self, """
         {"id":"act-1a2b3c4d","created_at":"2026-08-26T09:00:00Z","updated_at":"2026-08-26T09:02:00Z","project":"life",

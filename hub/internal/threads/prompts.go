@@ -200,7 +200,7 @@ func (p *Prompt) normalizeReplies() error {
 		if r.Outcome != "" {
 			want, ok := refOutcomes[r.Outcome]
 			if !ok {
-				return fmt.Errorf("outcome must be done|wont|approved|denied|accepted|declined|deferred, got %q", r.Outcome)
+				return fmt.Errorf("outcome must be done|wont|nudge|extend|approved|denied|accepted|declined|deferred, got %q", r.Outcome)
 			}
 			if !want[kind] {
 				return fmt.Errorf("outcome %q only says something about a %s: reference one", r.Outcome, refOutcomeWant(r.Outcome))
@@ -268,6 +268,8 @@ var refTypes = map[string]bool{"ask": true, "action": true, "rec": true, "cal": 
 var refOutcomes = map[string]map[string]bool{
 	"done": {"ask": true, "cal": true, "step": true}, "wont": {"ask": true, "cal": true, "step": true},
 	"approved": {"action": true}, "denied": {"action": true},
+	// A `waiting` item's card (store.WaitingOutcomes).
+	"nudge": {"cal": true}, "extend": {"cal": true},
 	// A rec's three answers (the fourth, "just reply", is "" with words). The
 	// rec itself is decided by POST /recs/{id}/decide before the prompt is
 	// queued; this only says what the prompt answers.
@@ -388,6 +390,12 @@ func (m *Manager) Queue(p Prompt) (Prompt, error) {
 				if m.ClaimCal != nil {
 					m.ClaimCal(id, r.Outcome, p.Text)
 				}
+			case kind == "cal" && (r.Outcome == "nudge" || r.Outcome == "extend"):
+				if m.ClaimCal != nil {
+					m.ClaimCal(id, r.Outcome, p.Text)
+				}
+				// A wordless "wait 7 more days" gives the session nothing to do.
+				quiet = r.Outcome == "extend"
 			case kind == "step" && (r.Outcome == "done" || r.Outcome == "wont"):
 				// One step, marked when the message was sent. With no words
 				// there is nothing for the session to act on.

@@ -28,9 +28,9 @@ import SwiftUI
 /// card opens the job's RUN (`JobRunView`). Approving it starts a session
 /// (hub `OnDecided`) and the card hands off to it.
 ///
-/// A decided one (reached from a calendar row or an old link) is the same
-/// card, grey, with its state where the buttons were; the audit trail below
-/// says who decided it and when.
+/// A decided one (reached from a calendar row or an old link) is its row:
+/// the verdict, the title; opened, the audit trail says who decided it and
+/// when.
 struct ApprovalCard: View {
     @Environment(HubClient.self) private var hub
     @Environment(\.armedPicks) private var armedPicks
@@ -43,6 +43,8 @@ struct ApprovalCard: View {
     /// Arm the chat bar with this card and a pick ("approved" | "denied" |
     /// "" for words alone) — ThreadDetail's `arm`. nil outside a session.
     var arm: ((String) -> Void)? = nil
+    /// The dollars of the turn that proposed it, on its first card (ThreadDetail).
+    var cost: Double = 0
     let onDecided: () async -> Void
     @State private var error: String?
     @State private var busy = false
@@ -62,13 +64,14 @@ struct ApprovalCard: View {
     private var dismissed: Bool { a.folded == "dismissed" }
 
     var body: some View {
-        Card(tint: .red,
-             mark: isOpen ? "hand.raised.fill" : (a.state == "denied" || a.state == "failed") ? "xmark" : "checkmark",
-             caption: isOpen ? "approval" : a.state, right: shortAgo(a.created_at),
+        Card(tint: .red, mark: "hand.raised.fill", caption: "approval", right: shortAgo(a.created_at),
+             cost: cost,
              title: a.title, text: a.detail, said: a.said ?? "", thread: a.thread_id ?? "",
              extra: payload, meta: AnyView(metaRow),
-             closed: !isOpen && !dismissed, line: decidedLine,
-             folded: dismissed ? "dismissed" : nil,
+             line: decidedLine,
+             // Decided or dismissed, it is its row: ✓ approved, ✕ denied.
+             folded: isOpen ? nil : dismissed || a.state == "dismissed" ? "✕ dismissed"
+                : (a.state == "denied" || a.state == "failed" ? "✕ " : "✓ ") + a.state,
              buttons: buttons, trail: trail, busy: busy, error: error)
         .task(id: a.id) {
             if let e = a.events { events = e; return }

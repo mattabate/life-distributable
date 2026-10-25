@@ -521,7 +521,7 @@ function md(src) {
   return out;
 }
 
-// The fold line: past this a chat bubble MAY fold. This is the cheap gate,
+// The fold line: past this a card's detail MAY fold. This is the cheap gate,
 // counted on the text so both surfaces and a test agree; the phone's
 // isLongText (StyledText.swift) is the same rule. Whether it does fold is
 // fitFolds' call, on the rendered height.
@@ -691,8 +691,7 @@ const foldLabel = (open, n) => open ? 'Show less' : `Show ${n} more lines`;
 const foldButtonHTML = (open, onclick) =>
   `<button type="button" class="fold small"${open ? '' : ' hidden'} onclick="${onclick}">${foldLabel(open, 0)}</button>`;
 function fitFolds(root) {
-  const sel = '.body.long:not(.open):not([data-fit]), .ask-long:not(.open):not([data-fit])';
-  for (const el of (root || document).querySelectorAll(sel)) {
+  for (const el of (root || document).querySelectorAll('.ask-long:not(.open):not([data-fit])')) {
     if (!el.clientHeight) continue;            // not laid out (a hidden pane): a later pass
     const cs = getComputedStyle(el);
     const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45;
@@ -745,19 +744,20 @@ function toggleCardLong(btn, key) {
 // are the hub's — `outcomes` on an ask, an action and a rec are one shape
 // (store.Outcome) — and each arms the composer with that pick; the client
 // adds only the silent closes (Dismiss; a read's Read) and the two buttons
-// that are not answers (Install, Restart). A closed card is grey with its
-// state where the row was. A dismissed one — or a read marked Read — FOLDS
-// to one grey line with Reopen inside, so it can still be reopened or reread;
-// `opened` is the chat's remembered fold (data-k survives the 5 s redraw).
+// that are not answers (Install, Restart). A closed card, whatever closed it,
+// FOLDS to one row (rowHTML) with Reopen inside, so it can still be reopened
+// or reread; `opened` is the chat's remembered fold (data-k survives the 5 s
+// redraw).
 //
-// A card is { ref, id, tint, mark, title, body, meta, acts, closed, folded, trail }:
+// A card is { ref, id, tint, mark, title, body, meta, acts, closed, folded, trail, at, cost }:
 //   ref     ask | action | rec — the id's namespace (data-k)
 //   tint    '' red (a stopped session, a proposal) | read | install | rec | err-card
 //   acts    [{ label, js | href, primary, suggested }] — the row of an open
 //           card: `primary` filled (on the bar, or a one-shot act such as
 //           Install), `suggested` outlined (the first pick, nothing armed)
-//   closed  the words where the row was (a closed card)
-//   folded  the word before the title (a folded card; acts = Reopen)
+//   closed  how it closed, a muted line inside the row
+//   folded  the row's word (a closed card; acts = Reopen)
+//   at      when it was raised (open) or closed; cost the turn's dollars
 const btnCls = b => 'sm' + (b.primary ? ' primary' : b.suggested ? ' suggested' : '');
 const cardBtn = b => b.href
   ? `<a class="btn ${btnCls(b)}" href="${esc(b.href)}" target="_blank">${b.label}</a>`
@@ -777,20 +777,34 @@ function cardHTML(c, opened) {
   // it the title, when the message does not already say it, then the message
   // in plain body type.
   const titled = !saidCovers(c.said, c.title) && !saidCovers(c.body, c.title, true);
-  const head = `<div class="card-h">${c.mark}<span class="verb">${esc(c.verb || '')}</span></div>`;
+  // `at` and `cost`: when it was raised or closed, and the dollars of the turn
+  // that raised it (they ride on that turn's first card).
+  const at = [c.at ? esc(dayWhen(c.at)) : '', c.cost ? usd(c.cost) : ''].filter(Boolean).join(' · ');
+  const head = `<div class="card-h">${c.mark}<span class="verb">${esc(c.verb || '')}</span>${at ? `<span class="at">${at}</span>` : ''}</div>`;
   const said = c.said ? `<div class="said">${esc(c.said)}</div>` : '';
+  // A closed card is one row: its state, title and time; open it to reread
+  // or Reopen.
   if (c.folded) {
-    return `<details class="ask folded" id="ask-card-${id}" data-k="${c.ref}:${id}" data-def="0"${opened ? ' open' : ''}>
-      <summary><span class="muted">${c.folded}</span><span class="${titled ? '' : 'echo'}"><span class="muted"> ·</span> ${mdInline(c.title)}</span></summary>
-      ${said}${body}
-      <div class="acts">${acts}</div></details>`;
+    return rowHTML({ id: 'ask-card-' + id, key: c.ref + ':' + id, opened, k: c.folded, title: mdInline(c.title), when: at,
+      body: said + body + (c.meta ? `<div class="small muted">${c.meta}</div>` : '')
+        + (c.closed ? `<div class="small muted">${c.closed}</div>` : '') + (c.trail || '')
+        + (acts ? `<div class="acts">${acts}</div>` : '') });
   }
-  const cls = ['ask', c.tint, c.closed ? 'answered' : ''].filter(Boolean).join(' ');
-  return `<div class="${cls}" id="ask-card-${id}">
+  return `<div class="${['ask', c.tint].filter(Boolean).join(' ')}" id="ask-card-${id}">
       ${head}${titled ? `<div class="t">${mdInline(c.title)}</div>` : ''}
       ${said}${body}
       ${c.meta ? `<div class="row small muted">${c.meta}</div>` : ''}
-      <div class="acts">${c.closed ? `<span class="small muted">${c.closed}</span>` : ''}${acts}</div>${c.trail || ''}</div>`;
+      <div class="acts">${acts}</div>${c.trail || ''}</div>`;
+}
+// THE ROW: everything in a chat that is not an open card is one line of the
+// same shape (a closed card, the owner's message, a note, a check-in). `k` is
+// the word that leads it, then the title cut to the line, the time at the
+// end; a click opens it in place. `cls` "me" is the owner's (grey fill; every
+// other row is white). `key` keeps it open across the redraw (data-k, wireChat).
+function rowHTML({ id, key, opened, cls, k, title, when, body }) {
+  return `<details class="chat-row${cls ? ' ' + cls : ''}"${id ? ` id="${esc(id)}"` : ''} data-k="${esc(key)}" data-def="0"${opened ? ' open' : ''}>
+    <summary><span class="k">${k}</span><span class="t">${title}</span><span class="when">${when || ''}</span></summary>
+    <div class="row-body">${body}</div></details>`;
 }
 // Markdown compared as words: links to their text, marks and a cut title's
 // "…" dropped. Used to spot a body line that only repeats the title.
@@ -799,9 +813,9 @@ const plainText = s => (s || '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace
 // Compared plain, case folded, the way the phone's SessionCell.body drops a
 // title-repeating line. A folded card open hides the title it covers: a read's
 // title is its message's first words cut with "…", and drawn over the message
-// it read as one paragraph truncated above the same one whole. The body covers
-// it only by STARTING with it (`lead`): an approval titled "git commit" keeps
-// its title over a will-run block that merely holds "git commit -m x".
+// it read as one paragraph truncated above the same one whole.
+// `lead`: the body covers the title only when it starts with it (a will-run
+// block that merely contains the title keeps the title line).
 function saidCovers(said, title, lead) {
   const t = plainText(title).toLowerCase();
   if (!t || !said) return false;
@@ -823,10 +837,8 @@ function outcomeBtns(outcomes, arm, armed) {
 
 // Where a card stands is the hub's (store.AskStanding): `open` = the owner's move,
 // `closed` = finished, neither = answered and waiting on its session;
-// `folded` = a silent close drawn as one line with Reopen ("dismissed", or
-// "read" — a read card closed with its own button, whose resolution is the
-// hub's word for its one outcome; a read closed by a reply carries the
-// reply's first line instead and stays a full card above the reply). What a
+// `folded` = the hub's word for how it closed ("dismissed", "read", "done"),
+// the word its row leads with. What a
 // card wants from the owner, in one word, is the ask's own `verb` (store.AskVerb).
 // The paused card: a session limit is a wait with an end, so it is not the grey error: amber like "waiting", ⏸ and
 // PAUSED on the head line, and the wait itself as a bar from the moment it
@@ -846,8 +858,9 @@ function pauseBarHTML(a) {
 }
 
 // `armed`: the pick this card has on the chat's composer (threads.js
-// chatArmed), undefined off a chat or when nothing of it is armed.
-function askHTML(a, opened, armed) {
+// chatArmed), undefined off a chat or when nothing of it is armed. `cost`:
+// the turn's dollars, on the first card it raised (threads.js msgHTML).
+function askHTML(a, opened, armed, cost) {
   const id = esc(a.id), err = a.kind === 'error', paused = err && !!a.resumes_at;
   const onBar = armed !== undefined && armed !== null;
   const open = !a.closed, answered = open && !a.open;
@@ -880,14 +893,15 @@ function askHTML(a, opened, armed) {
   return cardHTML({
     ref: 'ask', id: a.id, title: a.title, verb: a.verb || 'for you',
     tint: paused && open ? 'paused' : err ? 'err-card' : read ? 'read' : install ? 'install' : '',
-    mark: answered ? '⏳ ' : !open ? '✓ ' : paused ? PAUSE_MARK + ' ' : err ? '⚠︎ ' : read ? '🔵 ' : install ? '📲 ' : '🔴 ',
+    mark: answered ? '⏳ ' : paused ? PAUSE_MARK + ' ' : err ? '⚠︎ ' : read ? '🔵 ' : install ? '📲 ' : '🔴 ',
     // An item's steps: each its own Did it · Skip · Reply, on the one card,
     // staged on the chat's bar until Send.
     body: paused && open ? pauseBarHTML(a) : err ? '' : askBody(install && !mac ? askDetailShown(a.detail) : (a.detail || ''), 'ask:' + a.id)
       + (a.steps && typeof calStepsHTML === 'function' ? calStepsHTML(a, typeof armStepReply === 'function'
         ? { card: a.id, armed: n => chatArmed('step', (a.cal_id || a.id) + '.' + n) } : undefined) : ''),
-    said: a.said, thread: a.thread_id, acts, closed: open ? '' : esc(a.state),
-    folded: a.folded === 'dismissed' ? '✕ dismissed' : a.folded ? '✓ ' + esc(a.folded) : '',
+    said: a.said, thread: a.thread_id, acts, cost,
+    at: open ? '' : a.resolved_at || a.created_at,
+    folded: open ? '' : a.folded === 'dismissed' || a.state === 'dismissed' ? '✕ dismissed' : '✓ ' + esc(a.folded || a.state),
   }, opened);
 }
 
@@ -914,14 +928,14 @@ const kindPill = { money: 'amber', delete: 'needs', contact: 'purple', share: 'p
 // out of date unanswered).
 // Drawn INSIDE the chat under the reply that proposed it (no message id of
 // its own: after the last message that precedes it in time), with id
-// `ask-card-<id>` so a deep link scrolls to it like an ask. A decided one
-// (reached from a calendar row or an old link) is grey with its state where
-// the row was; the audit trail below says who decided it and when.
+// `ask-card-<id>` so a deep link scrolls to it like an ask. A decided one is
+// a row (✓ approved, ✕ denied); the audit trail inside says who decided it
+// and when.
 // The job behind a thread-less action's `source` (claude:job:<name>), or ''.
 const actionJob = a => (!a.thread_id && /^claude:job:/.test(a.source || '')) ? a.source.slice('claude:job:'.length) : '';
-function actionHTML(a, opened, armed) {
+function actionHTML(a, opened, armed, cost) {
   const id = esc(a.id), job = actionJob(a);
-  const open = a.open, dismissed = a.folded === 'dismissed';
+  const open = a.open, no = a.state === 'denied' || a.state === 'failed';
   const payload = a.exec_payload && a.exec_type && a.exec_type !== 'none'
     ? `<details style="margin:6px 0"><summary class="muted">will run: ${esc(a.exec_type)}</summary>
        <pre class="io mono">${esc(typeof a.exec_payload === 'string' ? a.exec_payload : JSON.stringify(a.exec_payload, null, 2))}</pre></details>`
@@ -930,11 +944,13 @@ function actionHTML(a, opened, armed) {
   const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('action','${id}',true)` }] : []) : outcomeBtns(a.outcomes, arm, armed).concat({ label: 'Dismiss', js: `cardFold('action','${id}')` });
   return cardHTML({
     ref: 'action', id: a.id, title: a.title, tint: '', verb: 'approve',
-    mark: open ? '🔴 ' : (a.state === 'denied' || a.state === 'failed') ? '✕ ' : '✓ ',
+    mark: '🔴 ',
     body: askBody(a.detail || '', 'action:' + a.id) + payload,
     said: a.said, thread: a.thread_id,
     meta: `${pill(a.kind, kindPill[a.kind])} ${job ? pill('⚙ ' + job + ' job') : ''} ${a.project ? esc(a.project) : ''} <span>${ago(a.created_at)}</span>`,
-    acts, closed: open ? '' : `${esc(a.state)}${a.decided_via ? ' via ' + esc(a.decided_via) : ''}${a.decided_at ? ' · ' + ago(a.decided_at) : ''}`, folded: dismissed ? '✕ dismissed' : '', trail: eventsHTML(a.events),
+    acts, cost, at: open ? '' : a.decided_at || a.created_at,
+    closed: open ? '' : `${esc(a.state)}${a.decided_via ? ' via ' + esc(a.decided_via) : ''}${a.decided_at ? ' · ' + ago(a.decided_at) : ''}`, trail: eventsHTML(a.events),
+    folded: open ? '' : a.folded === 'dismissed' || a.state === 'dismissed' ? '✕ dismissed' : (no ? '✕ ' : '✓ ') + esc(a.state),
   }, opened);
 }
 
@@ -946,7 +962,7 @@ function actionHTML(a, opened, armed) {
 // marks it expired with the note "dismissed" — silently, nothing relayed —
 // and Reopen puts it back. The violet "rec" pill opens the record. Pull stays
 // pull: the card is inside the session and notifies nobody. A decided rec is
-// grey with the verdict where the row was.
+// a row with its verdict; the note is inside.
 const DOM_PILL = { money: 'amber', health: 'done', audience: 'purple', tools: 'running', home: '', other: '' };
 // What saying yes costs — the hub's `cost_label` ("$11/mo", "$33,837 one-off",
 // "free", "price not checked"), the phone's exact words. Unpriced is muted.
@@ -957,19 +973,20 @@ function costLabel(r) {
 const REC_STATE_WORD = { proposed: 'open', deferred: 'later', accepted: 'accepted', declined: 'declined', done: 'done', superseded: 'superseded', expired: 'expired' };
 // A rec's standing is the hub's (store.RecStanding): a parked (deferred) rec
 // is not `closed`, so it keeps its buttons; `folded` marks one dismissed.
-function recHTML(r, opened, armed) {
+function recHTML(r, opened, armed, cost) {
   const id = esc(r.id), open = !r.closed;
-  const dismissed = r.folded === 'dismissed';
+  const word = esc(REC_STATE_WORD[r.status] || r.status);
   const note = r.decision_note ? ' — ' + mdInline(r.decision_note, false) : '';
   const acts = !open ? (r.reopen ? [{ label: 'Reopen', js: `cardFold('rec','${id}',true)` }] : []) : outcomeBtns(r.outcomes, v => `armRecReply('${id}','${v}')`, armed).concat({ label: 'Dismiss', js: `cardFold('rec','${id}')` });
   return cardHTML({
     ref: 'rec', id: r.id, title: r.title, tint: 'rec', verb: 'rec',
-    mark: open ? '💡 ' : r.status === 'declined' ? '✕ ' : '✓ ',
+    mark: '💡 ',
     body: (r.because ? `<div class="wrap2">${mdInline(r.because, false)}</div>` : '')
       + (r.status === 'deferred' ? `<div class="muted">parked${r.review_on ? ' · back ' + esc(r.review_on) : ''}${note}</div>` : ''),
     meta: `<a class="pill purple" href="#/recs/${id}">rec</a> ${pill(r.domain, DOM_PILL[r.domain])} <span>${esc(r.kind)} · ${costLabel(r)}${r.model ? ' · ' + esc(modelShort(r.model)) : ''}</span>`,
-    acts, folded: dismissed ? '✕ dismissed' : '',
-    closed: open ? '' : `${esc(REC_STATE_WORD[r.status] || r.status)}${r.decided_by ? ' by ' + esc(r.decided_by) : ''}${r.decided_at ? ' · ' + ago(r.decided_at) : ''}${note}`,
+    acts, cost, at: open ? '' : r.decided_at || r.created_at,
+    folded: open ? '' : r.folded === 'dismissed' ? '✕ dismissed' : (r.status === 'declined' ? '✕ ' : '✓ ') + word,
+    closed: open ? '' : `${word}${r.decided_by ? ' by ' + esc(r.decided_by) : ''}${r.decided_at ? ' · ' + ago(r.decided_at) : ''}${note}`,
   }, opened);
 }
 

@@ -101,16 +101,13 @@ chat=$("$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-er
 # ids are the shared composer's, one per key (composer.js `cdom`): the chat's
 # box is c-chat, its textarea c-chat-draft — they were plain "composer"/"draft"
 # until the box became one component used by chat, calendar steps and recs.
-for want in 'id="c-chat"' 'id="c-chat-draft"' 'class="msg'; do
+for want in 'id="c-chat"' 'id="c-chat-draft"' 'id="msgs"'; do
   case "$chat" in
     *"$want"*) ;;
     *) fail "chat view missing: $want (thread $tid)" ;;
   esac
 done
-case "$chat" in
-  *'class="run"'*|*'class="run" '*) echo "web-smoke: OK (chat + run activity rendered, thread $tid)" ;;
-  *) echo "web-smoke: OK (chat rendered, thread $tid — no activity block in this thread)" ;;
-esac
+echo "web-smoke: OK (chat rendered, thread $tid)"
 
 # Phase 3: the other tabs. Each one renders its own heading, so an empty
 # <main> or a missing heading means that route threw — which is otherwise

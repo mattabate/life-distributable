@@ -303,8 +303,8 @@ test('askHTML: a read card is blue', () => {
   // Replying does not turn it red — it is still a read, now waiting on the
   // agent to close it.
   assert.match(askHTML({ ...readAsk, state: 'answered', ...WAITING }), /^<div class="ask read" id=/);
-  // Closed by the owner's reply (resolution = the reply's first line): a full grey card.
-  assert.match(askHTML({ ...readAsk, state: 'done', resolution: 'thanks', ...CLOSED }), /^<div class="ask answered" id=/);
+  // Closed by the owner's reply (resolution = the reply's first line): one row.
+  assert.match(askHTML({ ...readAsk, state: 'done', resolution: 'thanks', ...CLOSED }), /^<details class="chat-row" id=/);
 });
 
 // Once read, a card can be dismissed — every open card but a read carries
@@ -313,28 +313,28 @@ test('askHTML: every open card but a read offers Dismiss', () => {
   assert.match(askHTML(ask), /Dismiss<\/button>/);
   assert.match(askHTML(ask), /cardFold\('ask','ask-1a2b3c4d'\)/);
   assert.doesNotMatch(askHTML({ ...ask, state: 'done', ...CLOSED }), /Dismiss<\/button>/);
-  // Dismissed keeps a footprint: a folded grey line that
-  // unfolds to the whole card and Reopen.
+  // Dismissed keeps a footprint: one row that opens to the whole card and
+  // Reopen (every closed card is a row).
   const gone = askHTML({ ...readAsk, state: 'dismissed', ...DISMISSED });
-  assert.match(gone, /^<details class="ask folded" id="ask-card-ask-1a2b3c4d" data-k="ask:ask-1a2b3c4d" data-def="0">/);
-  assert.match(gone, /✕ dismissed ·/);
+  assert.match(gone, /^<details class="chat-row" id="ask-card-ask-1a2b3c4d" data-k="ask:ask-1a2b3c4d" data-def="0">/);
+  assert.match(gone, /<span class="k">✕ dismissed<\/span><span class="t">Pick a <strong>day<\/strong><\/span><span class="when">today /);
   assert.match(gone, /<ul><li>Mon<\/li><li>Tue<\/li><\/ul>/);
   assert.match(gone, /cardFold\('ask','ask-1a2b3c4d',true\)">Reopen</);
   assert.match(askHTML({ ...ask, state: 'dismissed', ...DISMISSED }, true), /data-def="0" open>/);
   assert.doesNotMatch(askHTML(readAsk), /Dismiss<\/button>/);
-  // A read marked Read (done, "Read it") folds the same way, headed "read";
-  // a decision closed done with any note does not fold.
+  // A read marked Read (done, "Read it") is headed "read"; any other close
+  // by its state.
   const readIt = askHTML({ ...readAsk, state: 'done', resolution: 'Read it', ...CLOSED, folded: 'read' });
-  assert.match(readIt, /^<details class="ask folded" id="ask-card-ask-1a2b3c4d"/);
-  assert.match(readIt, /✓ read ·/);
+  assert.match(readIt, /^<details class="chat-row" id="ask-card-ask-1a2b3c4d"/);
+  assert.match(readIt, /<span class="k">✓ read<\/span>/);
   assert.match(readIt, /Reopen</);
-  assert.match(askHTML({ ...ask, state: 'done', resolution: 'Read it', ...CLOSED }), /^<div class="ask answered"/);
+  assert.match(askHTML({ ...ask, state: 'done', resolution: 'Read it', ...CLOSED }), /<span class="k">✓ done<\/span>/);
 });
 
-// Every closed card reopens but an install — the hub's `reopen` says which; a done card keeps its state word beside the button.
+// Every closed card reopens but an install - the hub's `reopen` says which; the row's label carries the state word.
 test('askHTML: a done card carries Reopen when the hub says reopen', () => {
   const done = askHTML({ ...ask, kind: 'physical', state: 'done', ...CLOSED });
-  assert.match(done, /<div class="acts"><span class="small muted">done<\/span><button class="sm" onclick="cardFold\('ask','ask-1a2b3c4d',true\)">Reopen<\/button><\/div>/);
+  assert.match(done, /<div class="acts"><button class="sm" onclick="cardFold\('ask','ask-1a2b3c4d',true\)">Reopen<\/button><\/div>/);
   assert.doesNotMatch(askHTML({ ...ask, kind: 'install', state: 'done', ...CLOSED, reopen: false }), /Reopen/);
 });
 
@@ -357,7 +357,7 @@ test('askHTML: an install card is teal with one Install button, link line stripp
   assert.match(bare, />Respond</);
   assert.doesNotMatch(bare, /btn sm primary/);
   // Closed drops the button with the tint like any other card.
-  assert.match(askHTML({ ...inst, state: 'done', ...CLOSED }), /^<div class="ask answered"/);
+  assert.match(askHTML({ ...inst, state: 'done', ...CLOSED }), /^<details class="chat-row"/);
 });
 
 // The desktop app's install cell (one click builds in the background, then
@@ -397,9 +397,7 @@ test('askHTML: answered keeps its buttons with ⏳; closed loses them', () => {
   assert.match(chat, /⏳ <span class="verb">[a-z ]+<\/span><\/div><div class="t">Pick/);
   assert.match(chat, /Decided/);
   const done = askHTML({ ...ask, state: 'done', ...CLOSED, reopen: false });
-  assert.match(done, /class="ask answered"/);
-  assert.match(done, /✓ <span class="verb">decide<\/span><\/div><div class="t">Pick/);
-  assert.match(done, /<span class="small muted">done<\/span>/);
+  assert.match(done, /<summary><span class="k">✓ done<\/span><span class="t">Pick/);
   assert.doesNotMatch(done, /<button/);
 });
 
@@ -431,10 +429,10 @@ test('actionHTML: the approval card in the chat', () => {
   assert.doesNotMatch(chat, /textarea|anote|decideAction|approve\?|Open in session/);
   // Deny on the bar: Deny filled, Approve plain.
   assert.match(actionHTML(action, false, 'denied'), /<button class="sm" onclick="armActionReply\('act-1a2b3c4d','approved'\)">Approve<\/button><button class="sm primary" onclick="armActionReply\('act-1a2b3c4d','denied'\)">Deny</);
-  // Dismissed: folded like a dismissed ask, Reopen inside; the fold remembers.
+  // Dismissed: a row like a dismissed ask, Reopen inside; the row remembers.
   const gone = actionHTML({ ...action, state: 'dismissed', ...DISMISSED });
-  assert.match(gone, /^<details class="ask folded" id="ask-card-act-1a2b3c4d" data-k="action:act-1a2b3c4d" data-def="0">/);
-  assert.match(gone, /✕ dismissed ·/);
+  assert.match(gone, /^<details class="chat-row" id="ask-card-act-1a2b3c4d" data-k="action:act-1a2b3c4d" data-def="0">/);
+  assert.match(gone, /<span class="k">✕ dismissed<\/span><span class="t">git commit<\/span>/);
   assert.match(gone, /<div class="acts"><button class="sm" onclick="cardFold\('action','act-1a2b3c4d',true\)">Reopen<\/button><\/div>/);
   assert.match(actionHTML({ ...action, state: 'dismissed', ...DISMISSED }, true), /data-def="0" open>/);
   // What the push SPOKE, under the detail like an ask's; nothing drawn
@@ -472,14 +470,15 @@ test('recHTML: the rec card in the chat', () => {
   assert.match(recHTML(rec, false, 'accepted'), /<div class="acts"><button class="sm primary" onclick="armRecReply\('rec-1a2b3c4d','accepted'\)">Accept<\/button><button class="sm" onclick="armRecReply\('rec-1a2b3c4d','declined'\)">Decline</);
   assert.match(recHTML(rec, false, 'declined'), /<button class="sm" onclick="armRecReply\('rec-1a2b3c4d','accepted'\)">Accept<\/button><button class="sm primary" onclick="armRecReply\('rec-1a2b3c4d','declined'\)">Decline</);
   const done = recHTML({ ...rec, status: 'declined', decided_by: 'owner', decision_note: 'no', ...CLOSED, reopen: false });
-  assert.match(done, /^<div class="ask rec answered"/);
-  assert.match(done, /✕ <span class="verb">rec<\/span><\/div><div class="t">Try/);
-  assert.match(done, /<div class="acts"><span class="small muted">declined by owner — no<\/span><\/div>/);
+  assert.match(done, /^<details class="chat-row" id="ask-card-rec-1a2b3c4d" data-k="rec:rec-1a2b3c4d"/);
+  assert.match(done, /<span class="k">✕ declined<\/span><span class="t">Try <strong>oat<\/strong> milk/);
+  assert.match(done, /<div class="small muted">declined by owner — no<\/div>/);
+  assert.doesNotMatch(done, /Reopen/);
   const gone = recHTML({ ...rec, status: 'expired', decision_note: 'dismissed', ...DISMISSED });
-  assert.match(gone, /^<details class="ask folded" id="ask-card-rec-1a2b3c4d" data-k="rec:rec-1a2b3c4d"/);
+  assert.match(gone, /<span class="k">✕ dismissed<\/span>/);
   assert.match(gone, /cardFold\('rec','rec-1a2b3c4d',true\)">Reopen</);
-  // Expired by the hub, not by the owner: a closed card, not a fold.
-  assert.match(recHTML({ ...rec, status: 'expired', ...CLOSED }), /^<div class="ask rec answered"/);
+  // Expired by the hub, not by the owner: its own word, not "dismissed".
+  assert.doesNotMatch(recHTML({ ...rec, status: 'expired', ...CLOSED }), /dismissed<\/span>/);
   // Parked (deferred): neither open nor closed — it keeps its buttons.
   assert.match(recHTML({ ...rec, status: 'deferred', ...WAITING }), />Accept<[\s\S]*>Dismiss</);
 });
@@ -492,12 +491,12 @@ test('actionHTML: events[] draw only when the hub sent them', () => {
   ] });
   assert.match(h, /<div>proposed by claude:thread:t-1a2b3c4d · /);
   assert.match(h, /<div>approved by app · .* · ok<\/div>/);
-  // decided: the card is grey, the state stands where the buttons were
-  assert.match(h, /^<div class="ask answered"/);
-  assert.match(h, /✓ <span class="verb">approve<\/span><\/div><div class="t">git commit<\/div>/);
-  assert.match(h, /<div class="acts"><span class="small muted">approved<\/span><\/div>/);
+  // decided: one row, its state the row's word; how it closed inside
+  assert.match(h, /^<details class="chat-row"/);
+  assert.match(h, /<span class="k">✓ approved<\/span><span class="t">git commit<\/span><span class="when">/);
+  assert.match(h, /<div class="small muted">approved<\/div>/);
   assert.doesNotMatch(h, /approve\?|decideAction|armActionReply|anote/);
-  assert.match(actionHTML({ ...action, state: 'denied', ...CLOSED }), /✕ <span class="verb">approve<\/span><\/div><div class="t">git commit<\/div>/);
+  assert.match(actionHTML({ ...action, state: 'denied', ...CLOSED }), /<span class="k">✕ denied<\/span>/);
   assert.equal(eventsHTML([]), '');
   assert.equal(eventsHTML(undefined), '');
 });

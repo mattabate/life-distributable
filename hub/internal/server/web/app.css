@@ -330,60 +330,40 @@ textarea { resize: vertical; }
   justify-content: center; gap: 6px; text-align: center;
 }
 .hello-line { font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
-.msg { margin-bottom: 14px; display: flex; }
-.msg.owner { justify-content: flex-end; }
-.bubble {
-  max-width: min(760px, 82%); padding: 10px 13px; border-radius: 13px;
-  background: var(--panel); border: 1px solid var(--line);
-}
-.msg.owner .bubble { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
-.msg.owner .bubble a { color: var(--accent-fg); text-decoration: underline; }
-.msg.system .bubble { background: transparent; border-style: dashed; color: var(--muted); font-size: 13px; }
-.msg.error .bubble { border-color: var(--red); }
-/* A reply that only answers (its asks are all `read`) is blue, not red. */
-.msg.read .bubble { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
-/* An empty reply is the turn ending (2026-09-09): the card was the reply, so
-   the row is one muted line, not a bubble with nothing in it. */
-.msg.end .end-line { font-size: 11px; color: var(--muted); padding: 2px 13px; display: inline-block; }
-.msg.end.read .end-line { color: var(--accent); }
-/* There is no white cell (2026-09-13): a reply that still carries text (an
-   older row, or words folded beside a card) keeps it behind the end line. */
-.msg.end > details.old-reply { max-width: min(760px, 82%); }
-.msg.end > details.old-reply > summary { cursor: pointer; list-style: none; width: fit-content; }
-.msg.end > details.old-reply > summary::-webkit-details-marker { display: none; }
-.msg.end > details.old-reply > summary .end-line::after { content: ' · text'; opacity: .7; }
-.msg.end > details.old-reply[open] > summary .end-line::after { content: ' · hide'; }
-.msg.end > details.old-reply > .bubble { margin-top: 4px; max-width: none; opacity: .85; }
-/* A long message folds: closed, a screen's worth with a fade;
-   open, its full height — never a box that scrolls inside the chat; only a wide table scrolls
-   sideways. The bubble widens to the pane so a table gets its columns. */
-.msg.has-long .bubble { max-width: min(920px, 92%); width: 100%; }
-.bubble .body.long { position: relative; max-height: 15lh; overflow: hidden; }
-.bubble .body.long::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3.5lh;
-  background: linear-gradient(to bottom, transparent, var(--panel)); pointer-events: none; }
-.msg.owner .bubble .body.long::after { background: linear-gradient(to bottom, transparent, var(--accent)); }
-.bubble .body.long.open { max-height: none; overflow-x: auto; overflow-y: hidden; }
-.bubble .body.long.open::after { display: none; }
-/* Fitted and found short (ui.js fitFolds): fewer than five lines were behind
-   the fold, so there is no fold: the body whole, no button. */
-.bubble .body.long.fits { max-height: none; }
-.bubble .body.long.fits::after { display: none; }
-.bubble .body.long.open .md-table { max-width: none; }
-.bubble .fold, .ask .fold { display: block; margin-top: 6px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
+/* THE ROW (ui.js rowHTML): every message and every closed card is one
+   full-width line, label · title · time · ›, that opens in place. The
+   owner's rows are grey with no outline, the rest white with a hairline;
+   nothing else differs. */
+.chat-row { margin: 6px 0; border-radius: 8px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); font-size: 13px; color: var(--muted); }
+.chat-row.me { background: color-mix(in srgb, var(--fg) 7%, var(--panel)); box-shadow: none; }
+.chat-row > summary { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; list-style: none; white-space: nowrap; overflow: hidden; }
+.chat-row > summary::-webkit-details-marker { display: none; }
+.chat-row > summary::after { content: '›'; flex: none; color: color-mix(in srgb, var(--muted) 60%, transparent); transition: transform .15s; }
+.chat-row[open] > summary::after { transform: rotate(90deg); }
+.chat-row .k { flex: none; width: 100px; overflow: hidden; text-overflow: ellipsis; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.chat-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg); opacity: .8; }
+.chat-row .when { flex: none; font-size: 12px; }
+.chat-row.me .k { color: var(--fg); opacity: .75; }
+.chat-row.sched .k { color: var(--green); }
+.chat-row.error .k { color: var(--red); }
+.chat-row.paused .k { color: var(--amber); }
+.row-body { padding: 2px 12px 10px; color: var(--fg); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.row-body .said { margin: 0 0 6px; }
+.row-body .acts { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+.row-body .re { margin-bottom: 4px; color: var(--muted); font-size: 13px; }
+.row-body .re a { color: inherit; }
+.row-body p { margin: 0 0 8px; } .row-body p:last-child { margin-bottom: 0; }
+.row-body ul, .row-body ol { margin: 6px 0; padding-left: 22px; }
+.row-body li { margin: 2px 0; }
+.row-body code { background: var(--code); padding: 1px 5px; border-radius: 4px;
+  font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
+.row-body h1, .row-body h2, .row-body h3 { font-size: 1em; font-weight: 700; margin: 10px 0 4px;
+  text-transform: none; letter-spacing: 0; color: inherit; }
+.chat-row .by a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.ask .fold { display: block; margin-top: 6px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
   font: 600 12px system-ui, sans-serif; color: inherit; background: transparent;
   border: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
-.bubble .fold:hover, .ask .fold:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
-.bubble .meta { font-size: 11px; opacity: .6; margin-top: 6px; display: flex; gap: 12px; align-items: baseline; }
-.bubble .meta .by { margin-left: auto; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
-.bubble .meta .by a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-.bubble p { margin: 0 0 8px; } .bubble p:last-child { margin-bottom: 0; }
-.bubble ul, .bubble ol { margin: 6px 0; padding-left: 22px; }
-.bubble li { margin: 2px 0; }
-.bubble code { background: var(--code); padding: 1px 5px; border-radius: 4px;
-  font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
-.msg.owner .bubble code { background: rgba(255,255,255,.2); }
-.bubble h1, .bubble h2, .bubble h3 { font-size: 1em; font-weight: 700; margin: 10px 0 4px;
-  text-transform: none; letter-spacing: 0; color: inherit; }
+.ask .fold:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
 /* A pipe table in a reply or a card's detail (2026-09-17): as wide as its
    words, header bold in the text's own colour, hairlines between rows — not
    the page tables' full-width muted headers. */
@@ -408,16 +388,16 @@ textarea { resize: vertical; }
 .md-copy:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
 .md-code pre { margin: 0; padding: 8px 10px; overflow-x: auto; white-space: pre; tab-size: 2;
   font: 12.5px/1.5 ui-monospace, Menlo, monospace; }
-.md-code pre code, .msg.owner .bubble .md-code pre code { background: transparent; padding: 0;
+.md-code pre code { background: transparent; padding: 0;
   border-radius: 0; font: inherit; }
 
-/* attachments in a bubble: pictures show as pictures */
+/* attachments on a message: pictures show as pictures */
 .atts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .att img {
   max-height: 200px; max-width: 260px; border-radius: 8px; display: block;
   border: 1px solid rgba(127,127,127,.25);
 }
-.att, .msg.owner .bubble a.att { text-decoration: none; }
+.att { text-decoration: none; }
 .att-file { display: inline-block; padding: 3px 0; }
 /* a hub file on a line of its own in a card or reply (ui.js md): a
    screenshot is read, so it is drawn to the text's width */
@@ -428,63 +408,6 @@ textarea { resize: vertical; }
 .md-files audio { display: block; width: min(260px, 100%); height: 34px; }
 .md-files figcaption { font-size: 12px; color: var(--muted); margin-top: 3px; }
 
-/* activity: one block per run, one row per tool call, result folded in */
-.activity:empty { display: none; }
-.activity { margin: 2px 0 12px; max-width: min(680px, 82%); }
-.run { font-size: 12.5px; color: var(--muted); }
-.run > summary {
-  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px;
-  padding: 3px 8px; border-radius: 7px; width: fit-content;
-}
-.run > summary::-webkit-details-marker { display: none; }
-.run > summary { max-width: 100%; }
-.run > summary .hl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.run > summary:hover { background: var(--code); }
-.run > summary::before { content: '▸'; font-size: 10px; opacity: .7; }
-.run[open] > summary::before { content: '▾'; }
-/* One mark leads a live run's row: the pulse while the block is shut, the
-   open arrow once it is opened, never a dot at both ends. */
-.run.live:not([open]) > summary::before { display: none; }
-.run.live[open] > summary .dot { display: none; }
-.run .gear { opacity: .7; }
-.run .evs { margin: 4px 0 0 10px; padding-left: 10px; border-left: 2px solid var(--line); }
-.ev { font-size: 12.5px; color: var(--muted); margin: 1px 0; }
-.ev > summary, .ev.flat {
-  cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 7px;
-  padding: 2px 6px; border-radius: 6px;
-}
-.ev > summary::-webkit-details-marker { display: none; }
-.ev > summary:hover { background: var(--code); }
-.ev .ic { flex: 0 0 12px; opacity: .65; font-size: 11px; }
-.ev .hl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ev[open] .hl { white-space: normal; }
-.ev .tick { color: var(--green); font-size: 11px; }
-.ev .tick.err { color: var(--red); }
-.ev.bad .hl { color: var(--red); }
-/* An opened step is one terminal block, no grey boxes (2026-10-05): the call
-   in blue, an edit's lines and the output in grey, an error in red; the
-   output folds at 12 lines behind "… N more lines" and never scrolls inside
-   itself. A thought is purple and IS its own detail: the first line shut,
-   the whole thought open. */
-.ev.think .hl { color: var(--violet); }
-.ev.think[open] .hl.one, .ev.think:not([open]) .hl.all { display: none; }
-/* What the agent said mid-turn (💬): shut, two lines and an ellipsis; open,
-   the whole text with its line breaks. */
-.ev.said:not([open]) .hl {
-  white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
-}
-.ev.said[open] .hl { white-space: pre-wrap; }
-.ev .io {
-  margin: 2px 0 2px 19px; padding: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; line-height: 1.45;
-  white-space: pre-wrap; word-break: break-word;
-}
-.ev .io.call { color: var(--accent); }
-.ev .io.err { color: var(--red); }
-.ev .more > summary { cursor: pointer; list-style: none; margin-left: 19px; font-size: 11.5px; opacity: .8; }
-.ev .more > summary::-webkit-details-marker { display: none; }
-.ev .more > summary:hover { color: var(--accent); }
-.ev .more[open] > summary { display: none; }
 .working { display: flex; align-items: center; gap: 7px; padding: 4px 8px 10px; }
 
 /* ---------- the one card (ui.js cardHTML) ----------
@@ -511,8 +434,7 @@ textarea { resize: vertical; }
   background: color-mix(in srgb, var(--amber) 16%, transparent); }
 .ask .pause-bar > i { display: block; height: 100%; border-radius: 2px; background: var(--amber); transition: width .6s ease; }
 .ask .pause-foot { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.msg.end.paused .end-line { color: var(--amber); }
-.ask.answered, .ask.err-card { --tint: var(--line); background: var(--panel); }
+.ask.err-card { --tint: var(--line); background: var(--panel); }
 .ask.err-card { opacity: .92; }
 .ask.err-card .t { font-weight: 500; color: var(--muted); }
 .ask .t { font-weight: 600; margin-bottom: 4px; }
@@ -525,13 +447,11 @@ textarea { resize: vertical; }
    tint. */
 .ask .card-h { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 13px; line-height: 1.2; }
 .ask .card-h .verb { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--tint); }
-.ask.answered .card-h .verb { color: var(--muted); }
+.ask .card-h .at { font-size: 11.5px; color: var(--muted); }
 /* The message this card SPOKE (asks.said) IS the card — the text of what was
    played: plain body type under the head line; the detail — the owner's
    steps — follows it, smaller. */
 .ask .said { margin: 0 0 6px; font-size: 14px; color: var(--fg); line-height: 1.5; }
-.ask.answered .said { color: var(--muted); }
-.ask.folded .said { font-size: 12.5px; color: inherit; }
 .ask.mini .said { display: none; }
 .ask .acts { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
 /* Filled = the pick on the bar (what Send will do), or a one-shot act
@@ -545,14 +465,6 @@ textarea { resize: vertical; }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
   white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto;
 }
-/* Dismissed, or a read marked Read: one grey folded line where the card
-   was; unfold to reread or Reopen. */
-.ask.folded { --tint: var(--line); background: transparent; padding: 5px 13px; color: var(--muted); }
-.ask.folded > summary { cursor: pointer; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ask.folded[open] { padding: 11px 13px; color: inherit; background: var(--panel); }
-/* Open, a title its message already says (a read's cut first words) goes:
-   the body is the card. */
-.ask.folded[open] > summary .echo { display: none; }
 /* Deep-linked from a "Your turn" card: it opens directly on that card, and
    says which one it is, once. */
 .ask.flash { animation: flash 1.6s ease-out; }
@@ -821,12 +733,6 @@ textarea { resize: vertical; }
 .reply-strip + .reply-strip { border-top: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); }
 .re-slot:empty { display: none; }
 .composer .err:empty { display: none; }
-/* The pick a sent answer carried, over the owner's words: "↩ Got it · <card>".
-   In the owner's blue bubble it is the bubble's own white, italic, a touch
-   lighter — never the grey muted colour, which is hard to read there. */
-.msg .bubble .re { margin-bottom: 4px; font-style: italic; }
-.msg .bubble .re a { color: inherit; }
-.msg.owner .bubble .re, .msg.owner .bubble .re a { color: var(--accent-fg); opacity: .9; }
 
 /* lightbox — one at a time, click anywhere (or Esc) to close */
 .lightbox {

@@ -6,10 +6,9 @@
 // in the card's tint, "Reply" after them, and the client's silent close
 // (Dismiss / Read) last. the owner: "they should have the same components, and
 // there shouldn't be any excess styling code… reuse as much code as possible,
-// standardize the UI." A closed card is the same box in grey with its state
-// line and Reopen where the buttons were (every kind but an install, the owner
-// 2026-09-29); a dismissed one folds to a grey line and unfolds to the body
-// + Reopen.
+// standardize the UI." A closed card (done, decided, dismissed) is one
+// ChatRow that opens in place to its body and Reopen (every kind but an
+// install).
 //
 // AskCard, ApprovalCard and RecCard decide WHAT the buttons say and do;
 // nothing in them draws a box, a row or a button.
@@ -107,6 +106,8 @@ struct Card: View {
     var caption: String
     /// Anything else on the caption line's right (a goal, "23m ago", a cost).
     var right: String = ""
+    /// The dollars of the turn that raised it, which ride on its first card.
+    var cost: Double = 0
     var title: String
     /// The body: markdown; past `isLongText` it folds behind "Show N more
     /// lines", like a long bubble, and opens to full height (no inner scroll).
@@ -131,11 +132,10 @@ struct Card: View {
     /// Between the body and the meta row (an approval's "will run" block).
     var extra: AnyView? = nil
     var meta: AnyView? = nil
-    var closed = false
-    /// The closed card's record ("done · 2h ago", "denied by app").
+    /// The closed card's record in words: its note, what replaced it.
     var line: String = ""
-    /// Set → one grey folded line headed with this word ("dismissed",
-    /// "read", "done"); tap to unfold the body and `buttons` (Reopen).
+    /// Set → the card is closed: one ChatRow led by this word ("✓ done",
+    /// "✕ dismissed"), opening to the body and `buttons` (Reopen).
     var folded: String? = nil
     var buttons: [CardButton] = []
     /// Under the buttons: an approval's audit trail.
@@ -143,13 +143,13 @@ struct Card: View {
     var busy = false
     var error: String? = nil
 
-    @State private var unfolded = false
     @State private var bodyOpen = false
     @State private var hushed = false
     @ObservedObject private var speaker = Speaker.shared
     @Environment(\.openURL) private var openURL
 
-    private var shade: Color { closed || folded != nil ? .secondary : tint }
+    /// "$0.60" when the card carries its turn's cost.
+    private var when: String { cost > 0 ? usd(cost) : "" }
 
     var body: some View {
         if let folded { foldedBody(folded) } else { openBody }
@@ -162,30 +162,26 @@ struct Card: View {
                 Text(caption).textCase(.uppercase)
                 Spacer()
                 if !right.isEmpty { Text(right).lineLimit(1).foregroundStyle(.tertiary) }
+                if !when.isEmpty { Text(when).lineLimit(1).fixedSize().foregroundStyle(.tertiary) }
                 // Play sits at the caption line's far end, never beside the
                 // mark — the console's head line.
                 if !said.isEmpty { playButton }
-            }.font(.caption2.weight(.semibold)).foregroundStyle(shade)
+            }.font(.caption2.weight(.semibold)).foregroundStyle(tint)
             // Selectable: the thing worth copying is often IN the title (a
             // paste-this string, an endpoint).
-            if titled { StyledText(text: title, style: .body, color: closed ? .secondary : .primary, bold: !closed) }
+            if titled { StyledText(text: title, style: .body, color: .primary, bold: true) }
             if !said.isEmpty { saidLine }
-            // A closed card keeps its body: what it said is often what the owner came
-            // back to copy (the owner 2026-09-29: "there was text I was supposed to
-            // copy out of it").
             if !text.isEmpty { bodyText }
             if let extra { extra }
             if let meta { meta }
-            if closed, !line.isEmpty { StyledText(text: line, style: .caption1, color: .secondary, macSize: 12) }
-            // A closed card's row is Reopen alone, when its owner gives one.
             if !buttons.isEmpty { buttonRow }
             if let trail { trail }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(closed ? Color(.secondarySystemBackground).opacity(0.6) : tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(shade.opacity(closed ? 0.15 : 0.45), lineWidth: 1) }
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(tint.opacity(0.45), lineWidth: 1) }
         .padding(.horizontal)
     }
 
@@ -244,7 +240,7 @@ struct Card: View {
     /// the whole line, and on the Mac a drag over it selected nothing (the owner
     /// 2026-09-30: "I can copy the text, but it's only the full thing").
     private var saidLine: some View {
-        StyledText(text: said, style: .subheadline, color: closed ? .secondary : .primary, macSize: 13.5)
+        StyledText(text: said, style: .subheadline, color: .primary, macSize: 13.5)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -292,33 +288,76 @@ struct Card: View {
             .foregroundStyle(b.primary ? AnyShapeStyle(.white) : b.suggested ? AnyShapeStyle(tint) : AnyShapeStyle(.primary))
     }
 
-    /// A dismissed card keeps a footprint to reopen or reread it: one grey line where the card was; tap unfolds the body + Reopen.
+    /// A closed card keeps a footprint to reopen or reread it: its row,
+    /// opening to what it said (often the thing to copy) and Reopen.
     private func foldedBody(_ word: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button { withAnimation(.snappy) { unfolded.toggle() } } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: word == "dismissed" ? "xmark.circle" : "checkmark.circle")
-                    // Open, the body says it all: a read's title is its
-                    // message's first words cut with "…", and drawn over the
-                    // message it read as one paragraph truncated above the
-                    // same one whole.
-                    let echo = unfolded && !titled
-                    Text(echo ? word : "\(word) ·").textCase(.uppercase).font(.caption2.weight(.semibold))
-                    if !echo { Text(md(title)).font(.subheadline).lineLimit(unfolded ? nil : 1).multilineTextAlignment(.leading) }
-                    Spacer(minLength: 0)
-                    Image(systemName: unfolded ? "chevron.up" : "chevron.down").font(.caption2)
-                }.foregroundStyle(.secondary).contentShape(Rectangle())
+        ChatRow(k: word, title: title, when: when) {
+            if !said.isEmpty { saidLine }
+            if !text.isEmpty { StyledText(text: text, style: .subheadline, color: .secondary) }
+            if !line.isEmpty { StyledText(text: line, style: .caption1, color: .secondary, macSize: 12) }
+            if !buttons.isEmpty { buttonRow }
+            if let trail { trail }
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+        }
+    }
+}
+
+/// THE ROW. Everything in a chat that is not an open card is one line of the
+/// same shape: a closed card, the owner's message, a note, a check-in. `k`
+/// leads it (✓ DONE, YOU, ⏰ CHECK-IN), then the title cut to the line, the
+/// time, ›; a tap opens it in place. `mine` is the owner's: grey, no outline;
+/// every other row is plain with a hairline. The console's rowHTML (ui.js).
+struct ChatRow<Content: View>: View {
+    let k: String
+    let title: String
+    var when: String = ""
+    var mine = false
+    /// The word's colour when it is not grey (a check-in green, an error red).
+    var tone: Color? = nil
+    @ViewBuilder var content: () -> Content
+    /// LIFE_SHOT_UNFOLD=1 (ops/screens.sh, ops/mac-screens.sh UNFOLD=1): every
+    /// row drawn open, as after a tap, for a shot of that state.
+    @State private var open = ProcessInfo.processInfo.environment["LIFE_SHOT_UNFOLD"] == "1"
+    /// The phone has no room for "today": a bare clock is today's.
+    private var stamp: String {
+        #if targetEnvironment(macCatalyst)
+        when
+        #else
+        when.hasPrefix("today ") ? String(when.dropFirst(6)) : when
+        #endif
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { withAnimation(.snappy) { open.toggle() } } label: {
+                HStack(spacing: 8) {
+                    Text(k).textCase(.uppercase).font(.system(size: 11, weight: .semibold)).tracking(0.4)
+                        .foregroundStyle(tone ?? (mine ? Color.primary.opacity(0.75) : Color.secondary))
+                        .lineLimit(1)
+                        #if targetEnvironment(macCatalyst)
+                        .frame(width: 100, alignment: .leading)
+                        #else
+                        .fixedSize()
+                        #endif
+                    Text(md(title)).font(.system(size: 13)).foregroundStyle(Color.primary.opacity(0.8)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    if !when.isEmpty { Text(stamp).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).fixedSize() }
+                    Text("›").font(.system(size: 13)).foregroundStyle(Color.secondary.opacity(0.6)).rotationEffect(.degrees(open ? 90 : 0))
+                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .contentShape(Rectangle())
             }.buttonStyle(.plain)
-            if unfolded {
-                if !said.isEmpty { saidLine }
-                if !text.isEmpty { StyledText(text: text, style: .subheadline, color: .secondary) }
-                if !buttons.isEmpty { buttonRow }
-                if let error { Text(error).font(.caption).foregroundStyle(.red) }
+            if open {
+                VStack(alignment: .leading, spacing: 6) { content() }
+                    .padding(.horizontal, 12).padding(.top, 2).padding(.bottom, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.secondary.opacity(0.15), lineWidth: 1) }
+        .background(mine ? Color.primary.opacity(0.07) : Color(.systemBackground), in: RoundedRectangle(cornerRadius: 8))
+        .overlay { if !mine { RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1), lineWidth: 1) } }
+        #if targetEnvironment(macCatalyst)
+        .frame(maxWidth: 860, alignment: .leading)
+        #endif
         .padding(.horizontal)
     }
 }

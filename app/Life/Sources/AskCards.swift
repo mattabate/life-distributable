@@ -48,7 +48,7 @@ extension EnvironmentValues {
 
 /// One ask inside its own session, right under the reply that raised it: full
 /// detail (no truncation — this is the place to read it) and the one button
-/// row. Closed asks stay as a faded record so the thread still reads sensibly
+/// row. A closed ask stays as its row so the thread still reads sensibly
 /// afterwards.
 struct AskCard: View {
     @Environment(HubClient.self) private var hub
@@ -56,6 +56,8 @@ struct AskCard: View {
     @Environment(\.armedPicks) private var armedPicks
     let a: Ask
     var goals: [Goal] = []
+    /// The dollars of the turn that raised it, on its first card (ThreadDetail).
+    var cost: Double = 0
     var reload: () async -> Void = {}
     @State private var error: String?
     @State private var busy = false
@@ -75,9 +77,6 @@ struct AskCard: View {
     /// not keep an Install button once a newer build is on the phone. Only
     /// open and answered cards draw buttons.
     var closed: Bool { a.isClosed }
-    var closedIcon: String {
-        switch a.state { case "done": "checkmark.circle.fill"; case "superseded": "arrow.trianglehead.2.clockwise"; default: "xmark.circle" }
-    }
     /// What "Copy link" copies: the ask's own link.
     var shareURL: URL? { a.firstLink }
     /// Needs action → red; something to read → blue (a read is the owner's
@@ -88,7 +87,7 @@ struct AskCard: View {
     /// A session-limit pause (the hub's `resumes_at`) is amber: nothing broke
     /// and nothing is the owner's to do — it comes back on its own.
     var tint: Color {
-        closed ? .secondary : paused ? .orange : a.kind == "error" ? .secondary : a.kind == "read" ? .accentColor : a.kind == "install" ? .teal : .red
+        paused ? .orange : a.kind == "error" ? .secondary : a.kind == "read" ? .accentColor : a.kind == "install" ? .teal : .red
     }
     /// A crash that is only the plan's session limit: the hub resumes it at
     /// `resumes_at`, and Restart is "Resume now".
@@ -96,9 +95,10 @@ struct AskCard: View {
 
     var body: some View {
         Card(tint: tint,
-             mark: closed ? closedIcon : paused ? "pause.circle" : a.kind == "read" || a.kind == "install" ? kindIcon : "hand.raised.fill",
-             caption: closed ? a.state : a.state == "answered" ? "waiting on agent" : kindLabel,
+             mark: paused ? "pause.circle" : a.kind == "read" || a.kind == "install" ? kindIcon : "hand.raised.fill",
+             caption: a.state == "answered" ? "waiting on agent" : kindLabel,
              right: a.goal_id.map { g in goals.first { $0.id == g }?.title ?? g } ?? "",
+             cost: cost,
              title: a.title,
              text: a.detailWithoutLinks,
              said: a.said ?? "",
@@ -110,11 +110,10 @@ struct AskCard: View {
              // the one card, staged on the chat's bar until Send.
              extra: paused && !closed ? AnyView(PauseBar(from: a.created_at, to: a.resumes_at!))
                 : (a.steps ?? []).isEmpty ? nil : AnyView(CalStepsList(calID: a.cal_id, steps: a.steps ?? [], stage: stepStage)),
-             closed: closed,
              line: a.resolution.flatMap { $0.isEmpty ? nil : $0 } ?? (a.state == "superseded" ? "replaced by a newer card" : ""),
-             // A dismissed card — or a read marked Read —
-             // folds to one grey line where it was, with Reopen inside.
-             folded: a.folded,
+             // Closed (done, dismissed, a read marked Read), it is its row,
+             // Reopen inside (the console's askHTML `folded`).
+             folded: !closed ? nil : a.folded == "dismissed" || a.state == "dismissed" ? "✕ dismissed" : "✓ " + (a.folded ?? a.state),
              buttons: buttons, busy: busy, error: error)
         .contextMenu {
             if !closed { Button { respond("") } label: { Label("Respond", systemImage: "arrowshape.turn.up.left") } }

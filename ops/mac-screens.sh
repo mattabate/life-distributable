@@ -14,7 +14,7 @@
 # Needs a desktop build first (`make mac`, or `make mac-build` unsigned).
 # WAIT=<seconds> for a slow page (default 6); W=<points> for a narrower
 # window than 1280 (the minimum is 1100); H=<points> for a taller one than 860.
-# STEPS=1 opens every run block in a thread shot and each of its rows.
+# STEPS=<script> sets the Sessions turn rehearsal (default cards:2).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/ops/logs/screens/mac"; mkdir -p "$OUT"

@@ -1060,6 +1060,10 @@ func (m *Manager) blocked(threadID string) bool {
 	return false
 }
 
+// SyncStatus re-derives a thread's status after another package closed or
+// re-armed a card of its (a waiting item put back to wait, calendar.go).
+func (m *Manager) SyncStatus(threadID string) { m.syncThreadStatus(threadID) }
+
 // syncThreadStatus: needs_you is derived — a thread that is not running is
 // needs_you iff it has active asks that BLOCK (Ask.Blocks: not a practice or
 // a step, which are the calendar's rows); otherwise idle (scheduled) or done.

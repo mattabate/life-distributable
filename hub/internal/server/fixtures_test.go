@@ -101,8 +101,6 @@ func fixtureRoutes(id fixtureIDs) []fixtureRoute {
 		{"workspace", "/api/v1/workspace"},
 		{"threads_id", "/api/v1/threads/" + id.thread},
 		{"threads_id_messages", "/api/v1/threads/" + id.thread + "/messages?limit=200"},
-		{"threads_id_events", "/api/v1/threads/" + id.thread + "/events?since=0&limit=1000"},
-		{"threads_id_steps", "/api/v1/threads/" + id.thread + "/steps"},
 		{"changes", "/api/v1/changes?since=&wait=0&thread="},
 		{"calendar", "/api/v1/calendar?from=&to="},
 		{"calendar_id", "/api/v1/calendar/" + id.cal},
