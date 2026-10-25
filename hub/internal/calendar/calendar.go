@@ -658,7 +658,6 @@ func New(db *store.DB, thr *threads.Manager) (*Calendar, error) {
 	thr.ClaimStep = c.claimStep
 	thr.StepHeader = c.stepHeader
 	thr.ResolveCal = c.resolveCard
-	thr.AwayLine = c.AwayLine
 	c.unprefixDatedAsks()
 	return c, nil
 }

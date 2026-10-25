@@ -6,10 +6,10 @@ import (
 	"time"
 )
 
-// An away span fires nothing, every session's preamble names it, and a step
-// filed on one of its days hears so.
+// An away span fires nothing and a step filed on one of its days hears so;
+// the preamble only says to check (no dates in it).
 func TestAwaySpanIsSeenAndFiresNothing(t *testing.T) {
-	c, th, n := newTest(t)
+	c, _, n := newTest(t)
 	now := time.Date(2030, 1, 10, 9, 0, 0, 0, time.Local)
 	c.Now = func() time.Time { return now }
 	if _, err := c.AddAway(Away{Title: "Trip", From: "2030-06-13", Until: "2030-06-07"}); err == nil {
@@ -18,20 +18,6 @@ func TestAwaySpanIsSeenAndFiresNothing(t *testing.T) {
 	hm, err := c.AddAway(Away{Title: "Trip", From: "2030-06-07", Until: "2030-06-13", Source: "claude:thread:calendar"})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if _, err := c.AddAway(Away{Title: "Conference", From: "2030-05-29"}); err != nil {
-		t.Fatal(err)
-	}
-	// Past the preamble's ~9 months: listed by GET /away, not in the line.
-	if _, err := c.AddAway(Away{Title: "Reunion", From: "2031-05-29"}); err != nil {
-		t.Fatal(err)
-	}
-	line := c.AwayLine()
-	if !strings.Contains(line, "Conference 2030-05-29; Trip 2030-06-07..2030-06-13") || strings.Contains(line, "Reunion") {
-		t.Fatalf("preamble line: %q", line)
-	}
-	if th.AwayLine == nil || th.AwayLine() != line {
-		t.Fatal("threads not wired to the away line")
 	}
 	if got := c.AwayOn("2030-06-10"); !strings.Contains(got, "Trip 2030-06-07..2030-06-13") {
 		t.Fatalf("AwayOn inside: %q", got)

@@ -437,7 +437,7 @@ Body `{author?=owner, target|new, text, in_reply_to?, outcome?, replies?: [{ref,
 → 200 Prompt. 400 if it is not still `queued`.
 
 ### GET /api/v1/asks
-Query `state` (default `active` = open+answered; `all`; or one state), `thread`, `limit`. Oldest first. No per-ask web page (removed 2026-09-15): the chat card shows the whole detail.
+Query `state` (default `active` = open+answered; `all`; or one state), `thread`, `limit` (default 200). The newest `limit`, oldest first. No per-ask web page (removed 2026-09-15): the chat card shows the whole detail.
 
 ### POST /api/v1/asks
 Body `{thread_id, title, detail?, kind?=other, surface?, check?, run_id?, say?}` → 201 Ask. 400 on bad kind / unknown thread. `say` (`lifectl ask add --say`) is the sentence the push SPEAKS in place of "To read — title" (≤400 chars, else the label form goes out); it is said, never stored. `surface` omitted or unrecognised = inferred from the text. `run_id` omitted (lifectl reads it from `LIFE_RUN_ID`) = **the thread's run in flight**, so a card raised mid-turn is still cut into that turn's tool chain (`/threads/{id}/steps` segments) and linked to its reply at turn end; only a card raised while the session is idle keeps none.

@@ -407,3 +407,28 @@ Entry format:
   ref), `store/close.go`, `cmd/lifectl/main.go`, `web/views/threads.js`,
   `web/ui.js`, `web/views/calendar.js`, `ThreadDetail.swift`,
   `AskCards.swift`, `CalendarView.swift`, `shared/api.md`.
+
+## add-0030 · 2026-10-25 · Away dates leave the preamble
+- For: everyone
+- Fix: add-0028 put every coming away span into every session's preamble,
+  which each turn re-reads. The dates are out again; the preamble's dated-work
+  rule now says to check `lifectl cal <from> <to>` and `lifectl cal away`
+  before suggesting a day, and a step dated on an away day is still answered
+  with the span.
+- How: same merge as add-0008. By hand: `calendar/away.go` (`AwayLine` and
+  `awayAhead` gone), `calendar/calendar.go`, `threads/threads.go` (the
+  `AwayLine` hook gone, the dated-work line), `calendar/away_test.go`.
+
+## add-0031 · 2026-10-25 · Small fixes: long chats keep their newest cards, card titles, goal Cancel
+- For: everyone
+- Fix: GET /asks took the oldest 200, so a chat past 200 cards lost its
+  newest, and its open read card drew nowhere; it now keeps the newest
+  `limit`, still handed back oldest first. A card's body hides its title only
+  when it starts with it, so an approval titled "git commit" keeps its title
+  over a will-run block that holds `git commit -m x` (web, phone, desktop).
+  On a goal's page, Cancel on the name and statement form left the form on
+  screen, and a saved edit stayed in its form; both put the head panel back.
+- How: same merge as add-0008. By hand: `threads/asks.go` (`ListAsks` DESC
+  then reversed), `threads/threads_test.go`, `shared/api.md`, `web/ui.js`
+  (`saidCovers` lead), `Card.swift` (`titled`), `web/views/goals.js`
+  (`closeGoalForm`).

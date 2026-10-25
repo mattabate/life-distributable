@@ -520,6 +520,10 @@ func TestAsks(t *testing.T) {
 	if d, _ = m.GetAsk(d.ID); d.State != "open" {
 		t.Fatalf("sibling ask touched by a Done relay: %+v", d)
 	}
+	// a capped list keeps the NEWEST cards, oldest first
+	if as, _ := m.ListAsks("all", th.ID, 2); len(as) != 2 || as[0].ID != b.ID || as[1].ID != d.ID {
+		t.Fatalf("%+v", as)
+	}
 	if pb, _ := os.ReadFile(promptFile(t, m, th.ID)); !strings.Contains(string(pb), "responded to ONE ask — "+b.ID) || strings.Contains(string(pb), "action you proposed") || !strings.Contains(string(pb), d.ID+" (decision, open)") {
 		t.Fatal(string(pb))
 	}
