@@ -776,7 +776,7 @@ function cardHTML(c, opened) {
   // APPROVE, the Sessions cell's corner word) on a line of their own. Under
   // it the title, when the message does not already say it, then the message
   // in plain body type.
-  const titled = !saidCovers(c.said, c.title) && !saidCovers(c.body, c.title);
+  const titled = !saidCovers(c.said, c.title) && !saidCovers(c.body, c.title, true);
   const head = `<div class="card-h">${c.mark}<span class="verb">${esc(c.verb || '')}</span></div>`;
   const said = c.said ? `<div class="said">${esc(c.said)}</div>` : '';
   if (c.folded) {
@@ -799,10 +799,14 @@ const plainText = s => (s || '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace
 // Compared plain, case folded, the way the phone's SessionCell.body drops a
 // title-repeating line. A folded card open hides the title it covers: a read's
 // title is its message's first words cut with "…", and drawn over the message
-// it read as one paragraph truncated above the same one whole.
-function saidCovers(said, title) {
+// it read as one paragraph truncated above the same one whole. The body covers
+// it only by STARTING with it (`lead`): an approval titled "git commit" keeps
+// its title over a will-run block that merely holds "git commit -m x".
+function saidCovers(said, title, lead) {
   const t = plainText(title).toLowerCase();
-  return !!t && !!said && plainText(said).toLowerCase().includes(t);
+  if (!t || !said) return false;
+  const s = plainText(said).toLowerCase();
+  return lead ? s.startsWith(t) : s.includes(t);
 }
 // The hub's outcomes as the row, in the hub's order — the same order the
 // composer strip draws its chips — never a different order on the bar than

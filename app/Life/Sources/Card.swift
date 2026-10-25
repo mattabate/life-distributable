@@ -192,11 +192,15 @@ struct Card: View {
     /// Does the message already say the title? Compared plain (links to their
     /// text, marks dropped, case folded), a cut title's "…" off — the console's
     /// `saidCovers`. Then the title stays for rows and the card leads with
-    /// the message alone.
+    /// the message alone. The body covers it only by starting with it: an
+    /// approval titled "git commit" keeps its title over a will-run block
+    /// that merely holds "git commit -m x".
     private var titled: Bool {
         let t = SessionCell.plain(title).lowercased()
         guard !t.isEmpty else { return true }
-        return ![said, text].contains { !$0.isEmpty && SessionCell.plain($0).lowercased().contains(t) }
+        let saidSays = !said.isEmpty && SessionCell.plain(said).lowercased().contains(t)
+        let bodyLeads = !text.isEmpty && SessionCell.plain(text).lowercased().hasPrefix(t)
+        return !saidSays && !bodyLeads
     }
 
     /// Hear the spoken message again; tap again to stop.

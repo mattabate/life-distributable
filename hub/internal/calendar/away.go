@@ -12,10 +12,12 @@ import (
 
 // Away: days the owner cannot be booked (a trip, a holiday), a label over a
 // span of days. It is not an item: it fires nothing, nags nothing, raises no
-// ask and never counts on a badge. It exists so agents see it without
-// looking: every session's preamble lists the coming spans (AwayLine), and a
-// step or dated ask filed on one of those days comes back with `away` saying
-// so. Ended, never deleted: `state` on -> ended.
+// ask and never counts on a badge. It exists so a dated idea meets it: the
+// preamble tells every session to check `lifectl cal` and `lifectl cal away`
+// before suggesting a day, and a step or dated ask filed on one of those days
+// comes back with `away` saying so. The dates themselves stay out of the
+// preamble, which every turn re-reads. Ended, never deleted: `state` on ->
+// ended.
 type Away struct {
 	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -27,10 +29,6 @@ type Away struct {
 	State     string    `json:"state"` // on | ended
 	Note      string    `json:"note,omitempty"`
 }
-
-// awayAhead: how far ahead the preamble looks (~9 months, so something
-// planned this spring sees a trip booked for the summer).
-const awayAhead = 9 * 31 * 24 * time.Hour
 
 const awayCols = `id, created_at, title, detail, day_from, day_until, source, state, note`
 
@@ -120,20 +118,6 @@ func (c *Calendar) AwayOn(day string) string {
 		names = append(names, a.Title+" "+span(a))
 	}
 	return "The owner is away on " + day + ": " + strings.Join(names, "; ") + ". They cannot do or attend anything that day: move it unless it is meant for the trip itself."
-}
-
-// AwayLine: the preamble's line, "" when nothing is coming.
-func (c *Calendar) AwayLine() string {
-	now := c.Now()
-	list, err := c.Aways(now.Format("2006-01-02"), now.Add(awayAhead).Format("2006-01-02"))
-	if err != nil || len(list) == 0 {
-		return ""
-	}
-	var spans []string
-	for _, a := range list {
-		spans = append(spans, a.Title+" "+span(a))
-	}
-	return "- THE OWNER IS AWAY (never propose, book or date anything of theirs on these days; check before any dated idea): " + strings.Join(spans, "; ") + ". `lifectl cal away` lists them.\n"
 }
 
 func span(a Away) string {

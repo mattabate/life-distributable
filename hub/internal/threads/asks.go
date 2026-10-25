@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -853,7 +854,10 @@ func (m *Manager) ListAsks(state, threadID string, limit int) ([]Ask, error) {
 		limit = 200
 	}
 	args = append(args, limit)
-	rows, err := m.db.Query(`SELECT `+askCols+` FROM `+askFrom+` WHERE `+strings.Join(where, " AND ")+` ORDER BY CASE WHEN a.src='cal' THEN a.fired_at ELSE a.created_at END LIMIT ?`, args...)
+	// The NEWEST `limit`, handed back oldest first. Oldest-first with the
+	// cap cut the newest off a long chat: past 200 cards, its open read
+	// card drew on no surface.
+	rows, err := m.db.Query(`SELECT `+askCols+` FROM `+askFrom+` WHERE `+strings.Join(where, " AND ")+` ORDER BY CASE WHEN a.src='cal' THEN a.fired_at ELSE a.created_at END DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -872,6 +876,7 @@ func (m *Manager) ListAsks(state, threadID string, limit int) ([]Ask, error) {
 		return nil, err
 	}
 	rows.Close()
+	slices.Reverse(out)
 	m.stepsOn(out)
 	return out, nil
 }

@@ -74,6 +74,7 @@ async function goalDetail(view, id) {
     ]);
     // A live redraw keeps a half-typed edit.
     const typed = document.getElementById('g-title') ? goalEditValue() : null;
+    goalShown = g;
     paint(view, `<div class="pane wide goal-page">
       <a href="#/goals" class="crumb">← Goals</a>
       ${/* The head panel: name, statement, the active switch — the three
@@ -131,9 +132,22 @@ function goalEditHTML(g, v) {
       <textarea id="g-statement" rows="6">${esc(v.statement)}</textarea></label>
     <div class="row mt10">
       <span class="grow"></span>
-      <button class="sm" onclick="pageRedraw()">Cancel</button>
+      <button class="sm" onclick="closeGoalForm()">Cancel</button>
       <button class="primary sm" onclick="saveGoal('${esc(g.id)}')">Save</button>
     </div>`;
+}
+
+// Cancel, and a save that landed: the head panel is drawn back over the form
+// from the goal on screen BEFORE the redraw. The redraw keeps a half-typed
+// edit whenever #g-title is still in the DOM, so a bare pageRedraw() here
+// drew the form again with its own values and Cancel cancelled nothing. And
+// emptying the panel is not enough: paint() skips a page whose markup is what
+// it last painted, which the head panel's is.
+let goalShown = null;
+function closeGoalForm() {
+  const head = document.getElementById('ghead');
+  if (head && goalShown) head.innerHTML = goalHeadHTML(goalShown);
+  return pageRedraw();
 }
 
 function goalEditValue() {
@@ -159,7 +173,7 @@ async function saveGoal(id) {
   // The id is a slug of the title made when the goal was created, so a
   // rename keeps the id and every note stays attached — nothing to redirect.
   // A failed save keeps the form open with their words (no repaint).
-  if (await act(() => patch(`/goals/${encodeURIComponent(id)}`, body), 'goal saved', null)) await pageRedraw();
+  if (await act(() => patch(`/goals/${encodeURIComponent(id)}`, body), 'goal saved', null)) await closeGoalForm();
 }
 
 // The switch is the whole status control: on = active, off = paused. A goal a
