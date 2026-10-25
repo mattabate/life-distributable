@@ -102,6 +102,7 @@ func (s *Server) routes() []route {
 		{"PATCH /api/v1/calendar/{id}", s.calendarUpdate, false},
 		{"POST /api/v1/calendar/{id}/resolve", s.calendarResolve, false},
 		{"POST /api/v1/calendar/{id}/merge", s.calendarMerge, false},
+		{"POST /api/v1/calendar/{id}/raise", s.calendarRaise, false},
 		{"PUT /api/v1/calendar/{id}/steps", s.calendarSteps, false},
 		{"POST /api/v1/calendar/{id}/steps/{n}", s.calendarStep, false},
 		{"GET /api/v1/recs", s.recsList, false},

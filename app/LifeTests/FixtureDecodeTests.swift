@@ -36,8 +36,6 @@ final class FixtureDecodeTests: XCTestCase {
         ("workspace", [WorkspaceFile].self),
         ("threads_id", Life.Thread.self),
         ("threads_id_messages", [ThreadMessage].self),
-        ("threads_id_events", [ThreadEvent].self),
-        ("threads_id_steps", [StepCount].self),
         ("changes", ChangeFeed.self),
         ("calendar", CalView.self),
         ("calendar_id", CalItem.self),

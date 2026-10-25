@@ -31,7 +31,7 @@
   // `outcomes` is the hub's per-kind answer vocabulary (store/close.go
   // AskOutcomes), default first — the console draws whatever it is sent.
   // Linked to reply 5 by the hub (message_id): the card IS that turn's reply,
-  // drawn under its "turn ended" line (2026-09-13).
+  // and carries its dollars.
   const ASK = { id: 'ask-t3st', thread_id: 't-t3st', thread_title: 'Exports', state: 'open', kind: 'decision', message_id: 5,
                 outcomes: [{ value: '', label: 'Reply' }, { value: 'done', label: 'Decided' }],
                 detail: 'line one\n- a bullet', created_at: new Date().toISOString() };
@@ -40,9 +40,9 @@
   // messages: a rec's picture must be in the DECISION, never a message after it.
   const UPLOADED = [], SENT = [];
   // Mutable so the last cases can stop and restart the session under the
-  // chat: status, the extra messages of a run in flight, and its steps.
+  // chat: status, and the extra messages of a run in flight.
   const THREAD = { id: 't-t3st', title: 'Exports', status: 'done' };
-  let EXTRA = [], EVENTS = [];
+  let EXTRA = [];
   const REC = { id: 'rec-t3st', thread_id: 't-t3st', source: 'claude:thread:t-t3st', status: 'proposed', domain: 'money', kind: 'switch',
                 title: 'Move the "idle" cash (it\'s <b>$5k</b>)', because: 'yield gap', cost_cents: 0, effort: 'small', confidence: 70,
                 model: 'claude-fable-5', message_id: 6, created_at: new Date(Date.now() - 90000).toISOString(), updated_at: new Date().toISOString() };
@@ -56,39 +56,15 @@
     if (url.includes('/asks/ask-t3st')) return j(ASK);
     // The session Respond opens: a thread row, and its messages carrying the ask.
     if (/\/threads\/t-t3st(\?|$)/.test(url)) return j(THREAD);
-    // Counts come from the hub, split at each starter exactly as it does —
-    // so the console can be checked for drawing what it was TOLD, never what
-    // it happens to have fetched (2026-08-28).
-    if (url.includes('/threads/t-t3st/steps')) {
-      const starters = EXTRA.filter(m => m.run_id).sort((a, b) => +new Date(a.ts) - +new Date(b.ts));
-      return j(starters.map((m, i) => {
-        const from = i === 0 ? -Infinity : +new Date(m.ts);
-        const to = i + 1 < starters.length ? +new Date(starters[i + 1].ts) : Infinity;
-        const evs = EVENTS.filter(e => { const t = +new Date(e.ts); return t >= from && t < to; });
-        return { message_id: m.id, run_id: m.run_id, tools: evs.filter(e => e.kind === 'tool_use').length,
-                 thoughts: evs.filter(e => e.kind === 'thinking').length, steps: evs.length,
-                 first_id: evs.length ? evs[0].id : 0, last_id: evs.length ? evs[evs.length - 1].id : 0 };
-      }));
-    }
-    // Events answer like the hub: since=0 = the NEWEST `limit`, since=N =
-    // the oldest after N, before=N = the page before N, ids= = exactly those.
-    // A window that moves is the whole point of the tick-down checks below.
-    if (url.includes('/threads/t-t3st/events')) {
-      const q = new URL(url, location.href).searchParams;
-      if (q.get('ids')) { const want = new Set(q.get('ids').split(',').map(Number)); return j(EVENTS.filter(e => want.has(e.id))); }
-      const since = +q.get('since') || 0, before = +q.get('before') || Infinity, limit = +q.get('limit') || 500;
-      const evs = EVENTS.filter(e => e.id > since && e.id < before).sort((a, b) => a.id - b.id);
-      return j(since > 0 ? evs.slice(0, limit) : evs.slice(-limit));
-    }
     if (url.includes('/asks?') && url.includes('thread=t-t3st')) return j([ASK]);
     // An earlier answer of the owner's, with the pick it carried: the chat
     // must SHOW it.
     if (url.includes('/threads/t-t3st/messages')) return j([
       // The card is the reply (2026-09-09): a turn that raised a read card
-      // ends with NO text, and the chat draws that as one "turn ended" line.
+      // ends with NO text, and the chat draws no row for it at all.
       { id: 5, thread_id: 't-t3st', ts: new Date(Date.now() - 120000).toISOString(), role: 'claude', kind: 'read', text: '', cost_usd: 1.44, tokens: 849000, attachments: [] },
       // A row that still carries text (before 2026-09-13, when every reply
-      // became a card): no white bubble — the same end line, text folded.
+      // became a card): one closed "Reply" row.
       { id: 6, thread_id: 't-t3st', ts: new Date(Date.now() - 60000).toISOString(), role: 'claude', kind: 'message', text: 'Filed a rec.', attachments: [] },
       { id: 7, thread_id: 't-t3st', ts: new Date().toISOString(), role: 'owner', kind: 'decision',
         text: 'the 4th', attachments: [], in_reply_to: 'ask:ask-t3st', outcome: 'done' },
@@ -197,7 +173,7 @@ setTimeout(async () => {
       check('the route is folded while the card is armed', (document.getElementById('c-chat-route') || {}).style?.display === 'none',
         String((document.getElementById('c-chat-route') || {}).outerHTML).slice(0, 200));
       // The owner's earlier answer shows what it answered and how, in the card's own word.
-      const re = document.querySelector('#msgs .msg.owner .re');
+      const re = document.querySelector('#msgs .chat-row.me .re');
       check('a sent answer shows its pick and card', !!re && re.textContent.includes('Decided') && re.textContent.includes('Amazon data export'),
         String(re ? re.textContent : document.getElementById('msgs')?.innerHTML).slice(0, 200));
       // The chips are the hub's words for THIS kind, its default lit.
@@ -235,37 +211,27 @@ setTimeout(async () => {
       const msgs = document.getElementById('msgs');
       const card = document.getElementById('ask-card-rec-t3st');
       check('rec card is drawn in the chat', !!card && card.textContent.includes('Move the "idle" cash'), String(msgs && msgs.innerHTML).replace(/\s+/g, ' ').slice(0, 300));
-      const end = msgs && msgs.querySelector('.msg.end.read .end-line');
-      // (Reply 6 keeps its old words behind a closed fold — that bubble is
-      // inside <details>, which is the point; the empty row has none at all.)
-      // Day, time, dollars, no tokens; "turn ended" only on the newest reply row.
-      check('an empty reply is one end line, not a bubble: day · time · $, no tokens', !!end && end.textContent.startsWith('today ') && end.textContent.includes('$1.44') && !end.textContent.includes('tok') && !end.textContent.startsWith('turn ended') && !document.getElementById('msg-5').querySelector('.bubble'),
-        String(end && end.outerHTML));
-      const endLines = [...msgs.querySelectorAll('.msg.end .end-line')];
-      check('"turn ended" is said once, on the newest reply row', endLines.filter(e => e.textContent.startsWith('turn ended')).length === 1 && endLines[endLines.length - 1].textContent.startsWith('turn ended'),
-        endLines.map(e => e.textContent).join(' | '));
+      // An empty reply draws nothing: its card is the turn, and the turn's
+      // dollars ride on that card's head, no tokens. (An open card has no
+      // time on its head, only the dollars.)
+      const askCard = document.getElementById('ask-card-ask-t3st');
+      const at = askCard && askCard.querySelector('.at');
+      check('an empty reply draws no row; its dollars ride on its card', !document.getElementById('msg-5') && !!at && at.textContent.includes('$1.44') && !at.textContent.includes('tok'),
+        String(askCard && askCard.outerHTML).replace(/\s+/g, ' ').slice(0, 300));
+      // A reply with text is one closed row, never an open bubble.
       const reply6 = document.getElementById('msg-6');
-      // There is no white cell (2026-09-13): a reply row with text is still
-      // the end line, its words behind a closed <details>, never an open bubble.
-      const fold = reply6 && reply6.querySelector('details.old-reply');
-      check('a reply with text draws no white bubble — end line, text folded', !!reply6 && reply6.classList.contains('end') && !!fold && !fold.open
-        && fold.querySelector('summary .end-line') && fold.textContent.includes('Filed a rec.') && !msgs.querySelector('.msg.claude:not(.end)'),
+      check('a reply with text is one closed row', !!reply6 && reply6.matches('details.chat-row') && !reply6.open
+        && reply6.querySelector('summary .k').textContent === 'Reply' && reply6.textContent.includes('Filed a rec.'),
         String(reply6 && reply6.outerHTML).replace(/\s+/g, ' ').slice(0, 300));
-      // Cards follow their message as siblings (askCards in msgHTML), so the
-      // rec's card belongs to reply 6 — not to the owner's answer at the end. Its
-      // immediate sibling is not the message: an ask hosted on the same reply
-      // is drawn first (asks, then approvals, then recs), so what this asserts
-      // is the nearest .msg above it.
-      const hostMsg = el => { let p = el.previousElementSibling; while (p && !p.classList.contains('msg')) p = p.previousElementSibling; return p; };
+      // Cards follow their message as siblings (msgHTML): the ask (reply 5)
+      // before reply 6's row, the rec reply 6 filed after it, never under the
+      // owner's answer at the end.
+      const hostMsg = el => { let p = el.previousElementSibling; while (p && !/^msg-/.test(p.id)) p = p.previousElementSibling; return p; };
       check('rec card sits under the reply that filed it', !!card && !!reply6 && hostMsg(card) === reply6,
         String(card && card.previousElementSibling && card.previousElementSibling.className));
-      // The card a turn ended on is drawn right under that turn's end line —
-      // never lost to a tool-chain block with nothing in it (a count of "1 to
-      // read" with no cell under it).
-      const askCard = document.getElementById('ask-card-ask-t3st');
-      check('the reply card is drawn under its "turn ended" line', !!askCard && hostMsg(askCard) === document.getElementById('msg-5'),
-        String(askCard && hostMsg(askCard) && hostMsg(askCard).outerHTML).replace(/\s+/g, ' ').slice(0, 200));
-      const recRe = [...document.querySelectorAll('#msgs .msg.owner .re')].find(e => e.textContent.includes('Accepted'));
+      check('the reply card is drawn before the next message', !!askCard && !!reply6 && !!(askCard.compareDocumentPosition(reply6) & Node.DOCUMENT_POSITION_FOLLOWING),
+        String(askCard && hostMsg(askCard) && hostMsg(askCard).id));
+      const recRe = [...document.querySelectorAll('#msgs .chat-row.me .re')].find(e => e.textContent.includes('Accepted'));
       check('a Recs-page decision shows in the chat', !!recRe && recRe.textContent.includes('Move the "idle" cash'), String(recRe && recRe.textContent));
       const accept = card && [...card.querySelectorAll('button')].find(b => b.textContent === 'Accept');
       // Later left both surfaces with the three bands (d70bcc1).
@@ -311,7 +277,6 @@ setTimeout(async () => {
     const f = document.getElementById('run-working');
     return !!f && getComputedStyle(f).display !== 'none';
   };
-  const liveBlock = () => [...document.querySelectorAll('#msgs .run')].find(r => r.querySelector('.dot.pulse'));
   const redraw = async () => { await refreshThread('t-t3st', true); await settle(); };
 
   check('a stopped session says nothing about working', !workingShown(),
@@ -324,72 +289,29 @@ setTimeout(async () => {
   Object.assign(THREAD, { turn_tools: 23, turn_cost_usd: 1.12, turn_at: new Date().toISOString() });
   await redraw();
   const workingText = () => (document.getElementById('run-working') || {}).textContent || '';
-  check('a running session with no run block shows working…', workingShown() && !liveBlock(), 'shown: ' + workingShown());
+  check('a running session shows working…', workingShown(), 'shown: ' + workingShown());
   check('the working line says the turn\'s calls, clock and dollars', /^\s*working · 23 tool calls · today \d+:\d\d [AP]M · \$1\.12$/.test(workingText()), workingText());
   const sideFacts = sessionCardHTML({ ...THREAD, activity: 'Run the verify proof again' }, {});
   // The list card is one line now: a blue dot, the name, when.
   check('a working session card is the dot, the name and when, no calls, dollars or step label', sideFacts.includes('sess-dot') && sideFacts.includes('sess-ago')
     && !sideFacts.includes('tool calls') && !sideFacts.includes('$1.12') && !sideFacts.includes('verify proof'), sideFacts);
 
-  // The run in flight: its block carries the count and the pulse; the line
-  // under it keeps the clock and dollars, like "turn ended · …".
-  EXTRA = [{ id: 9, thread_id: 't-t3st', ts: new Date().toISOString(), role: 'owner', kind: 'message',
+  // The owner's message is in and no tool call has landed yet: the line
+  // counts "starting · N s" from it; the tool calls are never drawn, only
+  // their count.
+  EXTRA = [{ id: 9, thread_id: 't-t3st', ts: new Date(Date.now() - 4000).toISOString(), role: 'owner', kind: 'message',
              text: 'and this one', attachments: [], run_id: 'r-live' }];
+  Object.assign(THREAD, { turn_tools: 0 });
   await redraw();
-  check('a live run block keeps the working line, count and pulse in the block', workingShown() && !!liveBlock()
-    && !document.querySelector('#run-working .dot') && /^\s*working · today .* · \$1\.12$/.test(workingText()),
-    'shown: ' + workingShown() + ' block: ' + !!liveBlock() + ' line: ' + workingText());
-  check('an empty live run says starting…', (liveBlock() || {}).textContent?.includes('starting…'), String((liveBlock() || {}).textContent));
-
-  // …and once steps land it says what it is doing, not just that it is.
-  EVENTS = [{ id: 1, thread_id: 't-t3st', run_id: 'r-live', ts: new Date().toISOString(),
-              kind: 'tool_use', title: 'lifectl recs all', summary: 'Reading the rec ledger', body: '' }];
+  check('a turn with no tool call yet says starting · N s', workingShown() && /^\s*starting · \d+ s$/.test(workingText()), workingText());
+  Object.assign(THREAD, { turn_tools: 1 });
   await redraw();
-  const head = (liveBlock() || {}).textContent || '';
-  check('a live run counts its calls, no raw step label', head.includes('1 tool call') && !head.includes('now:') && !head.includes('Reading the rec ledger'), head.trim());
-
-  // ---- A steering message never eats the block above it (2026-08-28) ----
-  // After a steering message, a block of 100 tool calls above it used to tick
-  // down: 99, 98, 97. The console re-read the newest 400 events each refresh, so every new
-  // step pushed one old step out of the window. Model it: 450 calls before
-  // the steer (more than one page, so the first read must walk back), then
-  // 3 after it — the block above must stay at 450 and the one below say 3.
-  const t0 = Date.now() - 600000, tSteer = Date.now() - 1000;
-  EXTRA[0].ts = new Date(t0 - 1000).toISOString();
-  EXTRA.push({ id: 10, thread_id: 't-t3st', ts: new Date(tSteer).toISOString(), role: 'owner', kind: 'message',
-               text: 'and the phone', attachments: [], run_id: 'r-live', steered: true });
-  const step = (i, ts) => ({ id: i, thread_id: 't-t3st', run_id: 'r-live', ts: new Date(ts).toISOString(), kind: 'tool_use', title: 'step ' + i, summary: 'Step ' + i, body: '' });
-  EVENTS = [];
-  for (let i = 1; i <= 450; i++) EVENTS.push(step(i, t0 + i * 1000));
-  chatState.events = new Map(); // a fresh open of the session
-  await redraw();
-  const blocks = () => [...document.querySelectorAll('#msgs .activity > .run > summary > .hl')].map(s => s.textContent);
-  // Only 400 events can be fetched in the first page, and the count is 450:
-  // the headline is the HUB's, not "what we happen to hold".
-  check('the headline is the hub count, not the page fetched', (blocks()[0] || '').startsWith('450 tool calls') && chatState.events.size <= 400,
-    JSON.stringify(blocks()) + ' held: ' + chatState.events.size);
-  for (let i = 451; i <= 453; i++) EVENTS.push(step(i, tSteer + (i - 450) * 100));
-  await redraw();
-  check('a step after the steer never counts down the block above', (blocks()[0] || '').startsWith('450 tool calls') && (blocks()[1] || '').startsWith('3 tool calls'), JSON.stringify(blocks()));
-
-  // Opening a folded block reads exactly its own steps, then draws them all.
-  const folded = [...document.querySelectorAll('#msgs .activity > .run')].find(r => !r.querySelector('.dot.pulse'));
-  check('a long finished run is folded, not preloaded', !!folded && !folded.open, String(!!folded) + ' open: ' + (folded || {}).open);
-  if (folded) {
-    folded.open = true;
-    folded.dispatchEvent(new Event('toggle'));
-    for (let i = 0; i < 60 && chatState.events.size < 453; i++) await settle();
-    await settle();
-    const rows = () => [...document.querySelectorAll('#msgs .activity > .run')].find(r => !r.querySelector('.dot.pulse'));
-    const body = rows() && rows().querySelector('.evs');
-    check('opening a block loads its own steps', !!body && body.querySelectorAll('.ev').length === 450 && !body.textContent.includes('loading'),
-      String(body && body.querySelectorAll('.ev').length) + ' held: ' + chatState.events.size);
-  }
+  check('once a call lands it counts them', /^\s*working · 1 tool call · /.test(workingText()) && !document.querySelector('#msgs .ev, #msgs .run'), workingText());
 
   // Stopping is the case that regressed: nothing may survive it.
   THREAD.status = 'done';
   await redraw();
-  check('stopping clears every working line', !workingShown() && !liveBlock(), 'shown: ' + workingShown() + ' block: ' + !!liveBlock());
+  check('stopping clears every working line', !workingShown(), 'shown: ' + workingShown());
 
   // ---- The Recs page box takes a screenshot too (2026-08-28) ----
   // Paste with no box chosen must go nowhere (the list draws two recs, so a

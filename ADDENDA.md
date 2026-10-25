@@ -432,3 +432,48 @@ Entry format:
   then reversed), `threads/threads_test.go`, `shared/api.md`, `web/ui.js`
   (`saidCovers` lead), `Card.swift` (`titled`), `web/views/goals.js`
   (`closeGoalForm`).
+
+## add-0032 · 2026-10-25 · Chat: one row per message and closed card
+- For: everyone
+- Offer: The chat is a list of one-line rows. Your messages (grey),
+  check-ins, notes, errors, text replies and every closed card (white, a
+  hairline) each read as one row: a label, the title on one line, the time
+  and the turn's dollars, a chevron; a click opens it in place, with Reopen
+  inside for a closed card. Open cards stay full. An empty reply draws
+  nothing, and its turn's dollars ride on the first card it raised. The
+  tool-call view (run blocks, step rows, event paging) is gone, and with it
+  the chat's events and steps fetches; the live state is the one footer
+  line, which now reads "sending · N s · working" when a message goes into
+  a session already at work. A rec whose reply is older than the loaded
+  messages is no longer drawn at the end of the chat (the Recs tab still
+  has it). Web, phone and desktop; the "sending" line is web only.
+- How: same merge as add-0008. By hand: `web/ui.js` (`rowHTML`, class
+  `chat-row`), `web/views/threads.js` (rows, `paintWorking`, the rec tail
+  rule; the run/event code deleted), `web/app.css`, `web/skin.css`,
+  `web/skin.js`, `web/test/ui.test.js`, `web/test/sending.test.js`,
+  `Card.swift` (`ChatRow`, `cost`), `ThreadDetail.swift` (the tool-call
+  view, `TurnRow`, `RunActivity`, `EventRow` and the events/steps fetches
+  deleted), `ApprovalCard.swift`, `AskCards.swift`, `RecCard.swift`,
+  `HubClient.swift`, `Models.swift` (`ThreadEvent`, `StepCount`,
+  `StepSegment` gone), the app's decode tests, `server/fixtures_test.go`,
+  `shared/fixtures/threads_id_events.json` and `threads_id_steps.json`
+  deleted, `ops/web-check.html`, `ops/web-preview.html`,
+  `ops/web-smoke.sh`, `ops/mac-screens.sh`. The hub's GET
+  /threads/{id}/events and /steps routes stay.
+
+## add-0033 · 2026-10-25 · Calendar: waiting on someone
+- For: everyone
+- Offer: For what someone owes you by a day (a reply, a quote):
+  `lifectl cal add "<who> owes <what>" --kind waiting --on <due> --detail
+  "<where to look>"`. It sits on the Calendar tab only; that morning its
+  session is woken once to look. `lifectl cal <id> done "what came"` closes
+  it; `lifectl cal <id> raise` gives you one card (Nudge · Wait 7 days ·
+  Drop), and Nudge or Wait puts it back 7 days with a fresh look. A look
+  that goes unanswered is raised by the hub the next morning. It replaces
+  hand-filed "did they reply?" agent wakes.
+- How: same merge as add-0008. By hand: `calendar/calendar.go` (the kind,
+  the look, `raise`, nudge/extend), `calendar/waiting_test.go`,
+  `server/calendar.go` + `routes.go` (POST /calendar/{id}/raise,
+  `nudge|extend` on /resolve), `store/close.go`, `threads/asks.go`,
+  `threads/prompts.go`, `threads/threads.go` (the preamble's dated-work
+  line), `cmd/lifectl/main.go`, `shared/api.md`.

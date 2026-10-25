@@ -10,12 +10,9 @@
 (() => {
   const UI = /(?:🔵|🔴|💡|📲|📅|📎|⏰|💬|⏳|⚠︎|⚠|⚙️?)\s?/gu;
   const clean = root => {
-    // "sent by you" under the owner's own message says nothing; another
-    // sender's line stays.
-    if (root.querySelectorAll) for (const by of root.querySelectorAll('.msg .meta .by')) by.classList.toggle('me', by.textContent.trim() === 'sent by you');
     const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-      if (n.parentElement && n.parentElement.closest('.bubble .md, .md, textarea, input')) continue;
+      if (n.parentElement && n.parentElement.closest('.chat-row .t,.row-body, textarea, input')) continue;
       UI.lastIndex = 0;
       if (UI.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(UI, '');
     }

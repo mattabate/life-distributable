@@ -203,6 +203,28 @@ func (s *Server) calendarStep(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, it)
 }
 
+// calendarRaise: a waiting item's look found nothing; its one card on the owner.
+func (s *Server) calendarRaise(w http.ResponseWriter, r *http.Request) {
+	if s.Cal == nil {
+		jsonErr(w, 503, "calendar not configured")
+		return
+	}
+	var in struct{ By, Note string }
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		jsonErr(w, 400, "bad json")
+		return
+	}
+	if in.By == "" {
+		in.By = "hub"
+	}
+	it, err := s.Cal.Raise(r.PathValue("id"), in.By, in.Note)
+	if err != nil {
+		jsonErr(w, 409, err.Error())
+		return
+	}
+	writeJSON(w, 200, it)
+}
+
 func (s *Server) calendarResolve(w http.ResponseWriter, r *http.Request) {
 	if s.Cal == nil {
 		jsonErr(w, 503, "calendar not configured")
@@ -218,9 +240,18 @@ func (s *Server) calendarResolve(w http.ResponseWriter, r *http.Request) {
 	}
 	// A button of the row's `outcomes` pressed: the hub, not the client, says
 	// which state done|wont closes it with.
+	if in.State == "" && (in.Outcome == "nudge" || in.Outcome == "extend") {
+		it, err := s.Cal.AnswerWaiting(r.PathValue("id"), in.Outcome, in.Note)
+		if err != nil {
+			jsonErr(w, 409, err.Error())
+			return
+		}
+		writeJSON(w, 200, it)
+		return
+	}
 	if in.State == "" && in.Outcome != "" {
 		if in.State = map[string]string{"done": "done", "wont": "dismissed"}[in.Outcome]; in.State == "" {
-			jsonErr(w, 400, "outcome must be done|wont")
+			jsonErr(w, 400, "outcome must be done|wont|nudge|extend")
 			return
 		}
 	}

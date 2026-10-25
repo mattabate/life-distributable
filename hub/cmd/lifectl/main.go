@@ -440,6 +440,7 @@ func main() {
 		// lifectl cal <id> done|dismiss|reopen ["what happened"]
 		// lifectl cal add "title" [--detail d] [--goal g]   NO --on = a soon item: the owner's to-do with no due day, never overdue
 		// lifectl cal <id> soon                        an open owner step loses its day and becomes a soon item
+		// lifectl cal <id> raise ["what you checked"]  a waiting item's look found nothing: one card on the owner
 		// lifectl cal add … --step "a" --step "b"       one item, several steps, each closed on its own
 		// lifectl cal <id> steps "a" "b"                replace an open item's steps
 		// lifectl cal <id> step <n> done|skip|reopen    close one step
@@ -461,7 +462,7 @@ func main() {
 			on := fs.String("on", "", "YYYY-MM-DD (local)")
 			until := fs.String("until", "", "--kind away: the last day away (inclusive; default --on)")
 			at := fs.String("at", "", "HH:MM (owner/homework/note: default all day, the ask is raised 08:00; agent: always a minute — default 08:00, then 30 min past the other agent runs that day — so give the time it should run)")
-			kind := fs.String("kind", "owner", "owner = the owner's step (becomes an ask that day, nagged until done) | homework = a Learn step of the owner's, same lifecycle, its own light-blue lane | agent = run an agent with --detail as its instructions | note = reminder (read ask) | away = days they cannot be booked, --on to --until (fires nothing; every session sees it)")
+			kind := fs.String("kind", "owner", "owner = the owner's step (becomes an ask that day, nagged until done) | homework = a Learn step of the owner's, same lifecycle, its own light-blue lane | agent = run an agent with --detail as its instructions | note = reminder (read ask) | waiting = someone owes us something by --on; --detail says where to look; this session is woken once that morning to check, then `cal <id> done \"what came\"` or `cal <id> raise \"what you checked\"` | away = days they cannot be booked, --on to --until (fires nothing; every session sees it)")
 			detail := fs.String("detail", "", "what exactly, and why (@/path or - reads it from a file/stdin)")
 			goal := fs.String("goal", "", "goal id")
 			thread := fs.String("thread", os.Getenv("LIFE_THREAD_ID"), "session the ask/run lands in (default $LIFE_THREAD_ID)")
@@ -575,6 +576,12 @@ func main() {
 					body["note"] = strings.Join(os.Args[8:], " ")
 				}
 				c.call("POST", "/api/v1/calendar/"+id+"/steps/"+os.Args[4], body)
+				return
+			}
+			if os.Args[3] == "raise" {
+				// lifectl cal <id> raise ["what you checked"]: a waiting item's
+				// look found nothing, so ONE card on the owner (Nudge · Wait 7 days · Drop).
+				c.call("POST", "/api/v1/calendar/"+id+"/raise", map[string]string{"by": actor(), "note": strings.Join(os.Args[4:], " ")})
 				return
 			}
 			if os.Args[3] == "soon" {
@@ -1168,12 +1175,13 @@ asks      asks [active|all|open|answered|done|dismissed] [--thread id]
             [--surface mobile|web|any] [--check c] [--say "…"] [--thread id] [--on YYYY-MM-DD [--at HH:MM]]
           ask <id> [done|dismiss|reopen [note] | surface mobile|web|any | kind k]
 calendar  cal [from] [to]
-          cal add "title" [--on YYYY-MM-DD] [--at HH:MM] [--kind owner|homework|agent|note] [--due on|by]
+          cal add "title" [--on YYYY-MM-DD] [--at HH:MM] [--kind owner|homework|agent|note|waiting] [--due on|by]
             [--detail d] [--goal g] [--thread id] [--repeat daily|weekly|monthly|yearly|every<N>d] [--nag min]
             (no --on = soon: your to-do, no due day)
           cal add "title" --kind away --on YYYY-MM-DD [--until YYYY-MM-DD] [--detail d]   days you cannot be booked
           cal away · cal away end <away-id> ["why"]
-          cal <id> [done|dismiss|reopen [note] | soon
+          cal add "<who> owes <what>" --kind waiting --on <due> --detail "where to look"   checked that morning
+          cal <id> [done|dismiss|reopen [note] | soon | raise ["what you checked"]
             | set [--title t] [--detail d] [--day|--on d|none] [--at HH:MM|none] [--repeat r|none] [--due on|by]]
 goals     goals · goal new "title" "statement" [--horizon h] [--cadence c] [--sources s]
           goal <id> [--full] · goal <id> digest "text|@file"

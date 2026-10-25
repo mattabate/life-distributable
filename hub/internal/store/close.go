@@ -27,6 +27,20 @@ var askOutcomes = map[string][]Outcome{
 	"install":  {oc("done", "Installed"), oc("wont", "Won't install"), Reply},
 	"other":    {oc("done", "I did this"), oc("wont", "Won't do"), Reply},
 	"error":    {},
+	"waiting":  WaitingOutcomes(),
+}
+
+// WaitingOutcomes: a `waiting` item whose due day came and went with nothing
+// (someone owes the owner a reply, a quote, a merge). Nudge: its session
+// drafts the nudge and waits 7 more days; Extend: just 7 more days; Drop:
+// stop waiting. Words alone (Reply) go to the session.
+func WaitingOutcomes() []Outcome {
+	return []Outcome{
+		{Value: "nudge", Label: "Nudge", Hint: "the session drafts the nudge for you, then waits 7 more days"},
+		{Value: "extend", Label: "Wait 7 days", Hint: "nothing is sent; the check comes back in a week"},
+		{Value: "wont", Label: "Drop", Hint: "stop waiting on it"},
+		Reply,
+	}
 }
 
 // AskOutcomes returns the answer chips for an ask kind (an unknown kind gets
@@ -42,7 +56,7 @@ func AskOutcomes(kind string) []Outcome {
 // askVerbs: what an ask wants from the owner, in one word — the chat card's head
 // line and the Sessions cell's corner, on both surfaces.
 var askVerbs = map[string]string{"read": "read", "install": "install", "decision": "decide", "access": "grant",
-	"physical": "do", "other": "do", "error": "restart"}
+	"physical": "do", "other": "do", "error": "restart", "waiting": "decide"}
 
 // AskVerb: the kind's one word; "for you" for a kind the table does not know.
 func AskVerb(kind string) string {
@@ -126,7 +140,10 @@ func ReplyLabel(refKind, outcome, askKind string) string {
 	case "rec":
 		table = map[string]string{"accepted": "Accepted", "declined": "Declined", "deferred": "Later", "": "Replied"}
 	case "cal":
-		table = map[string]string{"done": "Did it", "wont": "Won't do", "": "About"}
+		table = map[string]string{"done": "Did it", "wont": "Won't do", "nudge": "Nudge", "extend": "Wait 7 days", "": "About"}
+		if askKind == "waiting" {
+			table["wont"] = "Drop"
+		}
 	case "step":
 		table = map[string]string{"done": "Did it", "wont": "Skipped", "": "About"}
 	}
@@ -336,6 +353,10 @@ func RecScoreVerb(outcome string) string {
 // CalDidVerb: a closed calendar item's record word.
 func CalDidVerb(kind, state string) string {
 	switch {
+	case kind == "waiting" && state == "dismissed":
+		return "Dropped"
+	case kind == "waiting":
+		return "Came"
 	case state == "dismissed":
 		return "Skipped"
 	case kind == "agent":

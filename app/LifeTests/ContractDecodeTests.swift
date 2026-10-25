@@ -170,7 +170,7 @@ final class ContractDecodeTests: XCTestCase {
         XCTAssertNil(s.groups.first?.sources.last?.last)
     }
 
-    // MARK: Threads — messages and events
+    // MARK: Threads — messages
 
     func testThreadMessage() throws {
         let m = try decode(ThreadMessage.self, """
@@ -183,15 +183,6 @@ final class ContractDecodeTests: XCTestCase {
         let old = try decode(ThreadMessage.self, #"{"id":1,"thread_id":"t-1a2b3c4d","ts":"2026-08-21T09:00:00Z","role":"claude","kind":"needs_you","text":"Done.","cost_usd":0.5}"#)
         XCTAssertNil(old.tokens)
         XCTAssertNil(old.attachments)
-    }
-
-    func testThreadEvents() throws {
-        let e = try decode([ThreadEvent].self, """
-        [{"id":7,"thread_id":"t-1a2b3c4d","run_id":"r1","ts":"2026-08-26T09:00:00Z","kind":"tool_use","title":"Bash · lifectl goals","body":"lifectl goals","summary":"List goals"},
-         {"id":8,"thread_id":"t-1a2b3c4d","run_id":"r1","ts":"2026-08-26T09:00:01Z","kind":"tool_result","title":"result","body":"[...]"}]
-        """)
-        XCTAssertEqual(e.first?.summary, "List goals")
-        XCTAssertNil(e.last?.summary)
     }
 
     // MARK: Calendar item · engagement · recs

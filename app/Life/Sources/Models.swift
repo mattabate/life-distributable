@@ -1009,7 +1009,7 @@ struct ThreadMessage: Codable, Identifiable, Hashable {
     var tokens_cache_read: Int?
     var tokens_cache_write: Int?
     var attachments: [String]? // blob refs; nil on older hubs
-    var run_id: String?        // links to ThreadEvents of the run this message started / produced
+    var run_id: String?        // the run this message started / produced
     var queued: Bool?          // not yet handed to claude (legacy one-shot run still in flight)
     var steered: Bool?         // handed to claude mid-turn; it took it into account while working
     /// What the owner's message answered — "ask:<id>" or "rec:<id>" — and the
@@ -1035,51 +1035,6 @@ struct ChangeFeed: Codable, Hashable {
     /// The hub answered because it is shutting down: the pool of connections
     /// to it is about to go dead, so HubClient.changes drops it.
     var restarting: Bool?
-}
-
-/// One streamed step of a session run: a tool call, its result, a thinking
-/// block or interim text. Shown under the message that started the run.
-struct ThreadEvent: Codable, Identifiable, Hashable {
-    var id: Int
-    var thread_id: String
-    var run_id: String
-    var ts: Date
-    var kind: String   // thinking | text | tool_use | tool_result
-    var title: String
-    var body: String
-    var summary: String? // tool_use: the call in plain English (may arrive a few seconds late for shell commands)
-}
-
-/// How many steps sit under one message, counted by the HUB (GET
-/// /threads/{id}/steps). The headline of a run block comes from here, so it
-/// is right however many events the phone happens to hold — a turn regularly
-/// runs to hundreds of tool calls and any surface that counts its own fetch
-/// is one page size away from wrong. first_id/last_id bound
-/// the block, so opening it is one ranged read.
-struct StepCount: Codable, Identifiable, Hashable {
-    var message_id: Int
-    var run_id: String
-    var tools: Int
-    var thoughts: Int
-    var steps: Int
-    var first_id: Int
-    var last_id: Int
-    /// The block cut at the cards the agent raised while it ran — each piece
-    /// with its own count, and the card drawn after it, so a card appears in
-    /// the middle of the tool chain where it was raised. Absent/empty = one fold, as before.
-    var segments: [StepSegment]?
-    var id: Int { message_id }
-}
-
-/// One run of steps inside a block, and the card that closes it. `ref` is
-/// "ask:<id>" or "action:<id>"; "" on the tail after the last card.
-struct StepSegment: Codable, Hashable {
-    var ref: String?
-    var tools: Int
-    var thoughts: Int
-    var steps: Int
-    var first_id: Int
-    var last_id: Int
 }
 
 // MARK: - Calendar (plan layer)

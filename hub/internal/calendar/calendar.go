@@ -430,6 +430,8 @@ func stampEntry(e *Entry) {
 		e.Outcomes = store.StepOutcomes()
 	case e.Item && e.Kind == "note":
 		e.Outcomes = store.NoteOutcomes()
+	case e.Item && e.Kind == "waiting" && e.State == "fired":
+		e.Outcomes = store.WaitingOutcomes()
 	case e.Kind == "action" && e.State == "proposed":
 		e.Outcomes = store.ActionOutcomes(e.ThreadID != "")
 	}
@@ -478,6 +480,8 @@ func stampEntry(e *Entry) {
 		e.KindLabel = "one-off run"
 	case e.Kind == "note":
 		e.KindLabel = "reminder"
+	case e.Kind == "waiting":
+		e.KindLabel = "waiting on"
 	case e.Kind == "run":
 		e.KindLabel = "recurring run"
 	case e.Kind == "rec" && e.At == "" && !e.Did:
@@ -578,9 +582,15 @@ type View struct {
 // (CloseBySource; e.g. a practice site reporting the round). Any later kind
 // of homework is the same shape: kind `homework`, a `source` that names what
 // closes it, and the tick as the fallback.
-var kinds = map[string]bool{"owner": true, "homework": true, "agent": true, "note": true}
+//
+// `waiting` is someone else's move: a reply, a quote, a merge owed by a day.
+// It belongs to its session, not the owner: Calendar tab only, no card, no
+// push. On its day the hub wakes the session once to look (the detail says
+// where); arrival closes it with a note, and only an empty look raises ONE
+// card on the owner (Raise: Nudge · Wait 7 days · Drop).
+var kinds = map[string]bool{"owner": true, "homework": true, "agent": true, "note": true, "waiting": true}
 
-const kindsHelp = "kind must be owner|homework|agent|note"
+const kindsHelp = "kind must be owner|homework|agent|note|waiting"
 
 func ownerKind(kind string) bool { return kind == "owner" || kind == "homework" }
 
@@ -749,6 +759,15 @@ func (c *Calendar) Add(it Item) (Item, error) {
 			return Item{}, fmt.Errorf("unknown thread %q", it.ThreadID)
 		}
 	}
+	if it.Kind == "waiting" {
+		if it.ThreadID == "" {
+			return Item{}, errors.New("a waiting item needs the session that will check (--thread, default $LIFE_THREAD_ID)")
+		}
+		if strings.TrimSpace(it.Detail) == "" {
+			return Item{}, errors.New("a waiting item needs --detail: how to tell it came (the mailbox, thread or repo to check)")
+		}
+		it.Repeat = ""
+	}
 	if it.NagMin < 0 {
 		it.NagMin = 0
 	}
@@ -797,7 +816,7 @@ func (c *Calendar) Add(it Item) (Item, error) {
 		return Item{}, err
 	}
 	log.Printf("calendar: %s %s on %s %s: %s", it.ID, it.Kind, it.Day, it.At, it.Title)
-	if it.Kind == "agent" {
+	if it.Kind == "agent" || it.Kind == "waiting" {
 		c.queueWake(it)
 	}
 	return c.Get(it.ID)
@@ -936,6 +955,9 @@ func (c *Calendar) queueWake(it Item) {
 	if it.Detail != "" {
 		text += "\n\n" + it.Detail
 	}
+	if it.Kind == "waiting" {
+		text = waitingWake(it)
+	}
 	p, err := c.thr.Queue(threads.Prompt{Author: "hub", Target: target, NotBefore: c.fireAt(it), InReplyTo: "cal:" + it.ID,
 		Text: text, Title: it.Title, GoalID: it.GoalID})
 	if err != nil {
@@ -943,6 +965,16 @@ func (c *Calendar) queueWake(it Item) {
 		return
 	}
 	c.db.Exec(`UPDATE items SET prompt_id=? WHERE id=?`, p.ID, it.ID)
+}
+
+// waitingWake: the one look a waiting item gets on its day: what is owed,
+// where to check, and the two commands that end the look.
+func waitingWake(it Item) string {
+	return fmt.Sprintf("WAITING CHECK: %s (due %s).\nHow to tell it came: %s\n\n"+
+		"Check that source yourself now. Do not ask the owner and raise no card of your own.\n"+
+		"- It came: `lifectl cal %s done \"what came\"`, then act on it.\n"+
+		"- Nothing yet: `lifectl cal %s raise \"what you checked\"`. That gives the owner ONE card: Nudge · Wait 7 days · Drop.",
+		it.Title, it.Day, strings.TrimSpace(it.Detail), it.ID, it.ID)
 }
 
 // cancelWake drops an item's queued wake (it was closed or moved).
@@ -978,6 +1010,14 @@ func (c *Calendar) OnDelivered(p threads.Prompt, threadID string) {
 	// step is not doing it: closing the row here would mark a step done the
 	// moment a note about it was delivered. The owner's step closes through
 	// Resolve or ClaimCal, with words, or not at all.
+	// A waiting item's look is not its close either: it stays scheduled, on
+	// the session that took the look, until the session says came or raise
+	// (or Tick raises it the day after).
+	if it.Kind == "waiting" {
+		c.db.Exec(`UPDATE items SET thread_id=?, prompt_id=? WHERE id=? AND state='scheduled'`, threadID, p.ID, it.ID)
+		log.Printf("calendar: %s (waiting) look delivered → %s", it.ID, threadID)
+		return
+	}
 	if it.Kind != "agent" {
 		return
 	}
@@ -1293,7 +1333,7 @@ func (c *Calendar) Update(id string, in map[string]string) (Item, error) {
 		return Item{}, err
 	}
 	switch {
-	case up.Kind == "agent":
+	case up.Kind == "agent", up.Kind == "waiting" && up.State == "scheduled" && (up.Day != it.Day || up.At != it.At):
 		c.queueWake(up)
 	case it.Kind == "agent":
 		c.cancelWake(up)
@@ -1757,6 +1797,15 @@ func (c *Calendar) claim(id, outcome, note string) {
 	if err != nil {
 		return
 	}
+	if it.Kind == "waiting" {
+		defer c.thr.SyncStatus(it.ThreadID)
+	}
+	if outcome == "nudge" || outcome == "extend" {
+		if it.Kind == "waiting" && it.State == "fired" {
+			c.extendWaiting(it, outcome, note)
+		}
+		return
+	}
 	state := "done"
 	if outcome == "wont" {
 		state = "dismissed"
@@ -1780,6 +1829,16 @@ func (c *Calendar) header(id, outcome string) string {
 		verdict = "marked DONE (already closed by the hub)"
 	case "wont":
 		verdict = "marked WON'T DO (already closed by the hub) — they are not doing this; drop it or find another way"
+	}
+	if it.Kind == "waiting" {
+		switch outcome {
+		case "nudge":
+			verdict = "chose NUDGE on the overdue waiting item (the hub has already moved it a week out and will look again then): draft the nudge now as a copy box for the owner to send, or a `lifectl propose` if we send it, about"
+		case "extend":
+			verdict = "chose WAIT 7 DAYS on the overdue waiting item (already moved a week out; send nothing) about"
+		case "wont":
+			verdict = "DROPPED the waiting item (already closed by the hub; stop waiting, send nothing) about"
+		}
 	}
 	when := it.Day
 	if it.At != "" {
@@ -1823,9 +1882,9 @@ func (c *Calendar) resolveLocked(it Item, state, by, note string, quiet bool) {
 		// move is already on the trail) and appends the reopen.
 		c.setItem(id, by, note, `UPDATE items SET state='scheduled', updated_at=?, fired_at=NULL, ask_id=NULL, nag_count=0, last_nag_at=NULL, resolved_at=NULL, resolved_by=NULL, resolution='' WHERE id=?`, ts(now), id)
 		c.reopenSteps(id, by, now)
-		// A reopened agent item gets a fresh wake (its old one was delivered
-		// or cancelled).
-		if it.Kind == "agent" {
+		// A reopened agent or waiting item gets a fresh wake (its old one was
+		// delivered or cancelled).
+		if it.Kind == "agent" || it.Kind == "waiting" {
 			if re, err := c.Get(id); err == nil {
 				c.queueWake(re)
 			}
@@ -2016,6 +2075,10 @@ func (c *Calendar) Tick() {
 		if c.missedNow(it, now) {
 			continue // missDay closed it
 		}
+		if it.Kind == "waiting" {
+			c.waitingTick(it, now)
+			continue
+		}
 		switch it.State {
 		case "scheduled":
 			// A soon item has no moment to fire at: no ask, no push, no nag.
@@ -2029,6 +2092,111 @@ func (c *Calendar) Tick() {
 			c.followUp(it, now)
 		}
 	}
+}
+
+// waitingTick: a waiting item is the clock's while its look is queued. One
+// with no wake (its Queue failed) gets one. A look delivered and never
+// answered (the session ended its turn without came or raise) is raised by
+// the hub the morning after, so nothing owed rots on the calendar.
+func (c *Calendar) waitingTick(it Item, now time.Time) {
+	if it.State != "scheduled" || it.Day == "" {
+		return
+	}
+	if it.PromptID == "" {
+		if !now.Before(c.fireAt(it)) {
+			c.mu.Lock()
+			c.queueWake(it)
+			c.mu.Unlock()
+		}
+		return
+	}
+	if it.Day >= now.Format("2006-01-02") || now.Hour() < c.DefaultHour {
+		return
+	}
+	if p, err := c.thr.GetPrompt(it.PromptID); err != nil || p.State != "delivered" {
+		return
+	}
+	if _, err := c.Raise(it.ID, "hub", "the session looked on "+it.Day+" and did not say whether it came"); err != nil {
+		log.Printf("calendar: raise %s: %v", it.ID, err)
+	}
+}
+
+// Raise: the look found nothing, so the waiting item becomes ONE card on the
+// owner, on its session (store.WaitingOutcomes: Nudge · Wait 7 days · Drop).
+// `note` is what was checked, kept on the card. Only a scheduled waiting
+// item raises; a second raise of the same look is a no-op.
+func (c *Calendar) Raise(id, by, note string) (Item, error) {
+	c.mu.Lock()
+	it, err := c.Get(id)
+	if err != nil {
+		c.mu.Unlock()
+		return Item{}, errors.New("no such item")
+	}
+	if it.Kind != "waiting" {
+		c.mu.Unlock()
+		return it, errors.New("only a waiting item raises: a " + it.Kind + " item fires on its day")
+	}
+	if it.State != "scheduled" {
+		c.mu.Unlock()
+		return it, nil
+	}
+	tid, err := c.threadFor(it)
+	if err != nil {
+		c.mu.Unlock()
+		return it, err
+	}
+	c.cancelWake(it)
+	now := c.Now()
+	detail := strings.TrimSpace(it.Detail)
+	if note = strings.TrimSpace(note); note != "" {
+		detail += fmt.Sprintf("\n\n**Checked %s:** %s", now.Local().Format("2006-01-02"), note)
+	}
+	moved, err := c.setItem(it.ID, by, "nothing came", `UPDATE items SET thread_id=?, state='open', fired_at=?, updated_at=?, ask_kind='waiting', detail=? WHERE id=? AND state='scheduled'`,
+		tid, ts(now), ts(now), detail, it.ID)
+	c.mu.Unlock()
+	if err != nil {
+		return it, err
+	}
+	if !moved {
+		return c.Get(id)
+	}
+	if _, err := c.thr.RaiseStep(it.ID, threads.ClassUnblock, it.Say); err != nil {
+		log.Printf("calendar: raise %s card: %v", it.ID, err)
+	}
+	log.Printf("calendar: raised %s (waiting) %s: nothing came", it.ID, it.Title)
+	return c.Get(id)
+}
+
+// AnswerWaiting: Nudge or Wait 7 days pressed on a calendar row. It queues
+// the same prompt the card's chat bar posts, so the claim (and the session's
+// word) takes one road.
+func (c *Calendar) AnswerWaiting(id, outcome, note string) (Item, error) {
+	it, err := c.Get(id)
+	if err != nil {
+		return Item{}, errors.New("no such item")
+	}
+	if it.Kind != "waiting" || it.State != "fired" {
+		return it, errors.New("nudge|extend answer a waiting item's card")
+	}
+	if _, err := c.thr.Queue(threads.Prompt{Author: "owner", Target: "new-or:" + it.ThreadID, InReplyTo: "cal:" + id, Outcome: outcome, Text: strings.TrimSpace(note)}); err != nil {
+		return it, err
+	}
+	return c.Get(id)
+}
+
+// extendWaiting: Nudge or Wait 7 days. The item goes back to waiting, a week
+// from today, with a fresh look queued (resolveLocked's reopen). Under c.mu.
+func (c *Calendar) extendWaiting(it Item, outcome, note string) {
+	day := c.Now().Local().AddDate(0, 0, 7).Format("2006-01-02")
+	c.db.Exec(`UPDATE items SET day=?, ask_kind='' WHERE id=?`, day, it.ID)
+	why := "waiting 7 more days, to " + day
+	if outcome == "nudge" {
+		why = "nudged; waiting to " + day
+	}
+	if note = strings.TrimSpace(note); note != "" {
+		why += ": " + note
+	}
+	c.resolveLocked(it, "scheduled", "owner", why, true)
 }
 
 func (c *Calendar) threadFor(it Item) (string, error) {

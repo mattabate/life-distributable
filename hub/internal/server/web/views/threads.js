@@ -37,6 +37,7 @@ function focusAsk(askID) {
   if (!askID) return false;
   const el = document.getElementById('ask-card-' + askID);
   if (!el) return false;
+  if (el.tagName === 'DETAILS') el.open = true; // a folded card's row
   el.scrollIntoView({ block: 'center' });
   el.classList.add('flash');
   setTimeout(() => el.classList.remove('flash'), 1600);
@@ -678,15 +679,16 @@ async function createSession(p) {
 // in the DOM for the same reason as `open` — the chat redraws every 5s.
 // recs = this session's recommendations as last drawn (their cards arm the
 // composer by id, and re-reading a rec from the hub for that is a round trip).
-// events = the steps loaded so far, by event id — a STORE, only ever added to
-// (see loadEvents). steps = the hub's COUNT per message, which is what a run
-// block's headline prints; a block's rows are fetched when it is opened
-// (fetching = one is in flight, so a redraw does not ask twice).
-// cards = every ask and approval of this session by ref ("ask:<id>"), for the
-// ones drawn INSIDE a run block (steps.segments): drawActivity needs the
-// objects and runs on the fast path too, where the message-level maps are not
-// rebuilt.
-const chatState = { id: null, lastMsgID: 0, lastEvKey: '', lastAsks: '', lastActs: '', lastPrompts: '', lastRecs: '', recs: [], cards: {}, actIDs: '', open: new Map(), focus: '', focusAct: undefined, send: { target: 'this', when: 'now', at: '', re: null }, events: new Map(), steps: new Map(), fetching: new Set() };
+// cards = every ask and approval of this session by ref ("ask:<id>"): a
+// reply line names an approval by it, and an armed card is redrawn from it.
+// sendingSince/sendingAfter = a message on its way INTO this chat (Send,
+// now): when it left, and the newest message id held then; the owner's
+// message landing after it ends the count.
+// thread/running = the session as last read, so a Send can repaint the
+// working line at once; liveSince = when the turn in flight was started, for
+// its "starting · N s" until the first tool call.
+// costs = a turn's dollars by the ref of the first card it raised.
+const chatState = { id: null, lastMsgID: 0, lastAsks: '', lastActs: '', lastPrompts: '', lastRecs: '', recs: [], cards: {}, actIDs: '', open: new Map(), focus: '', focusAct: undefined, send: { target: 'this', when: 'now', at: '', re: null }, sendingSince: 0, sendingAfter: 0, thread: null, running: false, liveSince: 0, costs: {} };
 // Attachment drafts by box: 'chat', 'new', and one 'rec:<id>' per note box
 // on the Recs page (the rec box takes a pasted or dropped screenshot like the
 // composer).
@@ -698,8 +700,8 @@ const chatState = { id: null, lastMsgID: 0, lastEvKey: '', lastAsks: '', lastAct
 let armedReply = null;
 
 async function openThread(id, focus) {
-  chatState.id = id; chatState.lastMsgID = 0; chatState.lastEvKey = ''; chatState.lastActs = ''; chatState.open = new Map();
-  chatState.events = new Map(); chatState.steps = new Map(); chatState.fetching = new Set();
+  chatState.id = id; chatState.lastMsgID = 0; chatState.lastActs = ''; chatState.open = new Map();
+  chatState.sendingSince = 0; chatState.liveSince = 0;
   chatState.focus = focus || ''; chatState.focusAct = undefined; chatState.actIDs = ''; chatState.lastPrompts = ''; chatState.lastRecs = ''; chatState.recs = [];
   chatState.lastAsks = ''; chatState.cards = {};
   // The chat's composer state IS chatState.send (composer.js keeps it across
@@ -720,7 +722,7 @@ async function openThread(id, focus) {
 // Conversational order, not timestamp order — same rule as the app
 // (ThreadDetail.ordered): a message the owner sends mid-run is stored before that
 // run's reply but is really the next turn. Each turn (one run id) draws as one
-// piece — starter → activity → reply — and turns follow in the order they
+// piece - starter → cards → reply - and turns follow in the order they
 // STARTED (the ts of the run's earliest message), a key that never moves.
 // Keying a run by its latest message would put a turn with no
 // reply yet above the previous turn whose reply landed a second later.
@@ -731,70 +733,13 @@ function orderedMsgs(msgs) {
   return msgs.slice().sort((a, b) => key(a) - key(b) || +new Date(a.ts) - +new Date(b.ts) || a.id - b.id);
 }
 
-// Steps are a store the console only ever ADDS to, never a window it
-// re-reads. The old version fetched "the newest 400" every refresh, so each
-// new tool call pushed the oldest event out of the window and the block above
-// a steering message counted DOWN — 193, 192, 191 — while the block under the
-// message counted up.
-//
-// Counting what you happen to have fetched is the deeper bug, and it is gone:
-// every headline is the HUB's count (GET /threads/{id}/steps, straight out of
-// SQL), so a 5,000-step turn reads the same as a 5-step one. This store holds
-// only what is DRAWN — the newest page, whatever streams in after it, and any
-// block the owner opens (ensureBlock) — so opening a session is one small read
-// however long its history is.
-const evPage = 400;
-async function loadEvents(id) {
-  const store = chatState.events;
-  const take = evs => { for (const e of (evs || [])) store.set(e.id, e); return evs || []; };
-  if (!store.size) {
-    take(await get(`/threads/${id}/events?limit=${evPage}`).catch(() => []));
-    return held();
-  }
-  const newest = Math.max(...store.keys());
-  take(await get(`/threads/${id}/events?since=${newest}&limit=1000`).catch(() => []));
-  // A shell call's English summary is filled in by Haiku a few seconds after
-  // the call itself, so recent tool_use rows get a second look.
-  const stillComing = Date.now() - 120000;
-  const blank = [...store.values()].filter(e => e.kind === 'tool_use' && !e.summary && +new Date(e.ts) > stillComing).map(e => e.id);
-  if (blank.length) take((await get(`/threads/${id}/events?ids=${blank.slice(-40).join(',')}`).catch(() => [])).filter(e => e.summary));
-  return held();
-}
-const held = () => [...chatState.events.values()].sort((a, b) => a.id - b.id);
-
-// One folded block, opened: read exactly its steps (the hub gave the block's
-// first and last event id) and redraw. Anything already held is skipped, so
-// the live block — which streams in through `since` — never re-reads.
-async function ensureBlock(id, msgID) {
-  const c = chatState.steps.get(msgID);
-  const key = msgID + ':' + (c ? c.last_id : 0);
-  if (!c || !c.steps || chatState.fetching.has(key)) return false;
-  let have = 0;
-  for (const e of chatState.events.values()) if (e.id >= c.first_id && e.id <= c.last_id) have++;
-  if (have >= c.steps) return false;
-  chatState.fetching.add(key);
-  try {
-    let since = c.first_id - 1;
-    while (since < c.last_id && chatState.id === id) {
-      const page = await get(`/threads/${id}/events?since=${since}&before=${c.last_id + 1}&limit=2000`).catch(() => []);
-      if (!page.length) break;
-      for (const e of page) chatState.events.set(e.id, e);
-      since = page[page.length - 1].id;
-    }
-  } finally { chatState.fetching.delete(key); }
-  return true;
-}
-
 async function refreshThread(id, first) {
   if (chatState.id !== id) return;
   const gen = route.gen;
-  const [t, msgs, steps, asks, allActs, queued, recPage] = await Promise.all([
+  const [t, msgs, asks, allActs, queued, recPage] = await Promise.all([
     get('/threads/' + id), get(`/threads/${id}/messages?limit=200`),
-    // The counts every run block prints — the hub's, not "what we fetched".
-    get(`/threads/${id}/steps`).catch(() => []),
     get(`/asks?state=all&thread=${id}`).catch(() => []),
-    // Every state: a dismissed proposal folds where it was (2026-09-18), a
-    // decided one stays as its grey card (below).
+    // Every state: a closed proposal folds to its row where it was.
     get(`/actions?state=&thread=${encodeURIComponent(id)}&limit=500`).catch(() => []),
     // This session's own future: what it will be told, and when — by the owner or
     // by itself (a self-prompt checking back on a step). Phase 3 replaced the
@@ -806,24 +751,18 @@ async function refreshThread(id, first) {
   ]);
   const recs = (recPage && recPage.recs) || [];
   chatState.recs = recs;
-  chatState.steps = new Map((steps || []).map(s => [s.message_id, s]));
-  const events = await loadEvents(id);
   const el = document.getElementById('chat');
   if (!el || chatState.id !== id || gen !== route.gen) return;
   // This session's approvals, drawn as cards in the conversation like its
-  // asks (see actionHTML): pending ones with their buttons, dismissed ones
-  // folded, decided ones grey with who decided — a decided card used to leave
-  // the chat, so an approved proposal was only the owner's "↩ Approved · <id>"
-  // reply. Deciding one
-  // changes its state without a new message, so it is part of "did the
-  // structure change".
+  // asks (see actionHTML): pending ones with their buttons, decided and
+  // dismissed ones folded to their row. Deciding one changes its state
+  // without a new message, so it is part of "did the structure change".
   const acts = (allActs || []).filter(a => a.thread_id === id);
   // The deep-linked card (#/sessions/<thread>/<id>) is read on its own, once
   // per change of the list: GET /actions/{id} is the one read that carries
-  // events[] — Phase 2's audit trail, drawn under the card — and it finds an
-  // action the proposed list no longer has (decided already, reached from a
-  // calendar row), so the chat still shows it, closed, with who decided it
-  // and when. A focus that is an ask id 404s here, and that is the end of it.
+  // events[] (the audit trail, inside the card) and it finds an action the
+  // list no longer has (reached from a calendar row), so the chat still shows
+  // it. A focus that is an ask id 404s here, and that is the end of it.
   const ids = acts.map(a => a.id).join(',');
   if (ids !== chatState.actIDs) { chatState.actIDs = ids; chatState.focusAct = undefined; }
   if (chatState.focus && chatState.focusAct === undefined) {
@@ -835,25 +774,26 @@ async function refreshThread(id, first) {
     if (i >= 0) acts[i] = fa; else acts.push(fa);
   }
   const actKey = acts.map(a => a.id + ':' + (a.state || '')).join(',');
-  // Cards placed IN the tool chain, at the step the agent raised them. The hub cuts each run block at its cards
-  // (GET /threads/{id}/steps → segments), so the split and every segment's
-  // count are its, not "what we happen to hold". drawActivity draws them;
-  // the message-level maps below leave them alone.
   chatState.cards = {};
   for (const a of (asks || [])) chatState.cards['ask:' + a.id] = a;
   for (const a of acts) chatState.cards['action:' + a.id] = a;
-  const inChain = new Set();
-  for (const s of (steps || [])) for (const g of (s.segments || [])) if (g.ref && chatState.cards[g.ref]) inChain.add(g.ref);
 
   const msgsEl = document.getElementById('msgs');
   const anchor = chatAnchor(msgsEl);
   const ordered = orderedMsgs(msgs);
   const newest = msgs.length ? Math.max(...msgs.map(m => m.id)) : 0;
-  // "Did the activity change" = the hub's counts moved, or a step we hold
-  // gained its English summary (the in-place redraw below picks both up).
-  const evKey = (steps || []).map(s => s.message_id + '/' + s.steps + '/' + (s.segments || []).map(g => g.ref + '@' + g.steps).join('+')).join(',')
-    + ':' + events.length + ':' + events.filter(e => e.summary).length;
   const running = t.status === 'running';
+  chatState.thread = t; chatState.running = running;
+  // The turn in flight = the newest starter whose reply has not landed: its
+  // ts is where "starting · N s" counts from.
+  const replied = new Set(ordered.filter(m => m.role === 'claude' || m.kind === 'error').map(m => m.run_id).filter(Boolean));
+  const live = running ? ordered.filter(m => m.run_id && m.role !== 'claude' && !replied.has(m.run_id)).pop() : null;
+  chatState.liveSince = live ? Date.parse(live.ts) : 0;
+  // The owner's message landed: the "sending · N s" count is over (a Send
+  // that never lands stops counting after five minutes rather than forever).
+  if (chatState.sendingSince && (msgs.some(m => m.role === 'owner' && m.id > chatState.sendingAfter) || Date.now() - chatState.sendingSince > 300000)) {
+    chatState.sendingSince = 0;
+  }
   const promptKey = (queued || []).map(p => p.id).join(',');
   // A card raised mid-turn changes the chat without a new message: it must
   // redraw the moment the hub has it, not when the turn ends.
@@ -875,21 +815,13 @@ async function refreshThread(id, first) {
   chatState.lastRecs = recKey;
   el.dataset.status = t.status;
 
-  // Steps stream in far faster than messages; when only they moved, swap the
-  // activity blocks in place so the composer, its draft and the scroll
-  // position survive (before, a live run's steps never refreshed at all).
+  // Nothing new but the turn's count, clock and dollars: repaint those in
+  // place, so the composer, its draft and the scroll position survive.
   if (!structural) {
     paintChatPills(t);
-    if (evKey !== chatState.lastEvKey) {
-      chatState.lastEvKey = evKey;
-      drawActivity(ordered, events, running, t);
-      restoreChatAnchor(msgsEl, anchor);
-    } else {
-      paintWorking(running, chatState.liveBlock, t); // the clock and dollars move between steps
-    }
+    paintWorking(running, t);
     return;
   }
-  chatState.lastEvKey = evKey;
 
   const askByMsg = {}, askById = {}, tailAsks = [];
   // A dismissed card folds to one grey line where it was, with Reopen inside
@@ -906,7 +838,6 @@ async function refreshThread(id, first) {
   const activeAsk = a => !a.closed;
   for (const a of (asks || [])) {
     askById[a.id] = a;
-    if (inChain.has('ask:' + a.id)) continue;
     let host = null;
     if (a.message_id && ordered.some(m => m.id === a.message_id)) host = a.message_id;
     else if (activeAsk(a) || a.folded === 'dismissed') {
@@ -923,7 +854,6 @@ async function refreshThread(id, first) {
   // end if it is newer than everything (the reply has not landed yet).
   const actByMsg = {}, tail = [];
   for (const a of acts) {
-    if (inChain.has('action:' + a.id)) continue; // drawn where it was proposed
     const at = +new Date(a.created_at);
     let host = null;
     for (const m of ordered) if (+new Date(m.ts) <= at) host = m;
@@ -932,17 +862,22 @@ async function refreshThread(id, first) {
   // A rec sits under the reply that filed it — the hub names it
   // (message_id: the first reply after the rec was filed) — or at the end
   // while that reply is still being written. Every status is drawn: a
-  // decided one is the grey line that says what the owner chose.
+  // decided one is the row that says what the owner chose. A rec whose reply
+  // is older than the newest loaded message (past the 200-message window)
+  // is not drawn at the tail: only one with no reply yet, or a reply newer
+  // than every loaded message, goes there.
   const recByMsg = {}, recById = {}, tailRecs = [];
   const msgIDs = new Set(ordered.map(m => m.id));
-  const lastTurn = lastTurnID(ordered);
+  const newestID = Math.max(0, ...msgIDs);
   for (const r of recs) {
     recById[r.id] = r;
-    if (r.message_id && msgIDs.has(r.message_id)) (recByMsg[r.message_id] ||= []).push(r); else tailRecs.push(r);
+    if (r.message_id && msgIDs.has(r.message_id)) (recByMsg[r.message_id] ||= []).push(r);
+    else if (!r.message_id || r.message_id > newestID) tailRecs.push(r);
   }
   // A reply can land while the owner is mid-sentence; the composer keeps what
   // they have typed in its own state (composer.js), so the redraw restores it — an
   // approval's note too, since its card arms the composer (2026-09-17).
+  chatState.costs = {};
   el.innerHTML = `
     <div class="chat-head">
       <button class="sm narrow-only" onclick="showList()">←</button>
@@ -960,17 +895,16 @@ async function refreshThread(id, first) {
       ].filter(Boolean).join(' · ')}</div>
     </div>
     <div class="msgs" id="msgs">
-      ${ordered.map(m => msgHTML(m, askByMsg[m.id], actByMsg[m.id], askById, recByMsg[m.id], recById, m.id === lastTurn) + runSlot(m)).join('')}
-      ${tailAsks.map(chatAskHTML).join('')}
-      ${tail.map(chatActionHTML).join('')}
-      ${tailRecs.map(chatRecHTML).join('')}
-      <div id="run-orphan"></div>
+      ${ordered.map(m => msgHTML(m, askByMsg[m.id], actByMsg[m.id], recByMsg[m.id], askById, recById)).join('')}
+      ${tailAsks.map(a => chatAskHTML(a)).join('')}
+      ${tail.map(a => chatActionHTML(a)).join('')}
+      ${tailRecs.map(r => chatRecHTML(r)).join('')}
       <div class="working small muted" id="run-working" hidden></div>
     </div>
     ${queuedHTML(queued)}
     <div class="composer-wrap">${composerHTML('chat', chatComposerSpec(running))}</div>`;
 
-  drawActivity(ordered, events, running, t);
+  paintWorking(running, t);
   const box = document.getElementById('msgs');
   // Opening a chat places the reader on the newest message; after that the
   // chat never scrolls for them — a redraw puts back what they were reading. `first`
@@ -986,14 +920,12 @@ async function refreshThread(id, first) {
 // a streaming tool call must never scroll the chat for them. Sticking to the
 // bottom whenever the reader is within 80 px of it is wrong — that is where
 // the card just answered sits. The
-// anchor is the first element with an id still on screen (msg-N, ask-card-X,
-// run-…; ids survive a redraw) and how far below the top edge it sits: a
-// plain scrollTop would drift, because a card that folds or a run block that
-// grows above moves everything under it. No id on screen = the chat is not
-// drawn yet (openThread's empty #msgs): that is the one placement on the
-// newest message. The run slots' own ids (run-…, run-orphan, run-working)
-// are skipped — they are empty until drawActivity fills them, so on the
-// first draw one of them would count as "already drawn".
+// anchor is the first element with an id still on screen (msg-N, ask-card-X;
+// ids survive a redraw) and how far below the top edge it sits: a plain
+// scrollTop would drift, because a row that opens above moves everything
+// under it. No id on screen = the chat is not drawn yet (openThread's empty
+// #msgs): that is the one placement on the newest message. The working line
+// (run-working) is skipped: it is not part of the conversation.
 function chatAnchor(msgsEl) {
   if (!msgsEl) return null;
   const top = msgsEl.getBoundingClientRect().top;
@@ -1077,77 +1009,53 @@ function calTitle(ref) {
   return s ? s.title : '';
 }
 
-// The newest session row: the one end line that says "turn ended".
-// Repeating it on every reply says nothing, so every earlier reply row is its
-// day, time and cost alone. The phone's `lastTurnID` (ThreadDetail) picks
-// the same row.
-function lastTurnID(ordered) {
-  for (let i = ordered.length - 1; i >= 0; i--) {
-    const m = ordered[i];
-    if (m.role !== 'owner' && m.role !== 'system' && m.kind !== 'schedule') return m.id;
-  }
-  return null;
-}
-
-function msgHTML(m, asks, acts, askById, recs, recById, last) {
-  const role = m.role === 'owner' ? 'owner' : m.role === 'system' ? 'system' : 'claude';
-  const cls = m.kind === 'error' ? ' error' : m.kind === 'read' ? ' read' : '';
+// Every message is a row (ui.js rowHTML): the owner's in grey, the rest
+// white, one line each that opens in place. A session's reply draws nothing
+// of its own: the cards the turn raised ARE the reply, and its dollars ride
+// on the first of them. A reply that still carries text is a "Reply" row. An
+// error is a red row; a session limit a paused one, its card under it saying
+// when. The phone draws the same rows (ThreadDetail).
+function msgHTML(m, asks, acts, recs, askById, recById) {
+  const cards = [...(asks || []).map(a => 'ask:' + a.id), ...(acts || []).map(a => 'action:' + a.id), ...(recs || []).map(r => 'rec:' + r.id)];
+  if (m.role === 'claude' && m.cost_usd && cards.length) chatState.costs[cards[0]] = m.cost_usd;
+  const html = (asks || []).map(a => chatAskHTML(a)).join('') + (acts || []).map(a => chatActionHTML(a)).join('') + (recs || []).map(r => chatRecHTML(r)).join('');
   const atts = (m.attachments || []).map(attachHTML).join('');
-  const askCards = (asks || []).map(chatAskHTML).join('') + (acts || []).map(chatActionHTML).join('')
-    + (recs || []).map(chatRecHTML).join('');
-  // Day, time, dollars; no tokens. The session's token total stays in the head.
-  const meta = `${dayWhen(m.ts)}${m.cost_usd ? ' · ' + usd(m.cost_usd) : ''}`;
-  // THERE IS NO WHITE CELL: anything the owner must read or do is in one of
-  // the card cells.
-  // A session's reply is the turn ENDING, never a text bubble: the cards the
-  // turn raised are the reply (the hub mints a read card from any reply text
-  // since 09-13, so a new row is always empty), and the row is one muted line
-  // — that it ended, when, what it cost — in the card's colour. A row that
-  // still carries text (before 09-13, or text folded beside a card) keeps it
-  // behind that line, closed, for the record only. Errors stay red bubbles.
-  // The phone draws the same line (ThreadDetail.chatBubble).
-  // A session limit is a pause, not a crash: its row is the
-  // same one line in the paused card's amber, and the card under it says when.
-  if (m.kind === 'error' && isPauseText(m.text)) {
-    return `<div class="msg ${role} end paused" id="msg-${esc(String(m.id))}"><div><span class="end-line">turn paused · session limit · ${meta}</span></div></div>${askCards}`;
+  const text = m.shown ?? m.text ?? '';
+  const row = (k, cls, title, body) => rowHTML({ id: 'msg-' + m.id, key: 'msg:' + m.id, opened: chatState.open.get('msg:' + m.id) === true,
+    cls, k, title, when: dayWhen(m.ts) + (m.role === 'claude' && m.cost_usd && !cards.length ? ' · ' + usd(m.cost_usd) : ''),
+    body: body + (atts ? `<div class="atts">${atts}</div>` : '') });
+  const line = mdInline(firstLine(text), false);
+  if (m.kind === 'error') return (isPauseText(text) ? row('⏸ Paused', 'paused', 'session limit', md(text)) : row('⚠ Error', 'error', line, md(text))) + html;
+  if (m.kind === 'schedule') {
+    // The agent set (or cleared) its check-in: when it comes back, then the
+    // instructions it left itself.
+    const cut = text.indexOf('\n\n');
+    return row('⏰ Check-in', 'sched', esc(cut < 0 ? text : text.slice(0, cut)), cut < 0 ? '' : md(text.slice(cut + 2))) + html;
   }
-  if (role === 'claude' && m.kind !== 'error') {
-    const line = `<span class="end-line">${last ? 'turn ended · ' : ''}${meta}</span>`;
-    const old = (m.text || '').trim() || atts;
-    const body = old
-      ? `<details class="old-reply"><summary>${line}</summary><div class="bubble">${md(m.text)}${atts ? `<div class="atts">${atts}</div>` : ''}</div></details>`
-      : `<div>${line}</div>`;
-    return `<div class="msg ${role} end${cls}" id="msg-${esc(String(m.id))}">${body}</div>${askCards}`;
-  }
-  // A long message folds, so a big paste cannot fill the pane. Past LONG_LINES lines or LONG_CHARS
-  // characters the body clamps to a screen's worth with a fade and a "Show
-  // N more lines" button if N is five or more once it is drawn, else it is
-  // shown whole (ui.js fitFolds); open, it is a scroll box no taller than the pane,
-  // wide tables scroll sideways and their header row stays pinned while the
-  // rows go by. The fold survives the 5 s redraw (chatState.open, key
-  // "long:<id>"). The phone folds the same way (ThreadDetail.chatBubbleBox).
-  const long = isLongText(m.text);
-  const openLong = long && chatState.open.get('long:' + m.id) === true;
-  const bodyCls = long ? ` class="body long${openLong ? ' open' : ''}"` : ' class="body"';
-  const fold = long ? foldButtonHTML(openLong, `toggleLong(${+m.id})`) : '';
-  return `<div class="msg ${role}${cls}${long ? ' has-long' : ''}">
-    <div class="bubble">
-      ${m.kind === 'checkin' ? '<div class="small muted">⏰ scheduled check-in</div>' : ''}
-      ${role === 'owner' ? replyLineHTML(m, askById, recById) : ''}
-      <div${bodyCls}>${md(m.text)}${atts ? `<div class="atts">${atts}</div>` : ''}</div>${fold}
-      <div class="meta"><span>${meta}</span>${sentByHTML(m)}</div>
-    </div></div>${askCards}`;
+  if (m.role === 'claude') return (text.trim() || atts ? row('Reply', '', line, md(text)) : '') + html;
+  if (m.kind === 'checkin') return row('⏰ Check-in', 'sched', line, md(text)) + html;
+  if (m.role === 'system') return row('Note', '', line, md(text)) + html;
+  // The owner's message, or one another session or the hub sent in their
+  // place: the card it answered leads the title ("↩ Got it · …"), whole in
+  // the body. With no words of its own, the title is the card it answered.
+  const a = m.author || 'owner';
+  const k = a === 'owner' ? 'You' : a === 'hub' ? 'Hub' : esc(m.author_title || 'Session');
+  const re = (m.replies || []).find(r => r.label || r.outcome) || (m.outcome ? { outcome: m.outcome, ref: m.in_reply_to } : null);
+  const what = line || (re && esc(refTitle(re.ref || '', askById, recById))) || (atts ? '📎' : '');
+  const title = re ? `↩ ${esc(re.label || re.outcome)}${what ? ' · ' + what : ''}` : what;
+  const foot = a === 'owner' ? '' : sentByHTML(m);
+  return row(k, 'me', title, replyLineHTML(m, askById, recById) + md(text) + (foot ? `<div class="small muted">${foot}</div>` : '')) + html;
+}
+const firstLine = s => String(s || '').split('\n').find(l => l.trim()) || '';
+// The title of the card a ref names, when the chat holds it ('' otherwise).
+function refTitle(ref, askById, recById) {
+  const [type, id = ''] = ref.split(':');
+  const c = type === 'ask' ? (askById || {})[id] : type === 'rec' ? (recById || {})[id] : type === 'action' ? chatState.cards[ref] : null;
+  return c ? plainText(c.title) : type === 'cal' || type === 'step' ? calTitle(ref) : '';
 }
 
-function toggleLong(id) {
-  const k = 'long:' + id;
-  if (chatState.open.get(k) === true) chatState.open.delete(k); else chatState.open.set(k, true);
-  if (chatState.id) refreshThread(chatState.id, true);
-}
-
-// Who wrote a blue or dashed row, in its lower-right corner — you, the hub or
-// a session — so a blue message says where it came from. A session is a link
-// to it. The phone draws the same words (ThreadDetail.sentBy).
+// Who wrote an owner-side row the owner did not: the hub or a session. A
+// session is a link to it. The phone draws the same words (ThreadDetail.sentBy).
 function sentByHTML(m) {
   const a = m.author || '';
   if (!a) return '';
@@ -1184,149 +1092,51 @@ function openImage(url, name) {
 function closeImage() { document.getElementById('lightbox')?.remove(); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeImage(); });
 
-// ---- activity (what a run actually did) ----
-// The old version printed every event's raw title in one flat list, so half
-// the lines were the word "result" and a tool call read as a shell command.
-// Now it matches the app:
-// one collapsible block per run, each result folded into the call above it,
-// each call written in plain English with the raw command and output one
-// click away.
-// One slot per starter MESSAGE, not per run: a steering message shares its
-// run_id with the message that started the turn, so a per-run id made two
-// divs with the same id and only the first was ever filled.
-const runSlotID = m => 'run-' + String(m.run_id).replace(/[^A-Za-z0-9_-]/g, '_') + '-' + m.id;
-const startsRun = m => !!m.run_id && m.role !== 'claude' && m.kind !== 'error';
-function runSlot(m) {
-  return startsRun(m) ? `<div class="activity" id="${runSlotID(m)}"></div>` : '';
-}
-
-function drawActivity(ordered, events, running, t) {
-  const byRun = {};
-  for (const e of (events || [])) (byRun[e.run_id || ''] ||= []).push(e);
-  // The run in flight = the newest starter message whose reply has not landed.
-  const replied = new Set(ordered.filter(m => m.role === 'claude' || m.kind === 'error').map(m => m.run_id).filter(Boolean));
-  let live = null;
-  if (running) {
-    for (const m of ordered) if (m.run_id && m.role !== 'claude' && !replied.has(m.run_id)) live = m.run_id;
-  }
-  const known = new Set(ordered.map(m => m.run_id).filter(Boolean));
-  // Split each run's steps at its starters, so a message steered in mid-turn
-  // breaks the tool chain where it landed instead of the whole chain being
-  // printed both above and below it. Live dot: last starter.
-  const starters = {};
-  for (const m of ordered) if (startsRun(m)) (starters[m.run_id] ||= []).push(m);
-  for (const e of document.querySelectorAll('#msgs .msg.merged')) e.classList.remove('merged');
-  for (const [run, ms] of Object.entries(starters)) {
-    const evs = byRun[run] || [];
-    ms.forEach((m, i) => {
-      const el = document.getElementById(runSlotID(m));
-      if (!el) return;
-      const from = i === 0 ? -Infinity : +new Date(m.ts);          // first takes anything earlier
-      const to = i + 1 < ms.length ? +new Date(ms[i + 1].ts) : Infinity;
-      const slice = evs.filter(e => { const t = +new Date(e.ts); return t >= from && t < to; });
-      const isLive = run === live && i === ms.length - 1;
-      // The headline is the hub's count for THIS message; the rows are
-      // whatever steps are held (opening the block fetches the rest).
-      const count = chatState.steps.get(m.id);
-      // A block with no steps still has to draw the cards the hub cut it at
-      // (a card in a segment is drawn by blockHTML alone; emptying the slot
-      // would lose it: a "1 to read" with no cell).
-      const show = (count && (count.steps || (count.segments || []).length)) || slice.length || isLive;
-      el.innerHTML = show ? blockHTML(slice, isLive, 'run:' + run + ':' + m.id, count, m.id) : '';
-      if (!isLive) mergeTurnEnd(el, ordered[ordered.indexOf(m) + 1], m);
-    });
-  }
-  const orphanEl = document.getElementById('run-orphan');
-  let orphan = [];
-  if (orphanEl) {
-    orphan = running && !live ? (events || []).filter(e => !known.has(e.run_id)) : [];
-    orphanEl.innerHTML = orphan.length ? activityHTML(orphan, true, 'run:live') : '';
-  }
-  chatState.liveBlock = !!live || orphan.length > 0;
-  paintWorking(running, chatState.liveBlock, t);
-}
-
-// A turn's end line folded into the line of its last block: "6 tool calls ·
-// turn ended · today 11:56 PM · $1.31" where it was two rows (the desktop's
-// ThreadDetail.mergedEnds). Only when the reply row is nothing but that line
-// and comes straight after a block that ends in no card; its row stays in the
-// page, hidden, so a link or the reading anchor still finds it.
-function mergeTurnEnd(slot, reply, m) {
-  if (!reply || reply.role !== 'claude' || reply.kind === 'error' || reply.run_id !== m.run_id) return;
-  const end = document.getElementById('msg-' + reply.id);
-  const last = slot.lastElementChild;
-  if (!end || end.querySelector('.old-reply') || !last || !last.matches('details.run')) return;
-  const line = end.querySelector('.end-line'), hl = last.querySelector('summary .hl');
-  if (!line || !hl) return;
-  hl.insertAdjacentHTML('beforeend', ' · ' + line.innerHTML);
-  end.classList.add('merged');
-}
-
 // THE working line, same on both surfaces (the phone spells it out in
-// ThreadDetail.swift; keep them in step). A running turn ends the chat the
-// way a finished one does: its fold, then one line of facts. "turn ended ·
-// today 10:06 PM · $7.27" becomes "working · today 10:09 PM · $1.12", the
-// clock being the turn's last output, so a hung turn shows an old time. With
-// no live block yet the count rides on this line too, behind the pulse. A
-// line left on a stopped session reads as one that never finished.
-const showWorking = running => !!running;
-function paintWorking(running, liveBlock, t) {
+// ThreadDetail.swift; keep them in step): while a turn runs the chat ends in
+// "working · 23 tool calls · today 10:09 PM · $1.12", the clock being the
+// turn's last output, so a hung turn shows an old time. The tool calls
+// themselves are not drawn. A line left on a stopped session reads as one
+// that never finished, so it shows only while the session runs.
+//
+// Before any of that, "sending · N s" from the moment a message left this
+// box until it is in the chat (with "· working" or "· starting" behind it
+// when the session is already at work), then "starting · N s" until the
+// first tool call. The seconds tick on the console's own clock (tickSince),
+// not the poll.
+function paintWorking(running, t) {
   const el = document.getElementById('run-working');
   if (!el) return;
-  el.hidden = !showWorking(running);
+  const since = chatState.sendingSince;
+  el.hidden = !running && !since;
   if (el.hidden) return;
-  const line = ['working', turnFacts(t, !liveBlock)].filter(Boolean).join(' · ');
-  el.innerHTML = `${liveBlock ? '' : '<span class="dot pulse"></span> '}${esc(line)}`;
+  const dot = '<span class="dot pulse"></span> ';
+  if (since) el.innerHTML = `${dot}sending · ${sinceHTML(since)}${running ? ' · ' + esc(t && t.turn_tools ? 'working' : 'starting') : ''}`;
+  else if (!(t && t.turn_tools) && chatState.liveSince) el.innerHTML = `${dot}starting · ${sinceHTML(chatState.liveSince)}`;
+  else el.innerHTML = dot + esc(['working', turnFacts(t)].filter(Boolean).join(' · '));
 }
-
-// One run block, cut at the cards the agent raised while it ran. The hub gives the cut and each piece's own count
-// (steps.segments); with none, this is the single fold it always was.
-//
-// A segment whose card this chat is not drawing — a proposal the pending list
-// no longer carries — is FOLDED INTO the next one rather than left as a cut
-// with nothing between: the counts add up, so the chain still reads as one
-// run of N steps.
-function blockHTML(evs, live, key, count, msgID) {
-  const segs = (count && count.segments) || [];
-  if (!segs.length) return activityHTML(evs, live, key, count, msgID);
-  const merge = (a, b) => !a ? b : {
-    ref: b.ref, tools: a.tools + b.tools, thoughts: a.thoughts + b.thoughts, steps: a.steps + b.steps,
-    first_id: Math.min(a.first_id || b.first_id, b.first_id || a.first_id), last_id: Math.max(a.last_id, b.last_id),
-  };
-  const drawn = [];
-  let carry = null;
-  for (const s of segs) {
-    const acc = merge(carry, s);
-    if (s.ref && !chatState.cards[s.ref]) { carry = acc; continue; }
-    drawn.push(acc);
-    carry = null;
+const sinceHTML = since => `<span class="since" data-since="${since}">${Math.max(0, Math.floor((Date.now() - since) / 1000))} s</span>`;
+// Every "N s" on the page, once a second; a sending line that should have
+// gone (or come) is repainted here too.
+function tickSince() {
+  const el = document.getElementById('run-working');
+  if (el && chatState.thread && !!chatState.sendingSince !== el.textContent.includes('sending')) paintWorking(chatState.running, chatState.thread);
+  for (const s of document.querySelectorAll('[data-since]')) {
+    s.textContent = Math.max(0, Math.floor((Date.now() - +s.dataset.since) / 1000)) + ' s';
   }
-  if (carry) drawn.push({ ...carry, ref: '' });
-  return drawn.map((s, i) => {
-    const rows = s.steps ? evs.filter(e => e.id >= s.first_id && e.id <= s.last_id) : [];
-    const fold = s.steps ? activityHTML(rows, live && i === drawn.length - 1, key + ':' + i, s, msgID) : '';
-    return fold + (s.ref ? cardInChainHTML(s.ref) : '');
-  }).join('');
 }
+if (typeof document !== 'undefined') setInterval(tickSince, 1000);
 
-// The card itself, drawn where it was raised. It is the ordinary card — the
-// same Respond/Done/Dismiss, the same Approve/Deny — because answering one
-// mid-chain is the point: the reply is delivered into the turn still running
-// as a steering message and the agent carries on.
-function cardInChainHTML(ref) {
-  const c = chatState.cards[ref];
-  if (!c) return '';
-  return ref.startsWith('action:') ? chatActionHTML(c) : chatAskHTML(c);
-}
-
-// A dismissed card's fold remembers the owner's click across the redraw (cardHTML).
+// A folded card's row remembers the owner's click across the redraw (cardHTML).
 const chatOpened = (ref, id) => chatState.open.get(ref + ':' + id) === true;
 // The pick a card has on this chat's composer ('' = Reply), undefined when
 // none: its row draws that one filled (ui.js outcomeBtns).
 const chatArmed = (ref, id) => { const c = composerCards('chat').find(x => x.ref === ref && x.id === id); return c ? (c.outcome || '') : undefined; };
-const chatAskHTML = a => askHTML(a, chatOpened('ask', a.id), chatArmed('ask', a.id));
-const chatActionHTML = a => actionHTML(a, chatOpened('action', a.id), chatArmed('action', a.id));
-const chatRecHTML = r => recHTML(r, chatOpened('rec', r.id), chatArmed('rec', r.id));
+// chatState.costs = a turn's dollars by the ref of the first card it raised
+// (msgHTML), so a card redrawn on its own keeps them.
+const chatAskHTML = a => askHTML(a, chatOpened('ask', a.id), chatArmed('ask', a.id), chatState.costs['ask:' + a.id]);
+const chatActionHTML = a => actionHTML(a, chatOpened('action', a.id), chatArmed('action', a.id), chatState.costs['action:' + a.id]);
+const chatRecHTML = r => recHTML(r, chatOpened('rec', r.id), chatArmed('rec', r.id), chatState.costs['rec:' + r.id]);
 
 // The cards' rows follow the bar: whenever the strip changes - a button armed,
 // a chip switched, a x - every card that was or is on it is redrawn in place,
@@ -1344,92 +1154,6 @@ function chatPaintArmed() {
     el.outerHTML = kind === 'rec' ? chatRecHTML(c) : kind === 'action' ? chatActionHTML(c) : chatAskHTML(c);
   }
   chatArmedWas = now;
-}
-
-// count = the hub's row for this message ({tools, thoughts, steps}); it wins
-// over anything counted here, which is only ever the steps we happen to hold.
-function activityHTML(evs, live, key, count, msgID) {
-  const tools = count ? count.tools : evs.filter(e => e.kind === 'tool_use').length;
-  const thoughts = count ? count.thoughts : evs.filter(e => e.kind === 'thinking').length;
-  const all = count ? count.steps : evs.length;
-  const parts = [];
-  if (tools) parts.push(tools + ' tool call' + (tools === 1 ? '' : 's'));
-  if (thoughts) parts.push(thoughts + ' thought' + (thoughts === 1 ? '' : 's'));
-  if (!parts.length) parts.push(all ? all + ' step' + (all === 1 ? '' : 's') : 'starting…');
-  // No "now: <step>" behind the count: a raw step label reads as noise. The
-  // working line under the chat carries the turn's clock and dollars
-  // (paintWorking), and the steps are one click away.
-  // ALWAYS folded until the owner clicks it, live or not. A running turn used
-  // to open itself, so entering a session landed the reader in the middle of
-  // a wall of steps instead of on the conversation. `data-def` lets the toggle handler tell the owner's click apart
-  // from the open state we ourselves rendered.
-  const open = chatState.open.get(key) ?? false;
-  // Opened but not all of it is here yet: say so rather than showing a short
-  // list that looks like the whole run.
-  const missing = all > evs.length ? `<div class="ev flat"><span class="hl muted">loading ${all - evs.length} earlier step${all - evs.length === 1 ? '' : 's'}…</span></div>` : '';
-  // One mark leads the row: the pulse while the turn runs and the block is
-  // shut, ▾ open, ▸ ⚙ finished. `.run.live` (app.css) hides the other.
-  return `<details class="run${live ? ' live' : ''}" data-k="${esc(key)}" data-msg="${msgID || 0}" data-def="${open ? 1 : 0}"${open ? ' open' : ''}>
-    <summary>${live ? '<span class="dot pulse"></span>' : '<span class="gear">⚙</span>'} <span class="hl">${esc(parts.join(' · '))}</span></summary>
-    <div class="evs">${missing}${pairRows(evs).map(evRowHTML).join('')}</div></details>`;
-}
-
-/// Each tool_result belongs to the last tool_use still waiting for one.
-function pairRows(evs) {
-  const out = [];
-  for (const e of evs) {
-    if (e.kind === 'tool_result') {
-      const i = out.findLastIndex(p => p[0].kind === 'tool_use' && !p[1]);
-      if (i >= 0) { out[i][1] = e; continue; }
-    }
-    out.push([e, null]);
-  }
-  return out;
-}
-
-const firstLine = s => String(s || '').split('\n').find(l => l.trim()) || '';
-// An opened step is one plain terminal block, not a stack of grey boxes: a
-// light-mode terminal with lightly coloured text.
-// A thought: the purple line IS the thought — shut, its first line; open, all
-// of it, and nothing printed twice under it. A tool call: a shell command in
-// blue behind `$`, whole (the headline is its English), what went in when
-// the headline cannot say it (an edit's lines), then the output in grey
-// — its first OUT_FOLD lines, the rest behind "… N more lines" — or the error
-// in red, whole ("the error is good"). A body that is still the input's JSON
-// (stored before 10-05) is not shown: the title already says it.
-// An interim text step (what the agent said mid-turn, 💬) folds like the
-// thought: shut, its first two lines and an ellipsis (`.ev.said .hl`); open,
-// all of it. A long one on a single nowrap line could not be read at all.
-const OUT_FOLD = 12;
-function evRowHTML([e, r]) {
-  const icon = { thinking: '✻', tool_use: '⌘', text: '💬' }[e.kind] || '↳';
-  const bad = r && r.title === 'error';
-  const key = 'ev:' + e.id;
-  const open = chatState.open.get(key) === true;
-  const tick = r ? `<span class="tick${bad ? ' err' : ''}">${bad ? '✕' : '✓'}</span>` : '';
-  const fold = (cls, extra) => {
-    const o = chatState.open.get(key + extra) === true;
-    return `<details class="${cls}" data-k="${esc(key + extra)}" data-def="${o ? 1 : 0}"${o ? ' open' : ''}>`;
-  };
-  if (e.kind === 'thinking') {
-    return `${fold('ev think', '')}<summary><span class="ic">${icon}</span><span class="hl one">Thinking · ${esc(firstLine(e.body))}</span><span class="hl all">${esc(e.body)}</span></summary></details>`;
-  }
-  if (e.kind === 'text' && e.body) {
-    return `${fold('ev said', '')}<summary><span class="ic">${icon}</span><span class="hl">${esc(e.body)}</span></summary></details>`;
-  }
-  const head = `<span class="ic">${icon}</span><span class="hl">${esc(e.kind === 'tool_use' ? (e.summary || e.title) : (firstLine(e.body) || e.title || e.kind))}</span>${tick}`;
-  if (e.kind !== 'tool_use') return `<div class="ev flat">${head}</div>`;
-  // The call line is a shell command whole behind `$`; any other tool's
-  // headline already names the call ("Edit app/…/x.swift"), so its block
-  // holds only what went in and what came out.
-  const tool = e.title.split(' · ')[0];
-  const call = tool === 'Bash' ? `<pre class="io call">${esc('$ ' + e.body)}</pre>` : '';
-  const input = tool === 'Bash' || e.body.startsWith('{') ? '' : e.body;
-  const lines = r ? (r.body || '(no output)').split('\n') : [];
-  const out = !r ? '' : bad || lines.length <= OUT_FOLD
-    ? `<pre class="io out${bad ? ' err' : ''}">${esc(lines.join('\n'))}</pre>`
-    : `<pre class="io out">${esc(lines.slice(0, OUT_FOLD).join('\n'))}</pre>${fold('more', ':more')}<summary>… ${lines.length - OUT_FOLD} more lines</summary><pre class="io out">${esc(lines.slice(OUT_FOLD).join('\n'))}</pre></details>`;
-  return `${fold('ev' + (bad ? ' bad' : ''), '')}<summary>${head}</summary>${call}${input ? `<pre class="io in">${esc(input)}</pre>` : ''}${out}</details>`;
 }
 
 // The chat head's Stop is its "running" pill, hovered (headPills); Check in
@@ -1725,7 +1449,17 @@ async function chatSend(p) {
     return;
   }
   if (!re && p.target === 'this' && p.when === 'now') {
-    await post(`/threads/${chatState.id}/messages`, { text: p.text, attachments: p.refs, via: 'console' });
+    // "sending · N s" until the message is in the chat (refreshThread
+    // clears it when a newer owner message lands).
+    chatState.sendingSince = Date.now(); chatState.sendingAfter = chatState.lastMsgID;
+    paintWorking(chatState.running, chatState.thread);
+    try {
+      await post(`/threads/${chatState.id}/messages`, { text: p.text, attachments: p.refs, via: 'console' });
+    } catch (e) {
+      chatState.sendingSince = 0;
+      paintWorking(chatState.running, chatState.thread);
+      throw e;
+    }
     return;
   }
   // `new-or:<id>` and not the bare id: an ended session must not swallow words
@@ -1773,23 +1507,14 @@ function wireChat() {
   const msgs = document.getElementById('msgs');
   if (!msgs) return;
   wireDrop(msgs, 'chat');
-  // <details> toggles do not bubble; capture them so an expanded step stays
-  // expanded when the run re-renders. Only a state that differs from the one
-  // we rendered is remembered — a browser also fires `toggle` for the blocks
-  // that came out of innerHTML already open, and recording those would pin a
-  // finished run open forever.
+  // <details> toggles do not bubble; capture them so an opened row stays
+  // open when the chat redraws. A row is shut by default (data-def), so only
+  // a state that differs from the one rendered is remembered.
   msgs.addEventListener('toggle', e => {
     const el = e.target, k = el.dataset && el.dataset.k;
     if (!k) return;
     if (String(+el.open) === el.dataset.def) chatState.open.delete(k);
     else chatState.open.set(k, el.open);
-    // A block's steps are read when it is opened, not before: a session with
-    // thousands of them costs one small read to open.
-    const msgID = +(el.dataset.msg || 0);
-    if (el.open && msgID) {
-      const id = chatState.id;
-      ensureBlock(id, msgID).then(got => { if (got && chatState.id === id) refreshThread(id, true); });
-    }
   }, true);
   const draft = document.getElementById(cdom('chat') + '-draft');
   if (draft) draft.focus();

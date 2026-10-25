@@ -147,25 +147,13 @@ final class HubClient {
 
     /// The last body this path returned, decoded — nil when the phone has
     /// never seen it. Screens paint from this BEFORE the first request; call
-    /// it off the main actor for a big body (a chat's events).
+    /// it off the main actor for a big body (a long chat's messages).
     nonisolated static func cachedValue<T: Decodable & Sendable>(key: String) -> T? {
         guard let e = cache.entry(key) else { return nil }
         if let v = e.value as? T { return v }
         guard let v = try? decoder().decode(T.self, from: e.data) else { return nil }
         cache.setValue(key, v)
         return v
-    }
-
-    /// Write a value the phone assembled itself (a chat's events, seeded from
-    /// disk plus every `since` delta) back under the path it would have come
-    /// from, so the next open seeds from it.
-    nonisolated static func remember<T: Encodable & Sendable>(key: String, _ value: T) {
-        let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .custom { date, e in
-            var c = e.singleValueContainer(); try c.encode(Fmt.isoString(date))
-        }
-        guard let data = try? enc.encode(value) else { return }
-        cache.store(key, etag: "", data: data, value: value)
     }
 
     /// Every GET is cached by default: the reply is kept (memory +
@@ -448,19 +436,8 @@ final class HubClient {
     func threads(archived: Bool = false) async throws -> [Thread] { try await request("GET", archived ? Self.threadsPath + "?archived=1" : Self.threadsPath) }
     func thread(_ id: String) async throws -> Thread { try await request("GET", "/api/v1/threads/\(id)", cache: true) }
     func threadMessages(_ id: String) async throws -> [ThreadMessage] { try await request("GET", Self.messagesPath(id), cache: true) }
-    /// The full window (since 0) is what the phone keeps; a delta is appended
-    /// to it by ThreadDetail, which writes the result back with `remember`.
-    func threadEvents(_ id: String, since: Int = 0) async throws -> [ThreadEvent] { try await request("GET", since == 0 ? Self.eventsPath(id) : "/api/v1/threads/\(id)/events?since=\(since)&limit=1000", cache: since == 0) }
-    /// One run block's own steps: `since`/`before` bound it (see StepCount),
-    /// so a long finished run is read only when the owner opens it.
-    func threadEvents(_ id: String, since: Int, before: Int) async throws -> [ThreadEvent] {
-        try await request("GET", "/api/v1/threads/\(id)/events?since=\(since)&before=\(before)&limit=2000", cache: false)
-    }
-    /// The hub's per-message step counts — what a run block's headline prints.
-    func threadSteps(_ id: String) async throws -> [StepCount] { try await request("GET", "/api/v1/threads/\(id)/steps", cache: true) }
     nonisolated static let threadsPath = "/api/v1/threads"
     nonisolated static func messagesPath(_ id: String) -> String { "/api/v1/threads/\(id)/messages?limit=200" }
-    nonisolated static func eventsPath(_ id: String) -> String { "/api/v1/threads/\(id)/events?since=0&limit=1000" }
     /// The board this app asks for: `mobile` on the phone,
     /// `desktop` on the Mac — the one query the hub reads `surface` for, so
     /// each lists only the build it can install itself.
@@ -491,7 +468,6 @@ final class HubClient {
             throw e
         }
     }
-    func threadEvents(_ id: String, ids: [Int]) async throws -> [ThreadEvent] { try await request("GET", "/api/v1/threads/\(id)/events?ids=\(ids.map(String.init).joined(separator: ","))", cache: false) }
     /// Start a session from the owner's words and pictures alone: no title
     /// (the hub auto-titles), no goal, no cadence — the session infers both
     /// from the message.
