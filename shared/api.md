@@ -16,7 +16,7 @@ Errors: `{"error": "..."}` with a 4xx/5xx status.
 → `{"ok": true, "time": RFC3339}`. Unauthenticated (used by launchd/uptime checks).
 
 ### GET /
-Spend + sessions dashboard (HTML). First visit: `/?token=<token>` sets cookie.
+Spend + sessions dashboard (HTML). First visit: `/?token=<token>` sets cookie. `&next=/api/v1/blobs/<ref>` then lands on that blob instead of `/` (the phone app's "Open in browser" on an .html card file); any other `next` is ignored.
 
 ### GET /api/v1/projects
 → `[{"name", "dir"}]` — ops/hub.json projects ∪ subdirs of projects_root.

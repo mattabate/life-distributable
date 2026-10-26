@@ -36,13 +36,21 @@ func calWeekLabel(_ start: String) -> String {
 
 // MARK: - the rail
 
-struct CalRail: View {
+struct CalRail: View, Equatable {
     let view: CalView?
     let anchor: String
     let today: String
     @Binding var filters: CalFilters
     var onJump: (String) -> Void
     var onOpen: (CalEntry) -> Void
+    /// `CalShown.stamp`, as on `CalWeekGrid`.
+    var stamp = 0
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        // SwiftUI compares views on the main thread; the binding is the main actor's.
+        a.stamp == b.stamp && a.anchor == b.anchor && a.today == b.today
+            && MainActor.assumeIsolated { a.filters.off == b.filters.off }
+    }
 
     private var weekStart: String { calWeekStart(anchor) }
 
@@ -175,7 +183,7 @@ struct CalRail: View {
 /// Seven columns of the clock under one all-day band — `calTimeGridHTML`.
 /// A bar drags to another day and time (a plain drag: a mouse has no scroll
 /// to fight, so there is no hold first); the caller decides what a drop means.
-struct CalWeekGrid: View {
+struct CalWeekGrid: View, Equatable {
     let start: String
     let today: String
     let byDay: [String: [CalEntry]]
@@ -187,6 +195,13 @@ struct CalWeekGrid: View {
     /// Spans the owner is away: one bar across their days in this week, the
     /// columns hatched under it.
     var away: [CalAway] = []
+    /// The load these rows came from (`CalShown.stamp`): `==` compares it
+    /// instead of every entry, and the closures not at all.
+    var stamp = 0
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.stamp == b.stamp && a.start == b.start && a.today == b.today && a.filters.off == b.filters.off
+    }
 
     private var awayBars: [(span: CalAway, a: Int, b: Int)] {
         let first = days[0], last = days[6]

@@ -428,8 +428,8 @@ func stampEntry(e *Entry) {
 		e.Outcomes = store.TickOutcomes(true)
 	case e.Item && e.Kind == "owner":
 		e.Outcomes = store.StepOutcomes()
-	case e.Item && e.Kind == "note":
-		e.Outcomes = store.NoteOutcomes()
+	// A reminder (`note`) has none: the box alone, Send its one answer -
+	// empty = read, words = the owner's response (store/close.go).
 	case e.Item && e.Kind == "waiting" && e.State == "fired":
 		e.Outcomes = store.WaitingOutcomes()
 	case e.Kind == "action" && e.State == "proposed":

@@ -74,8 +74,7 @@ function calEntryHTML(i, opts) {
   // and the hub ticks it itself when the evidence lands (a full pitch round).
   // The hub's `tick` says which: no session waits on it (homework, a chore
   // that needs no agent behind it). A reminder (`note`) takes the same box
-  // with the chat read card's pair, Respond · Read, in place of Did it /
-  // Skip / Send.
+  // with no chips at all: the box and its one Send.
   const homework = isItem && (i.tick || i.kind === 'homework' || i.kind === 'note');
   const ownerStep = isItem && i.kind === 'owner' && !homework;
   // An install ask is the same teal cell here as in the chat — its own kind
@@ -151,19 +150,25 @@ function calEntryHTML(i, opts) {
 // (calendar.go header: title, day, goal, detail) above them; Send with words
 // and no pick leaves the item open. The buttons
 // are the row's own `outcomes` (store.TickOutcomes: Did it · Skip · Send).
-// A reminder (`note`) wears the same box with the chat read card's pair
-// (store.NoteOutcomes: Respond · Read): Read over an empty box closes it with
-// no session; Respond's words go to its session and close it as read too, as
-// answering a read card in the chat does.
+// A reminder (`note`) wears the same box with NO chips: the hub sends it no
+// outcomes, and Send is its one answer. It is the chat read card's shape
+// (`bare`, `confirmEmpty`): Send over an empty box asks "Are you sure? Send
+// without" and the second press closes it as read with no session; words go
+// to its session and close it as read too, as answering a read card in the
+// chat does.
 function calHomeworkBox(i) {
   const tick = ((i.outcomes || []).find(o => o.value === 'done') || {}).label || 'Did it';
   const note = i.kind === 'note';
-  // A reminder's words close it as read whichever chip sent them.
+  // A reminder's words close it as read: Send is read.
   const outcome = p => note ? 'done' : p.outcome;
-  return replyBox(calKey(i.id), { ref: 'cal', id: i.id, title: i.title || '' }, {
+  return replyBox(calKey(i.id), {
+    ref: 'cal', id: i.id, title: i.title || '',
+    ...(note ? { bare: true, confirmEmpty: true, outcome: 'done' } : {}),
+  }, {
     outcomes: i.outcomes,
-    emptyMsg: `Type something first — or press ${tick} twice to just ${note ? 'mark it read' : 'tick it'}.`,
-    placeholder: note ? `Your reply goes to its session and it closes as read — or just press ${tick}.`
+    emptyMsg: `Type something first — or press ${tick} twice to just tick it.`,
+    // Words for a box Send can take empty.
+    placeholder: note ? 'Anything to add (optional)'
       : `How did it go? Words start a session about it — or just press ${tick}.`,
     redraw: () => pageRedraw(),
     after: async () => { await pageRedraw(); refreshBadges(); },

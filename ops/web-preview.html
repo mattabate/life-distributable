@@ -78,6 +78,14 @@
         thread_id: TIDY, thread_title: 'Tidy the weekly digest',
         said: 'The digest now goes out Sunday at 8, with the week\'s dates on top and the open asks under them.',
         outcomes: [{ value: 'done', label: 'Read it' }] },
+      // An open read card longer than its window, carrying an .html file:
+      // the file draws as a thumbnail with Download / Open in browser, and
+      // the body pages five lines a click.
+      { id: 'ask-f02e', message_id: 3, title: 'This week\'s digest is ready', state: 'active', created_at: iso(3), kind: 'read', surface: 'any',
+        thread_id: TIDY, thread_title: 'Tidy the weekly digest',
+        detail: '[Weekly digest](/api/v1/blobs/digest-week-34.html)\n\n' + Array.from({ length: 24 }, (_, k) =>
+          `- Day ${k + 1}: ${['two asks closed', 'one step skipped', 'a rec accepted', 'the digest sent at 8'][k % 4]}`).join('\n'),
+        outcomes: [{ value: 'done', label: 'Read it' }, { value: '', label: 'Reply' }] },
     ],
     '/board': { surface: 'web', count: 3, working: 1, for_you: { [TRIP]: 2, [TIDY]: 1 },
       reads: {}, installs: {}, first: { [TRIP]: 'act-0002' },
@@ -199,6 +207,12 @@
   // &open=1 — expand every <details> before the screenshot, so a collapsed
   // editor or activity block can be looked at too.
   if (params.get('open')) setInterval(() => document.querySelectorAll('details').forEach(d => { d.open = true; }), 250);
+  // An .html file's thumbnail frame has no hub to load from here: draw a
+  // small synthetic page in it instead.
+  setInterval(() => document.querySelectorAll('.att-thumb iframe:not([srcdoc])').forEach(f => {
+    f.srcdoc = '<body style="font:44px -apple-system,sans-serif;margin:40px"><h2 style="margin:0 0 16px;font-size:64px">Weekly digest</h2>'
+      + '<p style="margin:0 0 6px;color:#555">Aug 17 - Aug 23</p><ul><li>3 asks closed</li><li>2 calendar steps done</li><li>1 rec accepted</li></ul></body>';
+  }), 250);
   document.write(`<link rel="stylesheet" href="${WEB}/app.css">`);
   document.write(`<link rel="stylesheet" href="${WEB}/skin.css">`);
   document.write(`<scr` + `ipt src="${WEB}/skin.js"></scr` + `ipt>`);

@@ -143,7 +143,6 @@ struct Card: View {
     var busy = false
     var error: String? = nil
 
-    @State private var bodyOpen = false
     @State private var hushed = false
     @ObservedObject private var speaker = Speaker.shared
     @Environment(\.openURL) private var openURL
@@ -248,10 +247,11 @@ struct Card: View {
         if let lines {
             StyledText(text: text, style: .subheadline, color: .secondary, lines: lines, macSize: 13.5)
         } else if isLongText(text) {
-            // Folds like a long chat bubble: a screen's worth fading out, then
-            // its full height — never a box scrolling inside the chat; whole
+            // A window, never the whole: a screen's worth, Show more / Back
+            // up paging it five lines at a time (a very long card would run
+            // on forever) — never a box scrolling inside the chat; whole
             // when fewer than five lines were behind the fold (FoldedText).
-            FoldedText(text: text, open: $bodyOpen, style: .subheadline, color: .secondary) { label, tap in
+            FoldedText(text: text, style: .subheadline, color: .secondary) { label, tap in
                 Button(label, action: tap).font(.caption.weight(.semibold)).buttonStyle(.bordered).tint(tint)
             }
         } else {
@@ -293,7 +293,8 @@ struct Card: View {
     private func foldedBody(_ word: String) -> some View {
         ChatRow(k: word, title: title, when: when) {
             if !said.isEmpty { saidLine }
-            if !text.isEmpty { StyledText(text: text, style: .subheadline, color: .secondary) }
+            // The same body as the open card's: a long one is the window.
+            if !text.isEmpty { bodyText }
             if !line.isEmpty { StyledText(text: line, style: .caption1, color: .secondary, macSize: 12) }
             if !buttons.isEmpty { buttonRow }
             if let trail { trail }

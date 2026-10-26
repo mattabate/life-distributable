@@ -153,6 +153,30 @@ test('isLongText: a bubble folds past 18 non-blank lines or 1600 characters', ()
   assert.equal(isLongText(null), false);
 });
 
+// A long detail is a window, never the whole: the clamped box, the detail
+// slid up `--off` lines inside it, Back up + Show more under it, no Show all,
+// no scroll box.
+test('askBody: a long detail is a fixed window with Back up / Show more, no Show all', () => {
+  const long = Array(40).fill('a line of the log').join('\n');
+  const h = askBody(long, 'ask:ask-1a2b3c4d');
+  assert.match(h, /^<div class="ask-long below" data-key="ask:ask-1a2b3c4d" style="--off:0"><div class="ask-long-in"><p>a line of the log/);
+  assert.match(h, /<div class="fold-row" hidden><button type="button" class="fold small" onclick="pageCardLong\(this,'ask:ask-1a2b3c4d',-1\)">Back up<\/button><button type="button" class="fold small" onclick="pageCardLong\(this,'ask:ask-1a2b3c4d',1\)">Show more<\/button><\/div>/);
+  assert.doesNotMatch(h, /Show all|Show less|more lines|overflow|scroll/);
+  // A short detail is just its markdown.
+  assert.equal(askBody('- Mon\n- Tue', 'ask:x'), '<ul><li>Mon</li><li>Tue</li></ul>');
+  // The window's place: five lines a click, clamped to what is hidden; the
+  // edge with more past it is marked and its button shown.
+  assert.deepEqual(foldWindow(0, 27), { off: 0, above: false, below: true, back: 'Back up', more: 'Show more' });
+  assert.deepEqual(foldWindow(FOLD_PAGE_LINES * 5, 27), { off: 25, above: true, below: true, back: 'Back up', more: 'Show more' });
+  assert.deepEqual(foldWindow(30, 27), { off: 27, above: true, below: false, back: 'Back up', more: 'Show more' });
+  assert.deepEqual(foldWindow(-5, 27).off, 0);
+  assert.equal(FOLD_PAGE_LINES, 5);
+  // A remembered place redraws where it was.
+  cardLongOff.set('ask:ask-1a2b3c4d', 10);
+  assert.match(askBody(long, 'ask:ask-1a2b3c4d'), /^<div class="ask-long above below" data-key="ask:ask-1a2b3c4d" style="--off:10">/);
+  cardLongOff.delete('ask:ask-1a2b3c4d');
+});
+
 test('md: a pipe table is a table, not paragraphs of pipes', () => {
   assert.equal(md('Your buys\n| Date | Buy |\n|---|---:|\n| **Today** | 1 AMZN |\n| 09-24 | `a | b` |\nafter'),
     '<p>Your buys</p><table class="md-table"><thead><tr><th>Date</th><th style="text-align:right">Buy</th></tr></thead>' +
@@ -186,6 +210,18 @@ test('md: a line that is only a hub file draws the file; anywhere else it is a l
   assert.ok(md('![grid](https://h/api/v1/blobs/sha256/00/g.svg)').includes('<img src="/api/v1/blobs/sha256/00/g.svg"'));
   // A sound: a player in place.
   assert.ok(md('[af_heart](https://h/api/v1/blobs/sha256/00/v.m4a)').includes('<audio controls preload="none" src="/api/v1/blobs/sha256/00/v.m4a"></audio>'));
+  // An .html page is a file to download or open in a browser, never a viewer
+  // in the app: a thumbnail of its top, Download named by the link's text,
+  // Open in browser in its own tab.
+  const page = md('[day by day](https://h/api/v1/blobs/sha256/28/28bf.html)');
+  assert.ok(page.includes('<div class="att-thumb"><iframe src="/api/v1/blobs/sha256/28/28bf.html" sandbox="" scrolling="no" tabindex="-1"'), page);
+  assert.ok(page.includes('<a href="/api/v1/blobs/sha256/28/28bf.html" download="day by day.html" class="small att-file">Download</a>'), page);
+  assert.ok(page.includes('<a href="/api/v1/blobs/sha256/28/28bf.html" target="_blank" class="small att-file">Open in browser</a>'), page);
+  assert.ok(page.includes('<figcaption>day by day</figcaption>') && !page.includes('📎'), page);
+  // No link text: the blob's own name. A message attachment has no caption.
+  assert.equal(htmlFileName('sha256/28/28bf.html', ''), '28bf.html');
+  assert.equal(htmlFileName('sha256/28/28bf.html', 'a/b: c'), 'a-b- c.html');
+  assert.ok(attachHTML('sha256/28/28bf.html').includes('download="28bf.html"'));
   // Inside a sentence, in a list, or climbing out of the blob route: not a file.
   assert.equal(blobLineRef(`see ![x](https://h/api/v1/blobs/${ref}) here`), null);
   assert.equal(blobLineRef(`- ![x](https://h/api/v1/blobs/${ref})`), null);

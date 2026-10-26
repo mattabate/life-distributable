@@ -15,7 +15,11 @@ enum HubPaint {
 
 @MainActor @Observable
 final class HubLoad<T: Sendable> {
-    var value: T?
+    var value: T? { didSet { stamp &+= 1 } }
+    /// Bumped on every write of `value`: a page that works something out of
+    /// a big value keys its copy on this rather than comparing the value
+    /// (CalendarView).
+    private(set) var stamp = 0
     var error: String?
     /// At least one load finished (or failed) — "empty" is now a real answer.
     var loaded = false

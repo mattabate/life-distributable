@@ -279,7 +279,9 @@ function composerStripHTML(key, re, i) {
       <a class="trunc grow" href="${esc(re.href || '#')}" onclick="${re.focus ? `${re.focus}('${esc(re.id)}');return false` : ''}" title="${esc(re.title)}">${mdInline(re.title, false)}</a>
       <button type="button" class="x" onclick="composerDropRe('${k}',${i})" title="just a message, not an answer to this card">×</button>
     </div>`;
-  if (re.bare) return `<div class="reply-strip">${head}</div>`;
+  // A bare card ON its row (a reminder's box) has no strip at all: no head to
+  // show and no chips, not an empty band's padding.
+  if (re.bare) return head ? `<div class="reply-strip">${head}</div>` : '';
   return `<div class="reply-strip">${head}
     <div class="row"><span class="chips-row">${outcomes.map(chip).join('')}</span>
       <span class="small muted trunc">${esc(means)}</span></div>

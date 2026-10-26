@@ -192,16 +192,24 @@ test('the all-day band holds four; a fifth collapses to "+N more" opening the wh
   assert.match(grid, /min-height:92px/);
 });
 
-test('a reminder is dark blue and answers Respond then Read, never Did it / Skip / Send', () => {
+test('a reminder is dark blue and has no chips: the box and one Send', () => {
   assert.equal(calColor({ kind: 'note', lane: 'mine' }), '#d93025');
   assert.equal(calShade({ kind: 'note', lane: 'mine' }), CAL_NOTE);
   const note = { id: 'cal-n1', ref: 'cal:cal-n1', item: true, kind: 'note', lane: 'mine', state: 'scheduled', mark: 'todo', title: 'Window closes',
-    detail: 'Nothing to buy before today.', thread_id: 't-1', outcomes: [{ value: '', label: 'Respond' }, { value: 'done', label: 'Read' }] };
+    detail: 'Nothing to buy before today.', thread_id: 't-1' };
   const nh = calEntryHTML(note, {});
   assert.match(nh, /<span class="tick">○<\/span>Window closes/);
-  assert.match(nh, /composerSend\('cal:cal-n1',''\)[^>]*>Respond<[\s\S]*composerSend\('cal:cal-n1','done'\)[^>]*>Read</);
+  assert.match(nh, /composerSend\('cal:cal-n1'\)[^>]*>Send</);
+  assert.match(nh, /placeholder="Anything to add \(optional\)"/);
   assert.match(calChipHTML({ ...note, day: '2026-10-10' }), new RegExp('--c:' + CAL_NOTE));
-  assert.doesNotMatch(nh, />Did it<|>Skip<|>Send<|resolveCal\('cal-n1','done'\)/);
+  // No chip, no strip, no button but Send: never Respond / Read, Did it / Skip.
+  assert.doesNotMatch(nh, /reply-strip|composerPickOutcome|>Respond<|>Read<|>Did it<|>Skip<|resolveCal\('cal-n1','done'\)/);
+  // Send over the empty box is the read card's second press: the box's card
+  // is `done` and asks "Send without" first (composer.js confirmEmpty).
+  const nst = composerState('cal:cal-n1');
+  assert.equal(nst.re.outcome, 'done');
+  assert.equal(nst.re.confirmEmpty, true);
+  assert.equal(nst.re.bare, true);
   // Closed, it is the plain row with Reopen.
   assert.match(calEntryHTML({ ...note, state: 'done', closed: true, mark: 'done' }, {}), /Reopen/);
 });

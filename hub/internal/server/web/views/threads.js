@@ -851,13 +851,17 @@ async function refreshThread(id, first) {
   }
   // An approval has no message of its own: it goes under the last message
   // written before it was proposed (the turn that proposed it), or at the
-  // end if it is newer than everything (the reply has not landed yet).
+  // end if it is newer than everything (the reply has not landed yet). One
+  // OLDER than every loaded message is history and is not drawn unless it is
+  // still waiting on a decision (or is the focused card): the chat loads a
+  // newer window, and a decided row from days ago would hang under today's.
   const actByMsg = {}, tail = [];
   for (const a of acts) {
     const at = +new Date(a.created_at);
     let host = null;
     for (const m of ordered) if (+new Date(m.ts) <= at) host = m;
-    if (host) (actByMsg[host.id] ||= []).push(a); else tail.push(a);
+    if (host) (actByMsg[host.id] ||= []).push(a);
+    else if (a.state === 'proposed' || !ordered.length || a.id === chatState.focus) tail.push(a);
   }
   // A rec sits under the reply that filed it — the hub names it
   // (message_id: the first reply after the rec was filed) — or at the end
@@ -1019,7 +1023,7 @@ function msgHTML(m, asks, acts, recs, askById, recById) {
   const cards = [...(asks || []).map(a => 'ask:' + a.id), ...(acts || []).map(a => 'action:' + a.id), ...(recs || []).map(r => 'rec:' + r.id)];
   if (m.role === 'claude' && m.cost_usd && cards.length) chatState.costs[cards[0]] = m.cost_usd;
   const html = (asks || []).map(a => chatAskHTML(a)).join('') + (acts || []).map(a => chatActionHTML(a)).join('') + (recs || []).map(r => chatRecHTML(r)).join('');
-  const atts = (m.attachments || []).map(attachHTML).join('');
+  const atts = (m.attachments || []).map(r => attachHTML(r)).join('');
   const text = m.shown ?? m.text ?? '';
   const row = (k, cls, title, body) => rowHTML({ id: 'msg-' + m.id, key: 'msg:' + m.id, opened: chatState.open.get('msg:' + m.id) === true,
     cls, k, title, when: dayWhen(m.ts) + (m.role === 'claude' && m.cost_usd && !cards.length ? ' · ' + usd(m.cost_usd) : ''),
