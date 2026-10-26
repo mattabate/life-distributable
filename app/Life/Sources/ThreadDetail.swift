@@ -250,6 +250,10 @@ struct ThreadDetail: View {
     /// waiting on the owner (`proposed`), or the one tapped to get here, pulls
     /// the window back: a dismissed proposal is history, and every row it
     /// drags in is paid for on open.
+    /// One older than every loaded message is history and is not drawn
+    /// unless it is still the owner's to decide (the web's refreshThread
+    /// agrees): old decided relays sat under today's cards because the
+    /// chat loads a newer window.
     func placeActions(_ pending: [Action]) {
         actions = pending
         var by: [Int: [Action]] = [:], tail: [Action] = []
@@ -258,7 +262,9 @@ struct ThreadDetail: View {
             if let host = order.last(where: { $0.ts <= a.created_at }) {
                 by[host.id, default: []].append(a)
                 if a.open == true || a.id == focusCard { widen(toRow: host.id) }
-            } else { tail.append(a) }
+            } else if a.open == true || a.id == focusCard || order.isEmpty {
+                tail.append(a)
+            }
         }
         actionsByMessage = by
         tailActions = tail

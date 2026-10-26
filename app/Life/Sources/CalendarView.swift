@@ -13,7 +13,11 @@ struct CalendarView: View {
     @State private var cal = HubLoad<CalView>()
     /// Without the other device's build rows (the owner 2026-10-01: an install
     /// card appears only in the app it updates) — `CalView.forThisDevice`.
-    private var view: CalView? { cal.value?.forThisDevice }
+    private var view: CalView? { shown.view }
+    @State private var memo = CalShown()
+    /// `forThisDevice` and the day map, worked out once per load, never on
+    /// each read: the body reads `view` a dozen times a pass.
+    private var shown: CalShown { memo.update(cal) }
     /// The store's copy: RootView's one poll keeps it current.
     private var goals: [Goal] { store.goals }
     /// A failed move or close; the next good load clears it.
@@ -114,7 +118,8 @@ struct CalendarView: View {
     private var macWeek: some View {
         HStack(alignment: .top, spacing: 14) {
             CalRail(view: view, anchor: anchor, today: today, filters: filtersBinding,
-                    onJump: { picked = $0 == today ? nil : $0 }, onOpen: { open($0) })
+                    onJump: { picked = $0 == today ? nil : $0 }, onOpen: { open($0) }, stamp: shown.stamp)
+                .equatable()
                 .frame(width: 226)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 4) {
@@ -135,7 +140,8 @@ struct CalendarView: View {
                             onTap: { open($0) },
                             onTapGroup: { group = CalGroup(entries: $0) },
                             onMove: { e, day, at in Task { await move(e, day: day, at: at) } },
-                            away: view?.away ?? [])
+                            away: view?.away ?? [], stamp: shown.stamp)
+                    .equatable()
             }
         }
         .padding(.horizontal, 16).padding(.top, 10)
@@ -295,11 +301,7 @@ struct CalendarView: View {
 
     /// Only `days` feeds the grid — an overdue or undated row has no cell to
     /// sit in and belongs in the tray, exactly as it does in the console rail.
-    private var byDay: [String: [CalEntry]] {
-        var m: [String: [CalEntry]] = [:]
-        for d in view?.days ?? [] { m[d.day] = d.entries }
-        return m
-    }
+    private var byDay: [String: [CalEntry]] { shown.byDay }
     private var anytimeCount: Int {
         ((view?.anytime ?? []) + (view?.overdue ?? []) + (view?.due ?? []) + (view?.soon ?? [])).filter { filters.shows($0) }.count
     }
@@ -695,8 +697,8 @@ struct CalendarView: View {
                 Button { Task { await resolve(e, "dismissed") } } label: { Label("Won't install", systemImage: "xmark") }.tint(.gray)
             } else if e.isOpen && (e.isItem || e.ask_id != nil) {
                 // Homework is a tick: the hub's Did it / Skip, nothing to say;
-                // any other open row, Done / Dismiss.
-                Button { Task { await resolve(e, "done") } } label: { Label(e.outcomeLabel("done") ?? "Done", systemImage: "checkmark") }.tint(.green)
+                // a reminder (no outcomes) is Read; any other open row, Done / Dismiss.
+                Button { Task { await resolve(e, "done") } } label: { Label(e.outcomeLabel("done") ?? (e.isNote ? "Read" : "Done"), systemImage: "checkmark") }.tint(.green)
                 Button { Task { await resolve(e, "dismissed") } } label: { Label(e.outcomeLabel("wont") ?? "Dismiss", systemImage: "xmark") }.tint(.gray)
             } else if e.isItem && e.isClosed {
                 // Closed by mistake → flip it back. Reopen alone, as on the
@@ -747,6 +749,29 @@ struct CalendarView: View {
     }
 }
 
+/// One load's agenda as the page draws it, recomputed only when `HubLoad`'s
+/// stamp moves. Its `stamp` is what the rail and the week compare (their
+/// `==`): every refresh of the store redrew the page (the root's openURL
+/// was a new closure each pass), and SwiftUI compared every entry of the
+/// month field by field to find nothing changed, a second of a stuck main
+/// thread per pass in a debug build, clicks on the top bar lost in it.
+@MainActor final class CalShown {
+    private(set) var stamp = -1
+    private(set) var view: CalView?
+    private(set) var byDay: [String: [CalEntry]] = [:]
+
+    func update(_ cal: HubLoad<CalView>) -> CalShown {
+        if stamp != cal.stamp {
+            view = cal.value?.forThisDevice
+            var m: [String: [CalEntry]] = [:]
+            for d in view?.days ?? [] { m[d.day] = d.entries }
+            byDay = m
+            stamp = cal.stamp
+        }
+        return self
+    }
+}
+
 /// The members of a collapsed box, on their way to the popout sheet.
 struct CalGroup: Identifiable {
     let entries: [CalEntry]
@@ -794,10 +819,11 @@ extension CalEntry {
     var isHomework: Bool { isItem && (tick == true || kind == "homework") }
     /// A reminder (`note`): a date to remember, nothing to do. One of My
     /// tasks, drawn like every other row, answering in the homework box with
-    /// the chat read card's pair - Respond · Read.
+    /// NO chips: Send empty = read, Send with words = the response
+    /// (RespondSubject(homework:)).
     var isNote: Bool { isItem && kind == "note" }
-    /// Answers with a tick box (Did it · Skip · Send; Respond · Read), not a
-    /// step's words.
+    /// Answers with a tick box (Did it · Skip · Send; a reminder's bare Send),
+    /// not a step's words.
     var isTickBox: Bool { isHomework || isNote }
     /// The hub's word for one of the row's answers (`outcomes`), nil when it
     /// sent none for that value.
@@ -1068,7 +1094,9 @@ struct CalEntrySheet: View {
                 if let r = respond {
                     VStack(alignment: .leading, spacing: 0) {
                         Web.line.frame(height: 1)
-                        if !r.subject.outcomes.isEmpty {
+                        // One answer is no choice (a reminder's Read): the
+                        // box alone, as RespondSheet draws it.
+                        if r.subject.outcomes.count > 1 {
                             RespondChips(model: r).padding(.horizontal, 16).padding(.top, 10)
                         }
                         RespondBar(model: r) { shut() }
@@ -1330,7 +1358,8 @@ struct CalEntrySheet: View {
                 // named for it. The owner's step closes only with words. Sent → this sheet goes.
                 if let r = respond {
                     VStack(alignment: .leading, spacing: 0) {
-                        if !r.subject.outcomes.isEmpty {
+                        // A reminder's one answer draws no chip.
+                        if r.subject.outcomes.count > 1 {
                             RespondChips(model: r).padding(.horizontal, 12).padding(.top, 10)
                         }
                         RespondBar(model: r) { shut() }

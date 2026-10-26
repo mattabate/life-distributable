@@ -7,6 +7,7 @@ struct LifeApp: App {
     init() {
         #if targetEnvironment(macCatalyst)
         DeciderKeychain.probeIfAsked()
+        MacHitTestGuard.install()
         #endif
         Perf.start()
     }

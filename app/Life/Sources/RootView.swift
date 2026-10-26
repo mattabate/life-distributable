@@ -13,6 +13,7 @@ struct RootView: View {
     @State private var store = BoardStore()
     /// Where a hub id tapped in a card's text lands — see Refs.swift.
     @State private var nav = RefNav()
+    @State private var links = LifeLinks()
     @State private var tab = {
         #if targetEnvironment(simulator) || targetEnvironment(macCatalyst)
         // ops/screens.sh (ops/mac-screens.sh): LIFE_TAB=calendar opens that tab directly for a screenshot.
@@ -106,11 +107,7 @@ struct RootView: View {
             .environment(nav)
             // Every text in the app opens its links through here: a `life://`
             // one is ours, anything else is still iOS's.
-            .environment(\.openURL, OpenURLAction { url in
-                guard url.scheme == "life" else { return .systemAction }
-                Task { await nav.open(url, hub: hub) }
-                return .handled
-            })
+            .environment(\.openURL, links.action(nav: nav, hub: hub))
             .task {
                 #if targetEnvironment(macCatalyst)
                 // A Mac that is not the hub's has no token file to read: it
@@ -235,6 +232,26 @@ struct RootView: View {
             .padding(.trailing, 44).padding(.bottom, 6)  // clear the screen's rounded corner, or the label is clipped
             .allowsHitTesting(false)
         #endif
+    }
+}
+
+/// The app's one link opener, built once: a `life://` link is ours, anything
+/// else is still iOS's. A fresh `OpenURLAction` on every pass of RootView
+/// (each board refresh) was a changed environment value, so every page that
+/// reads `openURL` redrew whole on every refresh.
+@MainActor final class LifeLinks {
+    private var nav: RefNav?
+    private var hub: HubClient?
+    private lazy var opener = OpenURLAction { [weak self] url in
+        guard url.scheme == "life" else { return .systemAction }
+        guard let self, let nav = self.nav, let hub = self.hub else { return .discarded }
+        Task { await nav.open(url, hub: hub) }
+        return .handled
+    }
+
+    func action(nav: RefNav, hub: HubClient) -> OpenURLAction {
+        self.nav = nav; self.hub = hub
+        return opener
     }
 }
 

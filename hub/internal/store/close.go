@@ -110,17 +110,12 @@ func TickOutcomes(open bool) []Outcome {
 	}
 }
 
-// NoteOutcomes: a reminder (a `note` item) — a date to remember, nothing to
-// do. It wears the chat read card's pair in homework's box, Respond first,
-// Read second. Read closes it quietly; Respond (words) posts them to its
-// session and closes it as read too - a read card's reply is its close, so
-// both surfaces send `done` with the words.
-func NoteOutcomes() []Outcome {
-	return []Outcome{
-		{Value: "", Label: "Respond", Hint: "your words go to its session and it closes as read"},
-		{Value: "done", Label: "Read", Hint: "closed as read — with words, they go to its session"},
-	}
-}
+// A reminder (a `note` item, a date to remember with nothing to do) has NO
+// outcomes: its row is the box alone, and Send is its one answer. Send over an
+// empty box (pressed twice, the read card's "Send without") closes it as read
+// on the hub and wakes nobody; Send with words posts them to its session as a
+// `cal:<id>` prompt with outcome `done`, so the row closes as read with the
+// words.
 
 // ReplyLabel: the verdict word on the "↩ <label> · <card>" line under a
 // message that answered a card. An ask's is the card's own button word

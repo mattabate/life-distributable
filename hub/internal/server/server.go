@@ -220,7 +220,10 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 // index serves the dashboard. ?token=X on first visit sets the cookie so
-// the phone's browser can bookmark the bare URL afterwards.
+// the phone's browser can bookmark the bare URL afterwards. &next=/api/v1/blobs/…
+// lands on that blob instead: the phone app's "Open in browser" on an .html
+// card file hands Safari a page it can show. A local copy cannot cross from
+// one app to Safari, so it is the hub's own URL with the cookie set on the way.
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -228,7 +231,11 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	}
 	if t := r.URL.Query().Get("token"); t != "" && subtle.ConstantTimeCompare([]byte(t), []byte(s.token)) == 1 {
 		http.SetCookie(w, &http.Cookie{Name: "life_token", Value: t, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		next := "/"
+		if n := r.URL.Query().Get("next"); strings.HasPrefix(n, "/api/v1/blobs/") && !strings.Contains(n, "..") {
+			next = n
+		}
+		http.Redirect(w, r, next, http.StatusSeeOther)
 		return
 	}
 	if !s.authorized(r) {

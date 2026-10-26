@@ -360,10 +360,10 @@ textarea { resize: vertical; }
 .row-body h1, .row-body h2, .row-body h3 { font-size: 1em; font-weight: 700; margin: 10px 0 4px;
   text-transform: none; letter-spacing: 0; color: inherit; }
 .chat-row .by a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-.ask .fold { display: block; margin-top: 6px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
+.fold { display: block; margin-top: 6px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
   font: 600 12px system-ui, sans-serif; color: inherit; background: transparent;
   border: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
-.ask .fold:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.fold:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
 /* A pipe table in a reply or a card's detail (2026-09-17): as wide as its
    words, header bold in the text's own colour, hairlines between rows — not
    the page tables' full-width muted headers. */
@@ -407,6 +407,13 @@ textarea { resize: vertical; }
 .md-files .att img { display: block; width: auto; max-width: min(260px, 100%); max-height: 180px; border-radius: 6px; border: 1px solid var(--line); cursor: zoom-in; }
 .md-files audio { display: block; width: min(260px, 100%); height: 34px; }
 .md-files figcaption { font-size: 12px; color: var(--muted); margin-top: 3px; }
+/* an .html blob (ui.js attachHTML): the page's top as a thumbnail, a 900px
+   page scaled into a 260px tile, no pointer, no scripts, then Download and
+   Open in browser; never a page inside the console */
+.att-html { display: inline-block; max-width: 100%; }
+.att-thumb { width: 260px; height: 160px; overflow: hidden; border-radius: 6px; border: 1px solid var(--line); background: #fff; pointer-events: none; }
+.att-thumb iframe { width: 900px; height: calc(900px * 160 / 260); border: 0; transform: scale(calc(260 / 900)); transform-origin: top left; pointer-events: none; }
+.att-html-row { display: flex; gap: 12px; margin-top: 2px; }
 
 .working { display: flex; align-items: center; gap: 7px; padding: 4px 8px 10px; }
 
@@ -438,11 +445,20 @@ textarea { resize: vertical; }
 .ask.err-card { opacity: .92; }
 .ask.err-card .t { font-weight: 500; color: var(--muted); }
 .ask .t { font-weight: 600; margin-bottom: 4px; }
-/* A long detail folds like a long message (ui.js askBody): a screen's worth
-   fading out, Show all opens it to full height — no inner scroll box. */
-.ask .ask-long { max-height: 15lh; overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, #000 75%, transparent); mask-image: linear-gradient(to bottom, #000 75%, transparent); }
-.ask .ask-long.open, .ask .ask-long.fits { max-height: none; -webkit-mask-image: none; mask-image: none; }
+/* A long detail is a window (ui.js askBody): fifteen lines high, the detail
+   inside slid up `--off` lines by Show more / Back up; never full height,
+   never a scroll box, nothing on the wheel. A fade on an edge says there is
+   more past it (`below`, `above`).
+   Unscoped: a closed card's body is drawn inside its row (.row-body), not an
+   .ask, and the window applies there too. */
+.ask-long { max-height: 15lh; overflow: hidden; }
+.ask-long .ask-long-in { transform: translateY(calc(var(--off, 0) * -1lh)); transition: transform .25s ease; }
+.ask-long.below { -webkit-mask-image: linear-gradient(to bottom, #000 80%, transparent); mask-image: linear-gradient(to bottom, #000 80%, transparent); }
+.ask-long.above { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20%); mask-image: linear-gradient(to bottom, transparent, #000 20%); }
+.ask-long.above.below { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20%, #000 80%, transparent); mask-image: linear-gradient(to bottom, transparent, #000 20%, #000 80%, transparent); }
+.ask-long.fits { max-height: none; -webkit-mask-image: none; mask-image: none; }
+.ask-long.fits .ask-long-in { transform: none; }
+.fold-row { display: flex; gap: 6px; }
 /* The head line: the mark and the card's word (READ · DO · DECIDE) in its
    tint. */
 .ask .card-h { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 13px; line-height: 1.2; }

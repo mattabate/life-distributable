@@ -55,12 +55,16 @@ struct RespondSubject {
     var footer = ""
     enum QuietClose { case cal(String) }
 
-    /// A reminder (`note`): its words close it as read whichever chip sent
-    /// them - Respond on a read card is its answer, as in the chat.
+    /// A reminder (`note`): its words close it as read - Respond on a read
+    /// card is its answer, as in the chat.
     var wordsClose = false
 
     /// A homework row on the calendar: the console's calHomeworkBox. A
-    /// reminder takes the same box with the hub's Respond · Read.
+    /// reminder takes the same box with NO chips: the hub sends it no
+    /// outcomes, so its one answer here is `done` (Read), never drawn (one
+    /// answer is no choice). Send over an empty box asks "Are you sure? Send
+    /// without" as the chat's read card does, then closes it on the hub and
+    /// wakes nobody; words go to its session and close it as read.
     init(homework e: CalEntry, first: String) {
         ref = "cal:" + e.id
         title = e.title
@@ -69,8 +73,9 @@ struct RespondSubject {
         quiet = .cal(e.id)
         newTitle = e.title
         wordsClose = e.isNote
-        outcomes = Self.chips(e.outcomes)
-        initial = outcomes.first { $0.value == first } ?? .none
+        silentWithoutWords = e.isNote
+        outcomes = e.isNote ? [RespondOutcome(value: "done", label: "Read")] : Self.chips(e.outcomes)
+        initial = outcomes.first { $0.value == first } ?? (e.isNote ? outcomes[0] : .none)
     }
 
     /// The hub's answers as chips (store/close.go); words alone when it sent

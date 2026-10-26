@@ -572,14 +572,148 @@ enum SVGRaster {
     }
 }
 
-/// A picture is drawn, anything else (a PDF shared from another app) is a
-/// chip that opens in Quick Look — the two roads a chat attachment takes,
-/// decided by the ref alone.
+/// A picture is drawn, an .html page is a file for a browser, anything else
+/// (a PDF shared from another app) is a chip that opens in Quick Look — the
+/// roads a chat attachment takes, decided by the ref alone.
 struct BlobAttachment: View {
     let ref: String
     var maxHeight: CGFloat = 240
     var body: some View {
-        if isImageRef(ref) { BlobImage(ref: ref, maxHeight: maxHeight) } else { BlobDocument(ref: ref) }
+        if isImageRef(ref) { BlobImage(ref: ref, maxHeight: maxHeight) }
+        else if isHTMLRef(ref) { BlobHTML(ref: ref) }
+        else { BlobDocument(ref: ref) }
+    }
+}
+
+func isHTMLRef(_ ref: String) -> Bool {
+    ["html", "htm"].contains((ref as NSString).pathExtension.lowercased())
+}
+
+/// An .html blob is a FILE, never a page inside the app (Quick Look opened it
+/// as a viewer that could not be used). A thumbnail of the page's top, then
+/// two buttons: **Download** — the Mac writes it to ~/Downloads under the
+/// link's text ("report.html"), the phone offers the Files save sheet — and
+/// **Open in browser** — the Mac hands the local copy to the default browser;
+/// the phone sends Safari the hub's own URL (a local file cannot cross apps),
+/// setting the cookie on the way (`/?token=…&next=`). The console's twin is
+/// `attachHTML` in ui.js.
+struct BlobHTML: View {
+    @Environment(HubClient.self) private var hub
+    let ref: String
+    /// The link's [text] when it has one — the file's name on disk.
+    var title: String = ""
+    @State private var local: URL?
+    @State private var failed = false
+    @State private var saved = false
+    @State private var exporting = false
+
+    /// The file as it is kept: the link's text with the extension, else the
+    /// blob's own name (its hash).
+    var fileName: String {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        return t.isEmpty ? String(ref.split(separator: "/").last ?? "page.html") : t + ".html"
+    }
+    static let tile = FileStrip.tile
+    /// The page is laid out at this width and scaled into the tile.
+    static let pageWidth: CGFloat = 900
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Group {
+                if let local {
+                    HTMLThumb(url: local)
+                        .frame(width: Self.pageWidth, height: Self.pageWidth * Self.tile.height / Self.tile.width)
+                        .scaleEffect(Self.tile.width / Self.pageWidth, anchor: .topLeading)
+                } else if failed {
+                    Image(systemName: "doc.badge.exclamationmark").font(.title2).foregroundStyle(.secondary)
+                        .frame(width: Self.tile.width, height: Self.tile.height)
+                } else {
+                    ProgressView().frame(width: Self.tile.width, height: Self.tile.height)
+                }
+            }
+            .frame(width: Self.tile.width, height: Self.tile.height, alignment: .topLeading)
+            .clipped()
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1)))
+            .allowsHitTesting(false)
+            .accessibilityLabel(fileName)
+            HStack(spacing: 6) {
+                Button(saved ? "Saved to Downloads" : "Download") { Task { await download() } }
+                    .disabled(local == nil || saved)
+                Button("Open in browser") { Task { await openInBrowser() } }
+                    .disabled(local == nil && failed)
+            }
+            .font(.caption.weight(.semibold)).buttonStyle(.bordered)
+        }
+        .task(id: ref) {
+            guard local == nil else { return }
+            if let url = await namedCopy() { local = url } else { failed = true }
+        }
+        #if !targetEnvironment(macCatalyst)
+        .fileExporter(isPresented: $exporting, item: local, contentTypes: [.html], defaultFilename: fileName) { r in
+            if case .success = r { saved = true }
+        }
+        #endif
+    }
+
+    /// The blob under its own name in the temp dir, so the browser's tab and
+    /// the saved file both read "report.html", not a hash.
+    private func namedCopy() async -> URL? {
+        guard let raw = await blobTempFile(ref, hub: hub) else { return nil }
+        let dir = raw.deletingPathExtension()
+        let url = dir.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: url.path) { return url }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return (try? FileManager.default.copyItem(at: raw, to: url)) != nil ? url : nil
+    }
+
+    private func download() async {
+        guard let local else { return }
+        #if targetEnvironment(macCatalyst)
+        guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else { return }
+        var dest = downloads.appendingPathComponent(fileName)
+        var n = 2
+        while FileManager.default.fileExists(atPath: dest.path) {
+            dest = downloads.appendingPathComponent("\(dest.deletingPathExtension().lastPathComponent.replacingOccurrences(of: #" \d+$"#, with: "", options: .regularExpression)) \(n).html")
+            n += 1
+        }
+        if (try? FileManager.default.copyItem(at: local, to: dest)) != nil { saved = true }
+        #else
+        exporting = true
+        #endif
+    }
+
+    private func openInBrowser() async {
+        #if targetEnvironment(macCatalyst)
+        guard let local else { return }
+        _ = await UIApplication.shared.open(local)
+        #else
+        var c = URLComponents(string: hub.baseURL)
+        c?.path = "/"
+        c?.queryItems = [URLQueryItem(name: "token", value: hub.token), URLQueryItem(name: "next", value: "/api/v1/blobs/" + ref)]
+        guard let url = c?.url else { return }
+        _ = await UIApplication.shared.open(url)
+        #endif
+    }
+}
+
+/// The top of an HTML file, drawn by WebKit with scripts off and no touch or
+/// scroll of its own: a picture of the page, not a page.
+struct HTMLThumb: UIViewRepresentable {
+    let url: URL
+    func makeUIView(context: Context) -> WKWebView {
+        let c = WKWebViewConfiguration()
+        c.defaultWebpagePreferences.allowsContentJavaScript = false
+        let w = WKWebView(frame: .zero, configuration: c)
+        w.isUserInteractionEnabled = false
+        w.scrollView.isScrollEnabled = false
+        w.scrollView.showsVerticalScrollIndicator = false
+        w.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        return w
+    }
+    func updateUIView(_ w: WKWebView, context: Context) {
+        if w.url != url { w.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent()) }
     }
 }
 

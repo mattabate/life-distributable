@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1080,6 +1081,16 @@ func TestIndexCookieFlow(t *testing.T) {
 	s.ServeHTTP(w, r)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "<html") {
 		t.Fatalf("%d", w.Code)
+	}
+	// &next= lands on a blob (the phone's Open in browser); anything else is "/".
+	for n, want := range map[string]string{"/api/v1/blobs/sha256/28/28bf.html": "/api/v1/blobs/sha256/28/28bf.html",
+		"/api/v1/blobs/../secret": "/", "/api/v1/sessions": "/", "https://evil/x": "/"} {
+		r = httptest.NewRequest("GET", "/?token=secret&next="+url.QueryEscape(n), nil)
+		w = httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		if w.Code != 303 || w.Header().Get("Location") != want {
+			t.Fatalf("next=%s: %d -> %q, want %q", n, w.Code, w.Header().Get("Location"), want)
+		}
 	}
 }
 

@@ -477,3 +477,75 @@ Entry format:
   `nudge|extend` on /resolve), `store/close.go`, `threads/asks.go`,
   `threads/prompts.go`, `threads/threads.go` (the preamble's dated-work
   line), `cmd/lifectl/main.go`, `shared/api.md`.
+
+## add-0034 · 2026-10-26 · An .html file in a card is a file
+- For: everyone
+- Offer: An .html page a session attaches is no longer opened inside the
+  app. It draws as a small thumbnail of the page's top with two links:
+  Download (saved under the link's text) and Open in browser. On the web
+  that is a download and a new tab; on the desktop app, ~/Downloads and
+  the default browser; on the phone, the Files save sheet and Safari,
+  which signs in through the hub's index (`/?token=…&next=/api/v1/blobs/<ref>`).
+  PDFs and other files still open in Quick Look.
+- How: same merge as add-0008. By hand: `web/ui.js` (`isHTMLRef`,
+  `attachHTML(ref, caption)`), `web/app.css` (`.att-html`),
+  `web/views/threads.js`, `web/test/ui.test.js`, `Attachments.swift`
+  (`BlobHTML`, `HTMLThumb`), `StyledText.swift` (`FileStrip`),
+  `server/server.go` (`next=` on the index, blob paths only),
+  `server/server_test.go`, `shared/api.md`.
+
+## add-0035 · 2026-10-26 · A long card is a window
+- For: everyone
+- Offer: A card too long for the chat no longer opens to its full length.
+  It stays a fixed window of 15 lines with a fade at the edge, and Show
+  more / Back up move it five lines a click; nothing scrolls inside it and
+  the mouse wheel still scrolls the chat. A closed card opened again gets
+  the same window. Web, phone and desktop.
+- How: same merge as add-0008. By hand: `web/ui.js` (`askBody`,
+  `foldWindow`, `FOLD_PAGE_LINES`, `pageCardLong`), `web/app.css`
+  (`.ask-long`, `.fold-row`), `web/test/ui.test.js`, `StyledText.swift`
+  (`FoldedText` pages with an offset inside its clip), `Card.swift`.
+
+## add-0036 · 2026-10-26 · A reminder has no chips
+- For: everyone
+- Offer: A calendar reminder (`--kind note`) is not a question, so its
+  box has no outcome chips: one Send. Send over an empty box asks once
+  ("Send without") and closes it as read, waking no session; Send with
+  words posts them to its session and closes it. The box reads "Anything
+  to add (optional)". Web, phone and desktop.
+- How: same merge as add-0008. By hand: `calendar/calendar.go` (a note
+  row sends no outcomes), `store/close.go` (`NoteOutcomes` gone),
+  `web/composer.js`, `web/views/calendar.js`, `web/test/calgrid.test.js`,
+  `CalendarView.swift`, `RespondSheet.swift`.
+
+## add-0037 · 2026-10-26 · Desktop: no crash on a mouse move, no Calendar freeze
+- For: desktop
+- Offer: Two desktop fixes. The app could crash on a mouse move when a
+  nested hit test cleared UIKit's hit-test context; the hosting views now
+  answer no hit instead. And the Calendar page no longer stalls on each
+  board refresh: it was redrawn and compared in full every pass (up to a
+  second each time), and now redraws only when the data changed.
+- How: same merge as add-0008. By hand: `MacHitTestGuard.swift` (new,
+  installed from `LifeApp.swift`, listed in `project.pbxproj`),
+  `RootView.swift` (one `LifeLinks` opener), `HubLoad.swift` (`stamp`),
+  `CalendarView.swift` (`CalShown`), `CalendarWeek.swift` (the rail and
+  week `Equatable` on the stamp).
+
+## add-0038 · 2026-10-26 · Old approvals stay where they happened
+- For: everyone
+- Offer: A chat draws its newest messages; an approval older than all of
+  them used to fall to the end of the chat. Now it is not drawn there
+  unless it is still open or you came to it from the board. Web, phone and
+  desktop.
+- How: same merge as add-0008. By hand: `web/views/threads.js`
+  (`refreshThread`), `ThreadDetail.swift` (`placeActions`).
+
+## add-0039 · 2026-10-26 · A card stands alone
+- For: everyone
+- Offer: Not an offer, a rule for the sessions. A card or calendar step
+  never points at another card ("the message from my last card"): every
+  step, URL and copy-box text is in it, in full, because you see only the
+  open card.
+- How: same merge as add-0008. By hand: `threads/threads.go` (the
+  preamble's one-card line; a few other lines tightened to stay under the
+  12000-byte budget in `preamble_test.go`).
