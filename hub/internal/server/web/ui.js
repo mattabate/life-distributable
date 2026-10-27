@@ -684,60 +684,37 @@ const askDetailShown = detail =>
 // ("phone" | "mac"), or — a calendar row, an older hub — the title's word.
 const askInstallTarget = a => a.target || (/^install (desktop|mac) build \d+/i.test(a.title || '') ? 'mac' : 'phone');
 
-// askBody: a long detail is a WINDOW, never the whole: a card long enough to
-// swallow the session is worse than a nested scroll box, and so is the box. The
-// box is `.ask-long`, clamped at 15 line-heights, and the detail inside slides
-// up by `--off` lines (translateY, `.ask-long-in`); under it two buttons,
-// "Back up" (hidden at the top) and "Show more" (hidden at the end), each
-// moving the window FOLD_PAGE_LINES = 5. It never opens to full height and
-// takes nothing on the mouse wheel, because the outer chat already scrolls.
-// `key` ("ask:<id>") keeps the window's place across the 5 s redraw
-// (cardLongOff). A fade marks the edge there is more past: the bottom while
-// lines wait below, the top once some have left.
+// askBody: a long detail folds the way a long chat message does (isLongText):
+// thirty lines, faded, and a "Show N more lines" button that pops it open to
+// full height; "Show less" shuts it. No inner scroll box, no paging. `key`
+// ("ask:<id>") keeps the fold across redraws. Shut, the button is drawn hidden
+// and fitFolds shows it with its number, or never does.
 //
 // The fold's second rule: a short message that wraps to many lines would
-// otherwise offer a window that reveals almost nothing. Past isLongText the
-// body clamps, but the window exists only when at least FOLD_MIN_LINES lines
-// are hidden. Measured on the rendered box (the detail's height against the
-// clamp, in line-heights) because the text's newlines say nothing about how
-// many lines it wraps to. Under the line the body is shown whole (`.fits`).
-// The phone's FoldedText is the same rule.
-const FOLD_MIN_LINES = 5, FOLD_PAGE_LINES = 5;
-// The window's place: `off` lines slid up, out of `n` hidden in all, which
-// edges have more past them, and the two buttons' names. Pure, so a test
-// pins it; foldSet draws it.
-function foldWindow(off, n) {
-  off = Math.max(0, Math.min(off | 0, n | 0));
-  return { off, above: off > 0, below: off < n, back: 'Back up', more: 'Show more' };
-}
-const foldButtonsHTML = key =>
-  `<div class="fold-row" hidden><button type="button" class="fold small" onclick="pageCardLong(this,'${esc(key)}',-1)">Back up</button>`
-  + `<button type="button" class="fold small" onclick="pageCardLong(this,'${esc(key)}',1)">Show more</button></div>`;
-// Draw the window at `off`: the slide, the fades, which buttons show.
-function foldSet(el, row, off) {
-  const w = foldWindow(off, +el.dataset.fit || 0);
-  el.style.setProperty('--off', w.off);
-  el.classList.toggle('above', w.above);
-  el.classList.toggle('below', w.below);
-  const [back, more] = row.querySelectorAll('button');
-  back.hidden = !w.above;
-  more.hidden = !w.below;
-  return w.off;
-}
+// otherwise offer a button that reveals almost nothing. Past isLongText the
+// body clamps with its fade, but the button exists only when opening it would
+// show at least FOLD_MIN_LINES more lines, and says how many. Measured on the
+// rendered box (scrollHeight against the clamp, in line-heights) because the
+// text's newlines say nothing about how many lines it wraps to. Under the
+// line the body is shown whole (`.fits`). The phone's FoldedText is the same
+// rule.
+const FOLD_MIN_LINES = 5;
+const foldLabel = (open, n) => open ? 'Show less' : `Show ${n} more lines`;
+const foldButtonHTML = (open, onclick) =>
+  `<button type="button" class="fold small"${open ? '' : ' hidden'} onclick="${onclick}">${foldLabel(open, 0)}</button>`;
 function fitFolds(root) {
-  for (const el of (root || document).querySelectorAll('.ask-long:not([data-fit])')) {
+  for (const el of (root || document).querySelectorAll('.ask-long:not(.open):not([data-fit])')) {
     if (!el.clientHeight) continue;            // not laid out (a hidden pane): a later pass
     const cs = getComputedStyle(el);
     const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45;
-    const inner = el.firstElementChild;
-    const n = Math.round(((inner ? inner.offsetHeight : el.scrollHeight) - el.clientHeight) / lh);
+    const n = Math.round((el.scrollHeight - el.clientHeight) / lh);
     el.dataset.fit = n;
-    const row = el.nextElementSibling;
-    if (!row || !row.classList.contains('fold-row')) continue;
-    if (n < FOLD_MIN_LINES) { el.classList.add('fits'); row.hidden = true; continue; }
-    row.hidden = false;
-    const key = el.dataset.key;
-    cardLongOff.set(key, foldSet(el, row, cardLongOff.get(key) || 0));
+    const btn = el.nextElementSibling;
+    if (!btn || !btn.classList.contains('fold')) continue;
+    if (n < FOLD_MIN_LINES) { el.classList.add('fits'); btn.hidden = true; continue; }
+    btn.dataset.n = n;
+    btn.textContent = foldLabel(false, n);
+    btn.hidden = false;
   }
 }
 // Every paint is fitted once a frame: the chat redraws every 5 s and cards
@@ -757,18 +734,18 @@ if (typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') 
   });
   addEventListener('resize', queueFit);
 }
-const cardLongOff = new Map();
+const cardLongOpen = new Set();
 function askBody(detail, key) {
   if (!isLongText(detail)) return md(detail);
-  const off = cardLongOff.get(key) || 0;
-  return `<div class="ask-long${off ? ' above' : ''} below" data-key="${esc(key)}" style="--off:${off}"><div class="ask-long-in">${md(detail)}</div></div>
-    ${foldButtonsHTML(key)}`;
+  const open = cardLongOpen.has(key);
+  return `<div class="ask-long${open ? ' open' : ''}">${md(detail)}</div>
+    ${foldButtonHTML(open, `toggleCardLong(this,'${esc(key)}')`)}`;
 }
-// One click of Back up (dir -1) or Show more (+1): the window moves
-// FOLD_PAGE_LINES and the chat's scroll stays where it is.
-function pageCardLong(btn, key, dir) {
-  const row = btn.parentElement, el = row.previousElementSibling;
-  cardLongOff.set(key, foldSet(el, row, (cardLongOff.get(key) || 0) + dir * FOLD_PAGE_LINES));
+function toggleCardLong(btn, key) {
+  const open = !cardLongOpen.delete(key);
+  if (open) cardLongOpen.add(key);
+  btn.previousElementSibling.classList.toggle('open', open);
+  btn.textContent = foldLabel(open, btn.dataset.n);
 }
 
 // ---------- the one card ----------

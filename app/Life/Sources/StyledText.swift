@@ -370,29 +370,22 @@ func longLineCount(_ s: String) -> Int {
 func isLongText(_ s: String) -> Bool { longLineCount(s) > longLines || s.count > longChars }
 
 /// The fold's second rule: a short message that wraps to many lines would
-/// otherwise offer a window that reveals almost nothing. Past `isLongText` a
-/// body clamps to `foldClamp` points with its fade, but the window exists only
-/// when at least `foldMinLines` lines are hidden. Measured on the rendered
-/// height (the text's own full height against the clamp, in line-heights)
-/// because the text's newlines say nothing about how many lines it wraps to.
-/// Under the line the body is shown whole. The console's fitFolds (ui.js) is
-/// the same rule.
+/// otherwise offer a button that reveals almost nothing. Past `isLongText` a
+/// body clamps to `foldClamp` points with its fade, but the button exists only
+/// when opening it would show at least `foldMinLines` more lines, and says how
+/// many. Measured on the rendered height (the text's own full height against
+/// the clamp, in line-heights) because the text's newlines say nothing about
+/// how many lines it wraps to. Under the line the body is shown whole. The
+/// console's fitFolds (ui.js) is the same rule.
 let foldMinLines = 5
-let foldClamp: CGFloat = 320
-/// Lines one click of Show more / Back up moves the window (ui.js
-/// FOLD_PAGE_LINES).
-let foldPageLines = 5
+/// Twice the old 320, the console's 30 line-heights.
+let foldClamp: CGFloat = 640
 
-/// A long body is a WINDOW, never the whole: a fixed height with in-card click
-/// pagination, Show more paging the window down about five lines at a time
-/// (lines leave the top as new ones appear at the bottom) plus a way back up;
-/// no inner scrollbar, nothing on the wheel, the outer chat already scrolls.
-/// The text clamps at `foldClamp` and slides up `off` lines inside the clip;
-/// under it Back up (hidden at the top) and Show more (hidden at the end),
-/// drawn by the caller's `button` so a tinted card keeps its own style. It
-/// never opens to full height. `fadeTo` is the box's own colour; nil masks to
-/// clear (a tinted card). A fade marks the edge there is more past. The
-/// console's askBody is the same.
+/// A long body behind the fold: the clamped text, its fade, and, when there
+/// is enough behind it, the one button that pops it open to full height and
+/// shut again, drawn by the caller's `button` so a tinted card keeps its own
+/// style. `fadeTo` is the box's own colour; nil masks to clear (a tinted
+/// card). The console's askBody is the same.
 struct FoldedText<Fold: View>: View {
     let text: String
     var style: UIFont.TextStyle = .callout
@@ -403,8 +396,7 @@ struct FoldedText<Fold: View>: View {
     /// The whole text's height at this width; nil until the first layout,
     /// and the fold is assumed until then so a long one never flashes open.
     @State private var full: CGFloat? = nil
-    /// Lines slid up out of the window.
-    @State private var off = 0
+    @State private var open = false
 
     /// The font `StyledText.build` sets the body in, so a line is its line.
     private var lineHeight: CGFloat {
@@ -413,51 +405,34 @@ struct FoldedText<Fold: View>: View {
         #endif
         return UIFont.preferredFont(forTextStyle: style).lineHeight
     }
-    /// Lines past the window in all, once measured.
+    /// Lines behind the fold once measured.
     private var hidden: Int { full.map { Int((($0 - foldClamp) / lineHeight).rounded()) } ?? Int.max }
     private var folds: Bool { hidden >= foldMinLines }
-    private var at: Int { max(0, min(off, hidden)) }
-    private var above: Bool { folds && at > 0 }
-    private var below: Bool { folds && at < hidden }
-
-    private func page(_ dir: Int) {
-        withAnimation(.easeInOut(duration: 0.25)) { off = max(0, min(at + dir * foldPageLines, hidden)) }
-    }
+    private var clamped: Bool { folds && !open }
 
     var body: some View {
         StyledText(text: text, style: style, color: color, macSize: macSize)
             // The text view answers its own full height whatever the frame
             // below proposes, so this is the whole body's height.
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { full = $0 }
-            .offset(y: folds ? -CGFloat(at) * lineHeight : 0)
-            .frame(maxHeight: folds ? foldClamp : nil, alignment: .top)
+            .frame(maxHeight: clamped ? foldClamp : nil, alignment: .top)
             .clipped()
             .overlay(alignment: .bottom) {
-                if below, let fadeTo {
+                if clamped, let fadeTo {
                     LinearGradient(colors: [.clear, fadeTo], startPoint: .top, endPoint: .bottom)
                         .frame(height: 64).allowsHitTesting(false)
                 }
             }
-            .overlay(alignment: .top) {
-                if above, let fadeTo {
-                    LinearGradient(colors: [fadeTo, .clear], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 64).allowsHitTesting(false)
-                }
-            }
             .mask {
-                if folds, fadeTo == nil {
-                    LinearGradient(stops: [.init(color: above ? .clear : .black, location: 0), .init(color: .black, location: 0.2),
-                                           .init(color: .black, location: 0.8), .init(color: below ? .clear : .black, location: 1)],
+                if clamped, fadeTo == nil {
+                    LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
                                    startPoint: .top, endPoint: .bottom)
                 } else {
                     Color.black
                 }
             }
         if folds {
-            HStack(spacing: 6) {
-                if above { button("Back up") { page(-1) } }
-                if below { button("Show more") { page(1) } }
-            }
+            button(open ? "Show less" : "Show \(hidden) more lines") { open.toggle() }
         }
     }
 }
@@ -766,8 +741,7 @@ func mdSegments(_ text: String) -> [MdSegment] {
 
 /// A fenced block (a settings.json to paste, say), which otherwise arrives as
 /// a column of paragraphs with its indentation gone. Text copied verbatim:
-/// monospaced, whitespace kept, long lines scroll sideways instead of
-/// wrapping, the language and Copy on a bar above. Copy puts exactly what the
+/// monospaced, whitespace kept, long lines wrap to the card, the language and Copy on a bar above. Copy puts exactly what the
 /// session wrote on the pasteboard.
 private struct CodeBlock: View {
     let code: String
@@ -794,14 +768,13 @@ private struct CodeBlock: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
             Divider()
-            // The same text view the prose is, unwrapped: a `Text` with
-            // `.textSelection` copies only the whole block, and on the Mac a
-            // drag over it selected nothing (the owner 2026-10-01: "drag highlight
-            // text anywhere… I just can't do it inside the copy boxes").
-            ScrollView(.horizontal, showsIndicators: false) {
-                SelectableText(attributed: Self.mono(code, size: size), tint: .label, chat: nil, unwrapped: true)
-                    .padding(10)
-            }
+            // The same text view the prose is: a `Text` with `.textSelection`
+            // copies only the whole block, and on the Mac a drag over it
+            // selects nothing. Wrapped to the card's width, never a sideways
+            // scroll; whitespace and line breaks are kept, and Copy still
+            // copies the text as written.
+            SelectableText(attributed: Self.mono(code, size: size), tint: .label, chat: nil)
+                .padding(10)
         }
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.15)))

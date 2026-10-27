@@ -86,6 +86,28 @@ test('msgHTML: the owner\'s message is a grey row, a reply is its cards', () => 
     /class="chat-row sched".*<span class="k">⏰ Check-in<\/span><span class="t">Back at 9:00 AM<\/span>/s);
 });
 
+test('open cards only: the chat draws what is open, the full chat is a toggle', () => {
+  const asks = [{ id: 'ask-1', closed: false }, { id: 'ask-2', closed: true, folded: 'done' }];
+  const acts = [{ id: 'act-1', open: true }, { id: 'act-2', open: false, state: 'approved' }];
+  const recs = [{ id: 'rec-1', closed: false }, { id: 'rec-2', closed: true, status: 'accepted' }];
+  assert.deepEqual(openCards(asks, acts, recs).map(l => l.map(c => c.id)), [['ask-1'], ['act-1'], ['rec-1']]);
+  assert.deepEqual(openCards(undefined, undefined, undefined), [[], [], []]);
+  // The button at the top names the other mode.
+  assert.match(chatFullHTML(false), /class="fold small chat-mode" onclick="toggleFullChat\(\)">Show full chat</);
+  assert.match(chatFullHTML(true), />Open cards only</);
+  // A deep link to a closed card opens the full chat; to an open one, not.
+  const askById = Object.fromEntries(asks.map(a => [a.id, a])), recById = Object.fromEntries(recs.map(r => [r.id, r]));
+  assert.equal(focusNeedsFull('ask-2', askById, recById, acts), true);
+  assert.equal(focusNeedsFull('act-2', askById, recById, acts), true);
+  assert.equal(focusNeedsFull('rec-2', askById, recById, acts), true);
+  assert.equal(focusNeedsFull('ask-1', askById, recById, acts), false);
+  assert.equal(focusNeedsFull('act-1', askById, recById, acts), false);
+  assert.equal(focusNeedsFull('', askById, recById, acts), false);
+  assert.equal(focusNeedsFull('ask-9', askById, recById, acts), false, 'a card not in the chat changes nothing');
+  // Every chat opens on the open cards.
+  assert.equal(chatState.full, false);
+});
+
 test('tickSince moves every clock on the page', () => {
   const s = { dataset: { since: String(Date.now() - 12000) }, textContent: '' };
   const saved = document.querySelectorAll;

@@ -549,3 +549,39 @@ Entry format:
 - How: same merge as add-0008. By hand: `threads/threads.go` (the
   preamble's one-card line; a few other lines tightened to stay under the
   12000-byte budget in `preamble_test.go`).
+
+## add-0040 · 2026-10-27 · Copy boxes wrap
+- For: everyone
+- Offer: A copy box (a fenced block a session sends for you to paste, an
+  email or a file) wraps its long lines to the card instead of scrolling
+  sideways, so you can read the whole layout. Whitespace and line breaks
+  are kept, and Copy still copies the text exactly as written. Web, phone
+  and desktop.
+- How: same merge as add-0008. By hand: `web/app.css` (`.md-code pre`
+  `pre-wrap`), `StyledText.swift` (`CodeBlock` drops its horizontal
+  `ScrollView`).
+
+## add-0041 · 2026-10-27 · A long card opens and closes again
+- For: everyone
+- Offer: Replaces add-0035. A long card shows its first 30 lines (640
+  points in the app) with a fade, and one button, "Show N more lines",
+  opens it to its full length; "Show less" closes it. The five-line
+  window and its Show more / Back up paging are gone.
+- How: same merge as add-0008. By hand: `web/ui.js` (`askBody`,
+  `fitFolds`, `foldButtonHTML`, `toggleCardLong`; the paging helpers
+  removed), `web/app.css` (`.ask-long`, `.fold-row` removed),
+  `web/test/ui.test.js`, `StyledText.swift` (`FoldedText` clamp plus one
+  toggle), `Card.swift`.
+
+## add-0042 · 2026-10-27 · A chat opens on its open cards
+- For: everyone
+- Offer: Opening a chat shows only what is still open for you: its open
+  cards, your message in flight and the working line. Every message row
+  and closed card sits behind "Show full chat" at the top; a link to a
+  closed card or an old message opens the full chat on it. Web, phone and
+  desktop.
+- How: same merge as add-0008. By hand: `web/views/threads.js`
+  (`chatState.full`, `openCards`, `chatFullHTML`, `toggleFullChat`,
+  `focusNeedsFull`), `web/app.css` (`.msgs .chat-mode`),
+  `web/test/sending.test.js`, `ThreadDetail.swift` (`full`, `openCells`,
+  the mode button above Show earlier).

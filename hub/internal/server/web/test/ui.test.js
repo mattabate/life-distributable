@@ -153,28 +153,22 @@ test('isLongText: a bubble folds past 18 non-blank lines or 1600 characters', ()
   assert.equal(isLongText(null), false);
 });
 
-// A long detail is a window, never the whole: the clamped box, the detail
-// slid up `--off` lines inside it, Back up + Show more under it, no Show all,
-// no scroll box.
-test('askBody: a long detail is a fixed window with Back up / Show more, no Show all', () => {
-  const long = Array(40).fill('a line of the log').join('\n');
+// A long detail pops open and shut: the clamped box and one button, hidden
+// until fitFolds counts the lines; open, Show less. No paging.
+test('askBody: a long detail folds with one open/shut button, no paging', () => {
+  const long = Array(80).fill('a line of the log').join('\n');
   const h = askBody(long, 'ask:ask-1a2b3c4d');
-  assert.match(h, /^<div class="ask-long below" data-key="ask:ask-1a2b3c4d" style="--off:0"><div class="ask-long-in"><p>a line of the log/);
-  assert.match(h, /<div class="fold-row" hidden><button type="button" class="fold small" onclick="pageCardLong\(this,'ask:ask-1a2b3c4d',-1\)">Back up<\/button><button type="button" class="fold small" onclick="pageCardLong\(this,'ask:ask-1a2b3c4d',1\)">Show more<\/button><\/div>/);
-  assert.doesNotMatch(h, /Show all|Show less|more lines|overflow|scroll/);
+  assert.match(h, /^<div class="ask-long"><p>a line of the log/);
+  assert.match(h, /<button type="button" class="fold small" hidden onclick="toggleCardLong\(this,'ask:ask-1a2b3c4d'\)">Show 0 more lines<\/button>/);
+  assert.doesNotMatch(h, /Back up|Show more<|--off|overflow|scroll/);
   // A short detail is just its markdown.
   assert.equal(askBody('- Mon\n- Tue', 'ask:x'), '<ul><li>Mon</li><li>Tue</li></ul>');
-  // The window's place: five lines a click, clamped to what is hidden; the
-  // edge with more past it is marked and its button shown.
-  assert.deepEqual(foldWindow(0, 27), { off: 0, above: false, below: true, back: 'Back up', more: 'Show more' });
-  assert.deepEqual(foldWindow(FOLD_PAGE_LINES * 5, 27), { off: 25, above: true, below: true, back: 'Back up', more: 'Show more' });
-  assert.deepEqual(foldWindow(30, 27), { off: 27, above: true, below: false, back: 'Back up', more: 'Show more' });
-  assert.deepEqual(foldWindow(-5, 27).off, 0);
-  assert.equal(FOLD_PAGE_LINES, 5);
-  // A remembered place redraws where it was.
-  cardLongOff.set('ask:ask-1a2b3c4d', 10);
-  assert.match(askBody(long, 'ask:ask-1a2b3c4d'), /^<div class="ask-long above below" data-key="ask:ask-1a2b3c4d" style="--off:10">/);
-  cardLongOff.delete('ask:ask-1a2b3c4d');
+  assert.equal(foldLabel(false, 42), 'Show 42 more lines');
+  assert.equal(foldLabel(true, 42), 'Show less');
+  // Open stays open across the redraw.
+  cardLongOpen.add('ask:ask-1a2b3c4d');
+  assert.match(askBody(long, 'ask:ask-1a2b3c4d'), /^<div class="ask-long open">[\s\S]*>Show less<\/button>/);
+  cardLongOpen.delete('ask:ask-1a2b3c4d');
 });
 
 test('md: a pipe table is a table, not paragraphs of pipes', () => {
