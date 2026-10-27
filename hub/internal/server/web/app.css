@@ -364,6 +364,8 @@ textarea { resize: vertical; }
   font: 600 12px system-ui, sans-serif; color: inherit; background: transparent;
   border: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
 .fold:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+/* The chat's one mode button at its top: Show full chat / Open cards only. */
+.msgs .chat-mode { margin: 0 0 14px; color: var(--muted); }
 /* A pipe table in a reply or a card's detail (2026-09-17): as wide as its
    words, header bold in the text's own colour, hairlines between rows — not
    the page tables' full-width muted headers. */
@@ -374,8 +376,8 @@ textarea { resize: vertical; }
 .md-table tr:last-child td { border-bottom: 0; }
 .md-table th:last-child, .md-table td:last-child { padding-right: 0; }
 .md-table .num { text-align: right; font-variant-numeric: tabular-nums; }
-/* A fenced block: text to copy verbatim. Whitespace kept, long
-   lines scroll sideways, the language and Copy on a bar above. */
+/* A fenced block: text to copy verbatim. Whitespace kept, long lines wrap
+   to the card (never a sideways scroll), the language and Copy on a bar above. */
 .md-code { margin: 6px 0 8px; max-width: 100%; border-radius: 8px; overflow: hidden;
   border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
   background: color-mix(in srgb, currentColor 5%, transparent); }
@@ -386,7 +388,7 @@ textarea { resize: vertical; }
 .md-copy { font: 600 11px system-ui, sans-serif; padding: 2px 8px; border-radius: 6px; cursor: pointer;
   color: inherit; background: transparent; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
 .md-copy:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
-.md-code pre { margin: 0; padding: 8px 10px; overflow-x: auto; white-space: pre; tab-size: 2;
+.md-code pre { margin: 0; padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2;
   font: 12.5px/1.5 ui-monospace, Menlo, monospace; }
 .md-code pre code { background: transparent; padding: 0;
   border-radius: 0; font: inherit; }
@@ -445,20 +447,14 @@ textarea { resize: vertical; }
 .ask.err-card { opacity: .92; }
 .ask.err-card .t { font-weight: 500; color: var(--muted); }
 .ask .t { font-weight: 600; margin-bottom: 4px; }
-/* A long detail is a window (ui.js askBody): fifteen lines high, the detail
-   inside slid up `--off` lines by Show more / Back up; never full height,
-   never a scroll box, nothing on the wheel. A fade on an edge says there is
-   more past it (`below`, `above`).
+/* A long detail folds like a long message (ui.js askBody): thirty lines
+   fading out, Show N more lines pops it open to full height, Show less shuts
+   it. No inner scroll box, no paging.
    Unscoped: a closed card's body is drawn inside its row (.row-body), not an
-   .ask, and the window applies there too. */
-.ask-long { max-height: 15lh; overflow: hidden; }
-.ask-long .ask-long-in { transform: translateY(calc(var(--off, 0) * -1lh)); transition: transform .25s ease; }
-.ask-long.below { -webkit-mask-image: linear-gradient(to bottom, #000 80%, transparent); mask-image: linear-gradient(to bottom, #000 80%, transparent); }
-.ask-long.above { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20%); mask-image: linear-gradient(to bottom, transparent, #000 20%); }
-.ask-long.above.below { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20%, #000 80%, transparent); mask-image: linear-gradient(to bottom, transparent, #000 20%, #000 80%, transparent); }
-.ask-long.fits { max-height: none; -webkit-mask-image: none; mask-image: none; }
-.ask-long.fits .ask-long-in { transform: none; }
-.fold-row { display: flex; gap: 6px; }
+   .ask, and the fold applies there too. */
+.ask-long { max-height: 30lh; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2lh), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 2lh), transparent); }
+.ask-long.open, .ask-long.fits { max-height: none; -webkit-mask-image: none; mask-image: none; }
 /* The head line: the mark and the card's word (READ · DO · DECIDE) in its
    tint. */
 .ask .card-h { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 13px; line-height: 1.2; }

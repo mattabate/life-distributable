@@ -247,10 +247,10 @@ struct Card: View {
         if let lines {
             StyledText(text: text, style: .subheadline, color: .secondary, lines: lines, macSize: 13.5)
         } else if isLongText(text) {
-            // A window, never the whole: a screen's worth, Show more / Back
-            // up paging it five lines at a time (a very long card would run
-            // on forever) — never a box scrolling inside the chat; whole
-            // when fewer than five lines were behind the fold (FoldedText).
+            // Folds like a long chat bubble: two screens' worth fading out,
+            // popped open to full height and shut again - never a box
+            // scrolling inside the chat; whole when fewer than five lines
+            // were behind the fold (FoldedText).
             FoldedText(text: text, style: .subheadline, color: .secondary) { label, tap in
                 Button(label, action: tap).font(.caption.weight(.semibold)).buttonStyle(.bordered).tint(tint)
             }

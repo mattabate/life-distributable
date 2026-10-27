@@ -688,7 +688,9 @@ async function createSession(p) {
 // working line at once; liveSince = when the turn in flight was started, for
 // its "starting · N s" until the first tool call.
 // costs = a turn's dollars by the ref of the first card it raised.
-const chatState = { id: null, lastMsgID: 0, lastAsks: '', lastActs: '', lastPrompts: '', lastRecs: '', recs: [], cards: {}, actIDs: '', open: new Map(), focus: '', focusAct: undefined, send: { target: 'this', when: 'now', at: '', re: null }, sendingSince: 0, sendingAfter: 0, thread: null, running: false, liveSince: 0, costs: {} };
+// full = the whole conversation is drawn (the toggle, chatFullHTML); false,
+// the default every time a chat opens, draws only the cards still open.
+const chatState = { id: null, lastMsgID: 0, lastAsks: '', lastActs: '', lastPrompts: '', lastRecs: '', recs: [], cards: {}, actIDs: '', open: new Map(), focus: '', focusAct: undefined, send: { target: 'this', when: 'now', at: '', re: null }, sendingSince: 0, sendingAfter: 0, thread: null, running: false, liveSince: 0, costs: {}, full: false };
 // Attachment drafts by box: 'chat', 'new', and one 'rec:<id>' per note box
 // on the Recs page (the rec box takes a pasted or dropped screenshot like the
 // composer).
@@ -703,7 +705,7 @@ async function openThread(id, focus) {
   chatState.id = id; chatState.lastMsgID = 0; chatState.lastActs = ''; chatState.open = new Map();
   chatState.sendingSince = 0; chatState.liveSince = 0;
   chatState.focus = focus || ''; chatState.focusAct = undefined; chatState.actIDs = ''; chatState.lastPrompts = ''; chatState.lastRecs = ''; chatState.recs = [];
-  chatState.lastAsks = ''; chatState.cards = {};
+  chatState.lastAsks = ''; chatState.cards = {}; chatState.full = false;
   // The chat's composer state IS chatState.send (composer.js keeps it across
   // the 5s redraws); a new session starts it empty.
   chatState.send = composerReset('chat');
@@ -882,6 +884,29 @@ async function refreshThread(id, first) {
   // they have typed in its own state (composer.js), so the redraw restores it — an
   // approval's note too, since its card arms the composer (2026-09-17).
   chatState.costs = {};
+  // Open cards only: a chat opens on what is still the owner's to act on (the
+  // asks, approvals and recs still open) and the working line; every message
+  // row and closed card is behind "Show full chat" at the top. A message in
+  // flight stays while the session works on it. A deep link to a closed card
+  // turns the full chat on, so the card is there to land on.
+  if (focusNeedsFull(chatState.focus, askById, recById, acts)) chatState.full = true;
+  const full = chatState.full;
+  const liveIDs = new Set(running && !full ? ordered.filter(m => m.run_id && m.role !== 'claude' && !replied.has(m.run_id)).map(m => m.id) : []);
+  let rows;
+  if (full) {
+    rows = ordered.map(m => msgHTML(m, askByMsg[m.id], actByMsg[m.id], recByMsg[m.id], askById, recById)).join('')
+      + tailAsks.map(a => chatAskHTML(a)).join('') + tail.map(a => chatActionHTML(a)).join('') + tailRecs.map(r => chatRecHTML(r)).join('');
+  } else {
+    rows = ordered.map(m => {
+      const [ka, kc, kr] = openCards(askByMsg[m.id], actByMsg[m.id], recByMsg[m.id]);
+      if (liveIDs.has(m.id)) return msgHTML(m, ka, kc, kr, askById, recById);
+      noteLeadCost(m, ka, kc, kr);
+      return ka.map(a => chatAskHTML(a)).join('') + kc.map(a => chatActionHTML(a)).join('') + kr.map(r => chatRecHTML(r)).join('');
+    }).join('');
+    const [ta, tc, tr] = openCards(tailAsks, tail, tailRecs);
+    rows += ta.map(a => chatAskHTML(a)).join('') + tc.map(a => chatActionHTML(a)).join('') + tr.map(r => chatRecHTML(r)).join('');
+    if (!rows && !running && !chatState.sendingSince) rows = '<div class="small muted">Nothing open</div>';
+  }
   el.innerHTML = `
     <div class="chat-head">
       <button class="sm narrow-only" onclick="showList()">←</button>
@@ -899,10 +924,8 @@ async function refreshThread(id, first) {
       ].filter(Boolean).join(' · ')}</div>
     </div>
     <div class="msgs" id="msgs">
-      ${ordered.map(m => msgHTML(m, askByMsg[m.id], actByMsg[m.id], recByMsg[m.id], askById, recById)).join('')}
-      ${tailAsks.map(a => chatAskHTML(a)).join('')}
-      ${tail.map(a => chatActionHTML(a)).join('')}
-      ${tailRecs.map(r => chatRecHTML(r)).join('')}
+      ${chatFullHTML(full)}
+      ${rows}
       <div class="working small muted" id="run-working" hidden></div>
     </div>
     ${queuedHTML(queued)}
@@ -918,6 +941,25 @@ async function refreshThread(id, first) {
   // The deep-linked ask wins over "open on the newest", once.
   if (chatState.focus && focusAsk(chatState.focus)) chatState.focus = '';
   wireChat();
+}
+
+// The one button at the top of the chat: "Show full chat" over the open cards,
+// "Open cards only" over the whole conversation. The whole chat is drawn on
+// demand, never by default.
+const chatFullHTML = full => `<button type="button" class="fold small chat-mode" onclick="toggleFullChat()">${full ? 'Open cards only' : 'Show full chat'}</button>`;
+function toggleFullChat() {
+  chatState.full = !chatState.full;
+  refreshThread(chatState.id, true);
+}
+// The cards still to act on, of each kind: an ask not closed, an approval
+// still open, a rec not closed.
+const openCards = (asks, acts, recs) => [(asks || []).filter(a => !a.closed), (acts || []).filter(a => a.open), (recs || []).filter(r => !r.closed)];
+// A deep link (#/sessions/<thread>/<id>) to a card the open-cards view does
+// not draw: a closed ask, a decided approval, a decided rec.
+function focusNeedsFull(focus, askById, recById, acts) {
+  if (!focus) return false;
+  const ask = (askById || {})[focus], rec = (recById || {})[focus], act = (acts || []).find(a => a.id === focus);
+  return !!((ask && ask.closed) || (rec && rec.closed) || (act && !act.open));
 }
 
 // Where the reader is, so a redraw puts it back: a button press (Dismiss) or
@@ -1019,9 +1061,15 @@ function calTitle(ref) {
 // on the first of them. A reply that still carries text is a "Reply" row. An
 // error is a red row; a session limit a paused one, its card under it saying
 // when. The phone draws the same rows (ThreadDetail).
-function msgHTML(m, asks, acts, recs, askById, recById) {
+// A reply's dollars ride on the first card it raised (chatState.costs).
+// Returns the cards' refs.
+function noteLeadCost(m, asks, acts, recs) {
   const cards = [...(asks || []).map(a => 'ask:' + a.id), ...(acts || []).map(a => 'action:' + a.id), ...(recs || []).map(r => 'rec:' + r.id)];
   if (m.role === 'claude' && m.cost_usd && cards.length) chatState.costs[cards[0]] = m.cost_usd;
+  return cards;
+}
+function msgHTML(m, asks, acts, recs, askById, recById) {
+  const cards = noteLeadCost(m, asks, acts, recs);
   const html = (asks || []).map(a => chatAskHTML(a)).join('') + (acts || []).map(a => chatActionHTML(a)).join('') + (recs || []).map(r => chatRecHTML(r)).join('');
   const atts = (m.attachments || []).map(r => attachHTML(r)).join('');
   const text = m.shown ?? m.text ?? '';

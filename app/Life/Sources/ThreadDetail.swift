@@ -101,6 +101,10 @@ struct ThreadDetail: View {
     /// them all down again on the way back to Sessions. Older turns are one
     /// tap away.
     @State private var shown = rowWindow
+    /// The whole conversation is drawn (the toggle at the top of the chat).
+    /// Off every time a chat opens: only the cards still open are drawn. The
+    /// console's chatState.full (threads.js).
+    @State private var full = false
 
     /// The owner can always write — while the agent works the message is steered
     /// into the running turn (it sees it at its next step), so the composer
@@ -132,6 +136,47 @@ struct ThreadDetail: View {
         guard thread.status == "running" else { return nil }
         let replied = Set(messages.filter { $0.role == "claude" || $0.kind == "error" }.compactMap(\.run_id))
         return messages.last { $0.run_id != nil && !replied.contains($0.run_id!) && $0.role != "claude" }?.ts
+    }
+
+    /// The owner's messages the session is working on: the turn in flight's
+    /// starters, with no reply yet. The open-cards view keeps them, so a Send
+    /// does not vanish into the working line.
+    var liveStarters: Set<Int> {
+        guard thread.status == "running" else { return [] }
+        let replied = Set(messages.filter { $0.role == "claude" || $0.kind == "error" }.compactMap(\.run_id))
+        return Set(messages.filter { $0.run_id != nil && !replied.contains($0.run_id!) && $0.role != "claude" }.map(\.id))
+    }
+
+    /// One cell of the open-cards view (`openCells`), in conversational order.
+    enum OpenCell: Identifiable {
+        case message(ThreadMessage), ask(Ask, Double), action(Action, Double), rec(Rec, Double)
+        var id: String {
+            switch self {
+            case .message(let m): "msg:\(m.id)"
+            case .ask(let a, _): a.id
+            case .action(let a, _): a.id
+            case .rec(let r, _): r.id
+            }
+        }
+    }
+
+    /// What is the owner's to act on: every ask not closed, approval still
+    /// open and rec not closed, where it sits in the conversation, plus the
+    /// message in flight. Every message row and closed card is behind "Show
+    /// full chat" (the console's openCards, threads.js).
+    func openCells(_ rows: [ThreadMessage]) -> [OpenCell] {
+        var out: [OpenCell] = []
+        let live = liveStarters
+        for m in rows {
+            if live.contains(m.id) { out.append(.message(m)) }
+            for a in asksByMessage[m.id] ?? [] where !a.isClosed { out.append(.ask(a, leadCost(m, "ask:" + a.id))) }
+            for a in actionsByMessage[m.id] ?? [] where a.open == true { out.append(.action(a, leadCost(m, "action:" + a.id))) }
+            for r in recsByMessage[m.id] ?? [] where !r.isClosed { out.append(.rec(r, leadCost(m, "rec:" + r.id))) }
+        }
+        for a in tailAsks where !a.isClosed { out.append(.ask(a, 0)) }
+        for a in tailActions where a.open == true { out.append(.action(a, 0)) }
+        for r in tailRecs where !r.isClosed { out.append(.rec(r, 0)) }
+        return out
     }
 
     /// Conversational order, not timestamp order. A message the owner sends while
@@ -367,25 +412,47 @@ struct ThreadDetail: View {
                     // load, so the initial scrollTo has real targets. That is
                     // affordable because only `shown` of them are built.
                     VStack(alignment: .leading, spacing: 8) {
-                        if rows.count > shown {
-                            Button { withAnimation { shown += rowWindow * 2 } } label: {
-                                Label("Show \(min(rowWindow * 2, rows.count - shown)) earlier of \(rows.count)", systemImage: "chevron.up")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }.buttonStyle(.plain).padding(.horizontal)
-                        }
-                        ForEach(visible(rows)) { m in
-                            messageRow(m).id(m.id)
-                            ForEach(asksByMessage[m.id] ?? []) { a in
-                                AskCard(a: a, goals: goals, cost: leadCost(m, "ask:" + a.id), reload: { await load() }).id(a.id)
+                        // The one mode button at the top: Show full chat over
+                        // the open cards, Open cards only over the whole
+                        // conversation (the console's chatFullHTML).
+                        Button { withAnimation { full.toggle() } } label: {
+                            Label(full ? "Open cards only" : "Show full chat", systemImage: full ? "rectangle.compress.vertical" : "text.alignleft")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.buttonStyle(.plain).padding(.horizontal)
+                        if full {
+                            if rows.count > shown {
+                                Button { withAnimation { shown += rowWindow * 2 } } label: {
+                                    Label("Show \(min(rowWindow * 2, rows.count - shown)) earlier of \(rows.count)", systemImage: "chevron.up")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }.buttonStyle(.plain).padding(.horizontal)
                             }
-                            ForEach(actionsByMessage[m.id] ?? []) { approvalCell($0, cost: leadCost(m, "action:" + $0.id)) }
-                            ForEach(recsByMessage[m.id] ?? []) { recCell($0, cost: leadCost(m, "rec:" + $0.id)) }
+                            ForEach(visible(rows)) { m in
+                                messageRow(m).id(m.id)
+                                ForEach(asksByMessage[m.id] ?? []) { a in
+                                    AskCard(a: a, goals: goals, cost: leadCost(m, "ask:" + a.id), reload: { await load() }).id(a.id)
+                                }
+                                ForEach(actionsByMessage[m.id] ?? []) { approvalCell($0, cost: leadCost(m, "action:" + $0.id)) }
+                                ForEach(recsByMessage[m.id] ?? []) { recCell($0, cost: leadCost(m, "rec:" + $0.id)) }
+                            }
+                            ForEach(tailAsks) { a in
+                                AskCard(a: a, goals: goals, reload: { await load() }).id(a.id)
+                            }
+                            ForEach(tailActions) { approvalCell($0) }
+                            ForEach(tailRecs) { recCell($0) }
+                        } else {
+                            let cells = openCells(rows)
+                            ForEach(cells) { cell in
+                                switch cell {
+                                case .message(let m): messageRow(m).id(m.id)
+                                case .ask(let a, let cost): AskCard(a: a, goals: goals, cost: cost, reload: { await load() }).id(a.id)
+                                case .action(let a, let cost): approvalCell(a, cost: cost)
+                                case .rec(let r, let cost): recCell(r, cost: cost)
+                                }
+                            }
+                            if cells.isEmpty, thread.status != "running", cardsLoaded {
+                                Text("Nothing open").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+                            }
                         }
-                        ForEach(tailAsks) { a in
-                            AskCard(a: a, goals: goals, reload: { await load() }).id(a.id)
-                        }
-                        ForEach(tailActions) { approvalCell($0) }
-                        ForEach(tailRecs) { recCell($0) }
                         // THE working line, the console's paintWorking
                         // (views/threads.js); keep them in step: "starting ·
                         // N s" until the first tool call, then "working · "
@@ -448,6 +515,9 @@ struct ThreadDetail: View {
                 // scrolls, once.
                 .onChange(of: messages.count) { old, new in
                     guard new > old, old == 0 else { return }
+                    // Opened on a reply (an ask card's "sent by"): the full
+                    // chat, so the row is there to land on.
+                    if let f = focusMessage, messages.contains(where: { $0.id == f }) { full = true }
                     let (target, anchor) = openingTarget()
                     widen(toRow: target as? Int)
                     Task { @MainActor in
@@ -1086,6 +1156,9 @@ struct ThreadDetail: View {
                 if soon != queuedPrompts { queuedPrompts = soon }
             }
             if let f = focusCard, !focusLanded, asks.contains(where: { $0.id == f }) || actions.contains(where: { $0.id == f }) {
+                // A deep link to a closed card opens the full chat, so the
+                // card is there to land on; the console's focusNeedsFull.
+                if asks.contains(where: { $0.id == f && $0.isClosed }) || actions.contains(where: { $0.id == f && $0.open != true }) { full = true }
                 focusLanded = true
             }
             error = nil
