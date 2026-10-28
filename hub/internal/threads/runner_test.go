@@ -530,6 +530,10 @@ func TestBackgroundTaskTurnsFoldIntoOneReply(t *testing.T) {
 	if !strings.Contains(held, "Simulator now") {
 		t.Fatal(held)
 	}
+	// The pending task is on the thread while the turn runs (turn_tasks).
+	if len(th.TurnTasks) != 1 || th.TurnTasks[0] != (TurnTask{ID: "b1", Type: "local_bash", Description: "Walk the phone chat"}) {
+		t.Fatalf("turn tasks %+v", th.TurnTasks)
+	}
 	// The task notifies, the CLI re-enters, another wait, another prose
 	// ending → result #2, still pending.
 	appendOut(t, out, `{"type":"system","subtype":"task_updated","task_id":"b1"}
@@ -546,6 +550,9 @@ func TestBackgroundTaskTurnsFoldIntoOneReply(t *testing.T) {
 	th, _ = m.Get(th.ID)
 	if msgs, _ = m.Messages(th.ID, 50); th.Status != "running" || len(msgs) != 1 {
 		t.Fatalf("second folded result became a reply: %+v %+v", th, msgs)
+	}
+	if len(th.TurnTasks) != 0 {
+		t.Fatalf("an emptied task list still shows %+v", th.TurnTasks)
 	}
 	// The last task notifies, the CLI re-enters with nothing pending, and
 	// the turn ends for real: ONE reply, the whole span's cost and tokens.

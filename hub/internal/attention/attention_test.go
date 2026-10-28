@@ -335,7 +335,7 @@ func TestSubSessionPullsItsParent(t *testing.T) {
 		{ID: "orphan", Status: "running", ParentID: "archived-one"}, {ID: "quiet", Status: "done", ParentID: "lone"}, {ID: "lone", Status: "idle"}}
 	asks := []threads.Ask{{ID: "a1", ThreadID: "team", Surface: "any", State: "open", Kind: "read"}}
 	b := Build("web", asks, nil, ths)
-	want := map[string]string{"scout": "working", "bench": "working", "port": "your_turn", "team": "your_turn",
+	want := map[string]string{"scout": "working", "bench": "working", "port": "working", "team": "your_turn",
 		"top": "working", "leaf": "working", "orphan": "working"}
 	if len(b.Section) != len(want) {
 		t.Fatalf("section %v", b.Section)
@@ -354,7 +354,29 @@ func TestSubSessionPullsItsParent(t *testing.T) {
 			t.Fatalf("home %s: %q, want %q", id, b.Home[id], top)
 		}
 	}
-	if b.Headings[0].Count != "1 in 1 session" || b.Headings[1].Count != "4" {
+	if b.Headings[0].Count != "1 in 1 session" || b.Headings[1].Count != "6" {
 		t.Fatalf("%+v", b.Headings)
+	}
+}
+
+// A session with turns running under it is working and says so, cards or
+// not; a running session is not filed under Your turn by a sub-session's card.
+func TestRunningChainIsWorking(t *testing.T) {
+	ths := []threads.Thread{{ID: "lead", Status: "needs_you"}, {ID: "r1", Status: "running", ParentID: "lead"},
+		{ID: "r2", Status: "running", ParentID: "lead"}, {ID: "sweep", Status: "running"}, {ID: "helper", Status: "needs_you", ParentID: "sweep"}}
+	asks := []threads.Ask{{ID: "a1", ThreadID: "lead", Surface: "any", State: "open", Kind: "read"},
+		{ID: "a2", ThreadID: "helper", Surface: "any", State: "open", Kind: "read"}}
+	b := Build("web", asks, nil, ths)
+	if b.Section["lead"] != "working" || b.Section["sweep"] != "working" || b.Section["helper"] != "your_turn" {
+		t.Fatalf("section %v", b.Section)
+	}
+	if p := b.Pills["lead"]; len(p) == 0 || p[0].Word != "2 running" || p[0].Tone != "running" {
+		t.Fatalf("lead pills %+v", p)
+	}
+	if p := b.Pills["sweep"]; len(p) == 0 || p[0].Word != "running" {
+		t.Fatalf("sweep pills %+v", p)
+	}
+	if b.Working != 1 {
+		t.Fatalf("working %d", b.Working)
 	}
 }

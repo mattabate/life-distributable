@@ -43,7 +43,7 @@ test('a turn with no tool call yet counts "starting · N s" from its message', (
   chatState.liveSince = Date.parse(ago(7));
   // A tool call landed: the count, never the clock.
   paintWorking(true, { status: 'running', turn_tools: 1 });
-  assert.match(w.innerHTML, /working · 1 tool call/);
+  assert.match(w.innerHTML, /working · <a href="#" class="chain-link" onclick="event.preventDefault\(\);toggleChain\(\)">1 tool call<\/a>/);
   assert.doesNotMatch(w.innerHTML, /starting|since/);
   // A finished turn never counts.
   paintWorking(false, { status: 'idle' });
@@ -68,8 +68,61 @@ test('the working line reads "sending · N s" while a message is on its way', ()
   assert.match(w.innerHTML, /sending · <span class="since" data-since="\d+">3 s<\/span> · working$/);
   chatState.sendingSince = 0;
   paintWorking(true, { status: 'running', turn_tools: 2 });
-  assert.match(w.innerHTML, /working · 2 tool calls/);
+  assert.match(w.innerHTML, /working · <a [^>]*>2 tool calls<\/a>/);
   assert.doesNotMatch(w.innerHTML, /sending/);
+});
+
+test('the tool chain: what the turn is doing, what it waits on, its helpers', () => {
+  // Events as the hub stores them.
+  const evs = [
+    { id: 1, kind: 'tool_result', title: 'result', body: 'answers a call before the window' },
+    { id: 2, kind: 'tool_use', title: 'Bash · make check', summary: 'Run the checks' },
+    { id: 3, kind: 'tool_result', title: 'error', body: 'Exit code 1' },
+    { id: 4, kind: 'tool_use', title: 'Agent · Survey the literature', summary: 'Delegate: Survey the literature' },
+    { id: 5, kind: 'tool_result', title: 'result', body: 'Async agent launched successfully.' },
+    { id: 6, kind: 'tool_use', title: 'Agent · Review the diff', summary: 'Delegate: Review the diff' },
+    { id: 7, kind: 'thinking', body: 'hmm' },
+    { id: 8, kind: 'tool_use', title: 'Read · DESIGN.md', summary: 'Read DESIGN.md' },
+  ];
+  const ch = toolChain(evs);
+  assert.deepEqual(ch.steps.map(s => [s.label, s.open, s.error]), [
+    ['Run the checks', false, true], ['Survey the literature', false, false],
+    ['Review the diff', true, false], ['Read DESIGN.md', true, false]]);
+  // No list from the hub: a launched helper runs for the rest of the turn.
+  assert.deepEqual(ch.helpers, ['Survey the literature', 'Review the diff']);
+  assert.deepEqual(ch.waiting, ['Read DESIGN.md']);
+  // The hub's list (turn_tasks) says which async helpers are still going.
+  assert.deepEqual(toolChain(evs, []).helpers, ['Review the diff']);
+  assert.deepEqual(toolChain(evs, [{ type: 'local_agent', description: 'Survey the literature' }, { type: 'local_bash', description: 'make ship' }]).helpers,
+    ['Survey the literature', 'Review the diff']);
+  assert.equal(helpersWords(1), '1 subagent running');
+  assert.equal(helpersWords(3), '3 subagents running');
+  assert.equal(taskHelpers({ turn_tasks: [{ type: 'local_agent' }, { type: 'local_bash' }] }), 1);
+  // Drawn: a row per worker, each opening on a second click; no dot inside
+  // the chain.
+  const tasks = [{ id: 'a1', type: 'local_agent', description: 'Survey the literature' }];
+  const shut = chainHTML(ch, false, 4, { name: 'Research', tasks });
+  assert.match(shut, /^<a [^>]*class="chain-w"[^>]*toggleChainMe\(\)"><span class="caret">›<\/span>Research · 2 tool calls<\/a>/);
+  assert.match(shut, /<div class="chain-w"><span class="caret"><\/span>Survey the literature · subagent<\/div>/);
+  assert.doesNotMatch(shut, /dot|Run the checks/);
+  const me = chainHTML(ch, false, 4, { name: 'Research', me: true, tasks });
+  assert.match(me, /<div class="chain-calls"><div class="chain-row err">Run the checks<\/div><div class="chain-row live">Read DESIGN.md<\/div><\/div>/);
+  // A helper the hub can read opens to its own calls.
+  const subs = { a1: { ok: true, open: true, evs: [{ id: 1, kind: 'tool_use', title: 'WebSearch · sorting networks', summary: 'Search sorting networks' }] } };
+  assert.match(chainHTML(ch, false, 4, { name: 'Research', tasks, subs }),
+    /class="chain-w on"[^>]*toggleChainSub\('a1'\)"><span class="caret">›<\/span>Survey the literature · 1 tool call<\/a><div class="chain-calls"><div class="chain-row live">Search sorting networks<\/div><\/div>/);
+  // No helper: the calls straight away; more in the turn than loaded, the
+  // earlier ones one click away.
+  const solo = toolChain(evs.filter(e => e.id < 4));
+  assert.equal(chainHTML(solo, false, 1), '<div class="chain-row err">Run the checks</div>');
+  assert.match(chainHTML(solo, false, 40), /onclick="event.preventDefault\(\);chainEarlier\(\)">39 earlier<\/a>/);
+});
+
+test('the working line counts the helpers the hub lists', () => {
+  const w = el('run-working');
+  chatState.liveSince = 0; chatState.sendingSince = 0;
+  paintWorking(true, { status: 'running', turn_tools: 9, turn_tasks: [{ type: 'local_agent', description: 'a' }, { type: 'local_agent', description: 'b' }] });
+  assert.match(w.innerHTML, />9 tool calls · 2 subagents running<\/a><\/span>$/);
 });
 
 // Every message is a row: the owner's grey, a reply with no text nothing at

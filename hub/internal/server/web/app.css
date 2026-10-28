@@ -418,6 +418,22 @@ textarea { resize: vertical; }
 .att-html-row { display: flex; gap: 12px; margin-top: 2px; }
 
 .working { display: flex; align-items: center; gap: 7px; padding: 4px 8px 10px; }
+/* The turn's tool chain (threads.js chainHTML): the count on the working
+   line opens it; a worker per row when helpers run, one quiet line per
+   call, the waiting ones darker. No dot or rule inside: the working line's
+   dot is the one live mark. */
+.working .chain-link { color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.working .chain-link:hover, .working .chain-link.on { color: var(--accent); text-decoration-color: currentColor; }
+.chain { margin: -4px 8px 10px 21px; }
+.chain-w { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; color: var(--fg); text-decoration: none; overflow-wrap: anywhere; }
+a.chain-w:hover, a.chain-w.on { color: var(--accent); }
+.chain-w .caret { flex: none; width: 10px; color: var(--muted); font-size: 15px; line-height: 1; text-align: center; transition: transform .12s; }
+.chain-w.on .caret { transform: rotate(90deg); }
+.chain-calls { padding: 0 0 4px 16px; }
+.chain-row { padding: 2px 0; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.chain-row.live { color: var(--fg); }
+.chain-row.err { color: var(--red); }
+.chain-more { display: block; padding: 2px 0 4px; }
 
 /* ---------- the one card (ui.js cardHTML) ----------
    Every card in the chat — ask, approval, rec — is .ask with a --tint: the

@@ -348,7 +348,9 @@ struct ThreadRow: View {
         let more = max(0, openCount - min(cells.count, Self.deskCards))
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if t.status == "running" {
+                // Its own turn or one under it at work (the board's running
+                // pill): the owner can see it is busy before typing.
+                if t.status == "running" || pills.contains(where: { $0.tone == "running" }) {
                     Circle().fill(Color.accentColor).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                 }
                 Text(md(t.title)).font(.system(size: 14.5, weight: t.unread > 0 ? .bold : .semibold))

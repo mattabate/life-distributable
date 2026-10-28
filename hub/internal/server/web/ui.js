@@ -255,6 +255,46 @@ function turnFacts(t, tools, cost) {
     t.turn_at ? dayWhen(t.turn_at) : '', cost !== false && t.turn_cost_usd ? usd(t.turn_cost_usd) : ''].filter(Boolean).join(' · ');
 }
 
+// THE TOOL CHAIN of the turn in flight: the count on the working line opens
+// it, showing what the turn is doing, what it is waiting on, and the
+// Agent-tool helpers it has running ("3 subagents running" and each one's
+// description), since helpers run inside the turn and never as sessions of
+// their own. `evs` are the turn's events (GET /threads/{id}/events, one
+// run_id), oldest first; a tool_result answers the oldest tool_use still
+// open, so the calls left without one are the ones it is waiting on. `tasks`
+// is the thread's turn_tasks (the CLI's own list of background tasks still
+// pending): when the hub sends it, an async helper runs until it leaves that
+// list; without it, a launched helper counts as running for the rest of the
+// turn. The phone's `toolChain` (Format.swift) is the same.
+const AGENT_TITLE = /^(Agent|Task)(?: · |$)/;
+function toolChain(evs, tasks) {
+  // A result with no call before it (the window opened mid-turn) answers
+  // nothing on screen.
+  const steps = [], open = [];
+  for (const e of evs || []) {
+    if (e.kind === 'tool_use') {
+      const agent = AGENT_TITLE.test(e.title || '');
+      const s = { id: e.id, agent, open: true, error: false, launched: false,
+        label: agent ? (e.title || '').replace(AGENT_TITLE, '') || 'helper' : (e.summary || e.title || e.kind) };
+      steps.push(s); open.push(s);
+    } else if (e.kind === 'tool_result' && open.length) {
+      const s = open.shift();
+      s.open = false; s.error = e.title === 'error';
+      s.launched = s.agent && /^Async agent launched/.test(e.body || '');
+    }
+  }
+  const helpers = [];
+  const add = d => { if (d && !helpers.includes(d)) helpers.push(d); };
+  if (Array.isArray(tasks)) for (const k of tasks) { if (k.type === 'local_agent') add(k.description || 'helper'); }
+  for (const s of steps) if (s.agent && (s.open || (!Array.isArray(tasks) && s.launched))) add(s.label);
+  return { steps, helpers, waiting: steps.filter(s => s.open && !s.agent).map(s => s.label) };
+}
+// The helpers line's words: "1 subagent running", "3 subagents running".
+const helpersWords = n => n ? `${n} subagent${n === 1 ? '' : 's'} running` : '';
+// The helpers the hub lists for a running thread on its own (turn_tasks),
+// before any chain is loaded: the working line counts them unopened.
+const taskHelpers = t => ((t && t.turn_tasks) || []).filter(k => k.type === 'local_agent').length;
+
 // The Markdown subset the agents are told to write (docs: preamble spec):
 // bullets, numbered lists, # headings, **bold**, `code`, links, pipe tables,
 // ``` fences — anything else renders as plain text rather than as syntax.
