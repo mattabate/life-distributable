@@ -1,5 +1,10 @@
 package store
 
+import (
+	"errors"
+	"strings"
+)
+
 // close.go — THE vocabulary of answering. Every word a surface prints about
 // closing something — the buttons on a card (`outcomes`), the one-word tag a
 // card wears ("decide"), the "↩ Accepted · …" line under the owner's answer,
@@ -184,6 +189,27 @@ func Owner(by string) bool {
 		return true
 	}
 	return false
+}
+
+// ErrOwnerClose: a session tried to rewrite a close of the owner's. Human
+// confirmed state is immutable to automation: a session that quietly moved
+// a closed ask done to dismissed (or a done step back to open with no word
+// why) rewrites the record of what the owner actually did.
+var ErrOwnerClose = errors.New("the owner closed this themselves, and a session never rewrites their close: something they marked done that is not: raise a new card saying what is left; a close to fix: reopen it with the reason as the note")
+
+// GuardOwnerClose: a session (by "claude:...") may not move a row the owner
+// closed (done or dismissed, by a surface of theirs) to the other closed
+// state, and reopens it only with words, which land on the trail. The owner
+// and the hub's own reconcilers pass: the rule is against a session's quiet
+// rewrite, not the owner's Reopen.
+func GuardOwnerClose(from, resolvedBy, to, by, note string) error {
+	if !strings.HasPrefix(by, "claude:") || !Owner(resolvedBy) || (from != "done" && from != "dismissed") {
+		return nil
+	}
+	if (to == "done" || to == "dismissed") || strings.TrimSpace(note) == "" {
+		return ErrOwnerClose
+	}
+	return nil
 }
 
 // Standing: where a row stands with the owner, said once by the hub so

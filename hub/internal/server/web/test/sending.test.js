@@ -35,6 +35,12 @@ test('a turn with no tool call yet counts "starting · N s" from its message', (
   chatState.liveSince = Date.parse(ago(7));
   paintWorking(true, { status: 'running', turn_tools: 0 });
   assert.match(w.innerHTML, /starting · <span class="since" data-since="\d+">7 s<\/span>/);
+  // Its message was queued 9 minutes before the turn opened (the previous
+  // turn was still working): the clock counts from the hub's turn start.
+  chatState.liveSince = Date.parse(ago(548));
+  paintWorking(true, { status: 'running', turn_tools: 0, turn_at: ago(84) });
+  assert.match(w.innerHTML, /starting · <span class="since" data-since="\d+">84 s<\/span>/);
+  chatState.liveSince = Date.parse(ago(7));
   // A tool call landed: the count, never the clock.
   paintWorking(true, { status: 'running', turn_tools: 1 });
   assert.match(w.innerHTML, /working · 1 tool call/);

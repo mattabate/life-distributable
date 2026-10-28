@@ -326,7 +326,8 @@ func TestHeadingsAndPills(t *testing.T) {
 
 // A listed sub-session pulls the session that started it onto the list,
 // under the more urgent of the two headings, and a grandchild reaches the
-// top; the counts stay the cards' own.
+// top; the counts stay the cards' own. Only the top is pulled, and Home files
+// every listed descendant under it: the done link between them is no row.
 func TestSubSessionPullsItsParent(t *testing.T) {
 	ths := []threads.Thread{{ID: "scout", Status: "idle"}, {ID: "bench", Status: "running", ParentID: "scout"},
 		{ID: "port", Status: "running"}, {ID: "team", Status: "needs_you", ParentID: "port"},
@@ -335,13 +336,22 @@ func TestSubSessionPullsItsParent(t *testing.T) {
 	asks := []threads.Ask{{ID: "a1", ThreadID: "team", Surface: "any", State: "open", Kind: "read"}}
 	b := Build("web", asks, nil, ths)
 	want := map[string]string{"scout": "working", "bench": "working", "port": "your_turn", "team": "your_turn",
-		"top": "working", "mid": "working", "leaf": "working", "orphan": "working"}
+		"top": "working", "leaf": "working", "orphan": "working"}
 	if len(b.Section) != len(want) {
 		t.Fatalf("section %v", b.Section)
 	}
 	for id, sec := range want {
 		if b.Section[id] != sec {
 			t.Fatalf("%s: %q, want %q (%v)", id, b.Section[id], sec, b.Section)
+		}
+	}
+	home := map[string]string{"bench": "scout", "team": "port", "leaf": "top"}
+	if len(b.Home) != len(home) {
+		t.Fatalf("home %v", b.Home)
+	}
+	for id, top := range home {
+		if b.Home[id] != top {
+			t.Fatalf("home %s: %q, want %q", id, b.Home[id], top)
 		}
 	}
 	if b.Headings[0].Count != "1 in 1 session" || b.Headings[1].Count != "4" {

@@ -138,6 +138,18 @@ struct ThreadDetail: View {
         return messages.last { $0.run_id != nil && !replied.contains($0.run_id!) && $0.role != "claude" }?.ts
     }
 
+    /// Where "starting · N s" counts from (the console's startingSince): a
+    /// message queued while the previous turn was still working is filed
+    /// minutes before its turn opens, and counting from its ts read
+    /// "starting · 548 s" the moment the previous reply landed. The hub's
+    /// turn_at is the turn's start until its first tool call, so the later
+    /// of the two.
+    var startingSince: Date? {
+        guard let s = liveSince else { return nil }
+        if let at = thread.turn_at, at > s { return at }
+        return s
+    }
+
     /// The owner's messages the session is working on: the turn in flight's
     /// starters, with no reply yet. The open-cards view keeps them, so a Send
     /// does not vanish into the working line.
@@ -462,7 +474,7 @@ struct ThreadDetail: View {
                         // head's pill. All of it is inside `status ==
                         // "running"`, so a stopped session shows none of it.
                         if thread.status == "running" {
-                            if (thread.turn_tools ?? 0) == 0, let s = liveSince {
+                            if (thread.turn_tools ?? 0) == 0, let s = startingSince {
                                 TimelineView(.periodic(from: .now, by: 1)) { ctx in
                                     workingLine("starting · \(max(0, Int(ctx.date.timeIntervalSince(s)))) s", stop: true)
                                 }

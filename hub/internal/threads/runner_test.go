@@ -26,6 +26,109 @@ func appendOut(t *testing.T, out, s string) {
 	f.Close()
 }
 
+// A process whose tmux session vanished with no .done (the tmux server died:
+// a reboot, kill-server) stayed "running" on the board forever. Once observed
+// gone (one has-session a minute, only for a quiet run) a turn in flight is
+// replayed like a 5xx, twice, then carded; an idle process just closes.
+func TestGoneProcessRestartsTheTurnThenCards(t *testing.T) {
+	m, n, cmds := setup(t)
+	alive := true
+	m.Run = func(name string, args ...string) ([]byte, error) {
+		*cmds = append(*cmds, strings.Join(append([]string{name}, args...), " "))
+		if len(args) > 0 && args[0] == "has-session" && !alive {
+			return nil, os.ErrNotExist
+		}
+		return nil, nil
+	}
+	th, _ := m.Create("", "life", "", "Do a long thing.", "", "", nil)
+	quiet := func() {
+		m.db.Exec(`UPDATE thread_runs SET last_output=? WHERE thread_id=? AND finished_at IS NULL`, ts(time.Now().Add(-2*deadProbe)), th.ID)
+	}
+	probes := func() int {
+		k := 0
+		for _, c := range *cmds {
+			if strings.Contains(c, "has-session") {
+				k++
+			}
+		}
+		return k
+	}
+	// A fresh run is not probed; a quiet one is, once a minute, and left alone
+	// while it answers.
+	m.Poll()
+	if probes() != 0 {
+		t.Fatalf("probed a fresh run: %v", *cmds)
+	}
+	quiet()
+	m.Poll()
+	m.Poll()
+	if probes() != 1 {
+		t.Fatalf("want one probe: %v", *cmds)
+	}
+	if th, _ := m.Get(th.ID); th.Status != "running" {
+		t.Fatalf("a live run was settled: %+v", th)
+	}
+	alive = false
+	for i := 1; i <= maxAutoRetries; i++ {
+		quiet()
+		m.probed = nil
+		m.Poll()
+		if asks, _ := m.ListAsks("active", th.ID, 10); len(asks) != 0 || len(n.msgs) != 0 {
+			t.Fatalf("attempt %d: asks=%v notes=%v", i, asks, n.msgs)
+		}
+		if th, _ := m.Get(th.ID); th.Status != "running" {
+			t.Fatalf("attempt %d: %+v", i, th)
+		}
+		if b, _ := os.ReadFile(inFile(t, m, th.ID)); !strings.Contains(string(b), "Do a long thing.") {
+			t.Fatalf("attempt %d: turn not replayed: %q", i, string(b))
+		}
+	}
+	quiet()
+	m.probed = nil
+	m.Poll()
+	asks, _ := m.ListAsks("active", th.ID, 10)
+	if len(asks) != 1 || asks[0].Kind != "error" || !strings.Contains(asks[0].Detail, "process is gone") {
+		t.Fatalf("%+v", asks)
+	}
+	if th, _ := m.Get(th.ID); th.Status != "needs_you" {
+		t.Fatalf("%+v", th)
+	}
+}
+
+// The idle half: a process waiting for its next message, gone: no error
+// card, no retry, no relaunch; the run closes and the thread keeps the state
+// its last reply left it in.
+func TestGoneIdleProcessCloses(t *testing.T) {
+	m, n, cmds := setup(t)
+	m.Run = func(name string, args ...string) ([]byte, error) {
+		*cmds = append(*cmds, strings.Join(append([]string{name}, args...), " "))
+		if len(args) > 0 && args[0] == "has-session" {
+			return nil, os.ErrNotExist
+		}
+		return nil, nil
+	}
+	th, _ := m.Create("", "life", "", "Hello.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	appendOut(t, out, `{"type":"result","subtype":"success","is_error":false,"result":"Hi.","total_cost_usd":0.01,"session_id":"sess-1"}
+`)
+	m.Poll()
+	m.db.Exec(`UPDATE thread_runs SET last_output=? WHERE thread_id=? AND finished_at IS NULL`, ts(time.Now().Add(-2*deadProbe)), th.ID)
+	m.Poll()
+	var live int
+	m.db.QueryRow(`SELECT count(*) FROM thread_runs WHERE thread_id=? AND finished_at IS NULL`, th.ID).Scan(&live)
+	asks, _ := m.ListAsks("active", th.ID, 10)
+	th2, _ := m.Get(th.ID)
+	launches := 0
+	for _, c := range *cmds {
+		if strings.Contains(c, "new-session") {
+			launches++
+		}
+	}
+	if live != 0 || len(asks) != 1 || asks[0].Kind != "read" || len(n.msgs) != 0 || th2.Status == "running" || launches != 1 {
+		t.Fatalf("live=%d asks=%v notes=%v launches=%d %+v", live, asks, n.msgs, launches, th2)
+	}
+}
+
 // The owner can message a working session: the message is written to claude's
 // stdin at once (steered into the running turn); between turns the same
 // process serves the next turn; tool calls streamed by claude land in events

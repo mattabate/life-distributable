@@ -481,6 +481,9 @@ type Manager struct {
 	// good turn (retry.go): a transient API error is retried, not put on the
 	// board. In memory on purpose — a hub restart is itself a fresh start.
 	retries map[string]int
+	// probed: when each live run's tmux session was last asked for (runner.go
+	// gone), so a quiet process costs one `tmux has-session` a minute.
+	probed map[string]time.Time
 
 	mu sync.Mutex
 }
@@ -648,6 +651,12 @@ func (m *Manager) CreateBy(author, title, project, goalID, prompt, schedule, sch
 // (via "console": the web console).
 func (m *Manager) CreateVia(title, project, goalID, prompt, schedule, schedulePrompt string, attachments []string, via string) (Thread, error) {
 	return m.createVia("owner", title, project, goalID, prompt, schedule, schedulePrompt, attachments, via)
+}
+
+// CreateFrom is CreateVia by a named author: claude:thread:<id> when a
+// session made the call, which makes it the new session's parent.
+func (m *Manager) CreateFrom(author, title, project, goalID, prompt, schedule, schedulePrompt string, attachments []string, via string) (Thread, error) {
+	return m.createVia(author, title, project, goalID, prompt, schedule, schedulePrompt, attachments, via)
 }
 
 func (m *Manager) createVia(author, title, project, goalID, prompt, schedule, schedulePrompt string, attachments []string, via string) (Thread, error) {
@@ -1074,7 +1083,7 @@ How to work:
 - Do the work yourself, end to end (pre-approved: lifectl, read-only shell, make, ops/*.sh, git commit, file edits); lifectl for {owner}'s data. Hub endpoints: ‵lifectl api GET|POST|PATCH /api/v1/… [json|@file]‵; database: ‵ops/db.sh "select …"‵ (read-only — every write goes through the hub); python: ‵ops/py.sh <script.py> [args]‵. ‵python3 -c‵, ‵sqlite3‵ and ‵curl‵ are removed on purpose: never work around them; new code goes in an ops/ script.
 - COMMIT in the hub repo with ‵ops/commit.sh -m "<subject>" [-m "<body>"] <path>…‵ (only those paths; refuses data/; never -a/-A).
 - ONE COMPLETION, MANY CALLS: every completion re-reads the context — independent tool calls go in the SAME message; a chain of reads becomes one ops/ script.
-- GATE: never move money, delete data, contact people or share data directly — ‵lifectl propose --kind money|delete|contact|share|commit --title ... --detail ...‵. Propose the moment you know and CARRY ON with work that does not depend on it; act only once their approval message arrives (possibly mid-turn).
+- GATE: never move money, delete data, contact people or share data directly — ‵lifectl propose --kind money|delete|contact|share|commit --title ... --detail ...‵; propose the moment you know, CARRY ON meanwhile, act once approved. A draft others read goes to a fresh Agent critic first (claims vs sources, voice, links).
 - BLOCKED ON {OWNER} (a decision, access, a physical step, a missing tool, a work-changing ambiguity) → an ASK the moment you know; never silently drop, shrink or substitute the task: ‵lifectl ask add "<imperative title, ≤80 chars>" --say "what you tried, why blocked, what unblocks it" --kind decision|access|physical|read|other [--check "how a verifier could tell it is done"]‵. One ask per thing; it pushes to their phone. Keep working — the answer arrives between tool calls. Never restate a card in text.
 - KIND = THE VERB ON THEIR BUTTONS: decision → Decided; access → Granted (ONLY a credential, scope or permission they hand over); physical/other → I did this (steps they carry out, even in a web console); read → Read it. Retag: ‵lifectl ask <id> kind physical‵.
 - THE MESSAGE IS WHAT THEY HEAR: the phone reads it aloud and the card leads with it. The whole answer, 2-5 plain sentences, answer first: "{hey}you asked if the export finished. It has." It STANDS ALONE: name the thing, never "this session"; no ids, URLs, paths, markdown or lists; ≤700 chars. After it ONLY a numbered list of steps they carry out, if any (shown, not spoken). No title line, no prose body. ‵lifectl ask add "<imperative title>" --say "<message>" [--detail "<steps>"]‵; a closing reply is ‵Say: {hey}…‵ (wraps until a blank line), then the steps.
@@ -1096,11 +1105,11 @@ How to work:
 Follow-through is YOUR call:
 - RECURRING work: ‵lifectl thread {id} schedule <daily@HH:MM|weekly@Mon HH:MM|every@6h> "what to do at each check-in"‵; adjust as the task changes, ‵... schedule off‵ when done. A SCHEDULE IS A CADENCE, NOT A DATE — one known day is a calendar item. Fleet = 5-10 scheduled sessions: ‵lifectl threads‵ first, add to an existing check-in on that goal and cadence; every watch gets a sunset date.
 - A wake runs on this session's model; sonnet only for rote work (export, diff, count, copy) you pin: ‵lifectl thread <id> model claude-sonnet-5-5‵.
-- A TIMED WAKE IS ONLY FOR THE WORLD (a bank post, a reply, a log that needs hours): ‵lifectl prompt "<what to check, what to do per outcome>" --in 2h‵ or ‵--on YYYY-MM-DD [--at HH:MM]‵; ‵lifectl prompts queued‵ lists yours, ‵lifectl prompt cancel <id>‵ drops one. NEVER FOR WORK THAT CAN RUN NOW (the work is continuous): a plan runs end to end this turn, never half now and half in a wake. A CAPPED PROCESS (a check-in wake) with steps left hands EVERY remaining step to a new session THE SAME MINUTE: ‵lifectl prompt "<done; each step left>" --new --title "…"‵ (no cap), then [end]. For ANOTHER session: ‵lifectl relay <id> "…"‵ (approval card), never chat; the session on that work takes it ("[Other sessions right now …]"; ‵lifectl threads --q <word>‵ finds more).
-- A parallel worker: ‵lifectl thread new "<standing instructions>" --schedule <when>‵.
+- A TIMED WAKE IS ONLY FOR THE WORLD (a bank post, a reply): ‵lifectl prompt "<what to check, what to do per outcome>" --in 2h‵ or ‵--on YYYY-MM-DD [--at HH:MM]‵; ‵lifectl prompts queued‵ lists yours, ‵lifectl prompt cancel <id>‵ drops one. NEVER FOR WORK THAT CAN RUN NOW: a plan runs end to end this turn. A CAPPED PROCESS (a check-in wake) with steps left hands EVERY remaining step to a new session THE SAME MINUTE: ‵lifectl prompt "<done; each step left>" --new --title "…"‵ (no cap), then [end]. For ANOTHER session: ‵lifectl relay <id> "…"‵ (approval card), never chat; the session on that work takes it ("[Other sessions right now …]"; ‵lifectl threads --q <word>‵ finds more).
+- A fan-out is the Agent tool in your turn, never ‵lifectl thread new‵ or ‵prompt --new‵.
 - ANYTHING WITH A DATE GOES ON THE CALENDAR. Before a day, check ‵lifectl cal <from> <to>‵, ‵cal away‵. Their step on a day: ‵lifectl cal add "<imperative title>" --on YYYY-MM-DD [--at HH:MM] --kind owner --detail "what and why" [--goal id] [--repeat monthly]‵ (nags that day). Day-only chore: ‵--due on --thread ""‵ (missed at midnight). NO REAL DEADLINE: omit --on (a soon to-do; ‵lifectl cal <id> soon‵ converts); never invent a day. Agent work: ‵--kind agent --at HH:MM‵, instructions in --detail (no --thread = fresh session); NEVER ALL DAY: after its data lands. ONE ITEM PER THING: edit the open one (any session's); ONE AGENT ITEM PER SESSION PER DAY. Owed a reply by a day: ‵--kind waiting --on <due> --detail "where to look"‵. Fold one: ‵lifectl cal <dup> into <keeper>‵. Instructions checkable, never "see how it went". "Remind me to…"/a date: ‵--kind note‵. A dated plan = ONE rec + one item per date. ‵lifectl cal <id> done|dismiss‵ closes one.
 - ANYTHING YOU RECOMMEND GOES IN THE LEDGER: ‵lifectl rec add "<title>" --domain money|health|tools|home|other --kind buy|subscribe|trade|try|stop|habit|process --because "<the evidence>" --expect "<what should change, and how we would know>" [--cost <dollars> --period monthly|yearly] [--goal id] [--act-by <date>] [--review-on <date>]‵. A rec is a cost or a real choice, never a step they can do now; PULL, never notify. Read ‵lifectl recs all --domain <d>‵ first; never re-serve a declined/deferred one — ‵--supersedes <id>‵. Accepted → mint items/proposals, ‵lifectl rec <id> link <ids>‵; later ‵lifectl rec <id> score worked|mixed|failed|unclear "<what happened>"‵.
-- Durable things they tell or show you also go into goal notes: state, open loops, next checkpoint.
+- Durable things they tell or show you also go into goal notes: state, open loops, next. THE OWNER'S WORDS THIS TURN OUTRANK MEMORY.md, workspace and goal notes: act on them, fix the file.
 - A QUEUED RUN IS FROZEN INSTRUCTIONS. (1) A decision that changes any session's queued check-in or calendar item → fix it the SAME turn (‵lifectl prompts queued‵, then ‵lifectl cal <id> set --detail @file‵, ‵lifectl thread <id> schedule …‵ or ‵lifectl cal <id> dismiss "why"‵; editing another session's run is allowed). (2) When you ARE the run, a "[CHANGED SINCE THESE INSTRUCTIONS …]" block beats your instructions; check premises against live data before an ask or rec. (3) A balance shown to {owner} is a provider figure (bank feed, screenshot), never hub-rebuilt. (4) Changed a goal's state → ‵lifectl goal <id> digest @file‵.`
 
 // systemPreamble fills preambleText for one thread: the owner's name, the
@@ -1835,10 +1844,17 @@ func (m *Manager) Update(id string, patch map[string]string) (Thread, error) {
 		}
 	}
 	before, _ := m.Get(id)
-	_, err = m.db.Exec(`UPDATE threads SET title=?, goal_id=?, model_class=?, persona=?, status=?, updated_at=? WHERE id=?`,
-		t.Title, nullable(t.GoalID), t.ModelClass, t.Persona, t.Status, ts(time.Now()), id)
+	_, err = m.db.Exec(`UPDATE threads SET title=?, goal_id=?, model_class=?, persona=?, updated_at=? WHERE id=?`,
+		t.Title, nullable(t.GoalID), t.ModelClass, t.Persona, ts(time.Now()), id)
 	if err != nil {
 		return t, err
+	}
+	// Status is written only when the patch sets it: a rename wrote back the
+	// status it read, so a turn that settled meanwhile read 'running' again.
+	if s, ok := patch["status"]; ok && s != "archived" {
+		if _, err = m.db.Exec(`UPDATE threads SET status=? WHERE id=?`, t.Status, id); err != nil {
+			return t, err
+		}
 	}
 	if before.Schedule != t.Schedule || before.SchedulePrompt != t.SchedulePrompt {
 		if err := m.SetSchedule(id, t.Schedule, t.SchedulePrompt); err != nil {

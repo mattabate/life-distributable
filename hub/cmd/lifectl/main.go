@@ -1014,6 +1014,11 @@ func (c client) call(method, path string, body any) {
 	req, _ := http.NewRequest(method, c.base+path, rd)
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
+	// The calling session, so a session it creates (`thread new`, `api POST
+	// /api/v1/threads`) is drawn under it.
+	if t := os.Getenv("LIFE_THREAD_ID"); t != "" {
+		req.Header.Set("X-Life-Thread", t)
+	}
 	timeout := 30 * time.Second
 	// A sync endpoint may crawl many pages. Matched without the query.
 	route, _, _ := strings.Cut(path, "?")

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func store(t *testing.T) *Store {
@@ -60,6 +61,54 @@ func TestOnlyTheRoleWritesAndNothingIsLost(t *testing.T) {
 	}
 	if s.Resolve("calendar") != "assistant" || s.Resolve("other") != "other" || s.Resolve("x") != "" {
 		t.Fatal("resolve")
+	}
+}
+
+// The role is the folder, never part of the name: `put assistant/x.md` and
+// `cat assistant/x.md` mean the assistant's x.md. Files already nested are
+// lifted out at startup, the newer copy winning, the other kept under
+// .versions/.
+func TestRolePrefixIsNotPartOfTheName(t *testing.T) {
+	s := store(t)
+	if f, err := s.Write("assistant", "assistant/x.md", []byte("x"), "owner"); err != nil || f.Name != "x.md" {
+		t.Fatalf("%v %+v", err, f)
+	}
+	if b, err := s.Read("assistant", "assistant/assistant/x.md"); err != nil || string(b) != "x" {
+		t.Fatalf("read by the prefixed name: %v %q", err, b)
+	}
+	if fs, _ := s.List("assistant"); len(fs) != 1 || fs[0].Name != "x.md" {
+		t.Fatalf("%+v", fs)
+	}
+
+	// Files nested the old way: a (nested newer) and b (flat newer).
+	nested := filepath.Join(s.Dir, "assistant", "assistant")
+	os.MkdirAll(filepath.Join(nested, "notes"), 0o755)
+	old := time.Now().Add(-time.Hour)
+	os.WriteFile(filepath.Join(s.Dir, "assistant", "a.md"), []byte("a old"), 0o644)
+	os.Chtimes(filepath.Join(s.Dir, "assistant", "a.md"), old, old)
+	os.WriteFile(filepath.Join(nested, "a.md"), []byte("a new"), 0o644)
+	os.WriteFile(filepath.Join(s.Dir, "assistant", "b.md"), []byte("b new"), 0o644)
+	os.WriteFile(filepath.Join(nested, "b.md"), []byte("b old"), 0o644)
+	os.Chtimes(filepath.Join(nested, "b.md"), old, old)
+	os.WriteFile(filepath.Join(nested, "notes", "c.md"), []byte("c"), 0o644)
+	moved := s.Unnest()
+	if want := []string{"assistant/a.md", "assistant/b.md", "assistant/notes/c.md"}; strings.Join(moved, " ") != strings.Join(want, " ") {
+		t.Fatalf("moved %v, want %v", moved, want)
+	}
+	for name, want := range map[string]string{"a.md": "a new", "b.md": "b new", "notes/c.md": "c", "x.md": "x"} {
+		if b, err := s.Read("assistant", name); err != nil || string(b) != want {
+			t.Fatalf("%s: %v %q, want %q", name, err, b, want)
+		}
+	}
+	if _, err := os.Stat(nested); err == nil {
+		t.Fatal("the doubled folder is still there")
+	}
+	vs, _ := os.ReadDir(filepath.Join(s.Dir, "assistant", ".versions"))
+	if len(vs) != 2 {
+		t.Fatalf("the losing copies are not kept: %v", vs)
+	}
+	if again := s.Unnest(); len(again) != 0 {
+		t.Fatalf("a second pass moved %v", again)
 	}
 }
 

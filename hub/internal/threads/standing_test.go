@@ -234,6 +234,30 @@ func TestStandingRefusedByBudget(t *testing.T) {
 	}
 }
 
+// A wake the budget allows but with a word (near its day cap) carries that
+// word in front of the check-in, so the session finishes what matters first.
+func TestStandingNearCapHearsTheWarning(t *testing.T) {
+	m, _, cmds := setup(t)
+	th, _ := m.Create("", "life", "", "Watch.", "every@6h", "", nil)
+	complete(t, m, th.ID, "ok")
+	m.Allow = func(kind, id string) (bool, string) { return true, "this session has spent $7.60 of its $10 for today" }
+	n := len(*cmds)
+	m.DuePrompts(time.Now().Add(7 * time.Hour))
+	if len(*cmds) == n {
+		t.Fatal("an allowed wake did not run")
+	}
+	ps, _ := m.ListPrompts("", th.ID, 10)
+	found := false
+	for _, p := range ps {
+		if strings.HasPrefix(p.Text, "[Budget: this session has spent $7.60 of its $10 for today]\n\n") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no child prompt opened with the budget line: %+v", ps)
+	}
+}
+
 // Schedule off — by PATCH or by cancelling the standing row — clears the
 // schedule, posts the card, and the session settles as done, not idle.
 func TestScheduleOffIsTheStandingRowCancelled(t *testing.T) {

@@ -319,7 +319,7 @@ func md(_ s: String) -> AttributedString {
 /// Code spans are stepped over untouched: inside backticks a backslash is a
 /// backslash, not an escape, so escaping there would print `\*`.
 func escapingStrayAsterisks(_ s: String) -> String {
-    guard s.contains("*") else { return s }
+    guard s.contains("*") || s.contains("~") else { return s }
     let chars = Array(s)
     var out = ""
     var open = 0        // emphasis runs opened at a word boundary, still unclosed
@@ -351,6 +351,16 @@ func escapingStrayAsterisks(_ s: String) -> String {
             } else {
                 out += String(repeating: "\\*", count: n)
             }
+            i += n; continue
+        }
+        // A lone `~` is "about" ("~$2,600"), never strikethrough: Apple's
+        // parser struck a pair of them through, crossing out whole sentences.
+        // The console has no strikethrough at all, so the tilde stays literal
+        // on both; `~~like this~~` is left to the parser.
+        if c == "~", fence == 0 {
+            var n = 0
+            while i + n < chars.count, chars[i + n] == "~" { n += 1 }
+            out += n == 1 ? "\\~" : String(repeating: "~", count: n)
             i += n; continue
         }
         out.append(c); i += 1

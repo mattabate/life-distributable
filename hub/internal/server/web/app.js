@@ -149,15 +149,19 @@ function busyForm(view) {
 // backoff(fails) ms and call onChange anyway — the error may have hidden a
 // change. Ends the moment alive() says so. `baseline`: the first answer counts
 // as a change (the chat drew before it; a change in between is inside it).
+// The day turning is a change too: a page left open overnight (the calendar's
+// today, Overdue) redrew only when the hub moved, so a quiet night kept
+// yesterday's day on screen.
 async function longPoll({ query = '', alive, onChange, backoff, baseline = false }) {
   if (HEADLESS) return;
-  let since = '', fails = 0;
+  let since = '', fails = 0, day = todayYMD();
   while (alive()) {
     try {
       const r = await get(`/changes?wait=25${query}${since ? '&since=' + encodeURIComponent(since) : ''}`);
       if (!alive()) return;
       if (!r || !r.version) throw new Error('no version'); // never spin on a bad answer
-      const moved = since ? r.changed : baseline;
+      let moved = since ? r.changed : baseline;
+      if (todayYMD() !== day) { day = todayYMD(); moved = true; }
       since = r.version;
       fails = 0;
       if (moved) await onChange();

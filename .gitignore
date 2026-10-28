@@ -1,5 +1,7 @@
 # Personal data and machine config — written at setup, never committed.
-data/
+# Anchored: an unanchored `data/` also swallows any nested data dir (a
+# package's src/data would never be committed).
+/data/
 ops/secrets/
 ops/hub.json
 ops/app.env

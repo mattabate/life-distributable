@@ -105,10 +105,12 @@ async function drawList(activeID, reuse) {
   // whose `parent_id` is filed on this list is a cell on its parent's card,
   // like an open card: its title, its state, its own card's tint and verb
   // when it has one, three rows and then "and N more".
-  const filed = new Set(threads.filter(t => sectionOf(b, t)).map(t => t.id));
-  const nested = t => t.parent_id && t.parent_id !== t.id && filed.has(t.parent_id);
+  // The hub's `home` names the card: the top of the chain, so a run started
+  // by a run started by a session is a cell on that session's card.
+  const home = b.home || {};
+  const nested = t => !!home[t.id];
   const kids = {};
-  for (const t of threads) if (nested(t) && filed.has(t.id)) (kids[t.parent_id] ||= []).push(t);
+  for (const t of threads) if (nested(t) && sectionOf(b, t)) (kids[home[t.id]] ||= []).push(t);
   const subCell = k => {
     const c = sessionCards(bundles[k.id])[0];
     const href = `#/sessions/${encodeURIComponent(k.id)}${b.first[k.id] ? '/' + encodeURIComponent(b.first[k.id]) : ''}`;
@@ -1156,6 +1158,12 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeImage()
 // when the session is already at work), then "starting · N s" until the
 // first tool call. The seconds tick on the console's own clock (tickSince),
 // not the poll.
+// startingSince: where "starting · N s" counts from. A message queued while
+// the previous turn was still working is filed minutes before its turn opens;
+// counting from its ts read "starting · 548 s" the moment the previous reply
+// landed. The hub's turn_at is the turn's start until its first tool call, so
+// the later of the two.
+const startingSince = t => Math.max(chatState.liveSince, (t && t.turn_at && Date.parse(t.turn_at)) || 0);
 function paintWorking(running, t) {
   const el = document.getElementById('run-working');
   if (!el) return;
@@ -1164,7 +1172,7 @@ function paintWorking(running, t) {
   if (el.hidden) return;
   const dot = '<span class="dot pulse"></span> ';
   if (since) el.innerHTML = `${dot}sending · ${sinceHTML(since)}${running ? ' · ' + esc(t && t.turn_tools ? 'working' : 'starting') : ''}`;
-  else if (!(t && t.turn_tools) && chatState.liveSince) el.innerHTML = `${dot}starting · ${sinceHTML(chatState.liveSince)}`;
+  else if (!(t && t.turn_tools) && chatState.liveSince) el.innerHTML = `${dot}starting · ${sinceHTML(startingSince(t))}`;
   else el.innerHTML = dot + esc(['working', turnFacts(t)].filter(Boolean).join(' · '));
 }
 const sinceHTML = since => `<span class="since" data-since="${since}">${Math.max(0, Math.floor((Date.now() - since) / 1000))} s</span>`;

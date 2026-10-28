@@ -85,7 +85,15 @@ func (s *Server) createThread(w http.ResponseWriter, r *http.Request) {
 		}{t, routed})
 		return
 	}
-	t, err := s.thr.CreateVia(in.Title, in.Project, in.GoalID, in.Prompt, in.Schedule, in.SchedulePrompt, in.Attachments, via(in.Via))
+	// A session calling (lifectl's X-Life-Thread) starts it: the new one is
+	// its sub-session, drawn under it, never loose as the owner's.
+	author := "owner"
+	if from := strings.TrimSpace(r.Header.Get("X-Life-Thread")); from != "" {
+		if _, err := s.thr.Get(from); err == nil {
+			author = "claude:thread:" + from
+		}
+	}
+	t, err := s.thr.CreateFrom(author, in.Title, in.Project, in.GoalID, in.Prompt, in.Schedule, in.SchedulePrompt, in.Attachments, via(in.Via))
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return

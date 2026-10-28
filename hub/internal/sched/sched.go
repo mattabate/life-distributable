@@ -505,6 +505,13 @@ func (s *Scheduler) runWith(name, via, promptID string) (int64, error) {
 			log.Printf("sched: run %d not closed: %v", id, uerr)
 		}
 		log.Printf("sched: job %s failed: %v", name, err)
+		// The model worked and answered in prose: whatever it found is in
+		// the run's output and nowhere else. One card says so (the same
+		// title supersedes itself while it stays open), rather than a
+		// failed run row nobody reads: a parse failure is a finding.
+		if s.Ask != nil && strings.Contains(err.Error(), "JSON") {
+			s.Ask(name, fmt.Sprintf("The %s job ended without its result block: read run %d, its findings reached no card", name, id))
+		}
 		return id, err
 	}
 	if _, uerr := s.db.Exec(`UPDATE runs SET finished_at=?, ok=1, summary=?, output=?, cost_usd=? WHERE id=?`, fin, out.Summary, out.Raw, out.Cost, id); uerr != nil {

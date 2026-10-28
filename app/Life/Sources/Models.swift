@@ -932,10 +932,12 @@ struct Board: Codable, Hashable {
     var headings: [BoardHeading]?
     var section: [String: String]?
     var pills: [String: [Pill]]?
+    /// A listed sub-session's card: the top of its chain.
+    var home: [String: String]?
     var badges: BoardBadges
 
     enum CodingKeys: String, CodingKey {
-        case surface, count, working, sessions, reads, installs, first, todo, detail, open, headings, section, pills, badges
+        case surface, count, working, sessions, reads, installs, first, todo, detail, open, headings, section, pills, home, badges
         case forYou = "for_you"
     }
 

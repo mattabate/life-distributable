@@ -1749,6 +1749,10 @@ func (c *Calendar) Resolve(id, state, by, note string) (Item, error) {
 		c.mu.Unlock()
 		return it, nil
 	}
+	if err := store.GuardOwnerClose(it.State, it.ResolvedBy, state, by, note); err != nil {
+		c.mu.Unlock()
+		return it, err
+	}
 	// Only a step a session waits on closes with words (and a soon to-do, whose
 	// words stay on its row). Homework, and any dated step no session is
 	// behind, is a completion — "I did this" — ticked from the row, or closed
