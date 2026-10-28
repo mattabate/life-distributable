@@ -42,4 +42,13 @@ final class MarkdownLinkTests: XCTestCase {
         XCTAssertEqual(got.map(\.url), ["https://g.test/pull/82"], "got: \(got)")
         XCTAssertEqual(got.map(\.text), ["PR"])
     }
+
+    /// "About" tildes stay literal, never strikethrough.
+    func testLoneTildeIsNotStrikethrough() {
+        let a = md("rent (~$2,600 by Nov 1) and the card (~$3,317).")
+        XCTAssertEqual(String(a.characters), "rent (~$2,600 by Nov 1) and the card (~$3,317).")
+        for run in a.runs {
+            XCTAssertFalse((run.inlinePresentationIntent ?? []).contains(.strikethrough))
+        }
+    }
 }

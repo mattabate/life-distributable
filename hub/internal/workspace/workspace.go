@@ -121,8 +121,19 @@ func (s *Store) Count(key string) int {
 	return len(fs)
 }
 
+// unprefix: a listing shows files as `<role>/<name>` and `cat` takes that
+// form, so a role may write with it too and land its files under
+// data/people/<role>/<role>/. The role is the folder, never part of the name.
+func unprefix(key, name string) string {
+	for strings.HasPrefix(name, key+"/") {
+		name = strings.TrimPrefix(name, key+"/")
+	}
+	return name
+}
+
 // Read: one file's bytes.
 func (s *Store) Read(key, name string) ([]byte, error) {
+	name = unprefix(key, name)
 	if err := checkName(name); err != nil {
 		return nil, err
 	}
@@ -136,6 +147,7 @@ func (s *Store) Read(key, name string) ([]byte, error) {
 // claude:thread:<id> — the session must play the role). An existing file is
 // first copied to .versions/<name>.<stamp>, so nothing is destroyed.
 func (s *Store) Write(key, name string, b []byte, by string) (File, error) {
+	name = unprefix(key, name)
 	if err := checkName(name); err != nil {
 		return File{}, err
 	}
@@ -180,6 +192,72 @@ func (s *Store) Write(key, name string, b []byte, by string) (File, error) {
 		return File{}, err
 	}
 	return File{Persona: key, Name: name, Bytes: info.Size(), UpdatedAt: info.ModTime().UTC().Format(time.RFC3339), Head: head(path)}, nil
+}
+
+// Unnest lifts the files a role wrote under its own doubled folder
+// (data/people/<role>/<role>/x to data/people/<role>/x) before unprefix
+// existed. The newer of the two copies wins and the other goes to
+// .versions/, so nothing is destroyed; the doubled folder is removed once
+// empty. Once at startup; idempotent. Returns "<role>/<name>" per file moved.
+func (s *Store) Unnest() []string {
+	ents, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return nil
+	}
+	var moved []string
+	for _, e := range ents {
+		role := e.Name()
+		if !e.IsDir() || strings.HasPrefix(role, ".") {
+			continue
+		}
+		nested := filepath.Join(s.Dir, role, role)
+		if st, err := os.Stat(nested); err != nil || !st.IsDir() {
+			continue
+		}
+		filepath.WalkDir(nested, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), ".") {
+				return nil
+			}
+			rel, _ := filepath.Rel(nested, path)
+			name := filepath.ToSlash(rel)
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			target := filepath.Join(s.Dir, role, rel)
+			if ti, err := os.Stat(target); err == nil {
+				ni, _ := d.Info()
+				if ni != nil && !ni.ModTime().After(ti.ModTime()) {
+					// The flat copy is newer: the nested one is the old version.
+					v := filepath.Join(s.Dir, role, ".versions", rel+"."+ni.ModTime().UTC().Format("20060102T150405"))
+					os.MkdirAll(filepath.Dir(v), 0o755)
+					if os.WriteFile(v, b, 0o644) == nil {
+						os.Remove(path)
+						moved = append(moved, role+"/"+name)
+					}
+					return nil
+				}
+			}
+			if _, err := s.Write(role, name, b, ""); err == nil {
+				os.Remove(path)
+				moved = append(moved, role+"/"+name)
+			}
+			return nil
+		})
+		// Drop the doubled folder's now-empty directories, deepest first.
+		var dirs []string
+		filepath.WalkDir(nested, func(path string, d fs.DirEntry, err error) error {
+			if err == nil && d.IsDir() {
+				dirs = append(dirs, path)
+			}
+			return nil
+		})
+		for i := len(dirs) - 1; i >= 0; i-- {
+			os.Remove(dirs[i]) // fails, harmlessly, when not empty
+		}
+	}
+	sort.Strings(moved)
+	return moved
 }
 
 func (s *Store) known(key string) bool {

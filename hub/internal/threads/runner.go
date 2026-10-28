@@ -54,7 +54,55 @@ const (
 	// (heldResult) becomes the reply anyway after this long with no output —
 	// the task's notification never came, and the text should not be lost.
 	holdTTL = 15 * time.Minute
+	// deadProbe: a process quiet for this long is asked for by name (tmux
+	// has-session), and asked again no more often than this. See gone.
+	deadProbe = time.Minute
 )
+
+// tmuxSession names the tmux session a run's claude lives in: the one
+// place the name is spelled, for launch, Stop, retries and gone.
+func (m *Manager) tmuxSession(threadID, runID string) string {
+	return fmt.Sprintf("%s-th-%s-%s", m.Prefix, threadID, runID)
+}
+
+// gone: has the run's tmux session disappeared under it? The run command ends
+// with `touch .done`, so a claude that exits (crashed, killed, out of budget)
+// leaves the marker and Poll settles it. Only the tmux server dying with the
+// process (a reboot, power loss, `tmux kill-server`) leaves a run with no
+// marker, and such a run stayed "running" on the board until the owner
+// pressed Stop. A process is settled only once it is OBSERVED gone: a run
+// quiet for deadProbe is asked for by name, at most once per deadProbe, and
+// a run that is still there is left alone. Caller holds m.mu.
+func (m *Manager) gone(r run, now time.Time) bool {
+	if now.Sub(r.lastOutput) < deadProbe || now.Sub(m.probed[r.id]) < deadProbe {
+		return false
+	}
+	if m.probed == nil {
+		m.probed = map[string]time.Time{}
+	}
+	m.probed[r.id] = now
+	if _, err := m.Run("tmux", "has-session", "-t", m.tmuxSession(r.thread, r.id)); err == nil {
+		return false
+	}
+	delete(m.probed, r.id)
+	return true
+}
+
+// goneText is what a gone run died of, in the error card's and the retry's
+// words (transientRe matches it: the turn wants starting again).
+const goneText = "the session's process is gone (its tmux session was not found)"
+
+// finishGone settles a run whose tmux session is no longer there (gone). A
+// turn in flight is the transient case: its input goes back on the queue and
+// a fresh process picks it up, two tries, then the error card, as for a
+// 5xx. An idle process just closes; a queued message starts the next.
+func (m *Manager) finishGone(r run) {
+	log.Printf("thread %s: process %s: %s", r.thread, r.id, goneText)
+	if r.busy == 1 {
+		os.WriteFile(r.out+".err", []byte(goneText), 0o600)
+	}
+	m.finishProcess(r)
+}
 
 type run struct {
 	id, thread, out, in, trigger string
@@ -378,6 +426,7 @@ func (m *Manager) runRef(id, author, role, kind, text string, attachments []stri
 
 type queuedMsg struct {
 	id   int64
+	role string
 	kind string
 	text string
 	atts []string
@@ -391,7 +440,7 @@ type queuedMsg struct {
 }
 
 func (m *Manager) queued(threadID string) ([]queuedMsg, error) {
-	rows, err := m.db.Query(`SELECT id, kind, text, attachments, in_reply_to, outcome, replies, ts, via FROM thread_messages WHERE thread_id=? AND queued=1 ORDER BY id`, threadID)
+	rows, err := m.db.Query(`SELECT id, role, kind, text, attachments, in_reply_to, outcome, replies, ts, via FROM thread_messages WHERE thread_id=? AND queued=1 ORDER BY id`, threadID)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +449,7 @@ func (m *Manager) queued(threadID string) ([]queuedMsg, error) {
 	for rows.Next() {
 		var x queuedMsg
 		var att, ref, outcome, replies, sent string
-		rows.Scan(&x.id, &x.kind, &x.text, &att, &ref, &outcome, &replies, &sent, &x.via)
+		rows.Scan(&x.id, &x.role, &x.kind, &x.text, &att, &ref, &outcome, &replies, &sent, &x.via)
 		json.Unmarshal([]byte(att), &x.atts)
 		x.replies = decodeReplies(replies, ref, outcome)
 		x.ts = parseTS(sent)
@@ -648,6 +697,20 @@ func (m *Manager) deliver(t Thread, r run) error {
 		return err
 	}
 	midTurn := r.busy == 1
+	if midTurn {
+		// Only the owner's words steer (runRef): a relay held for the end of
+		// the turn stays held when the owner writes, not swept in beside
+		// their message.
+		mine := qs[:0]
+		for _, q := range qs {
+			if q.role == "owner" {
+				mine = append(mine, q)
+			}
+		}
+		if qs = mine; len(qs) == 0 {
+			return nil
+		}
+	}
 	p, err := m.prompt(t, qs, midTurn, false)
 	if err != nil {
 		return err
@@ -771,7 +834,7 @@ func (m *Manager) launch(t Thread) error {
 		cmd += " " + shellQuote(a)
 	}
 	cmd += fmt.Sprintf(" > %s 2>%s.err; touch %s.done", shellQuote(base+".out"), shellQuote(base+".out"), shellQuote(base+".out"))
-	tmuxName := fmt.Sprintf("%s-th-%s-%s", m.Prefix, t.ID, runID)
+	tmuxName := m.tmuxSession(t.ID, runID)
 	if out, err := m.Run("tmux", "new-session", "-d", "-s", tmuxName, "-c", dir, cmd); err != nil {
 		return fmt.Errorf("tmux: %s", strings.TrimSpace(string(out)))
 	}
@@ -944,7 +1007,7 @@ func (m *Manager) killRuns(id, note, status string) error {
 	now := time.Now()
 	for _, runID := range runs {
 		// Ignore "no such session": the process may already be gone.
-		m.Run("tmux", "kill-session", "-t", fmt.Sprintf("%s-th-%s-%s", m.Prefix, id, runID))
+		m.Run("tmux", "kill-session", "-t", m.tmuxSession(id, runID))
 		m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0 WHERE id=?`, ts(now), runID)
 	}
 	// Anything not yet handed over stays queued for the next process.
@@ -982,6 +1045,10 @@ func (m *Manager) Poll() {
 				r = m.finishTurn(r, h)
 			}
 			m.finishProcess(r)
+			continue
+		}
+		if m.gone(r, now) {
+			m.finishGone(r)
 			continue
 		}
 		if r.in == "" {
@@ -2005,7 +2072,7 @@ func (m *Manager) relaunchBelow(r run, text string) bool {
 		return false
 	}
 	now := time.Now()
-	m.Run("tmux", "kill-session", "-t", fmt.Sprintf("%s-th-%s-%s", m.Prefix, r.thread, r.id))
+	m.Run("tmux", "kill-session", "-t", m.tmuxSession(r.thread, r.id))
 	m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0, cost_seen=? WHERE id=?`, ts(now), r.costSeen, r.id)
 	// Every message this process has seen since its last settled turn goes
 	// back on the queue (turn ids are <run>, <run>-t2, …).

@@ -122,7 +122,10 @@ type Board struct {
 	Headings []Heading                 `json:"headings"`
 	Section  map[string]string         `json:"section"`
 	Pills    map[string][]threads.Pill `json:"pills"`
-	Badges   Badges                    `json:"badges"`
+	// Home: per listed sub-session, the session at the top of its chain,
+	// the card it draws as a cell on. A session absent from Home is a row.
+	Home   map[string]string `json:"home"`
+	Badges Badges            `json:"badges"`
 }
 
 // Heading is one group on the Sessions page. N is how many sessions it holds
@@ -197,26 +200,39 @@ func (b *Board) headings(ths []threads.Thread) {
 			b.Pills[t.ID] = append(b.Pills[t.ID], threads.StatusPill(rest))
 		}
 	}
-	// A listed sub-session pulls the session that started it (ParentID) onto
-	// the list, under the more urgent heading of the two, so the surfaces can
-	// draw the child nested under it. The child keeps its own entry; the
-	// counts stay the cards' and their sessions'.
+	// A listed sub-session pulls the session at the top of its chain (ParentID
+	// up to the first one with no live parent) onto the list, under the more
+	// urgent heading of the two, and Home files the child under it, so the
+	// surfaces draw it as a cell on that card. Only the top is pulled: a chain
+	// of runs, each started by the last, would otherwise put its first, done,
+	// run on the list as an empty "idle" row while the runs under it drew
+	// nowhere. The child keeps its own entry; the counts stay the cards' and
+	// their sessions'.
 	rank := map[string]int{"working": 1, "your_turn": 2}
-	alive := map[string]bool{}
+	parent := map[string]string{}
 	for _, t := range ths {
-		alive[t.ID] = true
+		parent[t.ID] = t.ParentID
 	}
-	for moved := true; moved; { // until a grandchild has reached the top
-		moved = false
-		for _, t := range ths {
-			sec, ok := b.Section[t.ID]
-			if !ok || t.ParentID == "" || !alive[t.ParentID] {
-				continue
+	b.Home = map[string]string{}
+	for _, t := range ths {
+		sec, ok := b.Section[t.ID]
+		if !ok {
+			continue
+		}
+		top, seen := t.ID, map[string]bool{t.ID: true}
+		for {
+			p := parent[top]
+			if _, live := parent[p]; p == "" || !live || seen[p] {
+				break
 			}
-			if rank[sec] > rank[b.Section[t.ParentID]] {
-				b.Section[t.ParentID] = sec
-				moved = true
-			}
+			top, seen[p] = p, true
+		}
+		if top == t.ID {
+			continue
+		}
+		b.Home[t.ID] = top
+		if rank[sec] > rank[b.Section[top]] {
+			b.Section[top] = sec
 		}
 	}
 	inSessions := func(cards, n int) string {

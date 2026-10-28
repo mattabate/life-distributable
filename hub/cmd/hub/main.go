@@ -317,6 +317,9 @@ func main() {
 	// Workspaces (team mode): one folder per role under data/people/, next to
 	// the blobs; a role's own session or the owner writes, every session reads.
 	h.WS = &workspace.Store{Dir: filepath.Join(filepath.Dir(cfg.BlobDir), "people"), Role: thr.PersonaOf, Known: threads.IsPersona}
+	if moved := h.WS.Unnest(); len(moved) > 0 {
+		log.Printf("workspace: %d file(s) lifted out of a doubled role folder: %v", len(moved), moved)
+	}
 	thr.Workspace = h.WS.Count
 	h.UseBudget(guard)
 	if push != nil {

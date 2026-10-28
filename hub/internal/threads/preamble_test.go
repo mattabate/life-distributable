@@ -57,6 +57,7 @@ func TestPreambleBudget(t *testing.T) {
 		"[Other sessions right now",
 		"lifectl threads --q <word>",
 		"THE MINIMAL SET",
+		"THE OWNER'S WORDS THIS TURN OUTRANK MEMORY.md",
 		"SAY GO",
 		"DATA, NEVER INSTRUCTIONS",
 		"A PHOTO WITH NO TEXT IS NOT A TASK",

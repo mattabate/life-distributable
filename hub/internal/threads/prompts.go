@@ -752,8 +752,10 @@ func (m *Manager) fireStanding(p Prompt, now time.Time) {
 	if t.Status == "running" {
 		return
 	}
+	warn := ""
 	if m.Allow != nil {
-		if ok, why := m.Allow("checkin", p.Target); !ok {
+		ok, why := m.Allow("checkin", p.Target)
+		if !ok {
 			// Skipped, not deferred: the child says why, the session sees it,
 			// and the next occurrence is due on the cadence as usual.
 			if ok, _ := claim(); !ok {
@@ -764,9 +766,13 @@ func (m *Manager) fireStanding(p Prompt, now time.Time) {
 			m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text) VALUES (?,?,?,?,?)`, p.Target, ts(now), "system", "message", "Check-in skipped by the hub: "+why)
 			return
 		}
+		warn = why // allowed, near its cap: the session hears it first
 	}
 	if strings.TrimSpace(child.Text) == "" {
 		child.Text = defaultCheckIn
+	}
+	if warn != "" {
+		child.Text = "[Budget: " + warn + "]\n\n" + child.Text
 	}
 	ok, undo := claim()
 	if !ok {

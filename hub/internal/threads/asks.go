@@ -894,6 +894,11 @@ func (m *Manager) ResolveAsk(id, state, by, note string) (Ask, error) {
 	if state != "done" && state != "dismissed" && state != "open" {
 		return a, errors.New("state must be done|dismissed|open")
 	}
+	if a.State != state {
+		if err := store.GuardOwnerClose(a.State, a.ResolvedBy, state, by, note); err != nil {
+			return a, err
+		}
+	}
 	if a.Step() {
 		// A fired step IS its card (step 11): closing the card closes the step,
 		// through the calendar, which owns what a step's close means.

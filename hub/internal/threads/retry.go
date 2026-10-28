@@ -31,7 +31,7 @@ var apiErrorRe = regexp.MustCompile(`API Error:\s*(\d{3})`)
 // transientRe: failures that are the provider's or the network's, not the
 // run's, and that a second attempt usually clears. 4xx other than 429 is our
 // own bad request and repeats identically, so it is not here.
-var transientRe = regexp.MustCompile(`API Error:\s*(?:429|5\d\d)|Overloaded|overloaded_error|Connection error|fetch failed`)
+var transientRe = regexp.MustCompile(`API Error:\s*(?:429|5\d\d)|Overloaded|overloaded_error|Connection error|fetch failed|process is gone`)
 
 // maxAutoRetries: how many times the hub restarts a turn on its own before it
 // puts the error on the board. Two covers a blip; more would hide a session
@@ -113,7 +113,7 @@ func (m *Manager) retryTransient(r run, text string) bool {
 	}
 	m.retries[r.thread]++
 	now := time.Now()
-	m.Run("tmux", "kill-session", "-t", fmt.Sprintf("%s-th-%s-%s", m.Prefix, r.thread, r.id))
+	m.Run("tmux", "kill-session", "-t", m.tmuxSession(r.thread, r.id))
 	m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0, cost_seen=? WHERE id=?`, ts(now), r.costSeen, r.id)
 	turn := r.turnID()
 	if m.requeueTurn(turn) == 0 {

@@ -60,12 +60,11 @@ struct ThreadsView: View {
     }
     /// A session another one started is a row on that one's card, whatever
     /// heading it would have had; views/threads.js drawList draws the same.
-    func nested(_ t: Thread) -> Bool {
-        guard let p = t.parent_id, p != t.id else { return false }
-        return threads.contains { $0.id == p && turn.sectionOf($0) != nil }
-    }
+    /// The hub's `home` names the card: the top of the chain, so a run
+    /// started by a run started by a session is a cell on that session's.
+    func nested(_ t: Thread) -> Bool { turn.home?[t.id] != nil }
     func subs(_ t: Thread) -> [Thread] {
-        threads.filter { $0.parent_id == t.id && nested($0) && turn.sectionOf($0) != nil }
+        threads.filter { turn.home?[$0.id] == t.id && turn.sectionOf($0) != nil }
     }
     var body: some View {
         #if targetEnvironment(macCatalyst)

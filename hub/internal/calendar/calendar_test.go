@@ -287,6 +287,33 @@ func TestOwnerStepClosesWithWords(t *testing.T) {
 	}
 }
 
+// A session never rewrites the owner's close of a calendar item: no relabel,
+// a reopen only with the reason; the owner's own Reopen always works.
+func TestSessionNeverRewritesOwnerClose(t *testing.T) {
+	c, th, _ := newTest(t)
+	tr, err := th.Create("Security", "life", "", "p", "", "decider", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ses := "claude:thread:" + tr.ID
+	it, _ := c.Add(Item{Title: "Renew parking", Day: day(time.Now()), Kind: "owner", ThreadID: tr.ID})
+	if _, err := c.Resolve(it.ID, "done", "owner", "renewed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Resolve(it.ID, "dismissed", ses, "moot"); !errors.Is(err, store.ErrOwnerClose) {
+		t.Fatalf("a session relabelled the owner's done: %v", err)
+	}
+	if _, err := c.Resolve(it.ID, "scheduled", ses, ""); !errors.Is(err, store.ErrOwnerClose) {
+		t.Fatalf("a session reopened with no words: %v", err)
+	}
+	if got, _ := c.Get(it.ID); got.State != "done" {
+		t.Fatalf("the owner's close moved: %+v", got)
+	}
+	if _, err := c.Resolve(it.ID, "scheduled", ses, "the receipt was for the wrong order"); err != nil {
+		t.Fatalf("a reopen with the reason must pass: %v", err)
+	}
+}
+
 // Talking about one of the owner's steps is not doing it: a prompt at
 // `cal:<id>` with no outcome — the Respond sheet's "Reply" — reaches the
 // session and leaves the item exactly where it was. Delivery closes an AGENT

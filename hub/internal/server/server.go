@@ -4,6 +4,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
@@ -282,10 +283,20 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
+// writeJSON encodes before it writes: a NaN or Inf anywhere in v (a divide
+// by zero) used to send a 200 with an empty body, and the page went blank
+// with nothing in the log. Now it is a 500 that names the problem.
 func writeJSON(w http.ResponseWriter, code int, v any) {
+	var b bytes.Buffer
+	if err := json.NewEncoder(&b).Encode(v); err != nil {
+		log.Printf("writeJSON: %v", err)
+		b.Reset()
+		code = 500
+		json.NewEncoder(&b).Encode(map[string]string{"error": "the answer could not be encoded: " + err.Error()})
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
+	w.Write(b.Bytes())
 }
 
 func jsonErr(w http.ResponseWriter, code int, msg string) {

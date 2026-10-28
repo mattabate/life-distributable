@@ -262,9 +262,16 @@ func (g *Guard) Clear() State {
 	return g.State()
 }
 
+// ThreadWarnAt: the share of the per-thread cap past which an allowed
+// check-in is told how much room is left, so a session finishes what matters
+// before the cap stops it rather than being cut off mid-plan.
+const ThreadWarnAt = 0.75
+
 // Allow answers "may this unattended wake run now?" for a check-in
 // (kind=checkin, id=thread), a job (kind=job, id=name) or a calendar agent
-// item (kind=cal, id=item). The reason is for the log/digest when not.
+// item (kind=cal, id=item). The reason is for the log/digest when not. An
+// allowed check-in past ThreadWarnAt of its cap comes back true with a
+// warning the caller puts in front of the session.
 func (g *Guard) Allow(kind, id string) (bool, string) {
 	if g == nil {
 		return true, ""
@@ -273,8 +280,12 @@ func (g *Guard) Allow(kind, id string) (bool, string) {
 		return false, st.Note
 	}
 	if kind == "checkin" && g.ThreadDailyUSD > 0 {
-		if spent := g.ThreadSpentToday(id); spent >= g.ThreadDailyUSD {
+		spent := g.ThreadSpentToday(id)
+		if spent >= g.ThreadDailyUSD {
 			return false, fmt.Sprintf("thread spent $%.2f today (cap $%.0f) — next wake tomorrow", spent, g.ThreadDailyUSD)
+		}
+		if spent >= ThreadWarnAt*g.ThreadDailyUSD {
+			return true, fmt.Sprintf("this session has spent $%.2f of its $%.0f for today: $%.2f left, then no wake until tomorrow, so finish what matters first", spent, g.ThreadDailyUSD, g.ThreadDailyUSD-spent)
 		}
 	}
 	return true, ""

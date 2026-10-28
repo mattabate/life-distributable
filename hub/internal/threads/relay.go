@@ -203,7 +203,7 @@ const boardCap = 30
 // later message. Reading it wakes nobody; what the owner's message resolves
 // is closed or reworded by whoever read it.
 func (m *Manager) boardHeader(self string) string {
-	today := time.Now().Format("2006-01-02")
+	today := store.Day(time.Now())
 	rows, err := m.db.Query(`SELECT i.id, i.src, `+store.CardKind("i")+`, i.state, i.title, COALESCE(i.thread_id,''), COALESCE(t.title,''), i.day, i.win, i.lane
 		FROM items i LEFT JOIN threads t ON t.id=i.thread_id
 		WHERE COALESCE(i.thread_id,'') != ? AND (

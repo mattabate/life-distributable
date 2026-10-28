@@ -356,9 +356,8 @@ struct ChatRow<Content: View>: View {
         }
         .background(mine ? Color.primary.opacity(0.07) : Color(.systemBackground), in: RoundedRectangle(cornerRadius: 8))
         .overlay { if !mine { RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1), lineWidth: 1) } }
-        #if targetEnvironment(macCatalyst)
-        .frame(maxWidth: 860, alignment: .leading)
-        #endif
+        // The cards' width, never a column of its own: a width cap left the
+        // owner's row stopping short under full-width cards.
         .padding(.horizontal)
     }
 }

@@ -585,3 +585,43 @@ Entry format:
   `focusNeedsFull`), `web/app.css` (`.msgs .chat-mode`),
   `web/test/sending.test.js`, `ThreadDetail.swift` (`full`, `openCells`,
   the mode button above Show earlier).
+
+## add-0043 · 2026-10-28 · Chat rows span the pane
+- For: everyone
+- Offer: A chat's message rows and cards now use the full width of the pane, as its cards already did. Web and desktop.
+- How: same merge as add-0008. By hand: `web/skin.css` (the 860px cap on `.msgs > .chat-row, .msgs > .ask` removed), `Card.swift` (`ChatRow` drops `maxWidth: 860`).
+
+## add-0044 · 2026-10-28 · A lone tilde stays a tilde
+- For: everyone
+- Offer: A single `~` (as in "~$2,600") shows as a literal tilde on the phone and desktop instead of striking the text through; `~~pairs~~` still strike.
+- How: same merge as add-0008. By hand: `StyledText.swift` (`escapingStrayAsterisks` also escapes a lone tilde outside code), `MarkdownLinkTests.swift`.
+
+## add-0045 · 2026-10-28 · Midnight turns the page
+- For: everyone
+- Offer: A Calendar page left open overnight moves to the new day at midnight, and the console counts a new day as a change; `.gitignore` anchors `/data/`, so a nested `data` folder in a package is never ignored.
+- How: same merge as add-0008. By hand: `CalendarView.swift` (`.NSCalendarDayChanged`), `web/app.js` (`longPoll`), `.gitignore`.
+
+## add-0046 · 2026-10-28 · Sessions and their sub-sessions
+- For: everyone
+- Offer: A session created by another session (`lifectl thread new`, which now sends `X-Life-Thread`) is its sub-session, and a run started by a run is drawn as a cell on the card of the session at the top of its chain (the board's new `home` map), never as a row per link. The "starting · N s" line counts from the turn's real start, not from when the queued message was filed.
+- How: same merge as add-0008. By hand: `server/threads.go` (`createThread` reads the header, `CreateFrom`), `cmd/lifectl/main.go`, `attention/attention.go` (`Board.Home`, chain tops), `web/views/threads.js` and `ThreadsView.swift` (nest by `home`), `ThreadDetail.swift` and `threads.js` (`startingSince`), `shared/api.md`, `fixtures/board.json`.
+
+## add-0047 · 2026-10-28 · A dead run settles, only the owner steers
+- For: everyone
+- Offer: A session whose tmux process vanished without finishing (a reboot, `tmux kill-server`) no longer shows as running forever: the hub checks for it once a minute after it goes quiet, replays an in-flight turn twice, then raises an error card, and closes an idle one. A relay waiting for the end of a turn is no longer pushed into the running turn when the owner writes. A rename or persona change no longer writes back a stale status.
+- How: same merge as add-0008. By hand: `threads/runner.go`, `threads/retry.go` (one `tmuxSession` name helper, the probe), `threads/threads.go`, `threads/prompts.go`, tests.
+
+## add-0048 · 2026-10-28 · The owner's close stands
+- For: everyone
+- Offer: A session can no longer relabel an ask or calendar item the owner closed (done to dismissed or back), and reopens one only with a reason; the owner's own surfaces and the hub's reconcilers still can.
+- How: same merge as add-0008. By hand: `store/close.go` (`GuardOwnerClose`, `ErrOwnerClose`), `calendar.Resolve`, `threads/asks.go` (`ResolveAsk`), tests.
+
+## add-0049 · 2026-10-28 · Workspace names, warnings and errors that say it all
+- For: everyone
+- Offer: A workspace file named with its role's folder in front (the form a listing shows) means the bare name, and files already stored under a doubled role folder move up at startup (the newer copy wins, the other is kept under `.versions/`). A check-in past 75% of its daily cap opens with a line saying how much is left. A scheduled job that ends without its result block raises one ask naming the run. An answer that cannot be encoded is a 500 that says so, never an empty 200, and a bad `hub.json` lists every missing field at once. A test fails on any code that takes today from the process time zone instead of `store.Day`.
+- How: same merge as add-0008. By hand: `workspace/workspace.go` (`unprefix`, `Unnest`, called from `cmd/hub/main.go`), `budget/budget.go` (`ThreadWarnAt`), `threads` (`fireStanding`), `sched/sched.go`, `server/server.go` (`writeJSON`), `config/config.go`, `store/hygiene_test.go`, `recs/flow.go`, `threads/relay.go`.
+
+## add-0050 · 2026-10-28 · Three preamble lines
+- For: everyone
+- Offer: Sessions are told that a fan-out is the Agent tool inside the turn (never a new session per worker), that a draft others will read goes to a fresh critic first (claims against sources, voice, links), and that the owner's words this turn outrank memory, workspace and goal notes. The preamble stays under its 12000-byte budget.
+- How: same merge as add-0008. By hand: the preamble in `threads`, `preamble_test.go`.

@@ -30,6 +30,11 @@ func setupAt(t *testing.T, dir string) (*Manager, *nfy, *[]string) {
 	}
 	var cmds []string
 	m.Run = func(name string, args ...string) ([]byte, error) {
+		// Every process is alive, and the liveness probe (runner.go gone)
+		// is not a launch or a kill: it is not counted.
+		if len(args) > 0 && args[0] == "has-session" {
+			return nil, nil
+		}
 		cmds = append(cmds, strings.Join(append([]string{name}, args...), " "))
 		return nil, nil
 	}

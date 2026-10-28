@@ -133,20 +133,24 @@ func Load(path string) (*Config, error) {
 	for i := range c.Projects {
 		c.Projects[i].Dir = expand(c.Projects[i].Dir)
 	}
+	// Every problem at once, one line: a moved hub.json is fixed in one
+	// restart, not one per missing field.
+	var bad []string
 	if c.ClaudeBin == "" {
-		return nil, fmt.Errorf("claude_bin required (run `which claude`)")
-	}
-	if _, err := os.Stat(c.ClaudeBin); err != nil {
-		return nil, fmt.Errorf("claude_bin: %w", err)
+		bad = append(bad, "claude_bin required (run `which claude`)")
+	} else if _, err := os.Stat(c.ClaudeBin); err != nil {
+		bad = append(bad, fmt.Sprintf("claude_bin: %v", err))
 	}
 	if c.DBPath == "" {
-		return nil, fmt.Errorf("db_path required")
+		bad = append(bad, "db_path required")
 	}
 	if c.ListenAddr == "" {
-		return nil, fmt.Errorf("listen_addr required")
+		bad = append(bad, "listen_addr required")
+	} else if strings.HasPrefix(c.ListenAddr, "0.0.0.0") || strings.HasPrefix(c.ListenAddr, ":") {
+		bad = append(bad, fmt.Sprintf("listen_addr %q would bind all interfaces, refused", c.ListenAddr))
 	}
-	if strings.HasPrefix(c.ListenAddr, "0.0.0.0") || strings.HasPrefix(c.ListenAddr, ":") {
-		return nil, fmt.Errorf("listen_addr %q would bind all interfaces; refuse", c.ListenAddr)
+	if len(bad) > 0 {
+		return nil, fmt.Errorf("%s: %s", path, strings.Join(bad, "; "))
 	}
 	return c, nil
 }

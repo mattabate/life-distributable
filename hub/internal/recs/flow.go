@@ -163,8 +163,8 @@ func (f *Flow) Related(rec Rec) Related {
 	// The rest of the plan for this goal: what is open on the calendar in
 	// the next two months that the rec does not itself name.
 	if f.Cal != nil && rec.GoalID != "" {
-		today := time.Now().Format("2006-01-02")
-		if items, err := f.Cal.List(today, time.Now().AddDate(0, 0, 60).Format("2006-01-02"), ""); err == nil {
+		today := store.Day(time.Now())
+		if items, err := f.Cal.List(today, store.Day(time.Now().AddDate(0, 0, 60)), ""); err == nil {
 			for _, it := range items {
 				if it.GoalID != rec.GoalID || seen[it.ID] || (it.State != "scheduled" && it.State != "fired") {
 					continue

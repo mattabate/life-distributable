@@ -80,6 +80,11 @@ struct CalendarView: View {
                 #endif
             }
             .task(id: modeRaw + anchor) { await load() }
+            // Midnight turns the page: the day-change notice re-guesses today,
+            // the anchor moves, and the load's answer is the hub's day. A page
+            // left open overnight kept yesterday's today until the next step
+            // or pull.
+            .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in today = dayString(Date()) }
             #if !targetEnvironment(macCatalyst)
             // The desktop draws the panel inside the page (`macPanel`), never
             // as a sheet.
