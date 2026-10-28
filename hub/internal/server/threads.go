@@ -177,6 +177,18 @@ func (s *Server) threadEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, evs)
 }
 
+// threadTaskEvents: one Agent helper's steps, read from its CLI transcript
+// (threads.TaskEvents); 404 when the session has no such helper.
+func (s *Server) threadTaskEvents(w http.ResponseWriter, r *http.Request) {
+	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+	evs, err := s.thr.TaskEvents(r.PathValue("id"), r.PathValue("task"), since, qInt(r, "limit", 500, 2000))
+	if err != nil {
+		jsonErr(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, evs)
+}
+
 // threadSteps: how many steps sit under each message of the chat, counted in
 // SQL. The headline of a run block comes from here, so it is right however
 // many events the client happens to hold.

@@ -436,6 +436,21 @@ final class HubClient {
     func threads(archived: Bool = false) async throws -> [Thread] { try await request("GET", archived ? Self.threadsPath + "?archived=1" : Self.threadsPath) }
     func thread(_ id: String) async throws -> Thread { try await request("GET", "/api/v1/threads/\(id)", cache: true) }
     func threadMessages(_ id: String) async throws -> [ThreadMessage] { try await request("GET", Self.messagesPath(id), cache: true) }
+    /// The turn's events for the tool chain: the newest `limit` (since 0), the
+    /// oldest after `since`, or the newest before `before`, the hub's rule
+    /// for a window that moves (threads.Events).
+    func threadEvents(_ id: String, since: Int64 = 0, before: Int64 = 0, limit: Int) async throws -> [ThreadEvent] {
+        var q = "limit=\(limit)"
+        if since > 0 { q += "&since=\(since)" }
+        if before > 0 { q += "&before=\(before)" }
+        return try await request("GET", "/api/v1/threads/\(id)/events?\(q)")
+    }
+    /// One Agent helper's own steps (turn_tasks id), the same shape; throws
+    /// when the hub has no transcript for it.
+    func taskEvents(_ id: String, task: String, since: Int64 = 0) async throws -> [ThreadEvent] {
+        let t = task.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? task
+        return try await request("GET", "/api/v1/threads/\(id)/tasks/\(t)/events?limit=500" + (since > 0 ? "&since=\(since)" : ""))
+    }
     nonisolated static let threadsPath = "/api/v1/threads"
     nonisolated static func messagesPath(_ id: String) -> String { "/api/v1/threads/\(id)/messages?limit=200" }
     /// The board this app asks for: `mobile` on the phone,

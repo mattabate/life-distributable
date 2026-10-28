@@ -72,6 +72,7 @@ func (s *Server) routes() []route {
 		{"GET /api/v1/threads/{id}/messages", s.threadMessages, false},
 		{"POST /api/v1/threads/{id}/messages", s.sendThread, false},
 		{"GET /api/v1/threads/{id}/events", s.threadEvents, false},
+		{"GET /api/v1/threads/{id}/tasks/{task}/events", s.threadTaskEvents, false},
 		{"GET /api/v1/threads/{id}/steps", s.threadSteps, false},
 		{"GET /api/v1/changes", s.changes, false},
 		{"POST /api/v1/threads/{id}/checkin", s.checkinThread, false},

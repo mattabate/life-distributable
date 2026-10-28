@@ -625,3 +625,13 @@ Entry format:
 - For: everyone
 - Offer: Sessions are told that a fan-out is the Agent tool inside the turn (never a new session per worker), that a draft others will read goes to a fresh critic first (claims against sources, voice, links), and that the owner's words this turn outrank memory, workspace and goal notes. The preamble stays under its 12000-byte budget.
 - How: same merge as add-0008. By hand: the preamble in `threads`, `preamble_test.go`.
+
+## add-0051 · 2026-10-28 · The running turn's tool chain
+- For: everyone
+- Offer: The "N tool calls" count on a running turn's working line opens that turn's tool chain again: each call with its result, what it is doing now and what it waits on. With helpers out, the line says "N subagents running" and the chain is a row per worker (the session's own calls, then one row per helper), each opening on a second click to that helper's own calls. A thread now carries `turn_tasks` (the background tasks the turn waits on) and `GET /api/v1/threads/{id}/tasks/{task}/events` reads one helper's steps from its CLI transcript, read-only. Web, phone and desktop.
+- How: same merge as add-0008. By hand: `threads/threads.go` (`TurnTask`, `bg_list` migration, `turnCols`, `scan`), `threads/runner.go`, `threads/tasks.go` (new), `server/routes.go` + `server/threads.go` (`threadTaskEvents`), `shared/api.md`, `web/ui.js` (`toolChain`, `helpersWords`), `web/views/threads.js` (`chainHTML`, `loadChain`, `loadSubs`), `web/app.css`, `Models.swift` (`TurnTask`, `ThreadEvent.ts`), `HubClient.swift` (`taskEvents`), `Format.swift` (`toolChain`), `ThreadDetail.swift` (`chainView`, `workerRow`), `ThreadRows.swift`, `ops/web-preview.html`, tests (`tasks_test.go`, `runner_test.go`, `sending.test.js`, `FormatTests.swift`).
+
+## add-0052 · 2026-10-28 · A running chain is working
+- For: everyone
+- Offer: A session with a turn running under it (its own, or a sub-session's anywhere down its chain) is filed under Working, cards or not, and wears "running" or "N running" on every surface; Working outranks Your turn when a sub-session pulls its chain top onto the list.
+- How: same merge as add-0008. By hand: `attention/attention.go` (`Live`, `headings`, `BuildRows`), `attention_test.go`.

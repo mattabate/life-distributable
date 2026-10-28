@@ -4,6 +4,36 @@ import XCTest
 @testable import Life
 
 final class FormatTests: XCTestCase {
+    // The tool chain under a working line, the console's toolChain
+    // (sending.test.js): the same events, the same rows.
+    func testToolChain() {
+        func ev(_ id: Int64, _ kind: String, _ title: String, _ body: String = "", _ summary: String = "") -> ThreadEvent {
+            ThreadEvent(id: id, run_id: "r", kind: kind, title: title, body: body, summary: summary)
+        }
+        let evs = [
+            ev(1, "tool_result", "result", "answers a call before the window"),
+            ev(2, "tool_use", "Bash · make check", "", "Run the checks"),
+            ev(3, "tool_result", "error", "Exit code 1"),
+            ev(4, "tool_use", "Agent · Survey the literature", "", "Delegate: Survey the literature"),
+            ev(5, "tool_result", "result", "Async agent launched successfully."),
+            ev(6, "tool_use", "Agent · Review the diff", "", "Delegate: Review the diff"),
+            ev(7, "thinking", "", "hmm"),
+            ev(8, "tool_use", "Read · README.md", "", "Read README.md"),
+        ]
+        let ch = toolChain(evs, tasks: nil)
+        XCTAssertEqual(ch.steps.map(\.label), ["Run the checks", "Survey the literature", "Review the diff", "Read README.md"])
+        XCTAssertEqual(ch.steps.map(\.open), [false, false, true, true])
+        XCTAssertEqual(ch.steps.map(\.error), [true, false, false, false])
+        XCTAssertEqual(ch.helpers, ["Survey the literature", "Review the diff"])
+        XCTAssertEqual(ch.waiting, ["Read README.md"])
+        XCTAssertEqual(toolChain(evs, tasks: []).helpers, ["Review the diff"])
+        XCTAssertEqual(toolChain(evs, tasks: [TurnTask(id: "a", type: "local_agent", subagent_type: nil, description: "Survey the literature"),
+                                              TurnTask(id: "b", type: "local_bash", subagent_type: nil, description: "make ship")]).helpers,
+                       ["Survey the literature", "Review the diff"])
+        XCTAssertEqual(helpersWords(1), "1 subagent running")
+        XCTAssertEqual(helpersWords(3), "3 subagents running")
+    }
+
     func testSharedCases() throws {
         // The simulator shares the Mac's filesystem, so the repo file is readable.
         let url = URL(fileURLWithPath: #filePath)

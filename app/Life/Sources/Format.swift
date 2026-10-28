@@ -309,7 +309,72 @@ func turnFactsLine(calls n: Int?, at: Date?, cost: Double?, withCalls: Bool = tr
     return parts.joined(separator: " · ")
 }
 
+/// One Agent helper's steps as read so far (GET /threads/{id}/tasks/{task}/events):
+/// ok once the hub served it, tried so a 404 is asked once per opening.
+struct SubChain: Equatable {
+    var ok = false
+    var open = false
+    var tried = false
+    var evs: [ThreadEvent] = []
+    var last: Int64 = 0
+}
+
+/// THE TOOL CHAIN of the turn in flight, the console's `toolChain` (ui.js;
+/// keep them in step): its calls in order, each answered by the next
+/// tool_result (a result before any call, the window opening mid-turn,
+/// answers nothing), the ones still open being what it is waiting on; and
+/// its Agent-tool helpers running (the hub's `turn_tasks` list when it sends
+/// one, else every launched helper for the rest of the turn): "3 subagents
+/// running", each by its description.
+struct ToolChain: Equatable {
+    struct Step: Equatable, Identifiable {
+        var id: Int64
+        var label: String
+        var agent: Bool
+        var open = true
+        var error = false
+        var launched = false
+    }
+    var steps: [Step] = []
+    var helpers: [String] = []
+    var waiting: [String] { steps.filter { $0.open && !$0.agent }.map(\.label) }
+}
+
+func agentLabel(_ title: String) -> String? {
+    for p in ["Agent", "Task"] {
+        if title == p { return "helper" }
+        if title.hasPrefix(p + " · ") { let s = String(title.dropFirst(p.count + 3)); return s.isEmpty ? "helper" : s }
+    }
+    return nil
+}
+
+func toolChain(_ evs: [ThreadEvent], tasks: [TurnTask]?) -> ToolChain {
+    var c = ToolChain()
+    var open: [Int] = []
+    for e in evs {
+        if e.kind == "tool_use" {
+            let a = agentLabel(e.title)
+            c.steps.append(.init(id: e.id, label: a ?? (!e.summary.isEmpty ? e.summary : !e.title.isEmpty ? e.title : e.kind), agent: a != nil))
+            open.append(c.steps.count - 1)
+        } else if e.kind == "tool_result", !open.isEmpty {
+            let i = open.removeFirst()
+            c.steps[i].open = false
+            c.steps[i].error = e.title == "error"
+            c.steps[i].launched = c.steps[i].agent && e.body.hasPrefix("Async agent launched")
+        }
+    }
+    func add(_ d: String) { if !d.isEmpty, !c.helpers.contains(d) { c.helpers.append(d) } }
+    for k in tasks ?? [] where k.type == "local_agent" { add(k.description ?? "helper") }
+    for s in c.steps where s.agent && (s.open || (tasks == nil && s.launched)) { add(s.label) }
+    return c
+}
+
+/// "1 subagent running", "3 subagents running" (the console's helpersWords).
+func helpersWords(_ n: Int) -> String { n == 0 ? "" : "\(n) subagent\(n == 1 ? "" : "s") running" }
+
 extension Thread {
+    /// The helpers the hub lists on its own, before any chain is loaded.
+    var taskHelpers: Int { (turn_tasks ?? []).filter { $0.type == "local_agent" }.count }
     func turnFacts(withCalls: Bool = true, withCost: Bool = true) -> String {
         turnFactsLine(calls: turn_tools, at: turn_at, cost: turn_cost_usd, withCalls: withCalls, withCost: withCost)
     }

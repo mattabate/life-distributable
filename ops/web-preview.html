@@ -104,9 +104,37 @@
         replies: [{ ref: 'step:cal-0004.1', outcome: 'done', label: 'Did it' }] },
       { id: 5, thread_id: TRIP, role: 'claude', kind: 'schedule', ts: iso(7), text: 'Back Thursday 9:00 AM\n\nConfirm the cabin once the hold clears.' },
     ],
-    [`/threads/${TIDY}`]: { id: TIDY, title: 'Tidy the weekly digest', status: 'idle', model: 'claude-fable-5-1', cost_usd: 0.31, last_message_at: iso(6) },
+    // The digest chat is mid-turn: the working line's count opens its tool
+    // chain, with two helpers running (turn_tasks), one whose transcript the
+    // hub serves and one it does not.
+    [`/threads/${TIDY}`]: { id: TIDY, title: 'Tidy the weekly digest', status: 'running', model: 'claude-fable-5-1', cost_usd: 0.31, last_message_at: iso(6),
+      turn_tools: 7, turn_at: iso(1), turn_cost_usd: 0.12,
+      turn_tasks: [{ id: 'task-a1', type: 'local_agent', description: 'Check last week\'s dates' },
+        { id: 'task-b2', type: 'local_agent', description: 'Draft the Sunday intro' }] },
     [`/threads/${TIDY}/messages`]: [
       { id: 3, thread_id: TIDY, role: 'owner', author: 'owner', ts: iso(8), run_id: 'r2', text: 'Move the digest to Sunday morning.' },
+    ],
+    [`/threads/${TIDY}/events`]: [
+      { id: 21, run_id: 'r2', ts: iso(7.5), kind: 'tool_use', title: 'Read · digest.go', summary: 'Read digest.go' },
+      { id: 22, run_id: 'r2', ts: iso(7.4), kind: 'tool_result', title: 'result', body: '' },
+      { id: 23, run_id: 'r2', ts: iso(7), kind: 'tool_use', title: 'Grep · weekStart', summary: 'Search for weekStart' },
+      { id: 24, run_id: 'r2', ts: iso(6.9), kind: 'tool_result', title: 'result', body: '' },
+      { id: 25, run_id: 'r2', ts: iso(6), kind: 'tool_use', title: 'Agent · Check last week\'s dates', summary: 'Delegate: Check last week\'s dates' },
+      { id: 26, run_id: 'r2', ts: iso(5.9), kind: 'tool_result', title: 'result', body: 'Async agent launched successfully.' },
+      { id: 27, run_id: 'r2', ts: iso(5), kind: 'tool_use', title: 'Agent · Draft the Sunday intro', summary: 'Delegate: Draft the Sunday intro' },
+      { id: 28, run_id: 'r2', ts: iso(4.9), kind: 'tool_result', title: 'result', body: 'Async agent launched successfully.' },
+      { id: 29, run_id: 'r2', ts: iso(4), kind: 'tool_use', title: 'Edit · digest.go', summary: 'Edit digest.go' },
+      { id: 30, run_id: 'r2', ts: iso(3.9), kind: 'tool_result', title: 'result', body: '' },
+      { id: 31, run_id: 'r2', ts: iso(3), kind: 'tool_use', title: 'Bash · go test ./internal/goals', summary: 'Run the goals tests' },
+      { id: 32, run_id: 'r2', ts: iso(2.9), kind: 'tool_result', title: 'error', body: 'FAIL' },
+      { id: 33, run_id: 'r2', ts: iso(1), kind: 'tool_use', title: 'Bash · make check', summary: 'Run the checks' },
+    ],
+    // One helper's own transcript; the other has none (the hub's 404 is
+    // any non-list answer here), so it stays a plain row.
+    [`/threads/${TIDY}/tasks/task-a1/events`]: [
+      { id: 1, kind: 'tool_use', title: 'Read · calendar.json', summary: 'Read calendar.json' },
+      { id: 2, kind: 'tool_result', title: 'result', body: '' },
+      { id: 3, kind: 'tool_use', title: 'Grep · Sunday', summary: 'Search for Sunday' },
     ],
     '/prompts': [],
     '/recs': { recs: [

@@ -139,6 +139,39 @@ type Heading struct {
 	Show  int    `json:"show"`
 }
 
+// Live: for every running session and every chain top (ParentID through live
+// parents) with a turn running under it, how many running turns that is; a
+// done link between them stays off the list. A RUNNING CHAIN IS WORKING,
+// CARDS OR NOT: a session with runs going beneath it is filed under Working,
+// so the owner does not message it mid-work, and a sub-session's card does
+// not pull its running parent under Your turn. It wears "running", or
+// "N running" for a chain.
+func Live(ths []threads.Thread) map[string]int {
+	parent := map[string]string{}
+	for _, t := range ths {
+		parent[t.ID] = t.ParentID
+	}
+	live := map[string]int{}
+	for _, t := range ths {
+		if t.Status != "running" {
+			continue
+		}
+		live[t.ID]++
+		top, seen := t.ID, map[string]bool{t.ID: true}
+		for {
+			p := parent[top]
+			if _, ok := parent[p]; p == "" || !ok || seen[p] {
+				break
+			}
+			top, seen[p] = p, true
+		}
+		if top != t.ID {
+			live[top]++
+		}
+	}
+	return live
+}
+
 // headings: EVERY SESSION HAS AT MOST ONE HEADING, by a ladder — running →
 // Working; else any card open for the owner → Your turn; else it is off the
 // page. There is no Recent group: a session is on the page because it is
@@ -153,9 +186,10 @@ type Heading struct {
 func (b *Board) headings(ths []threads.Thread) {
 	b.Section, b.Pills = map[string]string{}, map[string][]threads.Pill{}
 	var turnN, workN, turnCards int
+	live := Live(ths)
 	for _, t := range ths {
 		n := b.ForYou[t.ID]
-		running := t.Status == "running"
+		running := live[t.ID] > 0
 		var pills []threads.Pill
 		// A session whose card is in the owner's ears RIGHT NOW leads with
 		// "speaking" — so the voice just heard has a name on the list, and a
@@ -168,7 +202,11 @@ func (b *Board) headings(ths []threads.Thread) {
 			pills = append(pills, threads.Pill{Word: "waiting to speak", Tone: "waiting"})
 		}
 		if running {
-			pills = append(pills, threads.StatusPill(t.Status))
+			p := threads.StatusPill("running")
+			if live[t.ID] > 1 {
+				p.Word = strconv.Itoa(live[t.ID]) + " running"
+			}
+			pills = append(pills, p)
 		}
 		pills = append(pills, threads.CardsPills(n, b.Reads[t.ID], b.Installs[t.ID])...)
 		if len(pills) > 0 {
@@ -208,7 +246,9 @@ func (b *Board) headings(ths []threads.Thread) {
 	// run on the list as an empty "idle" row while the runs under it drew
 	// nowhere. The child keeps its own entry; the counts stay the cards' and
 	// their sessions'.
-	rank := map[string]int{"working": 1, "your_turn": 2}
+	// Working outranks Your turn (see Live): a chain with a turn running is
+	// working, whatever cards it holds.
+	rank := map[string]int{"your_turn": 1, "working": 2}
 	parent := map[string]string{}
 	for _, t := range ths {
 		parent[t.ID] = t.ParentID
@@ -289,8 +329,10 @@ func BuildRows(surface string, rows []store.Dated, ths []threads.Thread) Board {
 		Todo: map[string]string{}, Detail: map[string]string{}, Open: map[string]int{}}
 	running := map[string]bool{}
 	title := map[string]string{}
+	for id := range Live(ths) {
+		running[id] = true
+	}
 	for _, t := range ths {
-		running[t.ID] = t.Status == "running"
 		title[t.ID] = t.Title
 	}
 	var askRows, ownerRows, actRows []store.Dated

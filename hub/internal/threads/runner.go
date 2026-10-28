@@ -1200,6 +1200,8 @@ func (m *Manager) tail(r run) run {
 			}
 			if json.Unmarshal([]byte(line), &ev) == nil {
 				r.tasks = len(ev.Tasks)
+				list, _ := json.Marshal(parseTurnTasks(ev.Tasks))
+				m.db.Exec(`UPDATE thread_runs SET bg_list=? WHERE id=?`, string(list), r.id)
 			}
 		case head.Type == "result" || (head.Type == "" && strings.Contains(line, `"result"`)):
 			var env resultEnvelope

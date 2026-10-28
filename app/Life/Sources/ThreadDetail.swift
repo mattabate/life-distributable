@@ -105,6 +105,22 @@ struct ThreadDetail: View {
     /// Off every time a chat opens: only the cards still open are drawn. The
     /// console's chatState.full (threads.js).
     @State private var full = false
+    /// THE TOOL CHAIN of the turn in flight, opened by a tap on the working
+    /// line's count (the console's chatState.chain): the run it belongs to,
+    /// its events as read so far (only ever added to), and the window's ends.
+    @State private var chainOpen = false
+    @State private var chainRun = ""
+    @State private var chainEvents: [ThreadEvent] = []
+    @State private var chainFirst: Int64 = 0
+    @State private var chainLast: Int64 = 0
+    @State private var chainLoaded = false
+    @State private var chainAll = false
+    @State private var chainBusy = false
+    /// With helpers, the session's own calls and each helper's open on a
+    /// second tap.
+    @State private var chainMe = false
+    @State private var chainSubs: [String: SubChain] = [:]
+    static let chainRows = 12
 
     /// The owner can always write — while the agent works the message is steered
     /// into the running turn (it sees it at its next step), so the composer
@@ -136,6 +152,13 @@ struct ThreadDetail: View {
         guard thread.status == "running" else { return nil }
         let replied = Set(messages.filter { $0.role == "claude" || $0.kind == "error" }.compactMap(\.run_id))
         return messages.last { $0.run_id != nil && !replied.contains($0.run_id!) && $0.role != "claude" }?.ts
+    }
+
+    /// That turn's run id: its events are the tool chain.
+    var liveRun: String {
+        guard thread.status == "running" else { return "" }
+        let replied = Set(messages.filter { $0.role == "claude" || $0.kind == "error" }.compactMap(\.run_id))
+        return messages.last { $0.run_id != nil && !replied.contains($0.run_id!) && $0.role != "claude" }?.run_id ?? ""
     }
 
     /// Where "starting · N s" counts from (the console's startingSince): a
@@ -393,15 +416,187 @@ struct ThreadDetail: View {
     /// The working line under the chat, the console's paintWorking: a dot
     /// and its words; on the phone, Stop beside it.
     @ViewBuilder func workingLine(_ text: String, stop canStop: Bool = false) -> some View {
+        workingLine(Text(text), stop: canStop)
+    }
+
+    /// The working line of a turn at work: "working · 23 tool calls · 3
+    /// subagents running · today 10:09 PM · $1.12", the count and the helpers
+    /// the way into the tool chain (the console's chain-link).
+    func workingFacts() -> some View {
+        let n: Int = thread.turn_tools ?? 0
+        let ownChain: Bool = chainLoaded && !chainRun.isEmpty
+        let helpers: Int = ownChain ? toolChain(chainEvents, tasks: thread.turn_tasks).helpers.count : thread.taskHelpers
+        let words: String = [n > 0 ? callsWord(n) : "", helpersWords(helpers)].filter { !$0.isEmpty }.joined(separator: " · ")
+        let facts: String = thread.turnFacts(withCalls: false)
+        let rest: String = facts.isEmpty ? "" : " · " + facts
+        #if targetEnvironment(macCatalyst)
+        let link: Color = chainOpen ? Web.accent : Web.muted
+        #else
+        let link: Color = chainOpen ? Color.accentColor : Color.secondary
+        #endif
+        let count: Text = Text(words).foregroundColor(link).underline(true, color: link.opacity(0.4))
+        let line: Text = words.isEmpty ? Text("working" + rest) : Text("working · \(count)\(rest)")
+        return workingLine(line, stop: true, tap: words.isEmpty ? nil : { toggleChain() })
+    }
+
+    func callsWord(_ n: Int) -> String { "\(n) tool call" + (n == 1 ? "" : "s") }
+
+    func toggleChain() {
+        chainOpen.toggle()
+        for (k, s) in chainSubs where !s.ok { chainSubs[k]?.tried = false }
+        if chainOpen { Task { await loadChain() } }
+    }
+
+    /// The chain under the working line (the console's chainHTML). With no
+    /// helper, the calls, newest last, the waiting ones darker; with helpers,
+    /// a row per worker, each opening its own calls on a second tap, a helper
+    /// once the hub reads its transcript. No dot inside: the working line's
+    /// is the one live mark. The last `chainRows` until the earlier ones are
+    /// asked for; it goes with the working line when the turn ends.
+    @ViewBuilder var chainView: some View {
+        let ch: ToolChain = toolChain(chainEvents, tasks: thread.turn_tasks)
+        let agents: Int = ch.steps.filter(\.agent).count
+        let total: Int = max(0, (thread.turn_tools ?? 0) - agents)
+        #if targetEnvironment(macCatalyst)
+        let font = Font.system(size: 12.5), inset: CGFloat = 13
+        #else
+        let font = Font.caption, inset: CGFloat = 26
+        #endif
+        VStack(alignment: .leading, spacing: 3) {
+            if ch.helpers.isEmpty {
+                callsView(ch.steps, all: chainAll, total: total, earlier: { Task { await chainEarlier() } })
+            } else {
+                workerRow(open: chainMe, words: "\(thread.title) · \(callsWord(max(ch.steps.count - agents, total)))") { chainMe.toggle() }
+                if chainMe {
+                    callsView(ch.steps, all: chainAll, total: total, earlier: { Task { await chainEarlier() } }).padding(.leading, 16)
+                }
+                ForEach(ch.helpers, id: \.self) { d in helperRow(d) }
+            }
+        }
+        .font(font)
+        .padding(.leading, inset)
+        .padding(.horizontal)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder func helperRow(_ d: String) -> some View {
+        let task: TurnTask? = (thread.turn_tasks ?? []).first { $0.type == "local_agent" && $0.description == d }
+        if let tid = task?.id, let s = chainSubs[tid], s.ok {
+            let sc: ToolChain = toolChain(s.evs, tasks: nil)
+            workerRow(open: s.open, words: "\(d) · \(callsWord(sc.steps.filter { !$0.agent }.count))") { chainSubs[tid]?.open.toggle() }
+            if s.open { callsView(sc.steps, all: true, total: 0, earlier: nil).padding(.leading, 16) }
+        } else {
+            workerRow(open: false, words: "\(d) · subagent", tap: nil)
+        }
+    }
+
+    /// A worker: a chevron that turns when open, then its words.
+    func workerRow(open: Bool, words: String, tap: (() -> Void)?) -> some View {
+        #if targetEnvironment(macCatalyst)
+        let accent = Web.accent, muted = Web.muted
+        #else
+        let accent = Color.accentColor, muted = Color.secondary
+        #endif
+        let lit: Bool = tap != nil && open
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(muted)
+                .rotationEffect(.degrees(open ? 90 : 0)).frame(width: 10).opacity(tap == nil ? 0 : 1)
+            Text(words).foregroundStyle(lit ? accent : Color.primary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture { tap?() }
+    }
+
+    /// One worker's calls, newest last; "N earlier" when more ran than shown.
+    @ViewBuilder func callsView(_ steps: [ToolChain.Step], all: Bool, total: Int, earlier more: (() -> Void)?) -> some View {
+        #if targetEnvironment(macCatalyst)
+        let muted = Web.muted
+        #else
+        let muted = Color.secondary
+        #endif
+        let calls: [ToolChain.Step] = steps.filter { !$0.agent }
+        let shown: [ToolChain.Step] = all ? calls : Array(calls.suffix(Self.chainRows))
+        let earlier: Int = max(calls.count, total) - shown.count
+        VStack(alignment: .leading, spacing: 3) {
+            if earlier > 0, let more {
+                Button(action: more) { Text("\(earlier) earlier").underline().foregroundStyle(muted) }.buttonStyle(.plain)
+            }
+            ForEach(shown) { s in
+                Text(s.label).foregroundStyle(s.error ? Color.red : s.open ? Color.primary : muted).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// The turn's events, read once and then only added to (since=). The turn
+    /// is the newest event's run: a turn a helper's end woke has no message of
+    /// its own, and an unanswered message hours back is not this turn; only a
+    /// message newer than every event (a send, before its first call) names
+    /// the run instead.
+    func loadChain() async {
+        guard chainOpen, thread.status == "running", !chainBusy else { return }
+        chainBusy = true
+        defer { chainBusy = false }
+        let id = thread.id
+        guard let page = try? await hub.threadEvents(id, since: chainLast, limit: chainLast > 0 ? 500 : 300), thread.id == id else { return }
+        let newest: ThreadEvent? = page.last
+        let since: Date? = liveSince
+        let sent: Bool = !liveRun.isEmpty && (since ?? .distantPast) > (newest?.ts ?? .distantPast)
+        let run: String = sent ? liveRun : (newest?.run_id ?? chainRun)
+        if run != chainRun {
+            chainRun = run; chainEvents = []; chainFirst = 0; chainAll = false; chainSubs = [:]
+        }
+        for e in page {
+            chainLast = max(chainLast, e.id)
+            chainFirst = chainFirst == 0 ? e.id : min(chainFirst, e.id)
+        }
+        let mine = page.filter { $0.run_id == run }
+        if !mine.isEmpty { chainEvents += mine }
+        chainLoaded = true
+        await loadSubs()
+    }
+
+    /// Each helper's own steps, from its transcript while the turn runs; a
+    /// helper the hub cannot read stays a plain row (tried once per opening).
+    func loadSubs() async {
+        for k in (thread.turn_tasks ?? []) where k.type == "local_agent" {
+            guard let tid = k.id else { continue }
+            var s: SubChain = chainSubs[tid] ?? SubChain()
+            if s.tried && !s.ok { continue }
+            s.tried = true
+            chainSubs[tid] = s
+            guard let page = try? await hub.taskEvents(thread.id, task: tid, since: s.last) else { continue }
+            var cur: SubChain = chainSubs[tid] ?? s
+            cur.ok = true
+            for e in page where e.id > cur.last { cur.last = e.id; cur.evs.append(e) }
+            chainSubs[tid] = cur
+        }
+    }
+
+    /// "N earlier": walk back (before=) to the start of the turn.
+    func chainEarlier() async {
+        chainAll = true
+        let run = chainRun
+        while chainFirst > 1 {
+            guard let page = try? await hub.threadEvents(thread.id, before: chainFirst, limit: 1000), !page.isEmpty, chainRun == run else { break }
+            chainFirst = min(chainFirst, page.map(\.id).min() ?? chainFirst)
+            chainEvents = page.filter { $0.run_id == run } + chainEvents
+            if page.contains(where: { $0.run_id != run }) { break }
+        }
+    }
+
+    @ViewBuilder func workingLine(_ text: Text, stop canStop: Bool = false, tap: (() -> Void)? = nil) -> some View {
         #if targetEnvironment(macCatalyst)
         HStack(spacing: 7) {
             LiveDot(color: Web.accent, size: 6)
-            Text(text).font(.system(size: 12.5)).foregroundStyle(Web.muted).monospacedDigit()
+            text.font(.system(size: 12.5)).foregroundStyle(Web.muted).monospacedDigit()
+                .contentShape(Rectangle()).onTapGesture { tap?() }
         }.padding(.horizontal)
         #else
         HStack(spacing: 8) {
             ProgressView()
-            Text(text).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+            text.font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(2)
+                .contentShape(Rectangle()).onTapGesture { tap?() }
             Spacer()
             if canStop {
                 Button { stop() } label: { Label("Stop", systemImage: "stop.fill").font(.caption.weight(.semibold)) }
@@ -479,7 +674,8 @@ struct ThreadDetail: View {
                                     workingLine("starting · \(max(0, Int(ctx.date.timeIntervalSince(s)))) s", stop: true)
                                 }
                             } else {
-                                workingLine((["working", thread.turnFacts()].filter { !$0.isEmpty }).joined(separator: " · "), stop: true)
+                                workingFacts()
+                                if chainOpen, chainLoaded, !chainRun.isEmpty { chainView }
                             }
                         }
                         Color.clear.frame(height: 1).id("bottom")
@@ -1173,6 +1369,7 @@ struct ThreadDetail: View {
                 if asks.contains(where: { $0.id == f && $0.isClosed }) || actions.contains(where: { $0.id == f && $0.open != true }) { full = true }
                 focusLanded = true
             }
+            await loadChain()
             error = nil
         } catch { if !error.isCancellation { self.error = error.localizedDescription } }
     }

@@ -463,6 +463,27 @@ enum JSONValue: Codable, Hashable, Sendable {
     var bool: Bool? { if case .bool(let b) = self { return b }; return nil }
 }
 
+/// One background task of the turn in flight (Thread.turn_tasks).
+struct TurnTask: Codable, Hashable {
+    var id: String?
+    var type: String?
+    var subagent_type: String?
+    var description: String?
+}
+
+/// One step of a run as the hub stored it (GET /threads/{id}/events): a tool
+/// call, its result, a thinking block or interim text. Read only for the
+/// tool chain of the turn in flight.
+struct ThreadEvent: Codable, Hashable, Identifiable {
+    var id: Int64
+    var run_id: String
+    var ts: Date?
+    var kind: String
+    var title: String
+    var body: String
+    var summary: String
+}
+
 struct Thread: Codable, Identifiable, Hashable {
     var id: String
     var created_at: Date
@@ -505,6 +526,11 @@ struct Thread: Codable, Identifiable, Hashable {
     var turn_tools: Int?
     var turn_cost_usd: Double?
     var turn_at: Date?
+    /// The background tasks the turn in flight still has pending (the CLI's
+    /// own list): an async Agent-tool helper is `local_agent` until it ends.
+    /// nil from a hub that does not send it; the tool chain then counts a
+    /// launched helper for the rest of the turn (`toolChain`).
+    var turn_tasks: [TurnTask]?
     var needs_you: Int
     /// The model the session runs on — its live run's, else the newest run
     /// that named one (list and single GET only; nil when it never ran with

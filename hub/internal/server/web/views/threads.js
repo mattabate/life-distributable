@@ -157,6 +157,7 @@ async function drawList(activeID, reuse) {
       const detail = todo ? mdPreview((b.detail || {})[t.id] || '') : '';
       return sessionCardHTML(t, {
         active: t.id === activeID,
+        live: ((b.pills || {})[t.id] || []).some(p => p.tone === 'running'),
         // Land on the card (approval or ask), not at the foot of the chat:
         // the board's `first` — the approval card, else the first ask.
         first: b.first[t.id] || '',
@@ -215,7 +216,10 @@ const ALL = ' all'; // drawList's activeID while #/sessions/all is open (no thre
 // line, a blue dot, the name and when it last moved. Only the live audio pills
 // stay (speaking, waiting): the fact a cell cannot carry.
 function sessionCardHTML(t, o) {
-  const live = t.status === 'running';
+  // The blue dot is the board's "running" pill, which a chain top wears for
+  // the runs under it (attention.Live), so a session whose helpers or child
+  // runs are at work reads as active before a message is sent to it.
+  const live = t.status === 'running' || !!o.live;
   const failed = !live && t.last_message_kind === 'error' && !isPauseText(t.last_message);
   const href = `#/sessions/${encodeURIComponent(t.id)}${o.first ? '/' + encodeURIComponent(o.first) : ''}`;
   const bare = !o.cells;
@@ -692,7 +696,10 @@ async function createSession(p) {
 // costs = a turn's dollars by the ref of the first card it raised.
 // full = the whole conversation is drawn (the toggle, chatFullHTML); false,
 // the default every time a chat opens, draws only the cards still open.
-const chatState = { id: null, lastMsgID: 0, lastAsks: '', lastActs: '', lastPrompts: '', lastRecs: '', recs: [], cards: {}, actIDs: '', open: new Map(), focus: '', focusAct: undefined, send: { target: 'this', when: 'now', at: '', re: null }, sendingSince: 0, sendingAfter: 0, thread: null, running: false, liveSince: 0, costs: {}, full: false };
+// liveRun = the run id of the turn in flight; chain = its tool chain, loaded
+// only while open (a click on the working line's count, chainHTML).
+const newChain = () => ({ open: false, run: '', evs: [], first: 0, last: 0, loaded: false, all: false, busy: false, me: false, subs: {} });
+const chatState = { id: null, lastMsgID: 0, lastAsks: '', lastActs: '', lastPrompts: '', lastRecs: '', recs: [], cards: {}, actIDs: '', open: new Map(), focus: '', focusAct: undefined, send: { target: 'this', when: 'now', at: '', re: null }, sendingSince: 0, sendingAfter: 0, thread: null, running: false, liveSince: 0, liveRun: '', chain: newChain(), costs: {}, full: false };
 // Attachment drafts by box: 'chat', 'new', and one 'rec:<id>' per note box
 // on the Recs page (the rec box takes a pasted or dropped screenshot like the
 // composer).
@@ -707,7 +714,7 @@ async function openThread(id, focus) {
   chatState.id = id; chatState.lastMsgID = 0; chatState.lastActs = ''; chatState.open = new Map();
   chatState.sendingSince = 0; chatState.liveSince = 0;
   chatState.focus = focus || ''; chatState.focusAct = undefined; chatState.actIDs = ''; chatState.lastPrompts = ''; chatState.lastRecs = ''; chatState.recs = [];
-  chatState.lastAsks = ''; chatState.cards = {}; chatState.full = false;
+  chatState.lastAsks = ''; chatState.cards = {}; chatState.full = false; chatState.chain = newChain(); chatState.liveRun = '';
   // The chat's composer state IS chatState.send (composer.js keeps it across
   // the 5s redraws); a new session starts it empty.
   chatState.send = composerReset('chat');
@@ -793,6 +800,7 @@ async function refreshThread(id, first) {
   const replied = new Set(ordered.filter(m => m.role === 'claude' || m.kind === 'error').map(m => m.run_id).filter(Boolean));
   const live = running ? ordered.filter(m => m.run_id && m.role !== 'claude' && !replied.has(m.run_id)).pop() : null;
   chatState.liveSince = live ? Date.parse(live.ts) : 0;
+  chatState.liveRun = (live && live.run_id) || '';
   // The owner's message landed: the "sending · N s" count is over (a Send
   // that never lands stops counting after five minutes rather than forever).
   if (chatState.sendingSince && (msgs.some(m => m.role === 'owner' && m.id > chatState.sendingAfter) || Date.now() - chatState.sendingSince > 300000)) {
@@ -824,6 +832,7 @@ async function refreshThread(id, first) {
   if (!structural) {
     paintChatPills(t);
     paintWorking(running, t);
+    loadChain();
     return;
   }
 
@@ -929,11 +938,14 @@ async function refreshThread(id, first) {
       ${chatFullHTML(full)}
       ${rows}
       <div class="working small muted" id="run-working" hidden></div>
+      <div class="chain small" id="run-chain" hidden></div>
     </div>
     ${queuedHTML(queued)}
     <div class="composer-wrap">${composerHTML('chat', chatComposerSpec(running))}</div>`;
 
   paintWorking(running, t);
+  paintChain();
+  loadChain();
   const box = document.getElementById('msgs');
   // Opening a chat places the reader on the newest message; after that the
   // chat never scrolls for them — a redraw puts back what they were reading. `first`
@@ -1149,8 +1161,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeImage()
 // THE working line, same on both surfaces (the phone spells it out in
 // ThreadDetail.swift; keep them in step): while a turn runs the chat ends in
 // "working · 23 tool calls · today 10:09 PM · $1.12", the clock being the
-// turn's last output, so a hung turn shows an old time. The tool calls
-// themselves are not drawn. A line left on a stopped session reads as one
+// turn's last output, so a hung turn shows an old time. The count opens the
+// turn's tool chain under the line (chainHTML). A line left on a stopped session reads as one
 // that never finished, so it shows only while the session runs.
 //
 // Before any of that, "sending · N s" from the moment a message left this
@@ -1173,7 +1185,136 @@ function paintWorking(running, t) {
   const dot = '<span class="dot pulse"></span> ';
   if (since) el.innerHTML = `${dot}sending · ${sinceHTML(since)}${running ? ' · ' + esc(t && t.turn_tools ? 'working' : 'starting') : ''}`;
   else if (!(t && t.turn_tools) && chatState.liveSince) el.innerHTML = `${dot}starting · ${sinceHTML(startingSince(t))}`;
-  else el.innerHTML = dot + esc(['working', turnFacts(t)].filter(Boolean).join(' · '));
+  else {
+    // The count is the way into the tool chain (paintChain), and the
+    // helpers the turn has running ride on the line, opened or not.
+    const n = (t && t.turn_tools) || 0, c = chatState.chain;
+    const helpers = chainLive(c) ? toolChain(c.evs, t && t.turn_tasks).helpers.length : taskHelpers(t);
+    const words = [n ? callsWord(n) : '', helpersWords(helpers)].filter(Boolean).join(' · ');
+    const link = words ? `<a href="#" class="chain-link${c.open ? ' on' : ''}" onclick="event.preventDefault();toggleChain()">${esc(words)}</a>` : '';
+    el.innerHTML = dot + '<span>' + ['working', link, esc(turnFacts(t, false))].filter(Boolean).join(' · ') + '</span>';
+  }
+}
+
+// THE TOOL CHAIN under the working line (ui.js toolChain). With no helper it
+// is the turn's calls, newest last, the ones still waiting drawn darker.
+// With helpers it is one row per worker: the session's own row ("<title> ·
+// N tool calls") and one per helper, each opening its own calls on a second
+// click; a helper opens once the hub serves its transcript
+// (/threads/{id}/tasks/{task}/events), else it stays a plain "<description>
+// · subagent" row. No dot inside the chain: the working line's is the one
+// live mark. Only the last CHAIN_ROWS calls until the reader asks for the
+// earlier ones. It lives exactly as long as the turn: when the turn ends,
+// the working line and the chain go together and the chat is its open cards
+// again.
+const CHAIN_ROWS = 12;
+function callsHTML(steps, all, total, earlierFn) {
+  const calls = steps.filter(s => !s.agent);
+  const shown = all ? calls : calls.slice(-CHAIN_ROWS);
+  const earlier = Math.max(calls.length, total) - shown.length;
+  const more = earlier > 0 ? `<a href="#" class="chain-more muted" onclick="event.preventDefault();${earlierFn}">${earlier} earlier</a>` : '';
+  return more + shown.map(s => `<div class="chain-row${s.open ? ' live' : s.error ? ' err' : ''}">${esc(s.label)}</div>`).join('');
+}
+const callsWord = n => `${n} tool call${n === 1 ? '' : 's'}`;
+// o: {name, me (the session's own calls open), subs: {[task id]: {ok, open, evs}}, tasks}.
+function chainHTML(ch, all, total, o = {}) {
+  const agents = ch.steps.filter(s => s.agent).length;
+  const own = callsHTML(ch.steps, all, Math.max(0, total - agents), 'chainEarlier()');
+  if (!ch.helpers.length) return own;
+  const subs = o.subs || {}, tasks = o.tasks || [];
+  const mine = Math.max(ch.steps.length - agents, total - agents);
+  const row = (open, words, click) => click
+    ? `<a href="#" class="chain-w${open ? ' on' : ''}" onclick="event.preventDefault();${click}"><span class="caret">›</span>${words}</a>`
+    : `<div class="chain-w"><span class="caret"></span>${words}</div>`;
+  let html = row(o.me, `${esc(o.name || 'Working')} · ${callsWord(mine)}`, 'toggleChainMe()');
+  if (o.me) html += `<div class="chain-calls">${own}</div>`;
+  for (const d of ch.helpers) {
+    const task = tasks.find(k => k.type === 'local_agent' && k.description === d);
+    const s = task && subs[task.id];
+    if (s && s.ok) {
+      const sc = toolChain(s.evs);
+      html += row(s.open, `${esc(d)} · ${callsWord(sc.steps.filter(x => !x.agent).length)}`, `toggleChainSub('${esc(task.id)}')`);
+      if (s.open) html += `<div class="chain-calls">${callsHTML(sc.steps, true, 0, '')}</div>`;
+    } else html += row(false, `${esc(d)} · subagent`, '');
+  }
+  return html;
+}
+const chainLive = c => c.loaded && !!c.run;
+function paintChain() {
+  const el = document.getElementById('run-chain');
+  if (!el) return;
+  const c = chatState.chain, t = chatState.thread;
+  el.hidden = !(chatState.running && c.open && chainLive(c));
+  if (!el.hidden) el.innerHTML = chainHTML(toolChain(c.evs, t && t.turn_tasks), c.all, (t && t.turn_tools) || 0,
+    { name: t && t.title, me: c.me, subs: c.subs, tasks: (t && t.turn_tasks) || [] });
+}
+function toggleChainMe() { chatState.chain.me = !chatState.chain.me; paintChain(); }
+function toggleChainSub(id) {
+  const s = chatState.chain.subs[id];
+  if (s) { s.open = !s.open; paintChain(); }
+}
+// A helper's own steps, read from its transcript while the turn runs; a
+// helper the hub cannot read (a 404) stays a plain row.
+async function loadSubs() {
+  const c = chatState.chain, id = chatState.id, t = chatState.thread;
+  for (const k of ((t && t.turn_tasks) || []).filter(k => k.type === 'local_agent' && k.id)) {
+    const s = c.subs[k.id] || (c.subs[k.id] = { ok: false, open: false, evs: [], last: 0, tried: false });
+    if (s.tried && !s.ok) continue;
+    s.tried = true;
+    const page = await get(`/threads/${id}/tasks/${encodeURIComponent(k.id)}/events?` + (s.last ? `since=${s.last}&limit=500` : 'limit=500')).catch(() => null);
+    if (chatState.chain !== c) return;
+    if (!Array.isArray(page)) continue;
+    s.ok = true;
+    for (const e of page) { if (e.id > s.last) s.last = e.id; s.evs.push(e); }
+  }
+}
+// The turn's events, read once and then only added to (since=), the hub's
+// rule for a moving window (threads.Events).
+// The turn is the newest event's run: a turn a helper's end woke has no
+// message of its own, and an unanswered message hours back is not this
+// turn. Only a message newer than every event (a send, before its first
+// call) names the run instead.
+async function loadChain() {
+  const c = chatState.chain, id = chatState.id;
+  if (!c.open || !chatState.running || c.busy) { paintChain(); return; }
+  c.busy = true;
+  try {
+    const page = (await get(`/threads/${id}/events?` + (c.last ? `since=${c.last}&limit=500` : 'limit=300'))) || [];
+    if (chatState.id !== id || chatState.chain !== c) return;
+    const newest = page[page.length - 1];
+    const run = chatState.liveRun && chatState.liveSince > (newest ? Date.parse(newest.ts) : 0) ? chatState.liveRun
+      : newest ? newest.run_id : c.run;
+    if (run !== c.run) Object.assign(c, { run, evs: [], first: 0, all: false, subs: {} });
+    for (const e of page) {
+      if (e.id > c.last) c.last = e.id;
+      if (!c.first || e.id < c.first) c.first = e.id;
+      if (e.run_id === run) c.evs.push(e);
+    }
+    c.loaded = true;
+    await loadSubs();
+  } catch { /* the next change tries again */ } finally { c.busy = false; }
+  paintChain();
+  paintWorking(chatState.running, chatState.thread);
+}
+function toggleChain() {
+  const c = chatState.chain;
+  c.open = !c.open;
+  for (const s of Object.values(c.subs)) if (!s.ok) s.tried = false;
+  paintWorking(chatState.running, chatState.thread);
+  if (c.open) loadChain(); else paintChain();
+}
+// "N earlier": walk back (before=) to the start of the turn.
+async function chainEarlier() {
+  const c = chatState.chain, id = chatState.id, run = c.run;
+  c.all = true;
+  while (c.first > 1) {
+    const page = await get(`/threads/${id}/events?before=${c.first}&limit=1000`).catch(() => null);
+    if (!page || !page.length || chatState.chain !== c) break;
+    c.first = Math.min(c.first, ...page.map(e => e.id));
+    c.evs = page.filter(e => e.run_id === run).concat(c.evs);
+    if (page.some(e => e.run_id !== run)) break;
+  }
+  paintChain();
 }
 const sinceHTML = since => `<span class="since" data-since="${since}">${Math.max(0, Math.floor((Date.now() - since) / 1000))} s</span>`;
 // Every "N s" on the page, once a second; a sending line that should have

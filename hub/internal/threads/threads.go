@@ -152,6 +152,11 @@ CREATE INDEX IF NOT EXISTS thread_events_thread ON thread_events(thread_id, id);
 	// PromptsSchema, once thread_messages.author exists). A sub-session is
 	// drawn under the session that spun it off.
 	`ALTER TABLE threads ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
+	// bg_list: the CLI's pending background tasks themselves (the last
+	// background_tasks_changed line's list, as Thread.TurnTasks JSON), beside
+	// their count bg_tasks: an async Agent helper's end is no event, so the
+	// surfaces' "N subagents running" reads it from here.
+	`ALTER TABLE thread_runs ADD COLUMN bg_list TEXT NOT NULL DEFAULT ''`,
 }
 
 // ModelCost: one model's share of a chat's bill. Model is the CLI's model id,
@@ -221,7 +226,10 @@ type Thread struct {
 	// where a finished turn prints "turn ended · today 10:06 PM · $7.27" (on
 	// the chat's working line and the session card) instead of a bare
 	// "working…" or a raw step label nobody can read.
-	TurnTools   int        `json:"turn_tools,omitempty"`
+	TurnTools int `json:"turn_tools,omitempty"`
+	// TurnTasks: the background tasks the running turn is waiting on - Agent
+	// helpers (type local_agent) and background shells - only while running.
+	TurnTasks   []TurnTask `json:"turn_tasks,omitempty"`
 	TurnCostUSD float64    `json:"turn_cost_usd,omitempty"`
 	TurnAt      *time.Time `json:"turn_at,omitempty"`
 	NeedsYou    int        `json:"needs_you"`
@@ -1171,7 +1179,8 @@ const turnCols = `CASE WHEN t.status='running' THEN (SELECT COUNT(*) FROM thread
 	CASE WHEN t.status='running' THEN (SELECT COALESCE(SUM(r.live_cost_usd),0) FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL) ELSE 0 END,
 	CASE WHEN t.status='running' THEN (SELECT MAX(COALESCE((SELECT MAX(e.ts) FROM thread_events e WHERE e.thread_id=r.thread_id
 		AND e.run_id=(CASE WHEN r.turns<=1 THEN r.id ELSE r.id||'-t'||r.turns END) AND e.kind='tool_use'), r.last_output))
-		FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL) END`
+		FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL) END,
+	CASE WHEN t.status='running' THEN (SELECT r.bg_list FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL AND r.bg_tasks>0 ORDER BY r.rowid DESC LIMIT 1) END`
 
 // tokCols: settled tokens plus what the turn in flight has burned so far, so
 // a running session's number climbs while it works instead of jumping when it
@@ -1874,16 +1883,44 @@ func (m *Manager) MarkRead(id string) error {
 	return err
 }
 
+// TurnTask is one entry of the CLI's background_tasks_changed list.
+type TurnTask struct {
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	SubagentType string `json:"subagent_type,omitempty"`
+	Description  string `json:"description,omitempty"`
+}
+
+// parseTurnTasks: a background_tasks_changed line's tasks as TurnTasks.
+func parseTurnTasks(raw []json.RawMessage) []TurnTask {
+	out := []TurnTask{}
+	for _, r := range raw {
+		var x struct {
+			TaskID       string `json:"task_id"`
+			TaskType     string `json:"task_type"`
+			SubagentType string `json:"subagent_type"`
+			Description  string `json:"description"`
+		}
+		if json.Unmarshal(r, &x) == nil {
+			out = append(out, TurnTask{x.TaskID, x.TaskType, x.SubagentType, x.Description})
+		}
+	}
+	return out
+}
+
 type scanner interface{ Scan(...any) error }
 
 func scan(r scanner) (Thread, error) {
 	var t Thread
 	var c, u string
-	var goal, sid, nextRun, last, lastMsg, lastTS, activity, lastKind, turnAt sql.NullString
+	var goal, sid, nextRun, last, lastMsg, lastTS, activity, lastKind, turnAt, bgList sql.NullString
 	if err := r.Scan(&t.ID, &c, &u, &t.Title, &t.Project, &goal, &t.ModelClass, &t.Persona, &t.ParentID, &t.Status, &sid, &t.Schedule, &t.SchedulePrompt, &nextRun, &last, &t.Unread, &t.CostUSD,
 		&t.Tokens.In, &t.Tokens.Out, &t.Tokens.CacheRead, &t.Tokens.CacheWrite, &lastMsg, &lastTS, &t.NeedsYou, &activity, &lastKind,
-		&t.TurnTools, &t.TurnCostUSD, &turnAt); err != nil {
+		&t.TurnTools, &t.TurnCostUSD, &turnAt, &bgList); err != nil {
 		return t, err
+	}
+	if t.Status == "running" && bgList.String != "" {
+		json.Unmarshal([]byte(bgList.String), &t.TurnTasks)
 	}
 	if t.Status == "running" && turnAt.Valid {
 		if x := parseTS(turnAt.String); !x.IsZero() {
