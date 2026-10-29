@@ -245,8 +245,9 @@ this Mac can erase their backups.
 6. **Restore test**: a backup that was never restored is a hope. It reads
    the passphrase, so it runs in its own window, not in your shell. You
    open this in the window form above:
-   `cd ops && set -a && source secrets/restic.env && restic snapshots && restic restore latest --target /tmp/life-restore-test --include '*/life.db' && ls -la /tmp/life-restore-test`
-   Tell them: "Wait for the window to stop, then tell me whether the last
+   `cd ops && set -a && source secrets/restic.env && T=$(mktemp -d) && restic snapshots && restic restore latest --target "$T" --include '*/life.db' && ls -laR "$T" && rm -rf "$T"`
+   (The restored copy is a decrypted database: it goes into a fresh
+   private temporary folder and is deleted once listed.) Tell them: "Wait for the window to stop, then tell me whether the last
    lines mention `life.db`." They only read it.
 
 **Verify:** `ops/b2.sh check` prints `SAFE`; the owner reports a snapshot

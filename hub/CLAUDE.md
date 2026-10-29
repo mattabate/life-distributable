@@ -82,6 +82,12 @@ shows a model under "Unpriced models".
   `ops/install-phone.sh`, `ops/hub.sh restart`, `git commit`. The session's
   preamble (threads.go `systemPreamble`) tells it so.
 - Neither uses bypassPermissions. Gate-list actions go via `lifectl propose`.
+- A `shell` or `claude` proposal is gated whatever kind it claims, unless the
+  shell `cmd` is one plain line on `Queue.FreeShell` (main sets it; `ls` by
+  default): otherwise a proposal would run the hub's own bash past both
+  lists. Add only read-only commands there. Sessions get `--disallowedTools`
+  Edit/Write on `ops/secrets/**`, and the decider fails closed once armed
+  (an emptied `decider.hash` refuses every approval).
 - **No `python3`, `sqlite3` or `curl` on either list**: each is
   one line past every other control. Use `lifectl api
   METHOD /api/v1/…` (hub only), `ops/db.sh "select …"` (`sqlite3 -readonly`,

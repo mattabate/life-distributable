@@ -29,16 +29,45 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"life/hub/internal/store"
 )
 
-type Decider struct{ path string }
+type Decider struct {
+	path string
+	db   *store.DB
+}
 
 func NewDecider(hashPath string) *Decider { return &Decider{path: hashPath} }
 
-// Armed reports whether a decider secret has been set. Unarmed = the old
-// behaviour, so the hub keeps working until the owner runs
-// ops/decider-set.sh.
-func (d *Decider) Armed() bool { return d.hash() != "" }
+// Decider is the queue's: once a hash has been seen, the hub's database
+// remembers it was armed, so emptying or deleting the file afterwards no
+// longer falls back to the hub token alone (a session can write files, and an
+// empty decider.hash used to make every approval the token's). Nothing but
+// the hub writes its database.
+func (q *Queue) Decider(hashPath string) *Decider {
+	if q == nil {
+		return NewDecider(hashPath)
+	}
+	return &Decider{path: hashPath, db: q.db}
+}
+
+const armedKey = "decider_armed"
+
+// Armed reports whether a decider secret has been set. Never armed = the old
+// behaviour, so a fresh hub works before the owner runs ops/decider-set.sh.
+// Armed once = armed for good: a missing or empty file then refuses every
+// decision (Verify has no hash to match) until decider-set.sh writes a new
+// one.
+func (d *Decider) Armed() bool {
+	if d.hash() != "" {
+		if d.db != nil && d.db.Setting(armedKey) == "" {
+			d.db.SetSetting(armedKey, time.Now().UTC().Format(time.RFC3339))
+		}
+		return true
+	}
+	return d.db != nil && d.db.Setting(armedKey) != ""
+}
 
 func (d *Decider) hash() string {
 	if d == nil || d.path == "" {

@@ -125,6 +125,9 @@ func main() {
 		log.Printf("apns: enabled (production=%v)", cfg.APNsProduction)
 	}
 	acts = actions.New(db, exec, sch)
+	// Read-only runs that need no card (actions.freeShell); anything else a
+	// shell proposal runs is the owner's to approve.
+	acts.FreeShell = []string{"ls"}
 	sch.SetActions(acts)
 	gs, err := goals.New(db)
 	if err != nil {

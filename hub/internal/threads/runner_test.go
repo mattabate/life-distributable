@@ -1119,3 +1119,13 @@ func TestDescribeToolBody(t *testing.T) {
 		t.Fatalf("Agent: %q", body)
 	}
 }
+
+// No session writes ops/secrets/: the CLI gets an absolute deny for it.
+func TestSessionsCannotWriteSecrets(t *testing.T) {
+	m, _, _ := setup(t)
+	m.ProjectDir = func(p string) (string, bool) { return "/x/life", p == "life" }
+	d := m.deniedTools()
+	if len(d) != 2 || d[0] != "Edit(//x/life/ops/secrets/**)" || d[1] != "Write(//x/life/ops/secrets/**)" {
+		t.Fatalf("denied: %v", d)
+	}
+}

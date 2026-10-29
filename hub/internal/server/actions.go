@@ -20,7 +20,7 @@ func (s *Server) decider() *actions.Decider {
 	if s.cfg == nil || s.cfg.TokenFile == "" {
 		return actions.NewDecider("")
 	}
-	return actions.NewDecider(filepath.Join(filepath.Dir(s.cfg.TokenFile), "decider.hash"))
+	return s.acts.Decider(filepath.Join(filepath.Dir(s.cfg.TokenFile), "decider.hash"))
 }
 
 // deciderStatus answers "is the code this surface holds the right one?" before
