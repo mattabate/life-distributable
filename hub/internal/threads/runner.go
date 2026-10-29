@@ -535,6 +535,10 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 				if intake[i] != "" {
 					fmt.Fprintf(&b, " — saved as %s", intake[i])
 				}
+				// Read can't open Word, Excel or PowerPoint.
+				if isOfficeBlob(p) {
+					fmt.Fprintf(&b, " — its text: `ops/py.sh doc-text.py '%s'`", p)
+				}
 			}
 			b.WriteString("]")
 			// A snap with no words typed is still wordless, whatever preamble

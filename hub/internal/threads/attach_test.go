@@ -81,7 +81,27 @@ func TestAttachedDocument(t *testing.T) {
 			t.Fatalf("prompt missing %q: %s", want, p)
 		}
 	}
-	if strings.Contains(string(p), "image(s)") {
-		t.Fatalf("a lone PDF is not an image: %s", p)
+	if strings.Contains(string(p), "image(s)") || strings.Contains(string(p), "doc-text.py") {
+		t.Fatalf("a lone PDF is not an image, and Read opens it: %s", p)
+	}
+}
+
+// A Word file: the prompt hands the session the line that prints its text.
+func TestAttachedWordFile(t *testing.T) {
+	m, _, _ := setup(t)
+	m.BlobPath = func(ref string) (string, error) { return "/data/blobs/" + ref, nil }
+	th, err := m.Create("", "life", "", "Read the contract", "", "", []string{"sha256/ab/abc.docx"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := m.db.Query(`SELECT out_file FROM thread_runs WHERE thread_id=?`, th.ID)
+	var out string
+	for rows.Next() {
+		rows.Scan(&out)
+	}
+	rows.Close()
+	p, _ := os.ReadFile(strings.TrimSuffix(out, ".out") + ".prompt")
+	if want := "/data/blobs/sha256/ab/abc.docx — its text: `ops/py.sh doc-text.py '/data/blobs/sha256/ab/abc.docx'`"; !strings.Contains(string(p), want) {
+		t.Fatalf("prompt missing %q: %s", want, p)
 	}
 }
