@@ -5,6 +5,7 @@
 package actions
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -167,6 +168,56 @@ type Queue struct {
 	// this package never reads the threads tables. nil = relay is refused.
 	RelayTarget func(threadID string) (title string, err error)
 	Relay       func(from, to, text, actionID string) (result string, err error)
+	// onUncertain / untold: who hears that an action ended `uncertain`, and
+	// the ones that did before anyone was listening: closeOrphans runs inside
+	// New, before main has the sessions to tell (TellUncertain).
+	onUncertain func(a Action)
+	untold      []string
+}
+
+// Uncertain: a run cut off from outside (the hub restarted under it, or the
+// timeout or a signal killed it) may have done all, part or none of its work,
+// so it is not `failed` (a clean non-zero exit, nothing to doubt). Running the
+// same command again after one may copy or insert twice.
+const Uncertain = "uncertain"
+
+// UncertainNote: what the proposing session is told, once, when its action
+// ends uncertain.
+func UncertainNote(a Action) string {
+	why := a.Error
+	if why == "" {
+		why = "cut off mid-run"
+	}
+	return fmt.Sprintf("Your proposal %s “%s” did not finish (%s), so its outcome is unknown: it may have run fully, partly or not at all. "+
+		"Check what it actually did (files, rows, git log) before you propose it again; an identical command is held for the owner either way.", a.ID, a.Title, why)
+}
+
+// TellUncertain sets who hears that an action ended uncertain and tells them
+// about every one that did before this (the restart's orphans).
+func (q *Queue) TellUncertain(f func(a Action)) {
+	q.mu.Lock()
+	q.onUncertain = f
+	ids := q.untold
+	q.untold = nil
+	q.mu.Unlock()
+	for _, id := range ids {
+		q.tellUncertain(id)
+	}
+}
+
+func (q *Queue) tellUncertain(id string) {
+	q.mu.Lock()
+	f := q.onUncertain
+	if f == nil {
+		q.untold = append(q.untold, id)
+	}
+	q.mu.Unlock()
+	if f == nil {
+		return
+	}
+	if a, err := q.Get(id); err == nil {
+		f(a)
+	}
 }
 
 // relayMax: a hand-off is a task, not a transcript.
@@ -298,9 +349,10 @@ func New(db *store.DB, exec Executor, nfy Notifier) *Queue {
 	return q
 }
 
-// closeOrphans fails every action still 'running' at startup: its command
-// was a child of the hub that died, so nothing will ever record its result
-// (7 sat open from 08-23 to 09-20 before this).
+// closeOrphans closes every action still 'running' at startup: its command
+// was a child of the hub that died, so nothing will ever record its result.
+// It ends `uncertain`, not `failed` (nobody knows how far it got), and the
+// session that proposed it is told so (TellUncertain).
 func (q *Queue) closeOrphans() {
 	rows, err := q.db.Query(`SELECT id FROM items WHERE src='action' AND state='running'`)
 	if err != nil {
@@ -319,13 +371,57 @@ func (q *Queue) closeOrphans() {
 	for _, id := range ids {
 		now := ts(time.Now())
 		if _, err := q.setState(id, "hub", why,
-			stmt(`UPDATE items SET state='failed', updated_at=? WHERE id=? AND src='action' AND state='running'`, now, id),
+			stmt(`UPDATE items SET state=?, updated_at=? WHERE id=? AND src='action' AND state='running'`, Uncertain, now, id),
 			stmt(`UPDATE actions SET error=?, updated_at=? WHERE id=?`, why, now, id)); err != nil {
 			log.Printf("actions: orphan %s: %v", id, err)
 			continue
 		}
-		q.event(id, "failed", "hub", why)
+		q.event(id, Uncertain, "hub", why)
+		q.tellUncertain(id)
 	}
+}
+
+// cutOff: the run was stopped from outside (its context ran out, the
+// 30-minute timeout, or a signal ended it: "signal: killed", "signal:
+// terminated") rather than exiting on its own.
+func cutOff(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx.Err() != nil {
+		return true
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return !ee.Exited()
+	}
+	return false
+}
+
+// sameCommand: the line a proposal's card gets when the very same command
+// (kind, exec type, payload) ended done or uncertain in the last 7 days,
+// "Same command as <id> (<state> <day>)", or "". Such a proposal is held for
+// the owner whatever its kind: running it again may do the work twice.
+func (q *Queue) sameCommand(kind, typ string, payload json.RawMessage) string {
+	if typ == "none" || typ == "relay" {
+		return ""
+	}
+	// Compared minified on both sides, so spacing is not a different command.
+	norm := string(payload)
+	var c bytes.Buffer
+	if json.Compact(&c, payload) == nil {
+		norm = c.String()
+	}
+	var id, state, at string
+	err := q.db.QueryRow(`SELECT i.id, i.state, i.updated_at`+joined+`WHERE r.kind=? AND r.exec_type=?
+		AND (CASE WHEN json_valid(r.exec_payload) THEN json(r.exec_payload) ELSE r.exec_payload END)=?
+		AND i.state IN ('done',?) AND i.updated_at>=? ORDER BY i.updated_at DESC LIMIT 1`,
+		kind, typ, norm, Uncertain, ts(time.Now().Add(-7*24*time.Hour))).Scan(&id, &state, &at)
+	if err != nil {
+		return ""
+	}
+	t, _ := time.Parse(time.RFC3339Nano, at)
+	return fmt.Sprintf("Same command as %s (%s %s)", id, state, store.Day(t))
 }
 
 // SetThread records the session that took an action on — the one started to
@@ -369,6 +465,12 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 	}
 	if p.ExecType == "relay" {
 		gated = true // never auto-runs, whatever the proposer says
+	}
+	// A retry of a command that already ran, or may have, is the owner's to
+	// approve: the card says which run it repeats.
+	if same := q.sameCommand(p.Kind, p.ExecType, p.ExecPayload); same != "" {
+		p.Detail = strings.TrimRight(p.Detail, "\n") + "\n\n" + same
+		gated = true
 	}
 	now := time.Now().UTC()
 	a := Action{ID: newID(), CreatedAt: now, UpdatedAt: now, Project: p.Project, Kind: p.Kind, Title: p.Title,
@@ -445,7 +547,7 @@ func (q *Queue) DecideQuiet(id string, approve bool, via, note string) error {
 		// An approved row moves on to running/done/failed on its own.
 		same := a.State == "denied"
 		if approve {
-			same = a.State == "approved" || a.State == "running" || a.State == "done" || a.State == "failed"
+			same = a.State == "approved" || a.State == "running" || a.State == "done" || a.State == "failed" || a.State == Uncertain
 		}
 		if same {
 			return nil
@@ -553,19 +655,28 @@ func (q *Queue) run(id string) {
 	}
 	if a.ExecType == "relay" {
 		res, err := q.relay(a)
-		q.finish(id, res, err)
+		q.finish(id, res, err, false)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
 	defer cancel()
 	res, err := q.exec.Exec(ctx, a.ExecType, a.ExecPayload)
-	q.finish(id, res, err)
+	q.finish(id, res, err, cutOff(ctx, err))
 }
 
-func (q *Queue) finish(id, res string, err error) {
+// runTimeout: how long an approved command may run before it is killed (a
+// var so a test can cut one off).
+var runTimeout = 30 * time.Minute
+
+// finish records how a run ended: done, failed (it exited with an error), or
+// uncertain (cut = it was stopped from outside, so how far it got is unknown).
+func (q *Queue) finish(id, res string, err error, cut bool) {
 	state, e := "done", ""
 	if err != nil {
 		state, e = "failed", err.Error()
+		if cut {
+			state = Uncertain
+		}
 	}
 	now := ts(time.Now())
 	if _, dbErr := q.setState(id, "hub", truncate(e, 2000),
@@ -574,7 +685,10 @@ func (q *Queue) finish(id, res string, err error) {
 		log.Printf("actions: finish %s: %v", id, dbErr)
 	}
 	if err != nil {
-		q.event(id, "failed", "hub", truncate(e, 2000))
+		q.event(id, state, "hub", truncate(e, 2000))
+		if cut {
+			q.tellUncertain(id)
+		}
 	} else {
 		q.event(id, "ran", "hub", truncate(res, 2000))
 	}

@@ -111,9 +111,11 @@ func TestPreMergeActionMovesToItems(t *testing.T) {
 	}
 }
 
-func TestRestartFailsOrphanedRuns(t *testing.T) {
+// A run the hub died under ends uncertain, not failed: nobody knows how far
+// it got. Its session hears so once.
+func TestRestartMakesOrphanedRunsUncertain(t *testing.T) {
 	q, ex, nf := setup(t)
-	a, err := q.Propose(Proposal{Kind: "other", Title: "tidy", ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"true"}`)})
+	a, err := q.Propose(Proposal{ThreadID: "t-1", Kind: "other", Title: "tidy", ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"true"}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,17 +126,105 @@ func TestRestartFailsOrphanedRuns(t *testing.T) {
 	}
 	q = New(q.db, ex, nf)
 	got, _ := q.Get(a.ID)
-	if got.State != "failed" || got.Error != "hub restarted mid-run" {
+	if got.State != Uncertain || got.Error != "hub restarted mid-run" || !got.Closed {
 		t.Fatalf("after restart: %+v", got)
 	}
 	evs, _ := q.Events(a.ID)
-	if len(evs) == 0 || evs[len(evs)-1].Event != "failed" {
+	if len(evs) == 0 || evs[len(evs)-1].Event != Uncertain {
 		t.Fatalf("events: %+v", evs)
+	}
+	if r := Row(got); r.Verb != "Unknown - check before retrying" {
+		t.Fatalf("verb %q", r.Verb)
+	}
+	// The orphan was closed inside New, before anyone listened: the hook,
+	// once set, hears it, once, even if the hub restarts again.
+	var told []Action
+	q.TellUncertain(func(a Action) { told = append(told, a) })
+	if len(told) != 1 || told[0].ID != a.ID || told[0].ThreadID != "t-1" || !strings.Contains(UncertainNote(told[0]), "outcome is unknown") {
+		t.Fatalf("told: %+v", told)
+	}
+	q2 := New(q.db, ex, nf)
+	q2.TellUncertain(func(a Action) { told = append(told, a) })
+	if len(told) != 1 {
+		t.Fatalf("told again: %d", len(told))
 	}
 	// A second run of the same id finds nothing to claim.
 	q.run(a.ID)
-	if got, _ := q.Get(a.ID); got.State != "failed" {
+	if got, _ := q.Get(a.ID); got.State != Uncertain {
 		t.Fatalf("rerun moved it: %s", got.State)
+	}
+}
+
+// blockExec runs until its context is cut off, or fails on its own.
+type blockExec struct{ fail bool }
+
+func (b blockExec) Exec(ctx context.Context, _ string, _ json.RawMessage) (string, error) {
+	if b.fail {
+		return "boom", errors.New("exit status 1")
+	}
+	<-ctx.Done()
+	return "", errors.New("signal: killed")
+}
+
+// The timeout's kill is uncertain and told; a clean non-zero exit stays failed.
+func TestTimeoutIsUncertainExitIsFailed(t *testing.T) {
+	defer func(d time.Duration) { runTimeout = d }(runTimeout)
+	runTimeout = 20 * time.Millisecond
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var told []string
+	tell := func(a Action) { mu.Lock(); told = append(told, a.ID); mu.Unlock() }
+	q := New(db, blockExec{}, &fakeNfy{})
+	q.TellUncertain(tell)
+	a, _ := q.Propose(Proposal{ThreadID: "t-1", Kind: "other", Title: "slow", ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"sleep 99"}`)})
+	waitState(t, q, a.ID, Uncertain)
+	q = New(db, blockExec{fail: true}, &fakeNfy{})
+	q.TellUncertain(tell)
+	b, _ := q.Propose(Proposal{ThreadID: "t-1", Kind: "other", Title: "bad", ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"false"}`)})
+	waitState(t, q, b.ID, "failed")
+	mu.Lock()
+	defer mu.Unlock()
+	if len(told) != 1 || told[0] != a.ID {
+		t.Fatalf("told: %v", told)
+	}
+}
+
+// The same command again, after it ran or may have, waits for the owner
+// whatever its kind.
+func TestSameCommandIsHeldForTheOwner(t *testing.T) {
+	q, ex, nf := setup(t)
+	pay := json.RawMessage(`{"cmd":"cp -n a b","dir":"/tmp"}`)
+	a, _ := q.Propose(Proposal{ThreadID: "t-1", Kind: "other", Title: "copy", ExecType: "shell", ExecPayload: pay})
+	waitState(t, q, a.ID, "done")
+	q.db.Exec(`UPDATE items SET state='running' WHERE id=?`, a.ID)
+	q = New(q.db, ex, nf)
+	// Spaced differently, it is still the same command.
+	b, err := q.Propose(Proposal{ThreadID: "t-1", Kind: "other", Title: "copy again", Detail: "retry", ExecType: "shell", ExecPayload: json.RawMessage(`{ "cmd": "cp -n a b", "dir": "/tmp" }`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Same command as " + a.ID + " (uncertain " + store.Day(time.Now()) + ")"
+	if !b.Gated || b.State != "proposed" || b.Detail != "retry\n\n"+want {
+		t.Fatalf("duplicate: %+v", b)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if len(ex.calls) != 1 {
+		t.Fatalf("duplicate ran: %v", ex.calls)
+	}
+	// Denied, a proposal is not a run: a third copy names the uncertain one.
+	q.Decide(b.ID, false, "app", "")
+	c, _ := q.Propose(Proposal{Kind: "other", Title: "copy 3", ExecType: "shell", ExecPayload: pay})
+	if !c.Gated || !strings.HasSuffix(c.Detail, want) {
+		t.Fatalf("third: %+v", c)
+	}
+	// Another command, or the same one as a different kind, runs as before.
+	d, _ := q.Propose(Proposal{Kind: "other", Title: "other", ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"true"}`)})
+	e, _ := q.Propose(Proposal{Kind: "share", Title: "share", ExecType: "shell", ExecPayload: pay})
+	if d.Gated || strings.Contains(d.Detail, "Same command") || strings.Contains(e.Detail, "Same command") {
+		t.Fatalf("not duplicates: %+v %+v", d, e)
 	}
 }
 
@@ -402,6 +492,7 @@ func TestDated(t *testing.T) {
 	}{
 		{"auto", "done", "Ran"}, {"auto", "failed", "Failed"}, {"auto", "running", "Running"},
 		{"app", "denied", "Denied"}, {"cli", "failed", "Failed"}, {"web", "done", "Approved"},
+		{"auto", Uncertain, "Unknown - check before retrying"}, {"app", Uncertain, "Unknown - check before retrying"},
 	} {
 		r := Row(Action{ID: "x", State: x.state, DecidedAt: &now, DecidedVia: x.via})
 		if !r.Did || r.Verb != x.verb {

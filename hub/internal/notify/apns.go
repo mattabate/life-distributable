@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -58,6 +59,9 @@ type APNs struct {
 	after func(time.Duration, func())
 	// deliverFn stands in for deliver in tests (records the payload).
 	deliverFn func(payload []byte) error
+	// retryWaits: the pauses before each retry of a card's push that hit a
+	// transient failure (deliver); nil = pushRetryWaits. Tests shorten them.
+	retryWaits []time.Duration
 	// Voice is told which session is being heard while its push is spoken
 	// (threads.Voice; the Sessions list's "speaking" pill). nil = none.
 	Voice Voice
@@ -363,7 +367,7 @@ func (a *APNs) push(kind, title, body, thread, card string) error {
 			log.Printf("apns: %s was answered before its turn; not spoken", card)
 			return nil
 		}
-		return a.sendPayload(apsPayload(kind, title, body, false, thread, a.badge()))
+		return a.sendCard(apsPayload(kind, title, body, false, thread, a.badge()), card)
 	}
 	if d := a.slot(title+" "+body, time.Now()); d > 0 {
 		rel := wait()
@@ -480,11 +484,28 @@ func (a *APNs) sendPayload(payload []byte) error {
 	if a.deliverFn != nil {
 		return a.deliverFn(payload)
 	}
-	return a.deliver(payload)
+	return a.deliver(payload, nil)
 }
 
-// deliver sends one alert payload to every registered device.
-func (a *APNs) deliver(payload []byte) error {
+// sendCard is sendPayload for a card's line: a device that failed for a
+// passing reason is tried again while the card is still open (deliver).
+func (a *APNs) sendCard(payload []byte, card string) error {
+	if a.deliverFn != nil {
+		return a.deliverFn(payload)
+	}
+	return a.deliver(payload, func() bool { return a.cardOpen(card) })
+}
+
+// pushRetryWaits: how long a card's push waits before each retry after a
+// transient failure (a network blip, APNs 429 or 5xx). Without a retry the
+// error was only logged and the line was lost until the next hub start.
+var pushRetryWaits = []time.Duration{2 * time.Second, 8 * time.Second, 30 * time.Second}
+
+// deliver sends one alert payload to every registered device. With `open`
+// (a card's push), a device that failed transiently is retried in the
+// background at retryWaits, each time only while open() still holds; any
+// other 4xx is final. The first error is returned either way.
+func (a *APNs) deliver(payload []byte, open func() bool) error {
 	toks, err := a.tokens()
 	if err != nil {
 		return err
@@ -495,11 +516,67 @@ func (a *APNs) deliver(payload []byte) error {
 	}
 	var first error
 	for _, d := range toks {
-		if err := a.send(jwt, d, payload); err != nil && first == nil {
+		err := a.send(jwt, d, payload)
+		if err == nil {
+			continue
+		}
+		if first == nil {
 			first = err
+		}
+		if open != nil && transient(err) {
+			go a.retry(d, payload, open, err)
 		}
 	}
 	return first
+}
+
+// retry re-sends one device's push after each wait until it goes, fails for
+// good, the waits run out, or the card closes.
+func (a *APNs) retry(d device, payload []byte, open func() bool, err error) {
+	waits := a.retryWaits
+	if waits == nil {
+		waits = pushRetryWaits
+	}
+	for i, w := range waits {
+		time.Sleep(w)
+		if !open() {
+			log.Printf("apns: card closed; retry %d of %s… dropped", i+1, d.token[:min(8, len(d.token))])
+			return
+		}
+		jwt, terr := a.token()
+		if terr != nil {
+			log.Printf("apns: retry %d: %v", i+1, terr)
+			return
+		}
+		if err = a.send(jwt, d, payload); err == nil {
+			log.Printf("apns: retry %d of %s… went", i+1, d.token[:min(8, len(d.token))])
+			return
+		}
+		if !transient(err) {
+			break
+		}
+	}
+	log.Printf("apns: gave up on %s…: %v", d.token[:min(8, len(d.token))], err)
+}
+
+// pushError is APNs's answer to one send that was not 200.
+type pushError struct {
+	status int
+	reason string
+}
+
+func (e *pushError) Error() string { return fmt.Sprintf("apns %d %s", e.status, e.reason) }
+
+// transient: worth trying again (APNs throttling (429) or its own fault
+// (5xx), or the request never got an answer (network)). Any other 4xx is
+// about the push or the token and would fail the same way again.
+func transient(err error) bool {
+	var pe *pushError
+	if errors.As(err, &pe) {
+		return pe.status == 429 || pe.status >= 500
+	}
+	var ne net.Error
+	return errors.As(err, &ne)
 }
 
 // Wake sends a silent background push (content-available) to every device
@@ -566,7 +643,7 @@ func (a *APNs) sendType(jwt string, d device, payload []byte, pushType string) e
 		a.db.Exec(`DELETE FROM devices WHERE token=?`, token)
 		log.Printf("apns: dropped token %s…: %s", token[:8], e.Reason)
 	}
-	return fmt.Errorf("apns %d %s", resp.StatusCode, e.Reason)
+	return &pushError{resp.StatusCode, e.Reason}
 }
 
 // Notifier adapter (sched.NeedsYou / sched.ToRead). The titles are what Siri

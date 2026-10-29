@@ -54,6 +54,12 @@ const (
 	// (heldResult) becomes the reply anyway after this long with no output —
 	// the task's notification never came, and the text should not be lost.
 	holdTTL = 15 * time.Minute
+	// hangTTL: a turn in flight with no background task pending that printed
+	// nothing for this long has a tool call that will never return (for
+	// example a shell call waiting on an OS permission prompt nobody can
+	// see). The hub kills it and cards the error. Long enough for a real
+	// build or a slow subagent, which print as they go.
+	hangTTL = 45 * time.Minute
 	// deadProbe: a process quiet for this long is asked for by name (tmux
 	// has-session), and asked again no more often than this. See gone.
 	deadProbe = time.Minute
@@ -91,6 +97,10 @@ func (m *Manager) gone(r run, now time.Time) bool {
 // goneText is what a gone run died of, in the error card's and the retry's
 // words (transientRe matches it: the turn wants starting again).
 const goneText = "the session's process is gone (its tmux session was not found)"
+
+// hangText is what a hung turn (hangTTL) died of, on its error card.
+// transientRe must not match it: a retry would hang on the same call.
+var hangText = fmt.Sprintf("the turn printed nothing for %d min (a tool call hung); stopped by the hub", int(hangTTL/time.Minute))
 
 // finishGone settles a run whose tmux session is no longer there (gone). A
 // turn in flight is the transient case: its input goes back on the queue and
@@ -1069,6 +1079,14 @@ func (m *Manager) Poll() {
 			m.db.Exec(`UPDATE thread_runs SET busy=0 WHERE id=?`, r.id)
 			m.reopenUnclosed(r.thread)
 			m.settleStatus(r.thread)
+		case r.busy == 1 && r.held == "" && r.tasks == 0 && now.Sub(r.lastOutput) > hangTTL:
+			// A hung tool call (see hangTTL). After the cases above, so a held
+			// result or a folded steer settles its own way first. Not transient
+			// words: the same call usually hangs again, so the card, no retry.
+			log.Printf("thread %s: process %s: %s", r.thread, r.id, hangText)
+			m.Run("tmux", "kill-session", "-t", m.tmuxSession(r.thread, r.id))
+			os.WriteFile(r.out+".err", []byte(hangText), 0o600)
+			m.finishProcess(r)
 		case r.busy == 0 && r.eof == 0 && now.Sub(r.lastOutput) > idleTTL:
 			m.sendEOF(r)
 		}
@@ -1194,6 +1212,13 @@ func (m *Manager) tail(r run) run {
 			// it. The phone drew "steered in mid-turn" under a message with its
 			// own step block.
 			m.db.Exec(`UPDATE thread_messages SET steered=0 WHERE steered=1 AND id=(SELECT MIN(id) FROM thread_messages WHERE run_id=? AND role!='claude')`, r.turnID())
+		case head.Type == "system" && head.Subtype == "compact_boundary":
+			// The CLI compacted the context: the board/peers blocks a turn got
+			// are folded away, and "unchanged since your last turn" would point
+			// at nothing. The next turn gets the whole blocks again.
+			m.boardMu.Lock()
+			delete(m.boardSeen, r.thread)
+			m.boardMu.Unlock()
 		case head.Type == "system" && head.Subtype == "background_tasks_changed":
 			var ev struct {
 				Tasks []json.RawMessage `json:"tasks"`

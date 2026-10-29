@@ -1,11 +1,19 @@
 package notify
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"life/hub/internal/store"
 )
 
 // A push waits while the floor is held (a replay, a pitch round) and goes out
@@ -147,4 +155,59 @@ func TestSlotQueuesPushesBehindOneAnother(t *testing.T) {
 	if speakTime("") < 5*time.Second || speakTime(string(make([]byte, 400))) > 40*time.Second {
 		t.Fatalf("speakTime out of range: %v … %v", speakTime(""), speakTime(string(make([]byte, 400))))
 	}
+}
+
+// A card's push that hits a passing failure (APNs 503, a network blip) is
+// sent again a moment later while the card is open; a 400 is final, and a
+// card closed meanwhile is not retried.
+func TestCardPushRetriesTransientFailures(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rig := func(t *testing.T, answer func(n int32) int, open Open) (*APNs, *atomic.Int32) {
+		var n atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(answer(n.Add(1)))
+			w.Write([]byte(`{"reason":"x"}`))
+		}))
+		t.Cleanup(srv.Close)
+		db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := &APNs{db: db, keyID: "k", teamID: "t", bundle: "b", defHost: srv.URL, key: key,
+			client: srv.Client(), retryWaits: []time.Duration{10 * time.Millisecond, 10 * time.Millisecond}, Open: open}
+		if err := a.Register("abcdef0123456789", "phone", "", 1); err != nil {
+			t.Fatal(err)
+		}
+		return a, &n
+	}
+	settle := func(n *atomic.Int32, want int32) {
+		t.Helper()
+		deadline := time.Now().Add(time.Second)
+		for n.Load() < want && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond) // and nothing more after it
+		if got := n.Load(); got != want {
+			t.Fatalf("sends = %d, want %d", got, want)
+		}
+	}
+	always := func(string) bool { return true }
+
+	a, n := rig(t, func(i int32) int { return map[bool]int{true: 503, false: 200}[i == 1] }, always)
+	if err := a.sendCard([]byte(`{}`), "ask-1"); err == nil {
+		t.Fatal("the first send's 503 is still reported")
+	}
+	settle(n, 2)
+
+	a, n = rig(t, func(int32) int { return 400 }, always)
+	a.sendCard([]byte(`{}`), "ask-1")
+	settle(n, 1)
+
+	var closed atomic.Bool
+	a, n = rig(t, func(int32) int { closed.Store(true); return 503 }, func(string) bool { return !closed.Load() })
+	a.sendCard([]byte(`{}`), "ask-1")
+	settle(n, 1)
 }

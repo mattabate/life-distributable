@@ -922,6 +922,12 @@ func (m *Manager) ResolveAsk(id, state, by, note string) (Ask, error) {
 		return a, nil
 	}
 	if err := m.setAskState(a, state, by, note); err != nil {
+		if errors.Is(err, errStale) {
+			// Another tap (or the agent) moved it first, and that writer queued
+			// whatever the move owed the session. The caller gets the card as it
+			// is now, so a double tap is one Done.
+			return m.GetAsk(id)
+		}
 		return a, err
 	}
 	// The owner answering a card is a prompt that REFERENCES the ask
@@ -966,6 +972,10 @@ func (m *Manager) ResolveAsk(id, state, by, note string) (Ask, error) {
 // dropped); a failed write is returned and the thread status is left alone.
 func (m *Manager) setAskState(a Ask, state, by, note string) error {
 	if err := m.moveAsk(askMove{ask: a.ID, from: a.State, to: state, by: by, note: note}); err != nil {
+		if errors.Is(err, errStale) {
+			log.Printf("ask %s: %s → %s by %s: already moved, left alone", a.ID, a.State, state, by)
+			return err
+		}
 		log.Printf("ask %s: %s → %s by %s: %v", a.ID, a.State, state, by, err)
 		return err
 	}
@@ -981,6 +991,14 @@ func (m *Manager) setAskState(a Ask, state, by, note string) error {
 type askMove struct {
 	ask, from, to, by, note, event, supersededBy string
 }
+
+// errStale: moveAsk found the ask no longer in the state its caller read,
+// because someone moved it in between. Every caller reads the state, then
+// writes later, and the write used to land regardless: a Done tapped as a
+// turn ended could be flipped back to open by an earlier read, and a Done
+// tapped on two surfaces at once queued two prompts. Now the row and the
+// trail stay as the other writer left them.
+var errStale = errors.New("ask moved since it was read")
 
 // moveAsk is the ONE writer of an ask's state and of ask_events: the row and
 // its event land in one transaction (a state with no event, or an event for a
@@ -1000,19 +1018,25 @@ func (m *Manager) moveAsk(mv askMove) error {
 		return err
 	}
 	defer tx.Rollback()
+	var res sql.Result
 	switch {
 	case mv.from == "":
 	case mv.to == "open":
-		_, err = tx.Exec(`UPDATE items SET state='open', updated_at=?, resolved_at=NULL, resolved_by=NULL, resolution='' WHERE id=? AND src='ask'`, now, mv.ask)
+		res, err = tx.Exec(`UPDATE items SET state='open', updated_at=?, resolved_at=NULL, resolved_by=NULL, resolution='' WHERE id=? AND src='ask' AND state=?`, now, mv.ask, mv.from)
 	case mv.to == "answered":
-		_, err = tx.Exec(`UPDATE items SET state='answered', updated_at=? WHERE id=? AND src='ask'`, now, mv.ask)
+		res, err = tx.Exec(`UPDATE items SET state='answered', updated_at=? WHERE id=? AND src='ask' AND state=?`, now, mv.ask, mv.from)
 	case mv.supersededBy != "":
-		_, err = tx.Exec(`UPDATE items SET state=?, superseded_by=?, resolution=?, updated_at=?, resolved_at=?, resolved_by=? WHERE id=? AND src='ask'`, mv.to, mv.supersededBy, note, now, now, mv.by, mv.ask)
+		res, err = tx.Exec(`UPDATE items SET state=?, superseded_by=?, resolution=?, updated_at=?, resolved_at=?, resolved_by=? WHERE id=? AND src='ask' AND state=?`, mv.to, mv.supersededBy, note, now, now, mv.by, mv.ask, mv.from)
 	default:
-		_, err = tx.Exec(`UPDATE items SET state=?, updated_at=?, resolved_at=?, resolved_by=?, resolution=? WHERE id=? AND src='ask'`, mv.to, now, now, mv.by, note, mv.ask)
+		res, err = tx.Exec(`UPDATE items SET state=?, updated_at=?, resolved_at=?, resolved_by=?, resolution=? WHERE id=? AND src='ask' AND state=?`, mv.to, now, now, mv.by, note, mv.ask, mv.from)
 	}
 	if err != nil {
 		return err
+	}
+	if res != nil {
+		if n, err := res.RowsAffected(); err == nil && n == 0 {
+			return errStale
+		}
 	}
 	if err := store.StampItem(tx, mv.ask); err != nil {
 		return err

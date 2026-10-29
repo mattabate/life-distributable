@@ -1002,7 +1002,9 @@ function actionHTML(a, opened, armed, cost) {
     meta: `${pill(a.kind, kindPill[a.kind])} ${job ? pill('⚙ ' + job + ' job') : ''} ${a.project ? esc(a.project) : ''} <span>${ago(a.created_at)}</span>`,
     acts, cost, at: open ? '' : a.decided_at || a.created_at,
     closed: open ? '' : `${esc(a.state)}${a.decided_via ? ' via ' + esc(a.decided_via) : ''}${a.decided_at ? ' · ' + ago(a.decided_at) : ''}`, trail: eventsHTML(a.events),
-    folded: open ? '' : a.folded === 'dismissed' || a.state === 'dismissed' ? '✕ dismissed' : (no ? '✕ ' : '✓ ') + esc(a.state),
+    folded: open ? '' : a.folded === 'dismissed' || a.state === 'dismissed' ? '✕ dismissed'
+      // Cut off mid-run (the hub restarted, or a kill): neither ✓ nor ✕.
+      : a.state === 'uncertain' ? '? Unknown - check before retrying' : (no ? '✕ ' : '✓ ') + esc(a.state),
   }, opened);
 }
 
