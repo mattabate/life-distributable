@@ -333,6 +333,9 @@ func CalMark(state string, did bool, lane string) string {
 	switch {
 	case Wont(state), state == "superseded":
 		return "wont"
+	case state == "uncertain":
+		// Cut off mid-run: neither done nor refused, so no glyph claims either.
+		return ""
 	case state == "done" || state == "accepted" || did:
 		return "done"
 	case lane == "mine" || lane == "homework" || lane == "chores":
@@ -340,6 +343,9 @@ func CalMark(state string, did bool, lane string) string {
 	}
 	return ""
 }
+
+// ActionUncertainVerb: the record word of an action whose run was cut off.
+const ActionUncertainVerb = "Unknown - check before retrying"
 
 // ActionDidVerb: what the decider did — Approved even once the action has
 // since run, because the running was the hub's part (byOwner = decided from one of
@@ -350,6 +356,9 @@ func ActionDidVerb(state string, byOwner bool) string {
 		return "Denied"
 	case state == "failed":
 		return "Failed"
+	case state == "uncertain":
+		// Cut off mid-run (actions.Uncertain): it may have run, or half run.
+		return ActionUncertainVerb
 	case byOwner:
 		return "Approved"
 	case state == "running":

@@ -80,7 +80,7 @@ func TestStandingIsTheClientsOldLists(t *testing.T) {
 		{"expired", false, "recs", "wont"}, {"declined", true, "recs", "wont"}, {"superseded", false, "recs", "wont"},
 		{"done", false, "agents", "done"}, {"accepted", false, "recs", "done"}, {"approved", true, "mine", "done"},
 		{"scheduled", false, "mine", "todo"}, {"scheduled", false, "homework", "todo"}, {"fired", false, "chores", "todo"},
-		{"scheduled", false, "scheduled", ""}, {"proposed", false, "recs", ""},
+		{"scheduled", false, "scheduled", ""}, {"proposed", false, "recs", ""}, {"uncertain", true, "agents", ""},
 	} {
 		if got := CalMark(c.state, c.did, c.lane); got != c.want {
 			t.Errorf("CalMark(%s,%v,%s) = %q, want %q", c.state, c.did, c.lane, got, c.want)

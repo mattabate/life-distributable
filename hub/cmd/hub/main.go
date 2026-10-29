@@ -220,6 +220,8 @@ func main() {
 		if _, err := thr.CreateIdle("hub", "Hub", "life"); err != nil {
 			log.Printf("hub thread: %v", err)
 		}
+	} else if err := thr.PinTitle("hub", "Hub"); err != nil {
+		log.Printf("hub thread title: %v", err)
 	}
 	sch.Ask = func(job, text string) {
 		if _, err := thr.AddAskOn("hub", "", text, "raised by the "+job+" job", "other", "", ""); err != nil {
@@ -260,6 +262,24 @@ func main() {
 			log.Printf("actions: record thread %s on %s: %v", id, a.ID, err)
 		}
 	}
+	// An action cut off mid-run (actions.Uncertain) is told to the session
+	// that proposed it, once, so it checks what happened before it proposes
+	// the same command again. This also tells the restart's orphans,
+	// closed inside actions.New before the sessions existed.
+	acts.TellUncertain(func(a actions.Action) {
+		if a.ThreadID == "" {
+			log.Printf("actions: %s ended uncertain with no session to tell", a.ID)
+			return
+		}
+		note, proj := actions.UncertainNote(a), a.Project
+		if _, ok := projDir(proj); !ok {
+			proj = "life"
+		}
+		if _, _, err := (deliver.Deliverer{Thr: thr}).ToSession(deliver.Target{ThreadID: a.ThreadID, Title: a.Title, Project: proj,
+			Relay: note, Starter: note + "\n\nDetail of the proposal:\n" + a.Detail}); err != nil {
+			log.Printf("actions: tell %s uncertain: %v", a.ID, err)
+		}
+	})
 	sch.Gate = func(gate string, last time.Time) bool {
 		switch gate {
 		case "asks":

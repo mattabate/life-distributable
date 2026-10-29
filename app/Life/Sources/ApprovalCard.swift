@@ -70,7 +70,9 @@ struct ApprovalCard: View {
              extra: payload, meta: AnyView(metaRow),
              line: decidedLine,
              // Decided or dismissed, it is its row: ✓ approved, ✕ denied.
+             // Cut off mid-run (the hub restarted, or a kill): neither ✓ nor ✕.
              folded: isOpen ? nil : dismissed || a.state == "dismissed" ? "✕ dismissed"
+                : a.state == "uncertain" ? "? Unknown - check before retrying"
                 : (a.state == "denied" || a.state == "failed" ? "✕ " : "✓ ") + a.state,
              buttons: buttons, trail: trail, busy: busy, error: error)
         .task(id: a.id) {
@@ -267,6 +269,6 @@ struct StateBadge: View {
     let state: String
     var body: some View { Chip(state, tint: color, style: .tag) }
     var color: Color {
-        switch state { case "proposed": .red; case "approved", "running": .blue; case "done": .green; case "denied": .gray; case "failed": .orange; default: .secondary }
+        switch state { case "proposed": .red; case "approved", "running": .blue; case "done": .green; case "denied": .gray; case "failed", "uncertain": .orange; default: .secondary }
     }
 }
