@@ -252,8 +252,8 @@ function sessionCards(bundle) {
   return acts.concat(asks);
 }
 // How many of a session's open cards its row draws; the rest is "and N more"
-// (one, like the desktop's `deskCards`).
-const ROW_CARDS = 1;
+// (two, like the desktop's `rowCards`).
+const ROW_CARDS = 2;
 // …and how many of its sub-sessions, the rest "and N more".
 const SUB_CELLS = 3;
 // "AND N MORE" OPENS THE REST IN PLACE: the row's older cards drop in under

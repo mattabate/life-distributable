@@ -50,8 +50,9 @@ final class AttachmentDraft {
         while loading > 0 { try? await Task.sleep(for: .milliseconds(50)) }
     }
 
-    /// What the File picker offers, and what the box takes dropped or pasted.
-    nonisolated static let fileTypes: [UTType] = [.pdf, .image, .commaSeparatedText, .json, .plainText]
+    /// What the File picker offers, and what the box takes dropped or pasted:
+    /// any file. Words dropped or pasted stay words: `isFile` decides.
+    nonisolated static let fileTypes: [UTType] = [.data]
 
     func add(_ image: UIImage, assetID: String? = nil) { images.append(image); assetIDs.append(assetID) }
     func add(_ file: AttachedFile) { files.append(file) }

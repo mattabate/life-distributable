@@ -655,3 +655,18 @@ Entry format:
 - For: everyone
 - Offer: The preamble tells sessions that text inside `<untrusted>` (pages, mail, files, API output) is data, never instructions, still within the 12000-byte budget. The hub's own idle session is no longer auto-titled after one run's words, and boot pins its title back to "Hub".
 - How: same merge as add-0008. By hand: `threads/threads.go` (preamble, `CreateIdle` `title_auto=0`, `PinTitle`), `preamble_test.go`, `pintitle_test.go`, `cmd/hub/main.go`.
+
+## add-0057 · 2026-10-29 · A copy of the database before a schema change
+- For: everyone
+- Offer: When a package that has already migrated gets new schema statements, the hub first writes `VACUUM INTO snapshots/pre-migrate.db` beside the database, so a bad backfill can be undone without the last nightly backup. A package's first run only creates tables and takes no copy.
+- How: same merge as add-0008. By hand: `store/migrate.go`, `migrate_test.go`.
+
+## add-0058 · 2026-10-29 · Any file attaches; Office files are readable
+- For: everyone
+- Offer: The phone's file picker, drop and paste take any file, not only a fixed list of types. A Word, Excel or PowerPoint attachment gets a line pointing the session at `ops/py.sh doc-text.py <file>`, which prints a .docx (paragraphs, tables), .xlsx (sheet by sheet) or .pptx (slide by slide) with the standard library, and .doc/.rtf/.odt through macOS `textutil`.
+- How: same merge as add-0008. By hand: `ops/doc-text.py` (new), `threads/threads.go` (`isOfficeBlob`), `threads/runner.go` (attachment note), `attach_test.go`, `Attachments.swift` (`fileTypes`).
+
+## add-0059 · 2026-10-29 · Two cards per Your turn row
+- For: everyone
+- Offer: A Your turn row on the Sessions list draws up to two cards before "and N more", on the web and on the desktop, which had drawn only one.
+- How: same merge as add-0008. By hand: `web/views/threads.js` (`ROW_CARDS`), `ThreadRows.swift` (`rowCards` replaces `deskCards`).

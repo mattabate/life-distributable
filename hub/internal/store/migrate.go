@@ -2,6 +2,9 @@ package store
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -31,6 +34,9 @@ func (db *DB) Migrate(pkg string, stmts []string) ([]string, error) {
 		return nil, fmt.Errorf("schema_migrations: %w", err)
 	}
 	var fresh []string
+	var recorded int
+	db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE pkg=?`, pkg).Scan(&recorded)
+	snapped := recorded == 0 // a package's first run only creates its tables
 	for i, stmt := range stmts {
 		var n int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE pkg=? AND stmt=?`, pkg, stmt).Scan(&n); err != nil {
@@ -38,6 +44,10 @@ func (db *DB) Migrate(pkg string, stmts []string) ([]string, error) {
 		}
 		if n > 0 {
 			continue
+		}
+		if !snapped {
+			snapped = true
+			db.preMigrateSnapshot(pkg)
 		}
 		if _, err := db.Exec(stmt); err != nil {
 			if !alreadyApplied(err) {
@@ -51,6 +61,35 @@ func (db *DB) Migrate(pkg string, stmts []string) ([]string, error) {
 		}
 	}
 	return fresh, nil
+}
+
+// preMigrateFile: the copy taken before an existing package's new
+// statements run, in a snapshots/ directory next to the database.
+const preMigrateFile = "pre-migrate.db"
+
+// preMigrateSnapshot: a bad backfill UPDATE in a new statement could only be
+// undone from the last nightly backup, up to a day of writes behind. So
+// before an already-migrated package runs anything new, the database is
+// copied with VACUUM INTO (never a file copy: WAL), one file overwritten each
+// time. A failure is logged and the migration goes ahead.
+func (db *DB) preMigrateSnapshot(pkg string) {
+	var seq int
+	var name, path string
+	if err := db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil || path == "" {
+		return // in-memory
+	}
+	dst := filepath.Join(filepath.Dir(path), "snapshots", preMigrateFile)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		log.Printf("store: pre-migrate snapshot (%s): %v", pkg, err)
+		return
+	}
+	os.Remove(dst)
+	start := time.Now()
+	if _, err := db.Exec(`VACUUM INTO ?`, dst); err != nil {
+		log.Printf("store: pre-migrate snapshot (%s): %v", pkg, err)
+		return
+	}
+	log.Printf("store: %s has new statements; snapshot %s (%s)", pkg, dst, time.Since(start).Round(time.Millisecond))
 }
 
 func alreadyApplied(err error) bool {

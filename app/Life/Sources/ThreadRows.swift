@@ -342,10 +342,9 @@ struct ThreadRow: View {
     /// which opens the older ones in place); a Working card is one line, a
     /// blue dot, the name and when it last moved. Only the live audio pills
     /// stay (speaking, waiting): the one fact a cell cannot carry.
-    static let deskCards = 1
     var macCard: some View {
         let live = pills.filter { ["speaking", "waiting"].contains($0.tone) }
-        let more = max(0, openCount - min(cells.count, Self.deskCards))
+        let more = max(0, openCount - min(cells.count, Self.rowCards))
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 // Its own turn or one under it at work (the board's running
@@ -371,11 +370,11 @@ struct ThreadRow: View {
             }
             if !cells.isEmpty || !subs.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(cells.prefix(moreOpen ? cells.count : Self.deskCards)) { c in WebMiniCard(c: c) { open(c.id) } }
-                    if !cells.isEmpty, more > 0 || cells.count > Self.deskCards {
+                    ForEach(cells.prefix(moreOpen ? cells.count : Self.rowCards)) { c in WebMiniCard(c: c) { open(c.id) } }
+                    if !cells.isEmpty, more > 0 || cells.count > Self.rowCards {
                         // "And N more" opens the older cards in place; the
                         // console's toggleMoreCards.
-                        Button { if cells.count > Self.deskCards { moreOpen.toggle() } else { open(nil) } } label: {
+                        Button { if cells.count > Self.rowCards { moreOpen.toggle() } else { open(nil) } } label: {
                             Text(moreOpen ? "Show less" : "and \(more) more").font(.system(size: 12.5)).foregroundStyle(.secondary)
                                 .padding(.horizontal, 14).padding(.vertical, 8)
                                 .frame(maxWidth: .infinity, alignment: .leading)

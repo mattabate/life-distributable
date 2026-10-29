@@ -1998,6 +1998,15 @@ func isImageBlob(ref string) bool {
 	return false
 }
 
+// isOfficeBlob: a file the Read tool can't open and ops/doc-text.py can.
+func isOfficeBlob(ref string) bool {
+	switch strings.ToLower(path.Ext(ref)) {
+	case ".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm", ".doc", ".rtf", ".odt":
+		return true
+	}
+	return false
+}
+
 func stripSnapPreamble(s string) string {
 	s = strings.TrimSpace(s)
 	for _, p := range []string{snapPreamble, consoleSnapPreamble} {
