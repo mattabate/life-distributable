@@ -55,6 +55,32 @@ func TestDeciderVerifiesOnlyTheRealSecret(t *testing.T) {
 	}
 }
 
+// Armed once, armed for good: a session that empties or deletes the hash
+// file gets refusals, not the hub token's old free pass.
+func TestDeciderFailsClosedOnceArmed(t *testing.T) {
+	q, _, _ := setup(t)
+	path := filepath.Join(t.TempDir(), "decider.hash")
+	if q.Decider(path).Armed() {
+		t.Fatal("never armed = unarmed")
+	}
+	secret, _ := NewSecret()
+	q.Decider(path).Arm(secret)
+	if !q.Decider(path).Armed() {
+		t.Fatal("armed after Arm")
+	}
+	for _, tamper := range []func(){func() { os.WriteFile(path, nil, 0o600) }, func() { os.Remove(path) }} {
+		tamper()
+		d := q.Decider(path)
+		if !d.Armed() || d.Verify(secret) || d.Verify("") {
+			t.Fatal("a tampered hash file must refuse every decision")
+		}
+	}
+	q.Decider(path).Arm(secret)
+	if !q.Decider(path).Verify(secret) {
+		t.Fatal("decider-set.sh's new hash works again")
+	}
+}
+
 func TestNewSecretIsTypeableAndUnguessable(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 50; i++ {

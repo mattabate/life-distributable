@@ -24,6 +24,30 @@ import (
 // Kinds that are ALWAYS gated regardless of what the proposer says.
 var gatedKinds = map[string]bool{"money": true, "delete": true, "contact": true, "share": true, "commit": true}
 
+// A shell or claude run is the owner's to approve whatever kind it says,
+// unless the command is one plain line on the free list (FreeShell). A
+// kind=other shell proposal used to run at once: the hub's own bash, outside
+// every session's --allowedTools, so `lifectl propose --exec shell` was one
+// line past the python3/curl/sqlite3 ban. The kind is the proposer's word;
+// the command is what runs.
+var shellMeta = "`$;&|<>(){}\n\r\\"
+
+// freeShell: cmd is exactly a free entry or one followed by plain arguments,
+// with nothing the shell would read as a second command, a redirect or an
+// expansion.
+func freeShell(free []string, cmd string) bool {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" || strings.ContainsAny(cmd, shellMeta) {
+		return false
+	}
+	for _, f := range free {
+		if f != "" && (cmd == f || strings.HasPrefix(cmd, f+" ")) {
+			return true
+		}
+	}
+	return false
+}
+
 type Action struct {
 	ID          string          `json:"id"`
 	CreatedAt   time.Time       `json:"created_at"`
@@ -158,6 +182,10 @@ type Queue struct {
 	exec Executor
 	nfy  Notifier
 	mu   sync.Mutex
+	// FreeShell: the commands a shell proposal may run without the owner's
+	// card (freeShell). main sets read-only ones; nil = every shell run is
+	// gated.
+	FreeShell []string
 	// OnDecided fires after the owner approves/denies a gated action (main relays
 	// it into the proposing thread, or starts one). nil = no callback.
 	OnDecided func(a Action, approved bool, note string)
@@ -465,6 +493,18 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 	}
 	if p.ExecType == "relay" {
 		gated = true // never auto-runs, whatever the proposer says
+	}
+	switch p.ExecType {
+	case "claude":
+		gated = true
+	case "shell":
+		var sp struct {
+			Cmd string `json:"cmd"`
+		}
+		json.Unmarshal(p.ExecPayload, &sp)
+		if !freeShell(q.FreeShell, sp.Cmd) {
+			gated = true
+		}
 	}
 	// A retry of a command that already ran, or may have, is the owner's to
 	// approve: the card says which run it repeats.

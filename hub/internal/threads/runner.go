@@ -818,6 +818,9 @@ func (m *Manager) launch(t Thread) error {
 	if len(m.AllowedTools) > 0 {
 		args = append(args, "--allowedTools", strings.Join(m.AllowedTools, ","))
 	}
+	if d := m.deniedTools(); len(d) > 0 {
+		args = append(args, "--disallowedTools", strings.Join(d, ","))
+	}
 	// The list the process launched with, for toolsStale.
 	if err := os.WriteFile(base+".tools", []byte(strings.Join(m.AllowedTools, ",")), 0o600); err != nil {
 		return err
@@ -1127,6 +1130,22 @@ func (m *Manager) deliveredAfter(r run, t time.Time) []int64 {
 		}
 	}
 	return out
+}
+
+// deniedTools: no session writes ops/secrets/ (hub.token, decider.hash, the
+// connector keys), whatever --allowedTools grants Edit and Write elsewhere
+// (a session could empty decider.hash). Edit rules cover every file-writing
+// tool; "//" is an absolute path.
+func (m *Manager) deniedTools() []string {
+	if m.ProjectDir == nil {
+		return nil
+	}
+	dir, ok := m.ProjectDir("life")
+	if !ok || dir == "" {
+		return nil
+	}
+	sec := "/" + filepath.Join(dir, "ops", "secrets") + "/**"
+	return []string{"Edit(" + sec + ")", "Write(" + sec + ")"}
 }
 
 // toolsStale: a live process keeps the --allowedTools it launched with, so a

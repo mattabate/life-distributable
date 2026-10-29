@@ -670,3 +670,8 @@ Entry format:
 - For: everyone
 - Offer: A Your turn row on the Sessions list draws up to two cards before "and N more", on the web and on the desktop, which had drawn only one.
 - How: same merge as add-0008. By hand: `web/views/threads.js` (`ROW_CARDS`), `ThreadRows.swift` (`rowCards` replaces `deskCards`).
+
+## add-0060 · 2026-10-29 · Security: shell proposals are gated, the decider fails closed
+- For: everyone
+- Offer: A security fix, worth taking. A proposal that runs a shell command or a Claude run now waits for the owner's approval whatever kind it claims (only one plain `ls` line runs at once); before, a `kind=other` shell proposal ran straight away as the hub's own bash, past every session's tool list. Once a decider code has been set, emptying or deleting `decider.hash` refuses every approval instead of falling back to the hub token, and no session may edit or write `ops/secrets/`. The SETUP restore test now restores into a fresh temporary folder and deletes it, and `ops/schedule.json` drops two pre-approved scripts the tree never shipped.
+- How: same merge as add-0008. By hand: `actions/actions.go` (`freeShell`, `Queue.FreeShell`, the `switch p.ExecType` in `Propose`) + `actions_test.go` (tests that ran shell ungated set `q.FreeShell`), `actions/decider.go` (`Queue.Decider`, the `decider_armed` setting) + `decider_test.go`, `server/actions.go` (`s.acts.Decider`), `cmd/hub/main.go` (`acts.FreeShell = []string{"ls"}`), `threads/runner.go` (`deniedTools`) + `runner_test.go`, `ops/schedule.json`, SETUP.md (the restore test), `shared/api.md`, `hub/CLAUDE.md`. Then `ops/hub.sh restart`. If the owner's sessions relied on ungated shell proposals, list the read-only commands they need in `FreeShell`.
