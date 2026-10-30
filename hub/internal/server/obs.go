@@ -258,11 +258,24 @@ func (s *Server) getBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	// An SVG is a document that can carry script: drawn in an <img> it runs
-	// none, but "open the file" loads it on the hub's own origin. Sandboxed,
-	// it is a picture there too.
-	if strings.EqualFold(filepath.Ext(p), ".svg") {
+	// A blob is served as its own kind, never sniffed, and anything that is not
+	// plain media is sandboxed so opening the file never gives it the hub's origin.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	switch ext := strings.ToLower(filepath.Ext(p)); {
+	case ext == ".svg":
 		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:")
+	case ext == ".html" || ext == ".htm":
+		// keeps its own script, at an opaque origin. allow-same-origin must never join this.
+		w.Header().Set("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src data:")
+	case !inertBlobExt[ext]:
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	}
 	http.ServeFile(w, r, p)
+}
+
+// inertBlobExt: types a browser draws or plays and never runs as a page. A PDF stays out of the sandbox because the browser's viewer refuses to open inside one.
+var inertBlobExt = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true, ".heic": true, ".heif": true, ".avif": true,
+	".mp3": true, ".m4a": true, ".wav": true, ".aac": true, ".ogg": true, ".mp4": true, ".mov": true, ".webm": true,
+	".pdf": true,
 }
