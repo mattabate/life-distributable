@@ -720,3 +720,8 @@ Entry format:
 - For: everyone
 - Offer: A security fix, worth taking. The OTA token is blanked from the request log, which sessions can read. `hub.token` is read the way its clients read it, a file holding no token is refused instead of overwritten, and a new token is written beside the file and renamed in.
 - How: same merge as add-0008. By hand: `server/server.go` (`logPath`), `cmd/hub/main.go`, their tests.
+
+## add-0070 · 2026-10-30 · A clearer security diagram
+- For: everyone
+- Offer: Docs only, nothing to run. The README's security diagram is redrawn, in light and dark, and its outbound list now names all four places, your backup bucket included.
+- How: same merge as add-0008. By hand: `README.md`, `docs/img/security.png`, `docs/img/security-dark.png`.
