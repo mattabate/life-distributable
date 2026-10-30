@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"life/hub/internal/notify"
 	"life/hub/internal/spend"
@@ -297,16 +299,13 @@ func (m *Manager) RewordAsk(id, title, detail, say, by string) (Ask, error) {
 	if a.Kind == "error" {
 		return Ask{}, errors.New("an error card is the hub's")
 	}
-	title, detail, say = strings.TrimSpace(title), strings.TrimSpace(detail), strings.TrimSpace(say)
+	title, detail, say = cardTitle(title), strings.TrimSpace(detail), strings.TrimSpace(say)
 	if title == "" && detail == "" && say == "" {
 		return Ask{}, errors.New("nothing to change: give --title, --say or --detail")
 	}
 	now := ts(time.Now())
 	sets, args, changed := []string{"updated_at=?"}, []any{now}, []string{}
 	if title != "" {
-		if len(title) > 200 {
-			title = title[:200]
-		}
 		sets, args, changed = append(sets, "title=?"), append(args, title), append(changed, "title")
 	}
 	if detail != "" {
@@ -447,13 +446,34 @@ func spokenFallback(kind, class, title, thread string) string {
 	return notify.Spoken(kind, class, plainTitle(title), plainTitle(thread))
 }
 
+// cardTitleMax: a card title's cap in bytes.
+const cardTitleMax = 200
+
+// cardTitle: a card title on one line and in whole characters. Control
+// characters (a newline, a tab) become a space, the ends are trimmed, and a
+// title past cardTitleMax bytes is cut back to a character's start, never
+// through one (a byte cut halves an accent or an emoji into invalid UTF-8).
+func cardTitle(s string) string {
+	s = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s))
+	if len(s) > cardTitleMax {
+		cut := cardTitleMax
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = strings.TrimSpace(s[:cut])
+	}
+	return s
+}
+
 func (m *Manager) addAsk(threadID, runID, title, detail, kind, check, surface, class, say string) (Ask, error) {
-	title = strings.TrimSpace(title)
+	title = cardTitle(title)
 	if title == "" {
 		return Ask{}, errors.New("title required")
-	}
-	if len(title) > 200 {
-		title = title[:200]
 	}
 	if kind == "" {
 		kind = "other"

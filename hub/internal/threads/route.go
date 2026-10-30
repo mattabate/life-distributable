@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Routing a new session (team mode): a message the owner starts a NEW
@@ -150,7 +152,14 @@ func (m *Manager) RouteWith(prompt, model string) (string, string) {
 			return ollamaPickWith(model, p, lanes, ids)
 		}
 	}
-	if (m.Pick == nil && local == nil) || strings.TrimSpace(prompt) == "" {
+	if strings.TrimSpace(prompt) == "" {
+		return "", ""
+	}
+	if id, name := m.addressedPersona(prompt); id != "" {
+		log.Printf("route: %s (opened by name: %s)", id, name)
+		return id, "the owner opened the message by name: " + name
+	}
+	if m.Pick == nil && local == nil {
 		return "", ""
 	}
 	cands := m.routeCandidates()
@@ -207,6 +216,55 @@ func (m *Manager) RouteWith(prompt, model string) (string, string) {
 	log.Printf("route: new session in %s (%q)", time.Since(start).Round(time.Millisecond), firstLine(out, 120))
 	return "", ""
 }
+
+// addressedPersona: the role the owner opens a message to by name ("Uh,
+// Dana, um, so here's the deal...", "Hey, Dana, what is this?"), whose
+// session takes it with no model asked. Only an opening counts: past filler
+// words ("uh", "hey", "so"), a name with a comma or other mark after it, or
+// straight after a greeting. A name later on ("Something seems odd with
+// Dana") is about that role, not to it, and the router decides. Only a
+// one-word title is a name; the calendar session's default title is not.
+func (m *Manager) addressedPersona(prompt string) (string, string) {
+	ps, err := m.Personas()
+	if err != nil {
+		return "", ""
+	}
+	byName := map[string]Thread{}
+	for _, t := range ps {
+		if n := strings.ToLower(strings.TrimSpace(t.Title)); n != "" && n != "calendar" && !strings.Contains(n, " ") {
+			byName[n] = t
+		}
+	}
+	if len(byName) == 0 {
+		return "", ""
+	}
+	s := strings.TrimSpace(stripBrackets(stripSnapPreamble(prompt)))
+	greeted := false
+	for i := 0; i < 6; i++ {
+		end := strings.IndexFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && r != '\'' })
+		word, rest := s, ""
+		if end >= 0 {
+			word, rest = s[:end], s[end:]
+		}
+		if word == "" {
+			return "", ""
+		}
+		w := strings.ToLower(word)
+		r, _ := utf8.DecodeRuneInString(strings.TrimLeft(rest, " "))
+		if t, ok := byName[w]; ok && (strings.ContainsRune(",:;!?.—-", r) || greeted) {
+			return t.ID, t.Title
+		}
+		if !addressFillers[w] {
+			return "", ""
+		}
+		greeted = greeted || w == "hey" || w == "hi" || w == "hello" || w == "yo"
+		s = strings.TrimLeft(rest, " ,.;:!?—-")
+	}
+	return "", ""
+}
+
+// addressFillers: what is said before a name when speaking to someone.
+var addressFillers = map[string]bool{"uh": true, "um": true, "umm": true, "hey": true, "hi": true, "hello": true, "yo": true, "ok": true, "okay": true, "so": true, "oh": true, "alright": true, "and": true, "well": true}
 
 // parseRoute reads "<id> | <reason>" from the first non-empty line.
 func parseRoute(out string) (string, string) {

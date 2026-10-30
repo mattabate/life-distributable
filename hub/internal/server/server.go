@@ -148,8 +148,27 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	finish()
 	done()
 	if took := time.Since(start); logRequest(r.Method, r.URL.Path, sw.code, took) {
-		log.Printf("%s %s %d %s", r.Method, r.URL.Path, sw.code, took.Round(time.Millisecond))
+		log.Printf("%s %s %d %s", r.Method, logPath(r.URL.Path), sw.code, took.Round(time.Millisecond))
 	}
+}
+
+// secretPaths: open routes whose path segment after the prefix is the
+// credential (the OTA bundle's token).
+var secretPaths = []string{"/ota/"}
+
+// logPath is the path as the request log may print it: a secret segment
+// becomes REDACTED. The log is a file sessions can read, and a long download
+// is always logged.
+func logPath(p string) string {
+	for _, pre := range secretPaths {
+		if rest, ok := strings.CutPrefix(p, pre); ok && rest != "" {
+			if i := strings.IndexByte(rest, '/'); i >= 0 {
+				return pre + "REDACTED" + rest[i:]
+			}
+			return pre + "REDACTED"
+		}
+	}
+	return p
 }
 
 // quietGET: a successful read faster than this is not logged. The console and

@@ -86,6 +86,33 @@ func TestAttachedDocument(t *testing.T) {
 	}
 }
 
+// A HEIC photo: Read can't open it, so the prompt hands over the line that
+// makes a JPEG; a JPEG gets no such line.
+func TestAttachedHEIC(t *testing.T) {
+	m, _, _ := setup(t)
+	m.BlobPath = func(ref string) (string, error) { return "/data/blobs/" + ref, nil }
+	th, err := m.Create("", "life", "", "Transcribe this", "", "", []string{"sha256/ab/abc.heic", "sha256/cd/cde.jpg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := m.db.Query(`SELECT out_file FROM thread_runs WHERE thread_id=?`, th.ID)
+	var out string
+	for rows.Next() {
+		rows.Scan(&out)
+	}
+	rows.Close()
+	p, _ := os.ReadFile(strings.TrimSuffix(out, ".out") + ".prompt")
+	if want := "/data/blobs/sha256/ab/abc.heic — Read can't open this format: `ops/py.sh img-to-jpeg.py '/data/blobs/sha256/ab/abc.heic'`"; !strings.Contains(string(p), want) {
+		t.Fatalf("prompt missing %q: %s", want, p)
+	}
+	if strings.Contains(string(p), "img-to-jpeg.py '/data/blobs/sha256/cd/cde.jpg'") {
+		t.Fatalf("a JPEG opens with Read: %s", p)
+	}
+	if !strings.Contains(string(p), "2 image(s)") {
+		t.Fatalf("a HEIC is still a picture: %s", p)
+	}
+}
+
 // A Word file: the prompt hands the session the line that prints its text.
 func TestAttachedWordFile(t *testing.T) {
 	m, _, _ := setup(t)
