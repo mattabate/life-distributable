@@ -89,3 +89,39 @@ func TestWaitingItemLooksThenRaisesOneCard(t *testing.T) {
 		t.Fatalf("raise of a closed item is a no-op: %v", err)
 	}
 }
+
+// A look cancelled while its item stays scheduled is no look: on its day the
+// tick queues a fresh one instead of leaving the row scheduled forever,
+// unchecked and never raised.
+func TestWaitingItemWithCancelledLookGetsAFreshOne(t *testing.T) {
+	c, th, _ := newTest(t)
+	now := ahead(1, 7, 0)
+	c.Now = func() time.Time { return now }
+	tr, _ := th.Create("", "life", "", "Quotes.", "", "", nil)
+	it, err := c.Add(Item{Title: "Vendor B owes a quote", Day: day(ahead(2, 0, 0)), Kind: "waiting", ThreadID: tr.ID, Detail: "mail from:vendor-b.example", Source: "claude:thread:" + tr.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := th.CancelPrompt(it.PromptID); err != nil {
+		t.Fatal(err)
+	}
+	c.Tick() // before its day: nothing to do yet
+	if got, _ := c.Get(it.ID); got.PromptID != it.PromptID {
+		t.Fatalf("a look is owed only once its day comes: %+v", got)
+	}
+	now = ahead(3, 9, 0)
+	c.Tick()
+	got, _ := c.Get(it.ID)
+	if got.State != "scheduled" || got.PromptID == "" || got.PromptID == it.PromptID {
+		t.Fatalf("cancelled look must be replaced: %+v", got)
+	}
+	if p, _ := th.GetPrompt(got.PromptID); p.State != "queued" || !strings.Contains(p.Text, "lifectl cal "+it.ID+" raise") {
+		t.Fatalf("fresh look: %+v", p)
+	}
+	th.DuePrompts(now)
+	now = ahead(4, 9, 0)
+	c.Tick()
+	if got, _ = c.Get(it.ID); got.State != "fired" || got.AskKind != "waiting" {
+		t.Fatalf("the fresh look, unanswered, raises the card: %+v", got)
+	}
+}

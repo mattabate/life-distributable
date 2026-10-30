@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"life/hub/internal/notify"
@@ -465,6 +466,31 @@ func newID() string { return store.NewID(time.Now().UTC().Format("20060102-15040
 
 var validExec = map[string]bool{"none": true, "shell": true, "claude": true, "relay": true}
 
+// bidiControl finds a Unicode direction control (the "Trojan Source" set:
+// U+061C, U+200E/F, U+202A..E, U+2066..9) or a Unicode tag character
+// (U+E0000..E007F) in an exec payload, JSON-escaped or raw. The approval
+// cards draw the payload as text and keep these as is, so a command can read
+// on the card in another order than the shell runs it, and a tag character
+// draws as nothing, so a claude payload could carry a sentence the card
+// never shows while the model reads it.
+func bidiControl(raw json.RawMessage) (rune, bool) {
+	s := string(raw)
+	var v any
+	if json.Unmarshal(raw, &v) == nil {
+		if b, err := json.Marshal(v); err == nil {
+			s += string(b) // decoded: \u escapes become the rune
+		}
+	}
+	for _, r := range s {
+		switch {
+		case r == 0x061C, r == 0x200E, r == 0x200F, r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069,
+			r >= 0xE0000 && r <= 0xE007F:
+			return r, true
+		}
+	}
+	return 0, false
+}
+
 // Propose records an action. Ungated actions run immediately (async).
 func (q *Queue) Propose(p Proposal) (Action, error) {
 	if p.ExecType == "relay" {
@@ -486,6 +512,9 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 	}
 	if len(p.ExecPayload) == 0 {
 		p.ExecPayload = json.RawMessage("{}")
+	}
+	if r, ok := bidiControl(p.ExecPayload); ok {
+		return Action{}, fmt.Errorf("exec_payload holds an invisible character (U+%04X, a direction control or a Unicode tag): the card would show something other than what runs; retype it without one", r)
 	}
 	gated := gatedKinds[p.Kind]
 	if p.Gated != nil && *p.Gated {
@@ -952,6 +981,18 @@ func truncate(s string, n int) string {
 	return s
 }
 
+// NoMCP: the headless runs the hub starts (scheduled jobs, the "claude"
+// exec type) connect no MCP server. Without it the CLI connects every
+// connector on the owner's account into an unattended run's context.
+// Sessions pass the same flags (threads/runner.go).
+var NoMCP = []string{"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`}
+
+// ClaudeExecArgs: the headless CLI line for the "claude" exec type.
+func ClaudeExecArgs(extra []string) []string {
+	args := append([]string{"-p", "--output-format", "json", "--permission-mode", "acceptEdits"}, NoMCP...)
+	return append(args, extra...)
+}
+
 // DefaultExecutor: shell (bash -c in a dir), claude (headless -p in a
 // project dir). Nothing here can contact anyone: contacting others is a
 // connector with its own gate.
@@ -961,6 +1002,32 @@ type DefaultExecutor struct {
 	// ClaudeArgs: --model and friends for the "claude" exec type, from the
 	// model policy's `job` rule (these run unattended). nil = CLI defaults.
 	ClaudeArgs func() []string
+}
+
+// shellGrace: how long an approved command's output pipe may stay open after
+// bash itself exited (or was killed) before the hub stops reading it.
+var shellGrace = 10 * time.Second
+
+// runShell runs an approved shell command in its own process group.
+// CombinedOutput alone waits until every holder of the output pipe closes
+// it, and the run timeout killed only bash: a hung child of a compound
+// command or a script (`make`, a test, a background watchdog) kept the pipe
+// open, so the action stayed "running" for good and was never marked cut
+// off. Now the timeout kills the whole group and the pipe is dropped
+// shellGrace after bash ends. Unlike a scheduled job (sched.runGroup),
+// nothing is killed after a clean exit: an approved start script may leave
+// its daemon running.
+func runShell(c *exec.Cmd) (string, error) {
+	var buf bytes.Buffer
+	c.Stdout, c.Stderr = &buf, &buf
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
+	c.WaitDelay = shellGrace
+	err := c.Run()
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil // bash exited 0; only a background child held the pipe
+	}
+	return buf.String(), err
 }
 
 func (e DefaultExecutor) Exec(ctx context.Context, typ string, payload json.RawMessage) (string, error) {
@@ -975,8 +1042,7 @@ func (e DefaultExecutor) Exec(ctx context.Context, typ string, payload json.RawM
 		}
 		c := exec.CommandContext(ctx, "/bin/bash", "-lc", p.Cmd)
 		c.Dir = p.Dir
-		out, err := c.CombinedOutput()
-		return string(out), err
+		return runShell(c)
 	case "claude":
 		var p struct {
 			Project string `json:"project"`
@@ -989,11 +1055,11 @@ func (e DefaultExecutor) Exec(ctx context.Context, typ string, payload json.RawM
 		if !ok {
 			return "", fmt.Errorf("unknown project %q", p.Project)
 		}
-		args := []string{"-p", "--output-format", "json", "--permission-mode", "acceptEdits"}
+		var extra []string
 		if e.ClaudeArgs != nil {
-			args = append(args, e.ClaudeArgs()...)
+			extra = e.ClaudeArgs()
 		}
-		c := exec.CommandContext(ctx, e.ClaudeBin, args...)
+		c := exec.CommandContext(ctx, e.ClaudeBin, ClaudeExecArgs(extra)...)
 		c.Dir = dir
 		c.Stdin = strings.NewReader(p.Prompt)
 		out, err := c.CombinedOutput()

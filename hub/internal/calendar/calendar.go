@@ -29,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"life/hub/internal/cadence"
 	"life/hub/internal/notify"
@@ -616,6 +618,45 @@ func overdueItem(it Item, today, hhmm string) bool {
 // grammar is internal/cadence's (one clock, 2026-08-28).
 func validRepeat(repeat string) bool { return repeat == "" || cadence.Kind(repeat) == "stride" }
 
+// clockAt: an item's time in the one shape it is stored and compared in,
+// zero-padded HH:MM. time.Parse("15:04") also takes a one-digit hour, so
+// "9:30" was stored as written, and every string comparison against an
+// HH:MM ("9:30" <= "09:31" is false: overdueItem, the past-today check,
+// ORDER BY at, agentSlot's taken minutes) read it as later than 23:59.
+func clockAt(s string) (string, error) {
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		return "", errors.New("at must be HH:MM")
+	}
+	return t.Format("15:04"), nil
+}
+
+// titleMax: the longest title stored, in bytes.
+const titleMax = 200
+
+// cleanTitle: an item's title as stored, on one line and whole characters.
+// A control character (a newline or tab) reads as a space, since a one-line
+// listing cuts at the first newline and hides the rest; the cap was a byte
+// slice, title[:200], which could split a multi-byte character (an accent,
+// an emoji) into invalid UTF-8, so the cut now backs up to the character's
+// start.
+func cleanTitle(s string) string {
+	s = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s))
+	if len(s) > titleMax {
+		cut := titleMax
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = strings.TrimSpace(s[:cut])
+	}
+	return s
+}
+
 // Notifier: how the nag reaches the owner — the scheduler, through notify.Card
 // (its card lane when it has one, else the NEEDS YOU push).
 type Notifier = notify.Needer
@@ -719,12 +760,9 @@ func newID() string { return store.NewID("cal") }
 
 // Add creates an item. day = YYYY-MM-DD (local), at = HH:MM or "".
 func (c *Calendar) Add(it Item) (Item, error) {
-	it.Title = strings.TrimSpace(it.Title)
+	it.Title = cleanTitle(it.Title)
 	if it.Title == "" {
 		return Item{}, errors.New("title required")
-	}
-	if len(it.Title) > 200 {
-		it.Title = it.Title[:200]
 	}
 	if it.Kind == "" {
 		it.Kind = "owner"
@@ -747,9 +785,11 @@ func (c *Calendar) Add(it Item) (Item, error) {
 		return Item{}, errors.New("day must be YYYY-MM-DD (or soon: true for a to-do with no due day)")
 	}
 	if it.At != "" {
-		if _, err := time.Parse("15:04", it.At); err != nil {
-			return Item{}, errors.New("at must be HH:MM")
+		at, err := clockAt(it.At)
+		if err != nil {
+			return Item{}, err
 		}
+		it.At = at
 	}
 	if !validRepeat(it.Repeat) {
 		return Item{}, errors.New("repeat must be daily|weekly|monthly|yearly|every<N>d or empty")
@@ -1188,11 +1228,8 @@ func (c *Calendar) Update(id string, in map[string]string) (Item, error) {
 		v = strings.TrimSpace(v)
 		switch f {
 		case "title":
-			if v == "" {
+			if v = cleanTitle(v); v == "" {
 				return Item{}, errors.New("title required")
-			}
-			if len(v) > 200 {
-				v = v[:200]
 			}
 		case "day":
 			if _, err := time.ParseInLocation("2006-01-02", v, time.Local); err != nil && !toSoon {
@@ -1200,9 +1237,12 @@ func (c *Calendar) Update(id string, in map[string]string) (Item, error) {
 			}
 		case "at":
 			if v != "" {
-				if _, err := time.Parse("15:04", v); err != nil {
-					return Item{}, errors.New("at must be HH:MM")
+				at, err := clockAt(v)
+				if err != nil {
+					return Item{}, err
 				}
+				v = at
+				in["at"] = at // atAfter below reads the stored shape
 			}
 		case "repeat":
 			if !validRepeat(v) {
@@ -1991,13 +2031,43 @@ func (c *Calendar) missedNow(it Item, now time.Time) bool {
 	return it.Due == "on" && it.Day != "" && it.Day < now.Format("2006-01-02") && !now.Before(c.missAt(it))
 }
 
-func nextDay(day, repeat string) string {
+// nextDay: the occurrence after day. dom is the chain's day of the month
+// (chainDay; 0 = day's own), so a monthly row clamped to Feb 28 steps back to
+// the 31st rather than drifting to the 28th for good.
+func nextDay(day, repeat string, dom int) string {
 	d, _ := time.ParseInLocation("2006-01-02", day, time.Local)
-	n := cadence.Step(repeat, d)
+	n := cadence.StepOn(repeat, d, dom)
 	if n.IsZero() {
 		return ""
 	}
 	return n.Format("2006-01-02")
+}
+
+// chainDay: the day of the month a monthly or yearly chain belongs on. A row
+// on its month's last day may have been clamped there (Jan 31 to Feb 28), so
+// it walks back through prev_id while the rows are month-ends and keeps the
+// largest day seen, stopping at the first row that is not one (an owner's own
+// move to the 15th holds). 0 for every other repeat.
+func (c *Calendar) chainDay(it Item) int {
+	if it.Repeat != "monthly" && it.Repeat != "yearly" {
+		return 0
+	}
+	d, err := time.ParseInLocation("2006-01-02", it.Day, time.Local)
+	if err != nil {
+		return 0
+	}
+	dom, prev := d.Day(), it.PrevID
+	for i := 0; i < 24 && dom < 31 && prev != "" && cadence.MonthEnd(d); i++ {
+		var day string
+		if c.db.QueryRow(`SELECT day, COALESCE(prev_id,'') FROM items WHERE id=?`, prev).Scan(&day, &prev) != nil {
+			break
+		}
+		if d, err = time.ParseInLocation("2006-01-02", day, time.Local); err != nil {
+			break
+		}
+		dom = max(dom, d.Day())
+	}
+	return dom
 }
 
 // spawnNext mints the next occurrence of a repeating item. It steps from the
@@ -2010,13 +2080,14 @@ func nextDay(day, repeat string) string {
 // occurrence. The next occurrence carries everything that shapes its ask
 // (surface, ask kind, check hint), not just its title and day.
 func (c *Calendar) spawnNext(it Item) {
-	nd := nextDay(it.Day, it.Repeat)
+	dom := c.chainDay(it)
+	nd := nextDay(it.Day, it.Repeat, dom)
 	if nd == "" {
 		return
 	}
 	today := c.Now().Format("2006-01-02")
 	for nd <= today {
-		nd = nextDay(nd, it.Repeat)
+		nd = nextDay(nd, it.Repeat, dom)
 	}
 	c.spawnMu.Lock()
 	defer c.spawnMu.Unlock()
@@ -2102,9 +2173,18 @@ func (c *Calendar) Tick() {
 // with no wake (its Queue failed) gets one. A look delivered and never
 // answered (the session ended its turn without came or raise) is raised by
 // the hub the morning after, so nothing owed rots on the calendar.
+// A look cancelled while the item stayed scheduled (a cancel on a queued
+// wake) counts as no look: the item sat scheduled past its day, never
+// checked and never raised. The row is what is owed; closing it is how
+// waiting stops.
 func (c *Calendar) waitingTick(it Item, now time.Time) {
 	if it.State != "scheduled" || it.Day == "" {
 		return
+	}
+	if it.PromptID != "" {
+		if p, err := c.thr.GetPrompt(it.PromptID); err == nil && p.State == "cancelled" {
+			it.PromptID = ""
+		}
 	}
 	if it.PromptID == "" {
 		if !now.Before(c.fireAt(it)) {
@@ -2643,7 +2723,8 @@ func (c *Calendar) coming(from, to, today string, have map[string]bool) []Entry 
 	for _, it := range tails {
 		// 400 steps: a daily repeat reaches a year out, and a window further
 		// than that is nobody's week.
-		for nd, i := nextDay(it.Day, it.Repeat), 0; nd != "" && nd <= to && i < 400; nd, i = nextDay(nd, it.Repeat), i+1 {
+		dom := c.chainDay(it)
+		for nd, i := nextDay(it.Day, it.Repeat, dom), 0; nd != "" && nd <= to && i < 400; nd, i = nextDay(nd, it.Repeat, dom), i+1 {
 			if nd < from || nd <= today || have[chainKey(it)+"|"+nd] {
 				continue
 			}

@@ -1120,12 +1120,14 @@ func TestDescribeToolBody(t *testing.T) {
 	}
 }
 
-// No session writes ops/secrets/: the CLI gets an absolute deny for it.
+// No session writes ops/secrets/ or the repo's .git/ (config and hooks name
+// programs the hub's own git calls run): the CLI gets an absolute deny.
 func TestSessionsCannotWriteSecrets(t *testing.T) {
 	m, _, _ := setup(t)
 	m.ProjectDir = func(p string) (string, bool) { return "/x/life", p == "life" }
-	d := m.deniedTools()
-	if len(d) != 2 || d[0] != "Edit(//x/life/ops/secrets/**)" || d[1] != "Write(//x/life/ops/secrets/**)" {
-		t.Fatalf("denied: %v", d)
+	got := strings.Join(m.deniedTools(), ",")
+	want := "Edit(//x/life/ops/secrets/**),Write(//x/life/ops/secrets/**),Edit(//x/life/.git/**),Write(//x/life/.git/**)"
+	if got != want {
+		t.Fatalf("denied: %v", got)
 	}
 }

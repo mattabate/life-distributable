@@ -590,20 +590,59 @@ final class MdTableModel {
         }
         minW = (0..<cols).map { c in ns.map { words($0[c]) }.max() ?? 0 }
         maxW = (0..<cols).map { c in ns.map { width($0[c]) }.max() ?? 0 }
-        cells = ns.map { $0.map(MdTableModel.swiftUI) }
+        let sole = ns.map { $0.map(MdTableModel.soleLink) }
+        links = sole
+        hasLinks = ns.contains { $0.contains { MdTableModel.linkCount($0) > 0 } }
+        cells = zip(ns, sole).map { row, s in zip(row, s).map { MdTableModel.swiftUI($0, keepLink: $1 == nil) } }
         self.header = header
         self.stacked = stacked
     }
 
-    /// UIKit runs → SwiftUI runs: a `Text` ignores a UIFont attribute.
-    private static func swiftUI(_ s: NSAttributedString) -> AttributedString {
+    /// A cell whose links all go one place: the whole cell is that link, so a
+    /// tap anywhere in it opens the link, like a hyperlink in an email.
+    let links: [[URL?]]
+    /// Any link at all: such a table is not selectable, since selectable
+    /// text on the Mac answers a click a line above the drawn link.
+    let hasLinks: Bool
+
+    private static func url(_ v: Any?) -> URL? {
+        if let u = v as? URL { return u }
+        if let s = v as? String { return URL(string: s) }
+        return nil
+    }
+
+    private static func linkCount(_ s: NSAttributedString) -> Int {
+        var seen = Set<URL>()
+        s.enumerateAttribute(.link, in: NSRange(location: 0, length: s.length)) { v, _, _ in
+            if let u = url(v) { seen.insert(u) }
+        }
+        return seen.count
+    }
+
+    private static func soleLink(_ s: NSAttributedString) -> URL? {
+        guard linkCount(s) == 1 else { return nil }
+        var out: URL?
+        s.enumerateAttribute(.link, in: NSRange(location: 0, length: s.length)) { v, _, stop in
+            if let u = url(v) { out = u; stop.pointee = true }
+        }
+        return out
+    }
+
+    /// UIKit runs → SwiftUI runs: a `Text` ignores a UIFont attribute. A
+    /// sole-link cell drops the run's link (still underlined): the cell's tap
+    /// opens it, so the glyphs never compete with the cell for the click.
+    private static func swiftUI(_ s: NSAttributedString, keepLink: Bool) -> AttributedString {
         var out = AttributedString()
         s.enumerateAttributes(in: NSRange(location: 0, length: s.length)) { attrs, range, _ in
             var run = AttributedString(s.attributedSubstring(from: range).string)
             if let f = attrs[.font] as? UIFont { run.font = Font(f as CTFont) }
             if let c = attrs[.foregroundColor] as? UIColor { run.foregroundColor = Color(c) }
             if let c = attrs[.backgroundColor] as? UIColor { run.backgroundColor = Color(c) }
-            if let u = attrs[.link] as? URL { run.link = u } else if let u = attrs[.link] as? String { run.link = URL(string: u) }
+            let link = url(attrs[.link])
+            if keepLink { run.link = link }
+            // A link in a cell is underlined, or it reads as plain text in the
+            // cell's ink.
+            if link != nil { run.underlineStyle = .single }
             if attrs[.strikethroughStyle] != nil { run.strikethroughStyle = .single }
             out += run
         }
@@ -629,21 +668,34 @@ private struct MdTableGrid: View {
     let model: MdTableModel
     let align: [NSTextAlignment]
     let rule: Color
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         let rows = model.cells.count
-        MdTableLayout(cols: model.minW.count, minW: model.minW, maxW: model.maxW, align: align) {
+        let grid = MdTableLayout(cols: model.minW.count, minW: model.minW, maxW: model.maxW, align: align) {
             ForEach(0..<rows, id: \.self) { r in
-                ForEach(0..<model.minW.count, id: \.self) { c in
-                    Text(model.cells[r][c])
-                        .multilineTextAlignment(c < align.count && align[c] == .right ? .trailing : c < align.count && align[c] == .center ? .center : .leading)
-                }
+                ForEach(0..<model.minW.count, id: \.self) { c in cell(r, c) }
             }
             ForEach(0..<rows, id: \.self) { r in
                 Rectangle().fill(r == rows - 1 ? .clear : model.header && r == 0 ? rule.opacity(0.7) : rule.opacity(0.15))
             }
         }
-        .textSelection(.enabled)
+        if model.hasLinks { grid } else { grid.textSelection(.enabled) }
+    }
+
+    @ViewBuilder private func cell(_ r: Int, _ c: Int) -> some View {
+        let a = c < align.count ? align[c] : .left
+        let text = Text(model.cells[r][c])
+            .multilineTextAlignment(a == .right ? .trailing : a == .center ? .center : .leading)
+        if let u = model.links[r][c] {
+            // The whole cell, its padding and half the gap to its neighbours.
+            text.frame(maxWidth: .infinity, maxHeight: .infinity,
+                       alignment: a == .right ? .topTrailing : a == .center ? .top : .topLeading)
+                .contentShape(Rectangle().inset(by: -MdTableLayout.pad))
+                .onTapGesture { openURL(u) }
+        } else {
+            text
+        }
     }
 }
 
@@ -692,8 +744,10 @@ private struct MdTableLayout: Layout {
             for c in 0..<cols {
                 let a = c < align.count ? align[c] : .left
                 let (px, anchor): (CGFloat, UnitPoint) = a == .right ? (x + w[c], .topTrailing) : a == .center ? (x + w[c] / 2, .top) : (x, .topLeading)
+                // The row's height on offer, so a link cell's tap area is the
+                // whole cell; a plain cell still takes only its text's.
                 subviews[r * cols + c].place(at: CGPoint(x: px, y: y + Self.pad), anchor: anchor,
-                                             proposal: ProposedViewSize(width: w[c], height: nil))
+                                             proposal: ProposedViewSize(width: w[c], height: h - 2 * Self.pad))
                 x += w[c] + MdTableModel.gap
             }
             subviews[hs.count * cols + r].place(at: CGPoint(x: bounds.minX, y: y + h - 1), anchor: .topLeading,

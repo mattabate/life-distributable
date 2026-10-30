@@ -531,7 +531,11 @@ function md(src) {
       }
       const td = (cells, tag) => '<tr>' + cells.map((c, k) => {
         const a = align && align[k] && align[k] !== 'left' ? ` style="text-align:${align[k]}"` : '';
-        return `<${tag}${a}>${inline(c)}</${tag}>`;
+        const html = inline(c);
+        // A cell that is one link is all link: a click anywhere in it opens
+        // it, like a hyperlink in an email.
+        const hrefs = new Set([...html.matchAll(/<a [^>]*href="([^"]*)"/g)].map(m => m[1]));
+        return `<${tag}${a}${hrefs.size === 1 ? ' class="md-link"' : ''}>${html}</${tag}>`;
       }).join('') + '</tr>';
       out += '<table class="md-table">';
       if (align) out += `<thead>${td(row0, 'th')}</thead>`; else rows.unshift(row0);

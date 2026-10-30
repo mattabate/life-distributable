@@ -235,9 +235,9 @@ func (c *Calendar) PlanStep(id string, n int, days []string, outcome, by, note s
 		if last.Repeat == "" || d < last.Day {
 			return Item{}, fmt.Errorf("%s is not a day of %s", d, id)
 		}
-		on := last.Day
+		on, dom := last.Day, c.chainDay(last)
 		for on != "" && on < d {
-			on = nextDay(on, last.Repeat)
+			on = nextDay(on, last.Repeat, dom)
 		}
 		if on != d {
 			return Item{}, fmt.Errorf("%s is not a day of this %s repeat (the next one after it is %s)", d, last.Repeat, on)

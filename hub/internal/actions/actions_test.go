@@ -96,6 +96,56 @@ func waitState(t *testing.T, q *Queue, id, want string) Action {
 	return a
 }
 
+// A direction control in what runs would let the card show the command in
+// another order, and a Unicode tag character hides text the model still
+// reads: refused raw or JSON-escaped; a plain non-ASCII command passes.
+func TestProposeRefusesBidiControlInPayload(t *testing.T) {
+	q, ex, _ := setup(t)
+	for _, pay := range []string{"{\"cmd\":\"rm -rf ~/x ‮#/tmp\"}", `{"cmd":"echo hi ⁦"}`, `"git commit -m ‏"`,
+		"{\"prompt\":\"tidy the notes\U000E0061\U000E006C\U000E0073\U000E006F\"}", `{"prompt":"tidy 󠁡"}`} {
+		if a, err := q.Propose(Proposal{Kind: "delete", Title: "tidy", ExecType: "shell", ExecPayload: json.RawMessage(pay)}); err == nil || !strings.Contains(err.Error(), "invisible character") {
+			t.Fatalf("%s: %+v %v", pay, a, err)
+		}
+	}
+	if len(ex.calls) != 0 {
+		t.Fatal(ex.calls)
+	}
+	if _, err := q.Propose(Proposal{Kind: "delete", Title: "tidy", ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"rm ~/tmp/café-ü.txt"}`)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A background child holding the output pipe ends the read shellGrace after
+// bash exits (the run is still done); a hung child of a compound command is
+// killed with bash when the timeout fires, so the run ends cut off instead
+// of staying "running".
+func TestShellDoesNotWaitOnItsChildren(t *testing.T) {
+	old := shellGrace
+	shellGrace = 200 * time.Millisecond
+	defer func() { shellGrace = old }()
+	var e DefaultExecutor
+
+	start := time.Now()
+	out, err := e.Exec(context.Background(), "shell", json.RawMessage(`{"cmd":"(sleep 20) & echo started"}`))
+	if err != nil || strings.TrimSpace(out) != "started" {
+		t.Fatalf("got %q %v", out, err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("waited %s on a background child", took)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start = time.Now()
+	_, err = e.Exec(ctx, "shell", json.RawMessage(`{"cmd":"sleep 20; echo never"}`))
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("a timed-out run took %s", took)
+	}
+	if !cutOff(ctx, err) {
+		t.Fatalf("want a cut-off run, got %v", err)
+	}
+}
+
 func TestUngatedRunsImmediately(t *testing.T) {
 	q, ex, nf := setup(t)
 	a, err := q.Propose(Proposal{Kind: "other", Title: "tidy", ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"true"}`)})

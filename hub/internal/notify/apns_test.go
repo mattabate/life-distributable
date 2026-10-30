@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -210,4 +211,85 @@ func TestCardPushRetriesTransientFailures(t *testing.T) {
 	a, n = rig(t, func(int32) int { closed.Store(true); return 503 }, func(string) bool { return !closed.Load() })
 	a.sendCard([]byte(`{}`), "ask-1")
 	settle(n, 1)
+}
+
+// A provider JWT APNs answers 403 ExpiredProviderToken to is dropped and the
+// card's retry goes out under a newly signed one.
+func TestRefusedProviderTokenIsResigned(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var auths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		auths = append(auths, r.Header.Get("authorization"))
+		first := len(auths) == 1
+		mu.Unlock()
+		if first {
+			w.WriteHeader(403)
+			w.Write([]byte(`{"reason":"ExpiredProviderToken"}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &APNs{db: db, keyID: "k", teamID: "t", bundle: "b", defHost: srv.URL, key: key,
+		client: srv.Client(), retryWaits: []time.Duration{10 * time.Millisecond}, Open: func(string) bool { return true }}
+	if err := a.Register("abcdef0123456789", "phone", "", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.sendCard([]byte(`{}`), "ask-1"); err == nil {
+		t.Fatal("the first send's 403 is still reported")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		mu.Lock()
+		n := len(auths)
+		mu.Unlock()
+		if n >= 2 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(auths) != 2 {
+		t.Fatalf("sends = %d, want 2 (the refused one, then a retry)", len(auths))
+	}
+	if auths[0] == auths[1] {
+		t.Fatal("the retry reused the JWT APNs refused")
+	}
+}
+
+// Register takes only a hex device token: a malformed one would never be
+// dropped (BadDeviceToken rows are kept), so it is refused at the door and
+// no row is written.
+func TestRegisterRefusesANonHexToken(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &APNs{db: db}
+	for _, bad := range []string{"<abcd 1234>", "abc", "abcdef012", "abcd/../x0", "abcdefgh"} {
+		if err := a.Register(bad, "phone", "", 1); err == nil {
+			t.Errorf("Register(%q) took it", bad)
+		}
+	}
+	var n int
+	db.QueryRow(`SELECT COUNT(*) FROM devices`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("%d rows written for refused tokens", n)
+	}
+	if err := a.Register("  ABCDEF0123456789\n", "phone", "", 1); err != nil {
+		t.Fatalf("a padded upper-case hex token was refused: %v", err)
+	}
+	var tok string
+	db.QueryRow(`SELECT token FROM devices`).Scan(&tok)
+	if tok != "abcdef0123456789" {
+		t.Fatalf("stored %q, want the trimmed lower-case token", tok)
+	}
 }
