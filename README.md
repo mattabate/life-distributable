@@ -163,12 +163,13 @@ The agent follows [SETUP.md](SETUP.md). Here is the timeline.
 Your data lives on your Mac. The hub listens only on your private
 [Tailscale](https://tailscale.com) network, so nothing about it is public.
 
-<p align="center"><img src="docs/img/security.png" alt="Security diagram for life: the iPhone app and a laptop or browser talk to the hub on your Mac inside your private Tailscale network, where your data lives. The hub reaches out to only four places: Anthropic for Claude sessions, Apple push for notifications, your Backblaze bucket for nightly backups encrypted on the Mac first, and an opt-in weekly usage heartbeat with counts only. The public internet has no way in." width="900"></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/security-dark.png"><img src="docs/img/security.png" alt="Security diagram for life: the iPhone app and a laptop or browser talk to the hub on your Mac inside your private Tailscale network, where your data lives. Only four things leave your Mac: Claude sessions to Anthropic, push notifications to Apple, nightly backups encrypted on the Mac first to your Backblaze bucket, and an opt-in weekly usage heartbeat with counts only. The public internet has no way in." width="900"></picture></p>
 
 - **Nothing public.** No open ports, no public URL. Your phone reaches the
   hub through Tailscale.
-- **Outbound, only three places:** Anthropic (your Claude sessions), Apple
-  (push notifications), and an optional weekly heartbeat.
+- **Outbound, only four places:** Anthropic (your Claude sessions), Apple
+  (push notifications), your own backup bucket, and an optional weekly
+  heartbeat.
 - **The heartbeat is off unless you say yes.** The agent asks once at
   setup, and the answer defaults to no. If you say yes, it sends a random
   install id, the version and a few counts. Never text, titles, names or
