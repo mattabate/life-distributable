@@ -3,9 +3,12 @@ package sched
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -19,6 +22,39 @@ type nfy struct{ msgs []string }
 
 func (n *nfy) NeedsYou(s string) error { n.msgs = append(n.msgs, "needs:"+s); return nil }
 func (n *nfy) ask(job, s string)       { n.msgs = append(n.msgs, "ask:"+job+": "+s) }
+
+// An unattended job connects no MCP server, nor does the gate's claude exec.
+func TestJobArgsConnectNoMCP(t *testing.T) {
+	got := strings.Join(jobArgs("/l", []string{"Read", "Bash(lifectl:*)"}, []string{"--model", "m"}), " ")
+	for _, want := range []string{"--strict-mcp-config", `--mcp-config {"mcpServers":{}}`, "--allowedTools Read,Bash(lifectl:*)", "--model m"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("job args lack %q: %s", want, got)
+		}
+	}
+	got = strings.Join(actions.ClaudeExecArgs(nil), " ")
+	if !strings.Contains(got, `--strict-mcp-config --mcp-config {"mcpServers":{}}`) {
+		t.Fatalf("claude exec args lack the no-MCP flags: %s", got)
+	}
+}
+
+// acceptEdits auto-accepts Edit/Write under the job's directory whatever
+// --allowedTools says: a read-only grant refuses every file tool, and a
+// scoped Write grant keeps its path but never reaches ops/secrets or .git.
+func TestJobArgsDenyUngrantedFileTools(t *testing.T) {
+	got := strings.Join(jobArgs("/l", []string{"Read", "Bash(lifectl:*)"}, nil), " ")
+	if !strings.Contains(got, "--disallowedTools Edit,Write,MultiEdit,NotebookEdit") {
+		t.Fatalf("read-only job may still edit: %s", got)
+	}
+	d := strings.Join(jobDenied("/l", []string{"Read", "Write(/data/tmp/pdf/**)"}), ",")
+	for _, want := range []string{"Edit", "Write(//l/ops/secrets/**)", "Write(//l/.git/**)", "NotebookEdit"} {
+		if !strings.Contains(","+d+",", ","+want+",") {
+			t.Fatalf("denials lack %q: %s", want, d)
+		}
+	}
+	if strings.Contains(","+d+",", ",Write,") {
+		t.Fatalf("a scoped Write grant was refused outright: %s", d)
+	}
+}
 
 func setup(t *testing.T, table string) (*Scheduler, *actions.Queue, *nfy) {
 	dir := t.TempDir()
@@ -243,6 +279,37 @@ func TestFireAnswersTheClock(t *testing.T) {
 	}
 }
 
+// A wake that cannot start a run says so on the record: an unknown project
+// is a failed run row carrying the wake's id (Fire answers skipped, so the
+// wake is no "delivered"), and a job already running holds instead of
+// reading started with no row behind it.
+func TestFireThatCannotStartIsOnTheRecord(t *testing.T) {
+	s, _, _ := setup(t, `{"jobs":[{"name":"typo","project":"lfie","when":"every@1h","prompt":"p"},{"name":"j","project":"life","when":"every@1h","prompt":"p"}]}`)
+	s.projDir = func(p string) (string, bool) { return t.TempDir(), p == "life" }
+	s.RunClaude = func(context.Context, string, string, []string) (Output, error) {
+		t.Fatal("ran a job that could not start")
+		return Output{}, nil
+	}
+	st, why := s.Fire("typo", "p-1")
+	if st != "skipped" || !strings.Contains(why, `unknown project "lfie"`) {
+		t.Fatal(st, why)
+	}
+	rs, _ := s.Runs("typo", 10)
+	if len(rs) != 1 || rs[0].PromptID != "p-1" || rs[0].FinishedAt == nil || rs[0].OK == nil || *rs[0].OK || !strings.Contains(rs[0].Error, "unknown project") {
+		t.Fatalf("%+v", rs)
+	}
+	if held, _ := s.Held("typo"); held {
+		t.Fatal("a job that failed to start still holds its running flag")
+	}
+	s.running["j"] = true // a manual run got there first
+	if st, _ := s.Fire("j", "p-2"); st != "held" {
+		t.Fatal(st)
+	}
+	if rs, _ := s.Runs("j", 10); len(rs) != 0 {
+		t.Fatalf("%+v", rs)
+	}
+}
+
 func TestRunRoutesOutput(t *testing.T) {
 	s, q, n := setup(t, `{"digest_at":"18:00","jobs":[{"name":"sweep","project":"life","when":"daily@07:00","prompt":"look around"}]}`)
 	s.RunClaude = func(_ context.Context, dir, prompt string, tools []string) (Output, error) {
@@ -317,5 +384,119 @@ func TestRunFailureIsARecordNotAPing(t *testing.T) {
 	}
 	if _, err := s.Run("nope", "test"); err == nil {
 		t.Fatal("unknown job accepted")
+	}
+}
+
+// A failed run exits 1 with its envelope; the reason sits after ~1 KB of
+// usage and stats. The run's error carries that reason and its cost, not
+// the first 500 raw bytes; non-JSON output is still quoted.
+func TestDecodeResultReadsTheReasonOfAFailedExit(t *testing.T) {
+	pad := strings.Repeat(`"x":0,`, 200)
+	raw := `{"type":"result","subtype":"success",` + pad + `"is_error":true,"total_cost_usd":0.42,"api_error_status":null,"result":"API Error: Can't reach the API server (ENOTFOUND)"}`
+	o, err := decodeResult([]byte(raw), fmt.Errorf("exit status 1"))
+	if err == nil || !strings.Contains(err.Error(), "Can't reach the API server") || strings.Contains(err.Error(), `"x"`) || o.Cost != 0.42 {
+		t.Fatalf("cost %v err %v", o.Cost, err)
+	}
+	if strings.Contains(err.Error(), "JSON") {
+		t.Fatal("an API failure must not file the no-result-block card", err)
+	}
+	if _, err := decodeResult([]byte("Error: spawn failed"), fmt.Errorf("exit status 1")); err == nil || !strings.Contains(err.Error(), "spawn failed") {
+		t.Fatal(err)
+	}
+	ok := `{"is_error":false,"total_cost_usd":0.1,"result":"{\"summary\":\"s\",\"findings\":[],\"needs_you\":[]}"}`
+	if o, err := decodeResult([]byte(ok), nil); err != nil || o.Summary != "s" || o.Cost != 0.1 {
+		t.Fatalf("%+v %v", o, err)
+	}
+}
+
+// The CLI's permission_denials reach the next run of the job. A run whose
+// last run had none hears nothing.
+func TestDeniedCallsReachTheNextRun(t *testing.T) {
+	s, _, _ := setup(t, `{"jobs":[{"name":"j","project":"life","when":"manual","prompt":"p"}]}`)
+	var prompts []string
+	raw := `{"type":"result","is_error":false,"total_cost_usd":0.1,"result":"{\"summary\":\"s\",\"findings\":[],\"needs_you\":[]}",` +
+		`"permission_denials":[{"tool_name":"Bash","tool_use_id":"t1","tool_input":{"command":"lifectl asks --json | python3 -c \"\nimport json\""}},` +
+		`{"tool_name":"Bash","tool_use_id":"t2","tool_input":{"command":"lifectl asks --json | python3 -c \"\nimport json\""}},` +
+		`{"tool_name":"WebFetch","tool_use_id":"t3","tool_input":{"url":"https://example.com"}}]}`
+	outs := []string{raw, `{"is_error":false,"total_cost_usd":0.1,"result":"{\"summary\":\"s\",\"findings\":[],\"needs_you\":[]}","permission_denials":[]}`}
+	s.RunClaude = func(_ context.Context, _, prompt string, _ []string) (Output, error) {
+		prompts = append(prompts, prompt)
+		r := outs[0]
+		outs = outs[1:]
+		return decodeResult([]byte(r), nil)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := s.Run("j", "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if strings.Contains(prompts[0], "refused") {
+		t.Fatal("first run has no previous run", prompts[0])
+	}
+	want := "\n- Bash: lifectl asks --json | python3 -c \" import json\"\n- WebFetch: {\"url\":\"https://example.com\"}"
+	if !strings.HasSuffix(prompts[1], want) || strings.Count(prompts[1], "python3") != 1 {
+		t.Fatalf("%q", prompts[1])
+	}
+	outs = []string{`{"is_error":false,"total_cost_usd":0.1,"result":"{\"summary\":\"s\",\"findings\":[],\"needs_you\":[]}"}`}
+	if _, err := s.Run("j", "test"); err != nil || strings.Contains(prompts[2], "refused") {
+		t.Fatalf("a run after a clean one is told nothing: %v %q", err, prompts[2])
+	}
+	if d := deniedOf("not json"); d != nil {
+		t.Fatal(d)
+	}
+}
+
+// Prose that quotes JSON before the envelope must not hide the envelope;
+// nested objects inside a finding are never taken for it; the prose is
+// GetRun's text.
+func TestParseOutputSkipsQuotedJSONInProse(t *testing.T) {
+	text := "Nothing to parse: `tool next` returned `{\"done\":true}` immediately.\n\n" +
+		`{"summary": "s", "findings": [{"kind":"other","title":"t","detail":"d","exec_type":"shell","exec_payload":{"summary":"inner"}}], "needs_you": ["n"]}` +
+		"\nTrailing `}` note."
+	o, err := ParseOutput(text, "")
+	if err != nil || o.Summary != "s" || len(o.Findings) != 1 || len(o.NeedsYou) != 1 {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if got := proseBefore(text); !strings.HasSuffix(got, "immediately.") {
+		t.Fatalf("prose: %q", got)
+	}
+	if _, err := ParseOutput("all quiet, no block", ""); err == nil || !strings.Contains(err.Error(), "JSON") {
+		t.Fatal("a missing envelope must still fail with a JSON error", err)
+	}
+}
+
+// A tool's leftover child holds claude's output pipe after claude wrote its
+// result and exited: the run still closes, keeps the result, and the child
+// is killed. A timeout kills the whole group, not just claude.
+func TestRunGroupDoesNotWaitOnAnOrphanedPipe(t *testing.T) {
+	dir := t.TempDir()
+	pidf := filepath.Join(dir, "pid")
+	bin := filepath.Join(dir, "claude")
+	os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30 &\necho $! > "+pidf+"\necho '{\"result\":\"done\"}'\n"), 0o755)
+	start := time.Now()
+	out, err := runGroup(exec.CommandContext(context.Background(), bin), 200*time.Millisecond)
+	if err != nil || !strings.Contains(string(out), `"result":"done"`) {
+		t.Fatalf("err=%v out=%q", err, out)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("waited %v on the orphan's pipe", d)
+	}
+	b, _ := os.ReadFile(pidf)
+	var pid int
+	fmt.Sscan(string(b), &pid)
+	time.Sleep(100 * time.Millisecond)
+	if pid == 0 || syscall.Kill(pid, 0) == nil {
+		t.Fatalf("orphan %d still alive", pid)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30\n"), 0o755)
+	start = time.Now()
+	if _, err := runGroup(exec.CommandContext(ctx, bin), 200*time.Millisecond); err == nil {
+		t.Fatal("a timed-out run reported no error")
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("timeout took %v", d)
 	}
 }

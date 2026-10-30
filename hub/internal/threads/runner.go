@@ -1136,6 +1136,13 @@ func (m *Manager) deliveredAfter(r run, t time.Time) []int64 {
 // connector keys), whatever --allowedTools grants Edit and Write elsewhere
 // (a session could empty decider.hash). Edit rules cover every file-writing
 // tool; "//" is an absolute path.
+//
+// Nor the repo's .git/ (the common dir every worktree shares): its config
+// (core.fsmonitor, core.hooksPath, filter/diff drivers) and hooks/ name
+// programs git runs, and the hub runs git itself (worktree add fires
+// post-checkout, status runs fsmonitor) as the hub's own process, past
+// every session's tool list. Sessions change .git only through the git
+// commands they are granted.
 func (m *Manager) deniedTools() []string {
 	if m.ProjectDir == nil {
 		return nil
@@ -1144,8 +1151,12 @@ func (m *Manager) deniedTools() []string {
 	if !ok || dir == "" {
 		return nil
 	}
-	sec := "/" + filepath.Join(dir, "ops", "secrets") + "/**"
-	return []string{"Edit(" + sec + ")", "Write(" + sec + ")"}
+	var out []string
+	for _, p := range []string{filepath.Join(dir, "ops", "secrets"), filepath.Join(dir, ".git")} {
+		g := "/" + p + "/**"
+		out = append(out, "Edit("+g+")", "Write("+g+")")
+	}
+	return out
 }
 
 // toolsStale: a live process keeps the --allowedTools it launched with, so a

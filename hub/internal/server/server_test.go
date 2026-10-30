@@ -956,6 +956,20 @@ func TestPromptDecidesAction(t *testing.T) {
 	if w := do("GET", "/api/v1/prompts?thread="+th.ID, "", ""); strings.Contains(w.Body.String(), `"text":"yes"`) {
 		t.Fatal("a refused prompt must not be queued:", w.Body.String())
 	}
+	// Padding the outcome must not slip past the gate: Queue trims it, so the
+	// gate trims first, on both reply forms.
+	for _, b := range []string{
+		`{"target":"` + th.ID + `","text":"yes","in_reply_to":"action:` + g + `","outcome":"approved "}`,
+		`{"target":"` + th.ID + `","text":"no","in_reply_to":"action:` + g + `","outcome":" denied"}`,
+		`{"target":"` + th.ID + `","text":"yes","replies":[{"ref":"action:` + g + `","outcome":"\tapproved\n"}]}`,
+	} {
+		if w := do("POST", "/api/v1/prompts", b, ""); w.Code != 403 {
+			t.Fatal("a padded outcome with no code must 403, got", w.Code, w.Body.String(), b)
+		}
+		if got, _ := s.acts.Get(g); got.State != "proposed" {
+			t.Fatalf("a padded outcome decided without the code: %+v", got)
+		}
+	}
 	if w := do("POST", "/api/v1/prompts", body, secret); w.Code != 201 {
 		t.Fatal("the real code must approve, got", w.Code, w.Body.String())
 	}

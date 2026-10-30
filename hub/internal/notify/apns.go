@@ -263,11 +263,32 @@ func (a *APNs) Register(token, device, env string, build int) error {
 	if token == "" {
 		return errors.New("empty token")
 	}
+	// A device token is hex bytes (the app sends 64 hex characters). Anything
+	// else is refused here: it goes into the APNs URL path as is, APNs answers
+	// it BadDeviceToken, and send keeps BadDeviceToken rows (an env mismatch
+	// fires it too), so a malformed row would stay and fail every push for
+	// good.
+	if !isHexToken(token) {
+		return errors.New("token must be the APNs device token in hex")
+	}
 	env = strings.TrimSpace(strings.ToLower(env))
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := a.db.Exec(`INSERT INTO devices (token, device, env, build, created_at, updated_at) VALUES (?,?,?,?,?,?)
 		ON CONFLICT(token) DO UPDATE SET device=excluded.device, env=excluded.env, build=excluded.build, updated_at=excluded.updated_at`, token, device, env, build, now, now)
 	return err
+}
+
+// isHexToken: an even number (8 or more) of lowercase hex characters.
+func isHexToken(t string) bool {
+	if len(t) < 8 || len(t)%2 != 0 {
+		return false
+	}
+	for _, c := range t {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // MaxBuild is the newest app build any registered phone has reported (0 = none).
@@ -569,11 +590,12 @@ func (e *pushError) Error() string { return fmt.Sprintf("apns %d %s", e.status, 
 
 // transient: worth trying again (APNs throttling (429) or its own fault
 // (5xx), or the request never got an answer (network)). Any other 4xx is
-// about the push or the token and would fail the same way again.
+// about the push or the token and would fail the same way again, except an
+// expired provider JWT: sendType dropped it, so the retry signs a new one.
 func transient(err error) bool {
 	var pe *pushError
 	if errors.As(err, &pe) {
-		return pe.status == 429 || pe.status >= 500
+		return pe.status == 429 || pe.status >= 500 || (pe.status == 403 && pe.reason == "ExpiredProviderToken")
 	}
 	var ne net.Error
 	return errors.As(err, &ne)
@@ -642,6 +664,16 @@ func (a *APNs) sendType(jwt string, d device, payload []byte, pushType string) e
 	if e.Reason == "Unregistered" {
 		a.db.Exec(`DELETE FROM devices WHERE token=?`, token)
 		log.Printf("apns: dropped token %s…: %s", token[:8], e.Reason)
+	}
+	// A provider JWT APNs refused is dropped, so the next send signs a fresh
+	// one: left cached it would fail every push for the rest of its 50
+	// minutes with the same 403.
+	if resp.StatusCode == 403 && (e.Reason == "ExpiredProviderToken" || e.Reason == "InvalidProviderToken") {
+		a.mu.Lock()
+		if a.jwt == jwt {
+			a.jwt = ""
+		}
+		a.mu.Unlock()
 	}
 	return &pushError{resp.StatusCode, e.Reason}
 }

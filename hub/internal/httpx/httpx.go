@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -102,9 +103,49 @@ func Bytes(c *http.Client, req *http.Request, max int64) ([]byte, error) {
 	}
 	resp, err := Or(c).Do(req)
 	if err != nil {
-		return nil, err
+		return nil, ScrubURLError(err)
 	}
 	return Read(resp, max)
+}
+
+// secretParams are query names whose value is a credential. A transport
+// failure (timeout, DNS, reset) is a *url.Error that prints the whole request
+// URL, query and all, and that string can land in a stored error or a page.
+// net/http strips only a userinfo password.
+var secretParams = map[string]bool{"key": true, "api_key": true, "apikey": true, "access_token": true,
+	"token": true, "refresh_token": true, "client_secret": true, "secret": true, "password": true, "code": true}
+
+// ScrubURLError blanks credential query values in a *url.Error's URL, so a
+// failed request's message names the endpoint but never the key it carried.
+func ScrubURLError(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	u, perr := url.Parse(ue.URL)
+	if perr != nil {
+		// Unparseable: keep nothing past the path.
+		if i := strings.IndexByte(ue.URL, '?'); i >= 0 {
+			ue.URL = ue.URL[:i] + "?REDACTED"
+		}
+		return err
+	}
+	if u.RawQuery == "" {
+		return err
+	}
+	q := u.Query()
+	changed := false
+	for k := range q {
+		if secretParams[strings.ToLower(k)] {
+			q[k] = []string{"REDACTED"}
+			changed = true
+		}
+	}
+	if changed {
+		u.RawQuery = q.Encode()
+		ue.URL = u.String()
+	}
+	return err
 }
 
 // Read is Bytes for a response the caller already has (after Retry429, say):

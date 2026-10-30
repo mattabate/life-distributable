@@ -29,6 +29,29 @@ func TestJSON(t *testing.T) {
 	}
 }
 
+// A transport failure prints the request URL; an API key riding in the query
+// must not ride along into the stored error.
+func TestTransportErrorScrubsQueryKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	u := srv.URL + "/video/v3/channels?part=snippet&key=SYNTHETICKEY123&id=UCx"
+	srv.Close()
+	var out any
+	err := JSON(context.Background(), nil, "GET", u, nil, nil, &out)
+	if err == nil {
+		t.Fatal("closed server answered")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "SYNTHETICKEY123") || !strings.Contains(msg, "key=REDACTED") ||
+		!strings.Contains(msg, "/video/v3/channels") || !strings.Contains(msg, "id=UCx") {
+		t.Fatalf("err = %s", msg)
+	}
+	// Not a *url.Error: untouched.
+	plain := errors.New("x?key=1")
+	if ScrubURLError(plain) != plain {
+		t.Fatal("plain error rewritten")
+	}
+}
+
 func TestRetry429(t *testing.T) {
 	n := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -71,6 +71,13 @@ func (s *Server) addPrompt(w http.ResponseWriter, r *http.Request) {
 	// An approve/deny riding on a message (the approval card arms the
 	// composer, 09-17) is gated exactly as /actions/{id}/approve is: the
 	// decider code, which the hub token — every session's — does not carry.
+	// The outcomes are trimmed HERE, before the gate, because Queue trims
+	// them too: "approved " would pass the gate's exact compare and then
+	// approve the action as "approved".
+	in.Outcome = strings.TrimSpace(in.Outcome)
+	for i := range in.Replies {
+		in.Replies[i].Outcome = strings.TrimSpace(in.Replies[i].Outcome)
+	}
 	replies := append([]threads.Reply{{Ref: in.InReplyTo, Outcome: in.Outcome}}, in.Replies...)
 	for _, re := range replies {
 		if kind, id := store.SplitRef(strings.TrimSpace(re.Ref)); kind == "action" && (re.Outcome == "approved" || re.Outcome == "denied") {

@@ -675,3 +675,28 @@ Entry format:
 - For: everyone
 - Offer: A security fix, worth taking. A proposal that runs a shell command or a Claude run now waits for the owner's approval whatever kind it claims (only one plain `ls` line runs at once); before, a `kind=other` shell proposal ran straight away as the hub's own bash, past every session's tool list. Once a decider code has been set, emptying or deleting `decider.hash` refuses every approval instead of falling back to the hub token, and no session may edit or write `ops/secrets/`. The SETUP restore test now restores into a fresh temporary folder and deletes it, and `ops/schedule.json` drops two pre-approved scripts the tree never shipped.
 - How: same merge as add-0008. By hand: `actions/actions.go` (`freeShell`, `Queue.FreeShell`, the `switch p.ExecType` in `Propose`) + `actions_test.go` (tests that ran shell ungated set `q.FreeShell`), `actions/decider.go` (`Queue.Decider`, the `decider_armed` setting) + `decider_test.go`, `server/actions.go` (`s.acts.Decider`), `cmd/hub/main.go` (`acts.FreeShell = []string{"ls"}`), `threads/runner.go` (`deniedTools`) + `runner_test.go`, `ops/schedule.json`, SETUP.md (the restore test), `shared/api.md`, `hub/CLAUDE.md`. Then `ops/hub.sh restart`. If the owner's sessions relied on ungated shell proposals, list the read-only commands they need in `FreeShell`.
+
+## add-0061 · 2026-10-30 · Scheduled jobs: a clean result, a locked-down run, no stuck pipes
+- For: everyone
+- Offer: A security and reliability fix, worth taking. Unattended jobs and the gate's Claude exec connect no MCP server, and a file tool a job's grant does not name is refused (`acceptEdits` used to auto-accept Edit and Write anywhere under the job's directory). A job's result is the last top-level JSON object with an envelope key, so prose quoting JSON no longer fails the run; a failed exit keeps its reason and cost. A job runs in its own process group: the timeout kills the group and a leftover child holding the pipe is dropped shortly after claude exits. A run hears which tool calls its job's previous run had refused, and a wake that cannot start a run leaves a failed run row instead of answering "started".
+- How: same merge as add-0008. By hand: `sched/sched.go` (`proseBefore`, `decodeResult`, `runGroup`, `pipeGrace`, `deniedNote`, `deniedOf`, `begin`, `exec`, `jobDenied`, `jobArgs`), `actions/actions.go` (`NoMCP`, `ClaudeExecArgs`), their tests.
+
+## add-0062 · 2026-10-30 · The gate: hidden characters, padded outcomes, .git, hung shell actions
+- For: everyone
+- Offer: A security fix, worth taking. A proposal whose exec payload holds a Unicode direction control or tag character is refused, since an approval card could draw it differently from what runs or hide a sentence the model reads. A padded approve or deny outcome on `POST /api/v1/prompts` now gets the decider check. Sessions may not Edit or Write the repo's `.git/`, whose config and hooks name programs the hub's git calls run. An approved shell action runs in its own process group and is cut off at its timeout, even if a child holds the output pipe.
+- How: same merge as add-0008. By hand: `actions/actions.go` (`bidiControl`, `runShell`, `shellGrace`), `server/prompts.go`, `threads/runner.go` (`deniedTools`), their tests.
+
+## add-0063 · 2026-10-30 · Calendar and schedules: month ends, clock times, titles
+- For: everyone
+- Offer: A monthly repeat on the 29th to 31st keeps its day (Jan 31, Feb 28, Mar 31) instead of skipping February and drifting. `every@` under a minute and a clock time with anything after the minutes (`daily@07:00pm`) are refused. A waiting item whose look was cancelled gets a fresh look on its day. An item's time is stored zero-padded, and its title on one line in whole characters.
+- How: same merge as add-0008. By hand: `cadence/cadence.go` (`StepOn`, `MonthEnd`, `MinEvery`, `digits`), `calendar/calendar.go` (`chainDay`, `clockAt`, `cleanTitle`, `waitingTick`), `calendar/steps.go`, their tests.
+
+## add-0064 · 2026-10-30 · Push and connector errors
+- For: everyone
+- Offer: A refused APNs provider token is dropped and re-signed, and an expired one retries, so a push is no longer lost for the token's remaining life. A device token that is not hex is refused at registration. A connector's transport error no longer prints an API key from the request's query string.
+- How: same merge as add-0008. By hand: `notify/apns.go` (`isHexToken`), `httpx/httpx.go` (`ScrubURLError`), their tests.
+
+## add-0065 · 2026-10-30 · Links in a table
+- For: everyone
+- Offer: Links in a markdown table are underlined, and a cell that holds one link opens from anywhere in the cell, on phone, desktop and web.
+- How: same merge as add-0008. By hand: `web/app.css`, `web/ui.js`, `app/Life/Sources/StyledText.swift`.

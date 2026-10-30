@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"life/hub/internal/cadence"
 	"life/hub/internal/store"
@@ -99,6 +100,87 @@ func TestOwnerItemFiresAskThenNags(t *testing.T) {
 	c.Tick()
 	if len(n.msgs) != 1 {
 		t.Fatalf("nagged after done: %v", n.msgs)
+	}
+}
+
+// A monthly item on the 31st: the next occurrence is Feb 28 (Go's AddDate
+// said Mar 3, skipping February), and the one after that is back on the 31st
+// rather than drifting to the 28th.
+func TestMonthlyRepeatOnThe31st(t *testing.T) {
+	c, _, _ := newTest(t)
+	now := time.Date(2027, 1, 31, 9, 0, 0, 0, time.Local)
+	c.Now = func() time.Time { return now }
+	it, err := c.Add(Item{Title: "Sweep the balance", Day: "2027-01-31", Kind: "owner", Repeat: "monthly", Source: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Tick()
+	feb, _ := c.List("2027-02-01", "2027-03-31", "")
+	if len(feb) != 1 || feb[0].Day != "2027-02-28" || feb[0].PrevID != it.ID {
+		t.Fatalf("after Jan 31: %+v", feb)
+	}
+	now = time.Date(2027, 2, 28, 9, 0, 0, 0, time.Local)
+	c.Tick()
+	mar, _ := c.List("2027-03-01", "2027-04-30", "")
+	if len(mar) != 1 || mar[0].Day != "2027-03-31" || mar[0].PrevID != feb[0].ID {
+		t.Fatalf("after Feb 28: %+v", mar)
+	}
+}
+
+// A one-digit hour is stored zero-padded, on add and on edit, so the string
+// comparisons against HH:MM (overdue, ordering) read it as the time it is.
+func TestOneDigitHourIsStoredPadded(t *testing.T) {
+	c, _, _ := newTest(t)
+	it, err := c.Add(Item{Title: "Call the vet", Day: "2026-09-03", At: "9:30", Kind: "owner", Source: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := c.Get(it.ID); got.At != "09:30" {
+		t.Fatalf("add stored at %q, want 09:30", got.At)
+	}
+	if !overdueItem(Item{Kind: "owner", State: "scheduled", Day: "2026-09-03", At: it.At}, "2026-09-03", "09:31") {
+		t.Fatal("09:30 not overdue at 09:31")
+	}
+	up, err := c.Update(it.ID, map[string]string{"at": "7:05"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := c.Get(it.ID); up.At != "07:05" || got.At != "07:05" {
+		t.Fatalf("update stored at %q (returned %q), want 07:05", got.At, up.At)
+	}
+	for _, bad := range []string{"24:00", "9:5", "09:30pm", "0930"} {
+		if _, err := c.Update(it.ID, map[string]string{"at": bad}); err == nil {
+			t.Fatalf("at %q accepted", bad)
+		}
+	}
+}
+
+// A title is stored on one line and in whole characters, on add and on edit:
+// a newline reads as a space, and the 200-byte cap backs up to a character's
+// start instead of splitting "é" in two.
+func TestTitleIsOneLineAndWholeCharacters(t *testing.T) {
+	c, _, _ := newTest(t)
+	it, err := c.Add(Item{Title: " Call the vet\nabout\tthe cat\r\n", Day: "2026-09-03", Kind: "owner", Source: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := c.Get(it.ID); got.Title != "Call the vet about the cat" {
+		t.Fatalf("add stored %q", got.Title)
+	}
+	long := strings.Repeat("a", 199) + "é and more" // é is bytes 199-200
+	up, err := c.Update(it.ID, map[string]string{"title": long})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := c.Get(it.ID)
+	if want := strings.Repeat("a", 199); got.Title != want || up.Title != want {
+		t.Fatalf("update stored %q (returned %q), want 199 a's", got.Title, up.Title)
+	}
+	if !utf8.ValidString(cleanTitle(strings.Repeat("é", 150))) || len(cleanTitle(strings.Repeat("é", 150))) != 200 {
+		t.Fatal("a cap through two-byte characters is not whole characters")
+	}
+	if _, err := c.Update(it.ID, map[string]string{"title": "\n\t"}); err == nil {
+		t.Fatal("a title of only control characters accepted")
 	}
 }
 

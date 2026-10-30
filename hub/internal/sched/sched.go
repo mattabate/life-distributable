@@ -9,8 +9,10 @@
 package sched
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -19,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"life/hub/internal/actions"
@@ -49,7 +52,8 @@ type Table struct {
 	Jobs []JobSpec `json:"jobs"`
 	// DefaultTools: Claude Code --allowedTools for jobs. Unattended jobs get
 	// read-only shell + lifectl; never bypassPermissions (the gate must stay
-	// structural). Edits are still auto-accepted (acceptEdits).
+	// structural). acceptEdits, but a file tool the grant does not name is
+	// passed as --disallowedTools (jobDenied).
 	DefaultTools []string `json:"default_tools"`
 	// PromptTools: allowlist for sessions (threads) — turns the owner starts
 	// from either surface. They asked for them, so they may build/install/commit.
@@ -196,7 +200,7 @@ func (s *Scheduler) GetRun(id int64) (RunDetail, error) {
 		if d.Summary == "" {
 			d.Summary = o.Summary
 		}
-		d.Text = strings.TrimSpace(env.Result[:strings.Index(env.Result, "{")])
+		d.Text = proseBefore(env.Result)
 	} else {
 		d.Text = strings.TrimSpace(env.Result)
 	}
@@ -328,7 +332,20 @@ func (s *Scheduler) Fire(name, promptID string) (state, why string) {
 			return "skipped", why
 		}
 	}
-	go s.runWith(name, "schedule", promptID)
+	// The run row is written before Fire answers, so "started" means a row
+	// exists. Begun in the goroutine, a run that could not start (a project
+	// the hub config does not have, a job started by hand a moment before)
+	// returned its error to nobody: the wake read "delivered" with no run
+	// row and no log line saying why.
+	b, err := s.begin(name, "schedule", promptID)
+	if err != nil {
+		if b.id == 0 {
+			return "held", err.Error() // already running: the next tick asks again
+		}
+		log.Printf("sched: %s not started: %v", name, err)
+		return "skipped", err.Error()
+	}
+	go s.exec(b)
 	return "started", ""
 }
 
@@ -459,6 +476,27 @@ func (s *Scheduler) runs(where string, limit int, args ...any) ([]Run, error) {
 func (s *Scheduler) Run(name, via string) (int64, error) { return s.runWith(name, via, "") }
 
 func (s *Scheduler) runWith(name, via, promptID string) (int64, error) {
+	b, err := s.begin(name, via, promptID)
+	if err != nil {
+		return b.id, err
+	}
+	return s.exec(b)
+}
+
+// begun is a run begin opened: the job holds its running flag and run row
+// id stays open until exec closes both. On a begin error, id is the failed
+// run row it wrote instead (0 = none, e.g. the job was already running).
+type begun struct {
+	spec     JobSpec
+	dir, via string
+	id       int64
+}
+
+// begin claims the job's running flag and opens its run row. A job whose
+// project the hub config lacks gets a failed run row saying so (it would
+// fail the same way every occurrence, so it must be on the record), and the
+// flag is released.
+func (s *Scheduler) begin(name, via, promptID string) (begun, error) {
 	var spec *JobSpec
 	s.mu.Lock()
 	for i := range s.table.Jobs {
@@ -468,25 +506,42 @@ func (s *Scheduler) runWith(name, via, promptID string) (int64, error) {
 	}
 	if spec == nil {
 		s.mu.Unlock()
-		return 0, fmt.Errorf("no job %q", name)
+		return begun{}, fmt.Errorf("no job %q", name)
 	}
 	if s.running[name] {
 		s.mu.Unlock()
-		return 0, fmt.Errorf("job %q already running", name)
+		return begun{}, fmt.Errorf("job %q already running", name)
 	}
 	s.running[name] = true
+	j := *spec
 	s.mu.Unlock()
-	defer func() { s.mu.Lock(); delete(s.running, name); s.mu.Unlock() }()
+	release := func() { s.mu.Lock(); delete(s.running, name); s.mu.Unlock() }
 
-	dir, ok := s.projDir(spec.Project)
+	now := store.TS(s.Now())
+	dir, ok := s.projDir(j.Project)
 	if !ok {
-		return 0, fmt.Errorf("job %s: unknown project %q", name, spec.Project)
+		release()
+		err := fmt.Errorf("job %s: unknown project %q", name, j.Project)
+		res, ierr := s.db.Exec(`INSERT INTO runs (job, started_at, finished_at, ok, error, prompt_id) VALUES (?,?,?,0,?,?)`, name, now, now, err.Error(), promptID)
+		if ierr != nil {
+			return begun{}, err
+		}
+		id, _ := res.LastInsertId()
+		return begun{id: id}, err
 	}
-	res, err := s.db.Exec(`INSERT INTO runs (job, started_at, prompt_id) VALUES (?,?,?)`, name, store.TS(s.Now()), promptID)
+	res, err := s.db.Exec(`INSERT INTO runs (job, started_at, prompt_id) VALUES (?,?,?)`, name, now, promptID)
 	if err != nil {
-		return 0, err
+		release()
+		return begun{}, err
 	}
 	id, _ := res.LastInsertId()
+	return begun{spec: j, dir: dir, via: via, id: id}, nil
+}
+
+// exec runs an open run to its end, closes its row and releases the job.
+func (s *Scheduler) exec(b begun) (int64, error) {
+	spec, name, dir, via, id := &b.spec, b.spec.Name, b.dir, b.via, b.id
+	defer func() { s.mu.Lock(); delete(s.running, name); s.mu.Unlock() }()
 	timeout := 20 * time.Minute
 	if d, err := time.ParseDuration(spec.Timeout); err == nil && d > 0 {
 		timeout = d
@@ -498,7 +553,10 @@ func (s *Scheduler) runWith(name, via, promptID string) (int64, error) {
 	if len(tools) == 0 {
 		tools = s.table.DefaultTools
 	}
-	out, err := s.RunClaude(ctx, dir, s.wrapPrompt(*spec), tools)
+	out, err := s.RunClaude(ctx, dir, s.wrapPrompt(*spec)+s.deniedNote(name, id), tools)
+	if d := deniedOf(out.Raw); len(d) > 0 {
+		log.Printf("sched: job %s: %d tool call(s) refused by its grant: %s", name, len(d), strings.Join(d, " | "))
+	}
 	fin := store.TS(s.Now())
 	if err != nil {
 		if _, uerr := s.db.Exec(`UPDATE runs SET finished_at=?, ok=0, error=?, output=?, cost_usd=? WHERE id=?`, fin, err.Error(), out.Raw, out.Cost, id); uerr != nil {
@@ -604,6 +662,58 @@ Rules:
  "needs_you": ["things only the owner can do, each one line; empty if none"]}`
 }
 
+// deniedNote tells a run which tool calls its job's previous run had refused
+// by the grant. The CLI lists them in the result's permission_denials; a
+// call that cannot pass costs a turn each run. `self` is this run's own
+// (still open) row.
+func (s *Scheduler) deniedNote(job string, self int64) string {
+	var raw string
+	s.db.QueryRow(`SELECT COALESCE(output,'') FROM runs WHERE job=? AND id<>? AND finished_at IS NOT NULL AND COALESCE(output,'')<>'' ORDER BY started_at DESC LIMIT 1`, job, self).Scan(&raw)
+	d := deniedOf(raw)
+	if len(d) == 0 {
+		return ""
+	}
+	return "\n\nYour previous run of this job had these tool calls refused by its tool grant. They will be refused again, so do not retry them; use one plain command the grant allows for each step:\n- " + strings.Join(d, "\n- ")
+}
+
+// maxDenied: how many refused calls a note or log line names.
+const maxDenied = 5
+
+// deniedOf: the refused tool calls in a CLI result envelope, one line each
+// ("Bash: <command>"), deduped, at most maxDenied. Not an envelope: none.
+func deniedOf(raw string) []string {
+	var env struct {
+		Denials []struct {
+			Tool  string          `json:"tool_name"`
+			Input json.RawMessage `json:"tool_input"`
+		} `json:"permission_denials"`
+	}
+	if json.Unmarshal([]byte(raw), &env) != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range env.Denials {
+		in := string(d.Input)
+		var b struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(d.Input, &b) == nil && b.Command != "" {
+			in = b.Command
+		}
+		line := d.Tool + ": " + truncate(strings.Join(strings.Fields(in), " "), 160)
+		if seen[line] {
+			continue
+		}
+		seen[line] = true
+		out = append(out, line)
+		if len(out) == maxDenied {
+			break
+		}
+	}
+	return out
+}
+
 // jobEnv puts the hub binary's dir (ops/bin, where lifectl lives) first on
 // PATH, as sessions get it: the grant is Bash(lifectl:*), so lifectl must
 // resolve bare, and a launchd PATH has no ops/bin.
@@ -618,35 +728,123 @@ func jobEnv() []string {
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-func (s *Scheduler) runClaude(ctx context.Context, dir, prompt string, tools []string) (Output, error) {
-	args := []string{"-p", "--output-format", "json", "--permission-mode", "acceptEdits"}
+// jobArgs: the CLI line for an unattended job; no MCP server, no connector
+// (actions.NoMCP).
+func jobArgs(dir string, tools, model []string) []string {
+	args := append([]string{"-p", "--output-format", "json", "--permission-mode", "acceptEdits"}, actions.NoMCP...)
 	if len(tools) > 0 {
 		args = append(args, "--allowedTools", strings.Join(tools, ","))
 	}
-	if s.ModelArgs != nil {
-		args = append(args, s.ModelArgs()...)
+	if d := jobDenied(dir, tools); len(d) > 0 {
+		args = append(args, "--disallowedTools", strings.Join(d, ","))
 	}
-	c := exec.CommandContext(ctx, s.claudeBin, args...)
+	return append(args, model...)
+}
+
+// jobDenied: the file tools a job may not use. acceptEdits auto-accepts
+// Edit/Write anywhere under the job's directory whatever --allowedTools
+// says, so a read-only job could rewrite the project, ops/secrets and .git
+// included. A file tool the grant never names is refused outright; one it
+// names keeps its grant but never reaches ops/secrets or .git, the same
+// denials a session gets (threads deniedTools).
+func jobDenied(dir string, tools []string) []string {
+	var out []string
+	for _, t := range []string{"Edit", "Write", "MultiEdit", "NotebookEdit"} {
+		named := false
+		for _, g := range tools {
+			if g == t || strings.HasPrefix(g, t+"(") {
+				named = true
+				break
+			}
+		}
+		if !named {
+			out = append(out, t)
+			continue
+		}
+		if dir == "" {
+			continue
+		}
+		for _, p := range []string{filepath.Join(dir, "ops", "secrets"), filepath.Join(dir, ".git")} {
+			out = append(out, t+"(/"+p+"/**)")
+		}
+	}
+	return out
+}
+
+func (s *Scheduler) runClaude(ctx context.Context, dir, prompt string, tools []string) (Output, error) {
+	var model []string
+	if s.ModelArgs != nil {
+		model = s.ModelArgs()
+	}
+	c := exec.CommandContext(ctx, s.claudeBin, jobArgs(dir, tools, model)...)
 	c.Dir = dir
 	c.Env = jobEnv()
 	c.Stdin = strings.NewReader(prompt)
-	raw, err := c.CombinedOutput()
-	o := Output{Raw: string(raw)}
-	if err != nil {
-		return o, fmt.Errorf("claude: %v: %s", err, truncate(string(raw), 500))
+	raw, err := runGroup(c, pipeGrace)
+	return decodeResult(raw, err)
+}
+
+// pipeGrace: how long a job's output pipe may stay open after claude itself
+// exited (or its timeout fired) before the hub stops reading it.
+var pipeGrace = 10 * time.Second
+
+// runGroup runs c in its own process group and returns its combined output.
+// CombinedOutput alone waits until every holder of the pipe closes it, and a
+// tool's leftover child (a backgrounded shell) holds it after claude has
+// written its result and exited: the timeout only kills claude, so a run
+// could stay open far past its timeout with the job held "already running".
+// Now the timeout kills the whole group, the pipe is dropped `grace` after
+// claude exits, and any straggler is killed then.
+func runGroup(c *exec.Cmd, grace time.Duration) ([]byte, error) {
+	var buf bytes.Buffer
+	c.Stdout, c.Stderr = &buf, &buf
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
+	c.WaitDelay = grace
+	err := c.Run()
+	if c.Process != nil {
+		syscall.Kill(-c.Process.Pid, syscall.SIGKILL) // stragglers; claude is reaped
 	}
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil // claude exited 0; only an orphan held the pipe
+	}
+	return buf.Bytes(), err
+}
+
+// decodeResult reads the CLI's one JSON result from a job's output. A run
+// that fails exits 1 WITH that envelope, and its reason (an API error, a
+// limit) sits about 1 KB in, after usage and subagent_stats: the first 500
+// raw bytes kept as the error never reached it, and the run's cost was
+// dropped. So the envelope is read on a nonzero exit too; only output that
+// is not one is quoted raw.
+func decodeResult(raw []byte, runErr error) (Output, error) {
+	o := Output{Raw: string(raw)}
 	var env struct {
 		Result    string  `json:"result"`
 		IsError   bool    `json:"is_error"`
 		Cost      float64 `json:"total_cost_usd"`
 		SessionID string  `json:"session_id"`
+		APIStatus any     `json:"api_error_status"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
+		if runErr != nil {
+			return o, fmt.Errorf("claude: %v: %s", runErr, truncate(string(raw), 500))
+		}
 		return o, fmt.Errorf("claude output not json: %s", truncate(string(raw), 300))
 	}
 	o.Cost = env.Cost
-	if env.IsError {
-		return o, fmt.Errorf("claude error: %s", truncate(env.Result, 500))
+	if env.IsError || runErr != nil {
+		why := strings.TrimSpace(env.Result)
+		if env.APIStatus != nil {
+			why += fmt.Sprintf(" (API status %v)", env.APIStatus)
+		}
+		if why == "" {
+			why = "no reason given"
+		}
+		if runErr != nil {
+			return o, fmt.Errorf("claude error (%v): %s", runErr, truncate(why, 500))
+		}
+		return o, fmt.Errorf("claude error: %s", truncate(why, 500))
 	}
 	out, err := ParseOutput(env.Result, string(raw))
 	out.Cost = env.Cost
@@ -671,9 +869,17 @@ func (s *Scheduler) CostByJob(since time.Time) []spend.Bucket {
 	return out
 }
 
-// ParseOutput extracts the JSON object from the model's final text.
+// ParseOutput extracts the JSON object from the model's final text: the
+// last top-level object carrying an envelope key (summary/findings/
+// needs_you). Prose before it may quote JSON of its own, so the first "{" to
+// the last "}" is not always the envelope.
 func ParseOutput(text, raw string) (Output, error) {
 	o := Output{Raw: raw}
+	if at, n := envelopeAt(text); at >= 0 {
+		if err := json.Unmarshal([]byte(text[at:at+n]), &o); err == nil {
+			return o, nil
+		}
+	}
 	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")
 	if start < 0 || end <= start {
 		return o, fmt.Errorf("no JSON object in result: %s", truncate(text, 300))
@@ -682,6 +888,43 @@ func ParseOutput(text, raw string) (Output, error) {
 		return o, fmt.Errorf("result JSON: %v: %s", err, truncate(text, 300))
 	}
 	return o, nil
+}
+
+// envelopeAt finds the last top-level JSON object in text that has an
+// envelope key: its offset and length, or -1. An object that decodes is
+// skipped whole, so a finding's nested exec_payload is never a candidate.
+func envelopeAt(text string) (at, n int) {
+	at = -1
+	for i := strings.IndexByte(text, '{'); i >= 0; {
+		dec := json.NewDecoder(strings.NewReader(text[i:]))
+		var m map[string]json.RawMessage
+		next := i + 1
+		if dec.Decode(&m) == nil {
+			end := int(dec.InputOffset())
+			_, s := m["summary"]
+			_, f := m["findings"]
+			_, y := m["needs_you"]
+			if s || f || y {
+				at, n = i, end
+			}
+			next = i + end
+		}
+		j := strings.IndexByte(text[next:], '{')
+		if j < 0 {
+			break
+		}
+		i = next + j
+	}
+	return at, n
+}
+
+// proseBefore is the model's text ahead of the object ParseOutput read.
+func proseBefore(text string) string {
+	at, _ := envelopeAt(text)
+	if at < 0 {
+		at = max(strings.Index(text, "{"), 0)
+	}
+	return strings.TrimSpace(text[:at])
 }
 
 func truncate(s string, n int) string { return format.Truncate(s, n) }

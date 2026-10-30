@@ -375,6 +375,11 @@ textarea { resize: vertical; }
 .md-table td { border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
 .md-table tr:last-child td { border-bottom: 0; }
 .md-table th:last-child, .md-table td:last-child { padding-right: 0; }
+/* A link in a table cell is underlined, so it never reads as plain text. */
+.md-table a { text-decoration: underline; text-underline-offset: 2px; }
+/* A cell that is one link: the link's box stretches over the whole cell. */
+.md-table .md-link { position: relative; }
+.md-table .md-link a::after { content: ""; position: absolute; inset: 0; }
 .md-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 /* A fenced block: text to copy verbatim. Whitespace kept, long lines wrap
    to the card (never a sideways scroll), the language and Copy on a bar above. */
