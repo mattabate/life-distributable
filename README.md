@@ -247,6 +247,8 @@ is also the list of what the agent can do to your Mac.
 [open an issue][issues]. Want it set up for you or your team? Get in touch
 through [mattabate.com](https://mattabate.com).
 
+Found a security hole? [Report it privately](https://github.com/mattabate/life-distributable/security/advisories/new), not in an issue.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
