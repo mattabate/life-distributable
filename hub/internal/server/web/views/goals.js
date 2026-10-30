@@ -101,7 +101,7 @@ function noteDay(iso) {
   const d = new Date(iso);
   const opts = { month: 'short', day: 'numeric' };
   if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
-  return d.toLocaleDateString(undefined, opts);
+  return d.toLocaleDateString('en-US', opts);
 }
 
 function noteBy(n) {

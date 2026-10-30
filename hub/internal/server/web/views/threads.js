@@ -1416,9 +1416,9 @@ function wireQueued() {
 const wakeWhen = (iso, now) => {
   if (!iso) return 'now';
   const d = new Date(iso); now = now || new Date();
-  const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const t = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   if (d.toDateString() === now.toDateString()) return t;
-  const day = d.toLocaleDateString([], d.getFullYear() === now.getFullYear()
+  const day = d.toLocaleDateString('en-US', d.getFullYear() === now.getFullYear()
     ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
   return day + ' ' + t;
 };

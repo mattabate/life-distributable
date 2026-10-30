@@ -13,6 +13,17 @@ const vm = require('node:vm');
 // in the global scope, which is exactly how the browser sees them.
 vm.runInThisContext(fs.readFileSync(path.join(__dirname, '..', 'ui.js'), 'utf8'), { filename: 'ui.js' });
 
+// A US host never shows this bug, so the source is what gets read: no time or
+// date call may fall back to the host's locale.
+test('every toLocale time and date call names its locale', () => {
+  const web = path.join(__dirname, '..');
+  const files = ['ui.js', ...fs.readdirSync(path.join(web, 'views')).filter(f => f.endsWith('.js')).map(f => path.join('views', f))];
+  for (const f of files) {
+    const bare = fs.readFileSync(path.join(web, f), 'utf8').match(/toLocale(Time|Date)String\((\[\]|undefined|\))/g);
+    assert.equal(bare, null, f);
+  }
+});
+
 test('esc: the five HTML characters, and null is empty', () => {
   assert.equal(esc(`<a href="x">&'</a>`), '&lt;a href=&quot;x&quot;&gt;&amp;&#39;&lt;/a&gt;');
   assert.equal(esc(null), '');

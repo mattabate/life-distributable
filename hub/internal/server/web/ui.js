@@ -212,15 +212,19 @@ function ago(iso) {
   if (s < 3600 - 30) return Math.round(s / 60) + 'm ago';
   if (s < 86400 - 1800) return Math.round(s / 3600) + 'h ago';
   if (s < 86400 * 30) return Math.round(s / 86400) + 'd ago';
-  return new Date(iso).toLocaleDateString();
+  return new Date(iso).toLocaleDateString(EN);
 }
+
+// The console is English and the phone's formatters are en_US, so times and
+// dates pin it too, whatever the host's locale.
+const EN = 'en-US';
 function when(iso) {
   if (!iso) return '';
   const d = new Date(iso), now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
-  return sameDay ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-                 : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
-                   d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return sameDay ? d.toLocaleTimeString(EN,{ hour: 'numeric', minute: '2-digit' })
+                 : d.toLocaleDateString(EN,{ month: 'short', day: 'numeric' }) + ' ' +
+                   d.toLocaleTimeString(EN,{ hour: 'numeric', minute: '2-digit' });
 }
 // A chat row's clock, the day said in words: "today 3:15 PM", "yesterday
 // 12:53 AM", "Mon 9:15 AM" inside the week, "Oct 1 4:02 PM" past it, the
@@ -230,14 +234,14 @@ function when(iso) {
 function dayWhen(iso, now) {
   if (!iso) return '';
   const d = new Date(iso); now = now || new Date();
-  const clock = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const clock = d.toLocaleTimeString(EN,{ hour: 'numeric', minute: '2-digit' });
   const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate());
   const days = Math.round((day(now) - day(d)) / 86400000);
   if (days === 0) return 'today ' + clock;
   if (days === 1) return 'yesterday ' + clock;
-  if (days > 1 && days < 7) return d.toLocaleDateString([], { weekday: 'short' }) + ' ' + clock;
+  if (days > 1 && days < 7) return d.toLocaleDateString(EN,{ weekday: 'short' }) + ' ' + clock;
   const sameYear = d.getFullYear() === now.getFullYear();
-  return d.toLocaleDateString([], sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + clock;
+  return d.toLocaleDateString(EN,sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + clock;
 }
 
 // The turn in flight in a finished turn's words: "23 tool calls · today
@@ -631,13 +635,13 @@ const todayYMD = () => ymd(new Date());
 // Whole days from a to b (both YYYY-MM-DD); noon on each side, so a DST
 // change in between cannot round a day away.
 const daysBetween = (a, b) => Math.round((day(b) - day(a)) / 86400000);
-const shortDay = s => day(s).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+const shortDay = s => day(s).toLocaleDateString(EN,{ month: 'short', day: 'numeric', year: 'numeric' });
 // The same day without the year, for a label inside a chart or a chip.
-const dayLabel = d => day(d).toLocaleDateString([], { month: 'short', day: 'numeric' });
+const dayLabel = d => day(d).toLocaleDateString(EN,{ month: 'short', day: 'numeric' });
 // With the weekday, for the title line of a plot's tooltip: on a daily series
 // "Sat" is half of why a day looks the way it does (nothing settles on a
 // weekend), and it is the one thing the date alone will not tell you.
-const fullDay = s => day(s).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+const fullDay = s => day(s).toLocaleDateString(EN,{ weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
 // The model that filed something, short: "claude-fable-5[1m]" → "fable 5",
 // "claude-haiku-4-5-20251001" → "haiku 4.5". The full id stays on the page.
@@ -903,7 +907,7 @@ function outcomeBtns(outcomes, arm, armed) {
 const PAUSE_MARK = '⏸︎';
 const pauseRe = /hit your (?:[a-z0-9 ]{0,24} )?limit[^\n]*?resets\s/i;
 const isPauseText = s => pauseRe.test(s || '');
-const clockShort = d => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const clockShort = d => d.toLocaleTimeString(EN,{ hour: 'numeric', minute: '2-digit' });
 function pauseBarHTML(a) {
   const from = new Date(a.created_at).getTime(), to = new Date(a.resumes_at).getTime(), now = Date.now();
   const pct = to > from ? Math.max(0, Math.min(100, (now - from) / (to - from) * 100)) : 100;
