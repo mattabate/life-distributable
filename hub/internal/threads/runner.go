@@ -539,6 +539,10 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 				if isOfficeBlob(p) {
 					fmt.Fprintf(&b, " — its text: `ops/py.sh doc-text.py '%s'`", p)
 				}
+				// Nor HEIC, HEIF or AVIF: a converter prints a JPEG's path.
+				if isUnreadableImage(p) {
+					fmt.Fprintf(&b, " — Read can't open this format: `ops/py.sh img-to-jpeg.py '%s'` prints a JPEG's path, Read that", p)
+				}
 			}
 			b.WriteString("]")
 			// A snap with no words typed is still wordless, whatever preamble
@@ -1007,6 +1011,16 @@ func (m *Manager) cardsForOwner(id string) int {
 	return n + acts
 }
 
+// proposedThisTurn says whether the thread raised an approval that is still
+// undecided since its last reply row, i.e. during the turn now ending. An
+// auto-approved relay is not a card and does not count.
+func (m *Manager) proposedThisTurn(id string) bool {
+	var n int
+	m.db.QueryRow(`SELECT COUNT(*) FROM items WHERE src='action' AND thread_id=? AND state='proposed'
+		AND created_at > COALESCE((SELECT MAX(ts) FROM thread_messages WHERE thread_id=? AND role='claude'), '')`, id, id).Scan(&n)
+	return n > 0
+}
+
 // killRuns kills every live process of a thread and sets its status.
 // Caller holds m.mu.
 func (m *Manager) killRuns(id, note, status string) error {
@@ -1213,6 +1227,16 @@ func (m *Manager) tail(r run) run {
 	var dirty bool
 	var live Tokens     // this pass's share of the turn in flight
 	var liveUSD float64 // …priced as it is counted, per message's own model
+	countLive := func(line string) {
+		if id, u, usd, ok := parseUsage(line, r.model); ok && !seenMsg(r.liveMsg, id) {
+			live.In += u.In
+			live.Out += u.Out
+			live.CacheRead += u.CacheRead
+			live.CacheWrite += u.CacheWrite
+			liveUSD += usd
+			r.liveMsg = rememberMsg(r.liveMsg, id)
+		}
+	}
 	for _, line := range strings.Split(string(buf[:end]), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -1223,9 +1247,20 @@ func (m *Manager) tail(r run) run {
 			Type      string `json:"type"`
 			Subtype   string `json:"subtype"`
 			SessionID string `json:"session_id"`
+			// Set on a sync Agent helper's own messages, which the CLI
+			// streams inline with the session's.
+			Parent string `json:"parent_tool_use_id"`
 		}
 		json.Unmarshal([]byte(line), &head)
 		switch {
+		case head.Parent != "":
+			// A helper's step is not the session's: in the session's feed it
+			// would close the open Agent call with the helper's first result,
+			// count twice in the chain (the session's calls and the helper
+			// row's, which reads its own transcript in tasks.go), and could
+			// open a turn on an idle run. Its usage still counts toward the
+			// live estimate.
+			countLive(line)
 		case head.Type == "system" && head.Subtype == "init":
 			if head.SessionID != "" {
 				m.db.Exec(`UPDATE threads SET claude_session_id=? WHERE id=?`, head.SessionID, r.thread)
@@ -1283,14 +1318,7 @@ func (m *Manager) tail(r run) run {
 				}
 			}
 		default:
-			if id, u, usd, ok := parseUsage(line, r.model); ok && !seenMsg(r.liveMsg, id) {
-				live.In += u.In
-				live.Out += u.Out
-				live.CacheRead += u.CacheRead
-				live.CacheWrite += u.CacheWrite
-				liveUSD += usd
-				r.liveMsg = rememberMsg(r.liveMsg, id)
-			}
+			countLive(line)
 			evs := parseEvents(line)
 			if len(evs) > 0 && r.busy == 0 {
 				// Output with no turn open: claude started a turn from a
@@ -1980,7 +2008,12 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 	// its text: that row is red, and the error card carries it too.
 	folded := false
 	if ok == 1 && text != "" {
-		if len(fresh) == 0 {
+		if len(fresh) == 0 && m.proposedThisTurn(threadID) {
+			// An approval card is the card too: the reply beside it would be a
+			// second card saying the same thing.
+			folded = true
+			text = ""
+		} else if len(fresh) == 0 {
 			var tname string
 			m.db.QueryRow(`SELECT title FROM threads WHERE id=?`, threadID).Scan(&tname)
 			title, detail, say := cardFromReply(text, tname)

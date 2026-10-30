@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -483,12 +484,26 @@ func main() {
 	log.Printf("hub: stopped")
 }
 
+// minTokenLen: the shortest hub.token accepted; a generated one is 48 hex.
+const minTokenLen = 32
+
+// loadOrCreateToken reads hub.token the way every client does (TrimSpace), so
+// a stray space or tab at either end cannot leave the hub comparing a token
+// no script sends. Only a missing file makes a new token. A file that is
+// there but holds no token (empty, truncated, too short, a space inside) is
+// an error: overwriting it would lock out the phone and every saved link and
+// hide whatever broke it. A new token is written to a temp file and renamed
+// in, so a crash mid-write never leaves a half token behind.
 func loadOrCreateToken(path string) (string, error) {
 	b, err := os.ReadFile(path)
-	if err == nil && len(b) >= 32 {
-		return string(trimNL(b)), nil
+	if err == nil {
+		tok := strings.TrimSpace(string(b))
+		if len(tok) < minTokenLen || strings.ContainsAny(tok, " \t\r\n") {
+			return "", fmt.Errorf("%s holds no hub token (want %d+ characters, no spaces); fix it or delete it for a new one", path, minTokenLen)
+		}
+		return tok, nil
 	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
 	raw := make([]byte, 24)
@@ -499,7 +514,23 @@ func loadOrCreateToken(path string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, []byte(tok+"\n"), 0o600); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), ".hub.token-*")
+	if err != nil {
+		return "", err
+	}
+	// CreateTemp makes it 0600; the Remove is a no-op once renamed.
+	defer os.Remove(f.Name())
+	_, err = f.WriteString(tok + "\n")
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), path)
+	}
+	if err != nil {
 		return "", err
 	}
 	fmt.Fprintf(os.Stderr, "generated new hub token at %s\n", path)

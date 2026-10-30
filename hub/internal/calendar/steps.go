@@ -18,16 +18,14 @@ import (
 // closes its open steps the same way (closeOpenSteps); a repeat's next row
 // gets the same titles, all open.
 
-// cleanSteps: the titles, trimmed, blanks dropped, each up to 200 bytes.
+// cleanSteps: the titles cleaned like an item's (cleanTitle: one line, whole
+// characters, up to 200 bytes), blanks dropped.
 func cleanSteps(steps []store.Step) []string {
 	var out []string
 	for _, s := range steps {
-		t := strings.TrimSpace(s.Title)
+		t := cleanTitle(s.Title)
 		if t == "" {
 			continue
-		}
-		if len(t) > 200 {
-			t = t[:200]
 		}
 		out = append(out, t)
 	}

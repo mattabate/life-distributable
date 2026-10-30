@@ -291,6 +291,13 @@ func TestScheduleOffIsTheStandingRowCancelled(t *testing.T) {
 	if _, err := m.Update(th.ID, map[string]string{"schedule": "hourly"}); err == nil {
 		t.Fatal("bad cadence accepted")
 	}
+	// Under the minute tick it would wake the session every minute.
+	if _, err := m.Update(th.ID, map[string]string{"schedule": "every@30s"}); err == nil {
+		t.Fatal("sub-minute every@ accepted")
+	}
+	if ps, _ := m.ListPrompts("queued", "", 10); len(ps) != 1 || ps[0].Repeat != "every@2h" {
+		t.Fatalf("refused schedule replaced the standing row: %+v", ps)
+	}
 	if _, err := m.Update(th.ID, map[string]string{"schedule": "off"}); err != nil {
 		t.Fatal(err)
 	}

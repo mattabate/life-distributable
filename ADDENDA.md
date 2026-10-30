@@ -700,3 +700,23 @@ Entry format:
 - For: everyone
 - Offer: Links in a markdown table are underlined, and a cell that holds one link opens from anywhere in the cell, on phone, desktop and web.
 - How: same merge as add-0008. By hand: `web/app.css`, `web/ui.js`, `app/Life/Sources/StyledText.swift`.
+
+## add-0066 · 2026-10-30 · Cards and the session feed
+- For: everyone
+- Offer: A reply beside an approval raised the same turn folds into it, not a second card saying the same thing. A sync helper's stream lines stay out of the session's step feed, where they closed the open Agent call early and counted twice; their usage still counts. A card's title is stored on one line in whole characters, as is a calendar step's.
+- How: same merge as add-0008. By hand: `threads/runner.go` (`proposedThisTurn`, `finishTurn`, the `parent_tool_use_id` check), `threads/asks.go` (`cardTitle`), `calendar/steps.go`, their tests.
+
+## add-0067 · 2026-10-30 · The router takes a name
+- For: team mode
+- Offer: A message opened to a role by its one-word title ("Assistant, can you...") goes straight to that session with no model asked. A title further into the message still goes through the router.
+- How: same merge as add-0008. By hand: `threads/route.go`, `route_test.go`.
+
+## add-0068 · 2026-10-30 · HEIC photos
+- For: everyone
+- Offer: A HEIC, HEIF or AVIF attachment's prompt line tells the session to convert it first, since Read cannot open those formats.
+- How: same merge as add-0008. By hand: `ops/img-to-jpeg.py` (new), `threads/threads.go` (`isUnreadableImage`), `threads/runner.go`, `attach_test.go`.
+
+## add-0069 · 2026-10-30 · Secrets on the hub: the log and the token file
+- For: everyone
+- Offer: A security fix, worth taking. The OTA token is blanked from the request log, which sessions can read. `hub.token` is read the way its clients read it, a file holding no token is refused instead of overwritten, and a new token is written beside the file and renamed in.
+- How: same merge as add-0008. By hand: `server/server.go` (`logPath`), `cmd/hub/main.go`, their tests.

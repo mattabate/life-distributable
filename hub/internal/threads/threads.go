@@ -1998,6 +1998,16 @@ func isImageBlob(ref string) bool {
 	return false
 }
 
+// isUnreadableImage: a picture the Read tool can't open (it takes PNG, JPEG,
+// GIF and WebP) and ops/img-to-jpeg.py can turn into one it can.
+func isUnreadableImage(ref string) bool {
+	switch strings.ToLower(path.Ext(ref)) {
+	case ".heic", ".heif", ".avif":
+		return true
+	}
+	return false
+}
+
 // isOfficeBlob: a file the Read tool can't open and ops/doc-text.py can.
 func isOfficeBlob(ref string) bool {
 	switch strings.ToLower(path.Ext(ref)) {
