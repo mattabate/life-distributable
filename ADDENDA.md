@@ -731,3 +731,8 @@ Entry format:
 - For: everyone
 - Offer: A security fix, worth taking. An uploaded file that is not plain media now opens sandboxed and is never type-sniffed, and `listen_addr` refuses every all-interfaces spelling, IPv6 included. One thing changes: an uploaded HTML page keeps its own script but can no longer fetch from your hub.
 - How: same merge as add-0008. By hand: `server/obs.go` (`getBlob`), `config/config.go` (`bindsAll`), their tests.
+
+## add-0073 · 2026-10-30 · A safer spend cache, and the same times on every host
+- For: everyone
+- Offer: Two bug fixes reported by @jonathanferwerda. Two hubs saving the spend cache at once can no longer install a short file, and `go test -race` passes on the spend package. The console now shows times and dates in en-US whatever the host's locale, as the phone does, so the web tests pass on any machine.
+- How: same merge as add-0008. By hand: `spend/cache.go`, `spend/cache_test.go`, the `toLocale` calls in `web/ui.js` and `web/views/` (`threads.js`, `calgrid.js`, `goals.js`), `web/test/ui.test.js`.

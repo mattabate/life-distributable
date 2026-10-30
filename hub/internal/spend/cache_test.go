@@ -20,25 +20,25 @@ func TestCacheReparsesOnlyWhatChanged(t *testing.T) {
 	c := NewCache(dir)
 
 	us, err := c.Usages()
-	if err != nil || len(us) != 2 || c.parses != 1 {
-		t.Fatalf("first parse: %d usages, %d parses, %v", len(us), c.parses, err)
+	if err != nil || len(us) != 2 || c.Parses() != 1 {
+		t.Fatalf("first parse: %d usages, %d parses, %v", len(us), c.Parses(), err)
 	}
 	// Nothing changed: the walk parses nothing.
-	if us, _ = c.refresh(); len(us) != 2 || c.parses != 1 {
-		t.Fatalf("unchanged tree reparsed: %d parses", c.parses)
+	if us, _ = c.refresh(); len(us) != 2 || c.Parses() != 1 {
+		t.Fatalf("unchanged tree reparsed: %d parses", c.Parses())
 	}
 	// An appended transcript (size changes) is parsed again, and only it.
 	b := filepath.Join(dir, "y", "b.jsonl")
 	os.MkdirAll(filepath.Dir(b), 0o755)
 	os.WriteFile(b, []byte(sample), 0o644)
-	if us, _ = c.refresh(); len(us) != 4 || c.parses != 2 {
-		t.Fatalf("new file: %d usages, %d parses", len(us), c.parses)
+	if us, _ = c.refresh(); len(us) != 4 || c.Parses() != 2 {
+		t.Fatalf("new file: %d usages, %d parses", len(us), c.Parses())
 	}
 	f, _ := os.OpenFile(a, os.O_APPEND|os.O_WRONLY, 0o644)
 	f.WriteString(extra)
 	f.Close()
-	if us, _ = c.refresh(); len(us) != 5 || c.parses != 3 {
-		t.Fatalf("appended file: %d usages, %d parses", len(us), c.parses)
+	if us, _ = c.refresh(); len(us) != 5 || c.Parses() != 3 {
+		t.Fatalf("appended file: %d usages, %d parses", len(us), c.Parses())
 	}
 	// Sorted by time across files, oldest first.
 	for i := 1; i < len(us); i++ {
@@ -48,8 +48,8 @@ func TestCacheReparsesOnlyWhatChanged(t *testing.T) {
 	}
 	// A deleted transcript (the nightly purge) drops out without a parse.
 	os.Remove(b)
-	if us, _ = c.refresh(); len(us) != 3 || c.parses != 3 {
-		t.Fatalf("removed file: %d usages, %d parses", len(us), c.parses)
+	if us, _ = c.refresh(); len(us) != 3 || c.Parses() != 3 {
+		t.Fatalf("removed file: %d usages, %d parses", len(us), c.Parses())
 	}
 }
 
@@ -97,15 +97,17 @@ func TestCacheStoreSurvivesRestart(t *testing.T) {
 	store := filepath.Join(t.TempDir(), "cache", "spend.gob")
 
 	c1 := &Cache{Root: dir, Store: store}
-	if us, err := c1.Usages(); err != nil || len(us) != 2 || c1.parses != 1 {
-		t.Fatalf("first parse: %d usages, %d parses, %v", len(us), c1.parses, err)
+	t.Cleanup(c1.Close)
+	if us, err := c1.Usages(); err != nil || len(us) != 2 || c1.Parses() != 1 {
+		t.Fatalf("first parse: %d usages, %d parses, %v", len(us), c1.Parses(), err)
 	}
 	waitFor(t, "the store to be written", func() bool { _, err := os.Stat(store); return err == nil })
 
 	// The hub restarts: a fresh Cache over the same file parses nothing.
 	c2 := &Cache{Root: dir, Store: store, MaxAge: time.Nanosecond}
-	if us, err := c2.Usages(); err != nil || len(us) != 2 || c2.parses != 0 {
-		t.Fatalf("after restart: %d usages, %d parses, %v", len(us), c2.parses, err)
+	t.Cleanup(c2.Close)
+	if us, err := c2.Usages(); err != nil || len(us) != 2 || c2.Parses() != 0 {
+		t.Fatalf("after restart: %d usages, %d parses, %v", len(us), c2.Parses(), err)
 	}
 	// A transcript that grew while the hub was down lands behind that call,
 	// and only it is parsed.
@@ -113,16 +115,53 @@ func TestCacheStoreSurvivesRestart(t *testing.T) {
 	f.WriteString(extra)
 	f.Close()
 	waitFor(t, "the changed file to be caught up", func() bool { us, _ := c2.Usages(); return len(us) == 3 })
-	if c2.parses != 1 {
-		t.Fatalf("catch-up parsed %d files, want 1", c2.parses)
+	if n := c2.Parses(); n != 1 {
+		t.Fatalf("catch-up parsed %d files, want 1", n)
 	}
 
 	// A store that is not ours (another shape, a truncated write) is ignored
 	// and the walk starts from nothing.
+	c1.Close()
+	c2.Close()
 	os.WriteFile(store, []byte("not a gob"), 0o644)
 	c3 := &Cache{Root: dir, Store: store}
-	if us, err := c3.Usages(); err != nil || len(us) != 3 || c3.parses != 1 {
-		t.Fatalf("bad store: %d usages, %d parses, %v", len(us), c3.parses, err)
+	t.Cleanup(c3.Close)
+	if us, err := c3.Usages(); err != nil || len(us) != 3 || c3.Parses() != 1 {
+		t.Fatalf("bad store: %d usages, %d parses, %v", len(us), c3.Parses(), err)
+	}
+}
+
+// Two hubs over one store (the old one finishing a save as the next starts)
+// must not share a temp file, or a rename installs a short copy. The hour-old
+// leftover of a killed hub goes; a live one stays.
+func TestCacheSaveTempIsUniqueAndSwept(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "x", "a.jsonl")
+	os.MkdirAll(filepath.Dir(a), 0o755)
+	os.WriteFile(a, []byte(sample), 0o644)
+	store := filepath.Join(t.TempDir(), "spend.gob")
+	old, live := store+".1.tmp", store+".2.tmp"
+	os.WriteFile(old, []byte("x"), 0o644)
+	os.WriteFile(live, []byte("x"), 0o644)
+	hour := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(old, hour, hour)
+
+	c := &Cache{Root: dir, Store: store}
+	if _, err := c.Usages(); err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if _, err := os.Stat(store); err != nil {
+		t.Fatalf("no store: %v", err)
+	}
+	if _, err := os.Stat(old); err == nil {
+		t.Fatal("the killed hub's temp stayed")
+	}
+	if _, err := os.Stat(live); err != nil {
+		t.Fatalf("a live save's temp went: %v", err)
+	}
+	if _, err := os.Stat(store + ".tmp"); err == nil {
+		t.Fatal("the shared temp name is back")
 	}
 }
 

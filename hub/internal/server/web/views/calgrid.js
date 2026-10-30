@@ -272,7 +272,7 @@ async function calDrawGrid(view, cal) {
 
 function calRangeLabel() {
   const [a, b] = calVisible();
-  const fmt = (s, o) => localDate(s).toLocaleDateString([], o);
+  const fmt = (s, o) => localDate(s).toLocaleDateString('en-US',o);
   const sameMonth = a.slice(0, 7) === b.slice(0, 7);
   return sameMonth
     ? `${fmt(a, { month: 'long' })} ${localDate(a).getDate()} – ${localDate(b).getDate()}, ${localDate(b).getFullYear()}`
@@ -374,7 +374,7 @@ function calMiniHTML(counts) {
     cells += `<button class="${cls}" onclick="calJump('${day}')" title="${counts[day] || 0} on ${day}">${d.getDate()}</button>`;
   }
   return `<div class="cal-mini">
-    <div class="cal-minihead"><span>${localDate(calAnchor()).toLocaleDateString([], { month: 'long', year: 'numeric' })}</span></div>
+    <div class="cal-minihead"><span>${localDate(calAnchor()).toLocaleDateString('en-US',{ month: 'long', year: 'numeric' })}</span></div>
     <div class="cal-minidow">${CAL_DOW.map(d => `<span>${d[0]}</span>`).join('')}</div>
     <div class="cal-minigrid">${cells}</div></div>`;
 }
@@ -663,7 +663,7 @@ function calPanelHTML(cal) {
   if (calState.open.startsWith('grp:')) return calGroupPanelHTML(cal);
   const e = calFind(cal, calState.open);
   if (!e) return '';
-  const long = e.day ? localDate(e.day).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
+  const long = e.day ? localDate(e.day).toLocaleDateString('en-US',{ weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
   const when = e.soon && !calClosed(e) ? `Anytime · added ${long}`
     : e.day ? long + (e.at ? ` · ${e.at}` : ' · all day')
     : 'No date — anytime';
@@ -685,7 +685,7 @@ function calGroupPanelHTML(cal) {
   const es = calState.open.slice(4).split(',').map(id => calFind(cal, id)).filter(Boolean);
   if (!es.length) return '';
   const lane = calLaneOf(es[0]);
-  const when = localDate(es[0].day).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const when = localDate(es[0].day).toLocaleDateString('en-US',{ weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   // A run of record is named for its session: "7 steps in <session
   // title>" — the deliverable, then the steps that made it.
   const { title, n } = calGroupLabel(es);
@@ -850,7 +850,7 @@ function calWireDrag(root) {
     drag.target = calDropTarget(ev.clientX, ev.clientY);
     const g = ghost();
     if (drag.target) {
-      g.textContent = localDate(drag.target.day).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+      g.textContent = localDate(drag.target.day).toLocaleDateString('en-US',{ weekday: 'short', month: 'short', day: 'numeric' })
         + (drag.target.at ? ' · ' + drag.target.at : ' · all day');
       g.style.display = 'block'; g.style.left = (ev.clientX + 14) + 'px'; g.style.top = (ev.clientY + 14) + 'px';
     } else { g.style.display = 'none'; }

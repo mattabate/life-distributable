@@ -42,8 +42,10 @@ type Cache struct {
 	loaded     bool
 	saving     bool
 	savedAt    time.Time
+	closed     bool
 
-	refreshMu sync.Mutex // one walk at a time
+	refreshMu sync.Mutex     // one walk at a time
+	saves     sync.WaitGroup // the save running behind a refresh
 }
 
 type cachedFile struct {
@@ -111,6 +113,21 @@ func (c *Cache) Usages() ([]Usage, error) {
 // does not pay for the walk.
 func (c *Cache) Prime() { go c.Usages() }
 
+// Close starts no more saves and waits for the one running, if any.
+func (c *Cache) Close() {
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
+	c.saves.Wait()
+}
+
+// Parses is how many transcripts have been parsed so far (tests read it).
+func (c *Cache) Parses() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.parses
+}
+
 // refresh walks Root, reparses what changed, and installs the new snapshot.
 func (c *Cache) refresh() ([]Usage, error) {
 	c.refreshMu.Lock()
@@ -155,9 +172,13 @@ func (c *Cache) refresh() ([]Usage, error) {
 	// A changed tree goes to Store, behind the caller and at most once a
 	// minute. `next` is never written to again — every refresh builds a new
 	// map — so the writer needs no lock on it.
-	if changed && c.Store != "" && !c.saving && time.Since(c.savedAt) >= saveEvery {
+	if changed && c.Store != "" && !c.closed && !c.saving && time.Since(c.savedAt) >= saveEvery {
 		c.saving = true
-		go c.save(next, c.snapAt)
+		c.saves.Add(1)
+		go func(at time.Time) {
+			defer c.saves.Done()
+			c.save(next, at)
+		}(c.snapAt)
 	}
 	return c.snap, err
 }
@@ -207,7 +228,9 @@ func (c *Cache) loadLocked() {
 }
 
 // save writes the tree to Store, whole file then rename, so a hub stopped
-// mid-write leaves the previous file in place.
+// mid-write leaves the previous file in place. The temp name is unique: a hub
+// still finishing its save while the next one starts would otherwise truncate
+// the same file, and a rename would install the short copy.
 func (c *Cache) save(files map[string]cachedFile, at time.Time) {
 	defer func() {
 		c.mu.Lock()
@@ -223,12 +246,13 @@ func (c *Cache) save(files map[string]cachedFile, at time.Time) {
 		log.Printf("spend: %v", err)
 		return
 	}
-	tmp := c.Store + ".tmp"
-	f, err := os.Create(tmp)
+	c.sweepTemps()
+	f, err := os.CreateTemp(filepath.Dir(c.Store), filepath.Base(c.Store)+".*.tmp")
 	if err != nil {
 		log.Printf("spend: %v", err)
 		return
 	}
+	tmp := f.Name()
 	if err := gob.NewEncoder(f).Encode(&t); err != nil {
 		f.Close()
 		os.Remove(tmp)
@@ -243,5 +267,16 @@ func (c *Cache) save(files map[string]cachedFile, at time.Time) {
 	if err := os.Rename(tmp, c.Store); err != nil {
 		os.Remove(tmp)
 		log.Printf("spend: %v", err)
+	}
+}
+
+// sweepTemps removes what a hub killed mid-write left behind. An hour old is
+// long past any live save.
+func (c *Cache) sweepTemps() {
+	old, _ := filepath.Glob(c.Store + ".*.tmp")
+	for _, p := range old {
+		if info, err := os.Stat(p); err == nil && time.Since(info.ModTime()) > time.Hour {
+			os.Remove(p)
+		}
 	}
 }
