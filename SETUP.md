@@ -337,21 +337,16 @@ CLAUDE.md (data first, a page only when they ask for one).
 Do this every time, as the last thing, even if the owner seems in a hurry.
 It takes one message.
 
-1. **Updates, every week.** Create the session that brings new things from
-   upstream to them as cards. Tell them first, in these words: *"Once a
-   week I'll check the project for anything new and show you each one as a
-   card. Nothing changes in your copy unless you say yes."* Then:
-   1. `lifectl thread new "Check upstream for new addenda" --title "Updates from upstream" --schedule "weekly@Mon 09:00"`
-   2. `lifectl thread <its id> schedule "weekly@Mon 09:00" "Check upstream: follow the header of ADDENDA.md."`
-      (the standing prompt it runs each week).
-   3. Write the newest entry id in `ADDENDA.md` (today that is `add-0001`)
-      to `data/addenda-seen.txt`, so the first check only shows what is
-      new after today.
-   **Verify:** `lifectl threads` lists **Updates from upstream** with its
-   weekly schedule. That same weekly session is also where you offer to
-   give back: when you have built or fixed something any owner would want,
-   offer the owner an issue on the project (CLAUDE.md, "Giving back"),
-   never on your own.
+1. **Updates, every week.** The `addenda-check` job in `ops/schedule.json`
+   brings new things from upstream to them as cards; it can only read and
+   raise cards. Tell them, in these words: *"Once a week I'll check the
+   project for anything new and show you each one as a card. Nothing changes
+   in your copy unless you say yes."* Then run `bash ops/addenda-seen.sh <id>`
+   with the id of the newest entry in `ADDENDA.md`, so the first check only
+   shows what is new after today.
+   **Verify:** `bash ops/addenda-seen.sh` prints that id. When you have built or
+   fixed something any owner would want, offer the owner an issue on the
+   project (CLAUDE.md, "Giving back"), never on your own.
 2. **Star, last time.** If they have not said they starred it after the
    first milestone (step 5), ask once more, in one sentence, with the link
    [github.com/mattabate/life-distributable](https://github.com/mattabate/life-distributable).

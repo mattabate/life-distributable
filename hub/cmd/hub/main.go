@@ -228,7 +228,12 @@ func main() {
 		log.Printf("hub thread title: %v", err)
 	}
 	sch.Ask = func(job, text string) {
-		if _, err := thr.AddAskOn("hub", "", text, "raised by the "+job+" job", "other", "", ""); err != nil {
+		// A title is capped: a longer line keeps all its words in the detail.
+		detail := "raised by the " + job + " job"
+		if len(text) > 200 {
+			detail = text + "\n\n" + detail
+		}
+		if _, err := thr.AddAskOn("hub", "", text, detail, "other", "", ""); err != nil {
 			log.Printf("sched: ask from %s: %v", job, err)
 		}
 	}

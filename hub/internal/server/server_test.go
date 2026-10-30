@@ -653,6 +653,21 @@ func TestObservationsUpload(t *testing.T) {
 	if w.Code != 200 || w.Header().Get("Content-Type") != "image/svg+xml" || !strings.HasPrefix(w.Header().Get("Content-Security-Policy"), "sandbox") {
 		t.Fatal(w.Code, w.Header())
 	}
+	// An HTML file, or a file with no extension holding HTML, is sandboxed.
+	for _, ext := range []string{"html", "xhtml", "xml", ""} {
+		ref, _, err := s.obs.PutBlob(strings.NewReader(`<script>localStorage</script>`), ext)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r = httptest.NewRequest("GET", "/api/v1/blobs/"+ref, nil)
+		r.Header.Set("Authorization", "Bearer secret")
+		w = httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		csp := w.Header().Get("Content-Security-Policy")
+		if w.Code != 200 || !strings.HasPrefix(csp, "sandbox") || strings.Contains(csp, "allow-same-origin") || w.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Fatal(ext, w.Code, w.Header())
+		}
+	}
 	r = httptest.NewRequest("POST", "/api/v1/observations", strings.NewReader(`{"source":"app","kind":"note","payload":{"text":"hi"}}`))
 	r.Header.Set("Authorization", "Bearer secret")
 	w = httptest.NewRecorder()

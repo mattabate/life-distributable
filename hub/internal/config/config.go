@@ -5,6 +5,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +13,19 @@ import (
 
 	"life/hub/internal/spend"
 )
+
+// bindsAll: an empty host or any spelling of the unspecified address, IPv6's [::] included.
+func bindsAll(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = strings.Trim(addr, "[]")
+	}
+	if host == "" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
+}
 
 type Project struct {
 	Name string `json:"name"`
@@ -146,7 +160,7 @@ func Load(path string) (*Config, error) {
 	}
 	if c.ListenAddr == "" {
 		bad = append(bad, "listen_addr required")
-	} else if strings.HasPrefix(c.ListenAddr, "0.0.0.0") || strings.HasPrefix(c.ListenAddr, ":") {
+	} else if bindsAll(c.ListenAddr) {
 		bad = append(bad, fmt.Sprintf("listen_addr %q would bind all interfaces, refused", c.ListenAddr))
 	}
 	if len(bad) > 0 {

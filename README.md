@@ -194,8 +194,9 @@ Your data lives on your Mac. The hub listens only on your private
   until you opt in.
 - **Your agent checks weekly.** It reads [ADDENDA.md](ADDENDA.md) every
   Monday and shows each new entry as a card on your phone.
-- **Nothing merges without you.** Say yes on a card and it applies that
-  one update, tests it, and tells you what changed.
+- **Nothing merges without you.** The check only reads and shows cards. Say
+  yes in a new session and that session applies the one update, tests it, and
+  tells you what changed.
 
 ## What you need
 
