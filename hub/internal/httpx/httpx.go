@@ -159,7 +159,7 @@ func Read(resp *http.Response, max int64) ([]byte, error) {
 	if resp.StatusCode/100 != 2 {
 		msg := strings.TrimSpace(string(b))
 		if len(msg) > 300 {
-			msg = msg[:300]
+			msg = strings.ToValidUTF8(msg[:300], "")
 		}
 		return nil, &StatusError{Code: resp.StatusCode, Body: msg}
 	}

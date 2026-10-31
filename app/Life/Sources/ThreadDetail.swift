@@ -150,15 +150,33 @@ struct ThreadDetail: View {
     /// run with no reply yet.
     var liveSince: Date? {
         guard thread.status == "running" else { return nil }
-        let replied = Set(messages.filter { $0.role == "claude" || $0.kind == "error" }.compactMap(\.run_id))
-        return messages.last { $0.run_id != nil && !replied.contains($0.run_id!) && $0.role != "claude" }?.ts
+        return inFlightStarters.last?.ts
+    }
+
+    /// The starters of the turn in flight: no reply yet, and no later turn has
+    /// been answered. A turn that died unanswered (a plan limit) stays
+    /// reply-less for good, so "no reply" alone brought an old relay and limit
+    /// note back every time the session next worked. The console's
+    /// liveStarterMsgs (threads.js).
+    var inFlightStarters: [ThreadMessage] {
+        var start: [String: Date] = [:]
+        var replied = Set<String>()
+        for m in messages {
+            guard let r = m.run_id else { continue }
+            start[r] = min(start[r] ?? m.ts, m.ts)
+            if m.role == "claude" || m.kind == "error" { replied.insert(r) }
+        }
+        let answered = replied.compactMap { start[$0] }.max() ?? .distantPast
+        return messages.filter { m in
+            guard let r = m.run_id, m.role != "claude", !replied.contains(r), let s = start[r] else { return false }
+            return s > answered
+        }
     }
 
     /// That turn's run id: its events are the tool chain.
     var liveRun: String {
         guard thread.status == "running" else { return "" }
-        let replied = Set(messages.filter { $0.role == "claude" || $0.kind == "error" }.compactMap(\.run_id))
-        return messages.last { $0.run_id != nil && !replied.contains($0.run_id!) && $0.role != "claude" }?.run_id ?? ""
+        return inFlightStarters.last?.run_id ?? ""
     }
 
     /// Where "starting · N s" counts from (the console's startingSince): a
@@ -178,8 +196,7 @@ struct ThreadDetail: View {
     /// does not vanish into the working line.
     var liveStarters: Set<Int> {
         guard thread.status == "running" else { return [] }
-        let replied = Set(messages.filter { $0.role == "claude" || $0.kind == "error" }.compactMap(\.run_id))
-        return Set(messages.filter { $0.run_id != nil && !replied.contains($0.run_id!) && $0.role != "claude" }.map(\.id))
+        return Set(inFlightStarters.filter { $0.role == "owner" }.map(\.id))
     }
 
     /// One cell of the open-cards view (`openCells`), in conversational order.

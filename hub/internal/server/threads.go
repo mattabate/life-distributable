@@ -211,6 +211,11 @@ func (s *Server) sendThread(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "need {text} and/or {attachments}")
 		return
 	}
+	// This route writes as the owner, so a session may not aim it at another session.
+	if from := strings.TrimSpace(r.Header.Get("X-Life-Thread")); from != "" && from != r.PathValue("id") {
+		jsonErr(w, 403, "a session may not write into another session as the owner; to hand a task over: `lifectl relay <session-id> \"...\"`")
+		return
+	}
 	if err := s.thr.SendVia(r.PathValue("id"), in.Text, in.Attachments, via(in.Via)); err != nil {
 		jsonErr(w, 409, err.Error())
 		return

@@ -268,6 +268,13 @@ func (m *Manager) RelayTarget(id string) (string, error) {
 	if t.Status == "archived" {
 		return "", fmt.Errorf("session %q is archived", id)
 	}
+	// Work lives with a role: a relay must not wake a session that has none
+	// (an old thread with its schedule cleared would reopen and raise cards
+	// under a drifting title). A sub-session still takes one: it sits under
+	// its parent's card.
+	if t.Persona == "" && t.ParentID == "" {
+		return "", fmt.Errorf("session %q is no one's: relay the role whose lane it is (`lifectl threads`)", id)
+	}
 	return t.Title, nil
 }
 

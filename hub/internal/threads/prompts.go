@@ -951,11 +951,8 @@ func (m *Manager) refHeader(ref, outcome, msgKind string) string {
 		return fmt.Sprintf("[The owner responded to ONE ask — %s %q (%s) — and %s. This says nothing about any other ask on this thread: judge each of those on its own and leave open anything their words do not resolve. Anything below is theirs; act on it.]\n",
 			a.ID, a.Title, a.Kind, verdict)
 	case "action":
-		verdict := "decided on"
-		switch outcome {
-		case "approved":
-			verdict = "APPROVED"
-		case "denied":
+		verdict := "APPROVED"
+		if outcome == "denied" {
 			verdict = "DENIED"
 		}
 		which := id
@@ -963,6 +960,13 @@ func (m *Manager) refHeader(ref, outcome, msgKind string) string {
 			if t := m.ActionTitle(id); t != "" {
 				which = fmt.Sprintf("%s %q", id, t)
 			}
+		}
+		// No outcome = words on the card, not a decision: the row is as it
+		// was, and framing it as "carry out" would run a gated action on a
+		// spoken approval that decided nothing. Only the card's Approve,
+		// behind the decider code, decides.
+		if outcome != "approved" && outcome != "denied" {
+			return fmt.Sprintf("[The owner wrote back about the action you proposed — %s — and did NOT decide it, even if their words sound like a yes or a no: only Approve or Deny on the card decides, and this message changes nothing on the row. Do not carry it out on this. Answer their words below.]\n", which)
 		}
 		what := "Carry out exactly that action now — nothing more — and report the outcome briefly."
 		if m.ActionExec != nil && m.ActionExec(id) == "relay" {

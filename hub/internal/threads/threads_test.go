@@ -876,6 +876,12 @@ func TestTitleMarkdownSurvivesButNotEchoes(t *testing.T) {
 		{"1. fix `app.js` and *ship* it", "fix app.js and ship it"},
 		{"See [the run](https://x/y)", "See the run"},
 		{"Account history chart", "Account history chart"},
+		{"fix `__init__.py` now", "fix __init__.py now"},
+		{"match `*.go and *.py` first", "match *.go and *.py first"},
+		{"*see `x` now*", "see x now"},
+		{"*.go and *.py", "*.go and *.py"},
+		{"5*3 and 2*4", "5*3 and 2*4"},
+		{"*a* *b*", "a b"},
 	} {
 		if got := plainTitle(c.in); got != c.want {
 			t.Fatalf("plainTitle(%q) = %q, want %q", c.in, got, c.want)

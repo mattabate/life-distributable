@@ -56,6 +56,11 @@ func (s *Server) addPrompt(w http.ResponseWriter, r *http.Request) {
 	if in.Author == "" {
 		in.Author = "owner"
 	}
+	// A session is who its header says, whatever author the body claims, so
+	// Queue's self-only rule applies to it.
+	if from := strings.TrimSpace(r.Header.Get("X-Life-Thread")); from != "" {
+		in.Author = "claude:thread:" + from
+	}
 	if in.New && in.Target == "" {
 		in.Target = "new"
 	}

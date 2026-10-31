@@ -50,6 +50,19 @@ func TestRelayDeliversOnlyWithAnApprovedAction(t *testing.T) {
 	if _, err := m.RelayTarget("nope"); err == nil {
 		t.Fatal("a session that does not exist took a relay")
 	}
+	// A session that is no one's cannot be woken by a relay; a role's session
+	// and a sub-session can.
+	if _, err := m.RelayTarget(b.ID); err == nil || !strings.Contains(err.Error(), "no one's") {
+		t.Fatalf("a thread with no persona took a relay: %v", err)
+	}
+	m.db.Exec(`UPDATE threads SET persona='cto' WHERE id=?`, b.ID)
+	if _, err := m.RelayTarget(b.ID); err != nil {
+		t.Fatal(err)
+	}
+	m.db.Exec(`UPDATE threads SET parent_id=? WHERE id=?`, b.ID, a.ID)
+	if _, err := m.RelayTarget(a.ID); err != nil {
+		t.Fatal(err)
+	}
 	clearCards(m, b.ID)
 	if err := m.Archive(b.ID); err != nil {
 		t.Fatal(err)

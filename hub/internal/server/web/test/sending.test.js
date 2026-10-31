@@ -145,6 +145,32 @@ test('msgHTML: the owner\'s message is a grey row, a reply is its cards', () => 
     /class="chat-row sched".*<span class="k">⏰ Check-in<\/span><span class="t">Back at 9:00 AM<\/span>/s);
 });
 
+test('a turn that died unanswered is never in flight again', () => {
+  // A relay and a plan-limit note from days ago must not come back as soon as
+  // the session next works.
+  const ids = msgs => liveStarterMsgs(msgs).map(m => m.id);
+  const dead = [
+    { id: 1, ts: '2026-10-27T22:10:00Z', role: 'system', run_id: 'dead' },
+    { id: 2, ts: '2026-10-27T22:10:05Z', role: 'system', run_id: 'dead' },
+    { id: 3, ts: '2026-10-28T09:00:00Z', role: 'owner', run_id: 'r1' },
+    { id: 4, ts: '2026-10-28T09:01:00Z', role: 'claude', run_id: 'r1' },
+  ];
+  assert.deepEqual(ids(dead), []);
+  // A new message opens a new turn: only that one is live.
+  const asked = [...dead, { id: 5, ts: '2026-10-30T13:06:03Z', role: 'owner', run_id: 'r2' }];
+  assert.deepEqual(ids(asked), [5]);
+  // A message queued during a turn keeps its place when that turn's reply lands
+  // after it: the queued run started later than the answered one.
+  const queued = [
+    { id: 6, ts: '2026-10-30T13:00:00Z', role: 'owner', run_id: 'r3' },
+    { id: 7, ts: '2026-10-30T13:00:10Z', role: 'owner', run_id: 'r4' },
+    { id: 8, ts: '2026-10-30T13:00:20Z', role: 'claude', run_id: 'r3' },
+  ];
+  assert.deepEqual(ids(queued), [7]);
+  // No answered turn at all: every starter still counts.
+  assert.deepEqual(ids([{ id: 9, ts: '2026-10-30T13:00:00Z', role: 'owner', run_id: 'r5' }]), [9]);
+});
+
 test('open cards only: the chat draws what is open, the full chat is a toggle', () => {
   const asks = [{ id: 'ask-1', closed: false }, { id: 'ask-2', closed: true, folded: 'done' }];
   const acts = [{ id: 'act-1', open: true }, { id: 'act-2', open: false, state: 'approved' }];
