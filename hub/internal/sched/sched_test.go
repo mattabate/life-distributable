@@ -96,6 +96,12 @@ func TestNoUnrestrictedShellInAnyToolGrant(t *testing.T) {
 			if rest, ok := strings.CutPrefix(cmd, "bash "); ok && strings.HasPrefix(rest, "ops/") && strings.HasSuffix(strings.TrimSuffix(rest, ":*"), ".sh") {
 				cmd = rest
 			}
+			// A launcher whole runs anything from a one-liner, no file first:
+			// `xcrun python3 -c …`, `find … -exec`. Its named subcommands pass.
+			// make, go and npm run stay on purpose: they run only what is in the repo first.
+			if cmd == "xcrun:*" || cmd == "find:*" {
+				t.Errorf("%s grants %q — a launcher runs any command; grant named subcommands", label, tool)
+			}
 			word := cmd
 			if i := strings.IndexAny(word, " :"); i >= 0 {
 				word = word[:i]

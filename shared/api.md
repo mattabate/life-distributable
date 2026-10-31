@@ -152,7 +152,7 @@ token_bucket}`, counts only. Off unless the owner said yes at setup (`usage_opt_
 ### PUT /api/v1/usage
 Body `{"on": true|false}` — the Settings switch. → State (as GET). 400 without `on`.
 
-## Actions — the approval queue (DESIGN.md "Operating model")
+## Actions — the approval queue
 
 Action: `{id, created_at, updated_at, project, kind, title, detail, gated, exec_type, exec_payload, state, decided_at?, decided_via?, result?, error?, thread_id?, note?}`
 `thread_id` = the session that proposed it (lifectl fills it from `$LIFE_THREAD_ID`, which every thread run exports). When the owner decides, the hub posts the decision into that thread as an `owner` message of kind `decision` ("Approved: <title>" + the owner's `note`), which resumes the agent — so approving is how a proposing session gets told to go ahead, and the owner can keep replying in the thread.

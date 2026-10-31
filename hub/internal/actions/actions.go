@@ -1,7 +1,7 @@
 // Package actions is the approval queue — the mechanical enforcement of the
-// confirmation gate in DESIGN.md "Operating model". Anything that moves
-// money, deletes, contacts people, shares data or commits the owner is
-// proposed here with gated=true and does not execute until they approve it.
+// confirmation gate in CLAUDE.md "Hard rules". Anything that moves money,
+// deletes, contacts people, shares data or pushes code is proposed here with
+// gated=true and does not execute until the owner approves it.
 package actions
 
 import (
@@ -901,14 +901,15 @@ func (q *Queue) List(state string, limit int) ([]Action, error) {
 // chat reads its own cards instead of the whole queue.
 func (q *Queue) ListFor(state, threadID string, limit int) ([]Action, error) {
 	where := "WHERE 1=1"
+	var args []any
 	switch state {
 	case "":
 	case "open":
 		where += " AND i.state IN ('proposed','approved','running')"
 	default:
-		where += " AND i.state = '" + strings.NewReplacer("'", "").Replace(state) + "'"
+		where += " AND i.state = ?"
+		args = append(args, state)
 	}
-	var args []any
 	if threadID != "" {
 		where += " AND i.thread_id = ?"
 		args = append(args, threadID)

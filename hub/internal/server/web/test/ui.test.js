@@ -1,6 +1,6 @@
 // Tests for ui.js, the console's shared render helpers — the one file that
 // runs without a browser. `ops/webcheck.sh` runs these (node --test); they
-// are not part of `make check` (no JS lane in the gate, DESIGN.md). The
+// are not part of `make check` (no JS lane in the gate). The
 // fixtures are made up here and hold no personal data.
 'use strict';
 const test = require('node:test');

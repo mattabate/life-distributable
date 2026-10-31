@@ -80,14 +80,15 @@ func LoadTable(path string) (Table, error) {
 	if len(t.PromptTools) == 0 {
 		t.PromptTools = []string{"Read", "Grep", "Glob", "Edit", "Write", "WebSearch", "WebFetch",
 			"Bash(lifectl:*)", "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git add:*)", "Bash(git commit:*)",
-			"Bash(make:*)", "Bash(ops/install-phone.sh:*)", "Bash(ops/hub.sh:*)", "Bash(go:*)", "Bash(gofmt:*)", "Bash(xcodegen:*)", "Bash(xcodebuild:*)", "Bash(xcrun:*)",
-			"Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)", "Bash(find:*)", "Bash(wc:*)", "Bash(date:*)",
+			"Bash(make:*)", "Bash(ops/install-phone.sh:*)", "Bash(ops/hub.sh:*)", "Bash(go:*)", "Bash(gofmt:*)", "Bash(xcodegen:*)", "Bash(xcodebuild:*)",
+			"Bash(xcrun simctl:*)", "Bash(xcrun devicectl:*)", "Bash(xcrun xcresulttool:*)", "Bash(xcrun dyld_info:*)", "Bash(xcrun atos:*)",
+			"Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(date:*)",
 			"Bash(ops/db.sh:*)", "Bash(ops/py.sh:*)"}
 	}
 	if len(t.DefaultTools) == 0 {
 		t.DefaultTools = []string{"Read", "Grep", "Glob", "WebSearch", "WebFetch",
 			"Bash(lifectl:*)", "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)",
-			"Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)", "Bash(find:*)",
+			"Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)",
 			"Bash(date:*)", "Bash(wc:*)", "Bash(ops/db.sh:*)"}
 	}
 	for _, j := range t.Jobs {

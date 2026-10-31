@@ -191,7 +191,8 @@ over Tailscale, which only their own devices can join.
    **Terminate**)."
 7. **The decider code**: a second password that only they hold, needed to
    approve anything that spends money, deletes, contacts someone, shares
-   data or commits code, so no session can approve its own request. You
+   data or pushes code, so no session can approve its own request (a local
+   commit needs no approval). You
    open `ops/decider-set.sh` in its own window. Tell them: "The window
    shows a code. Save it in the Passwords app with the title
    `life decider code`, then close the window." You never see it.

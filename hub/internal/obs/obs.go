@@ -1,5 +1,5 @@
 // Package obs: the append-only observations table + content-addressed blob
-// store (DESIGN.md "Data model"). Adding a new input = new source/kind
+// store (CLAUDE.md, convention 4). Adding a new input = new source/kind
 // string; nothing here ever updates, and the ONE delete is
 // PruneQuotaHeartbeats — a fixed WHERE on the hub's own 10-minute plan-quota
 // readings, never a parameter another kind could be passed to.

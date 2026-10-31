@@ -1,6 +1,6 @@
 // Tests for tip.js — the one tooltip every plot on the console draws into.
 // `ops/webcheck.sh` runs these (node --test); they are not part of `make check`
-// (no JS lane in the gate, DESIGN.md). Nothing here is real data.
+// (no JS lane in the gate). Nothing here is real data.
 //
 // What these pin is the CONTRACT the eight charts
 // share: a card that escapes what it is handed, prints the value before the
