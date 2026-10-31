@@ -82,8 +82,8 @@ you have to babysit. You don't need to be technical. You need:
 - **Puts a card on your phone when it needs you.** One clear thing to do,
   decide or read. Everything else it handles itself.
 - **Asks before anything that matters.** Money, deleting, contacting
-  people, sharing data and code commits wait for your approval, with a code
-  only you hold.
+  people, sharing data and pushing code wait for your approval, with a code
+  only you hold. Local commits don't.
 - **Tracks your goals.** Sessions file what they learn under each goal, so
   every goal has a living "where this stands".
 - **Recommends, with receipts.** Every suggestion goes in a ledger with its
@@ -177,8 +177,9 @@ Your data lives on your Mac. The hub listens only on your private
 - **Backups are yours.** Encrypted on your Mac before upload, so the
   storage only ever sees noise. The nightly key can't delete anything.
 - **The gate.** Anything that spends money, deletes, contacts a person,
-  shares data or commits code needs your approval plus a decider code that
-  only you hold. No session can approve itself.
+  shares data or pushes code needs your approval plus a decider code that
+  only you hold. No session can approve itself. A session can commit locally
+  without asking; that commit stays on your Mac until a push is approved.
 
 ## Updates and addenda
 

@@ -736,3 +736,18 @@ Entry format:
 - For: everyone
 - Offer: Two bug fixes reported by @jonathanferwerda. Two hubs saving the spend cache at once can no longer install a short file, and `go test -race` passes on the spend package. The console now shows times and dates in en-US whatever the host's locale, as the phone does, so the web tests pass on any machine.
 - How: same merge as add-0008. By hand: `spend/cache.go`, `spend/cache_test.go`, the `toLocale` calls in `web/ui.js` and `web/views/` (`threads.js`, `calgrid.js`, `goals.js`), `web/test/ui.test.js`.
+
+## add-0074 · 2026-10-30 · A LAN address no longer starts the hub
+- For: everyone
+- Offer: A security fix, worth taking, reported by @cristiangirlea. `listen_addr` now takes only a Tailscale address (100.64.0.0/10, fd7a:115c:a1e0::/48) or a `.ts.net` name; a LAN address used to pass and put the hub on the home network. One thing changes: if yours is anything else, including 127.0.0.1, the hub refuses to start and names the problem. Check `listen_addr` in `ops/hub.json` before you restart. Also, `ListFor` now passes the state as a query parameter.
+- How: same merge as add-0008. By hand: `config/config.go` (`onTailnet`, `Load`), `actions/actions.go` (`ListFor`), their tests.
+
+## add-0075 · 2026-10-30 · Sessions no longer get whole `xcrun` or `find`
+- For: everyone
+- Offer: A security fix, worth taking, reported by @noamsto. Either grant let a session run any command from a one-liner past the interpreter ban. `xcrun` is now granted by named subcommand (`simctl`, `devicectl`, `xcresulttool`, `dyld_info`, `atos`) and `find` is gone; Glob and Grep do its job. A test bans both whole grants.
+- How: same merge as add-0008. By hand: `sched/sched.go` (both fallback lists), `ops/schedule.json`, `sched/sched_test.go`; if you added jobs of your own, check their `allowed_tools`.
+
+## add-0076 · 2026-10-30 · The docs say what the gate gates
+- For: everyone
+- Offer: Docs only. Reported by @noamsto: `README.md`, `SETUP.md` and `CLAUDE.md` said code commits are gated, and they are not; pushes and shares are, and a local commit is not. Reported by @cristiangirlea: references to a `DESIGN.md` this repo lacks are repointed or removed.
+- How: same merge as add-0008. By hand: those three docs and the comments.

@@ -28,7 +28,7 @@ xcodebuild -project Life.xcodeproj -scheme Life -configuration Debug \
     if grep -q "Unable to find a destination" "$ROOT/ops/logs/install-phone.log"; then
       # Phone not reachable over the LAN (CoreDevice is Bonjour-only, never
       # crosses Tailscale). OTA (ops/ota.sh) does NOT install on the free
-      # tier (2026-08-21, see DESIGN.md) — so this is a hard stop: the
+      # tier (2026-08-21) — so this is a hard stop: the
       # install has to wait until the phone is on the Mac's Wi-Fi.
       echo "phone not reachable by Xcode (not on the Mac's LAN). Retry when it is; OTA is not an option on the free tier."
       exit 2

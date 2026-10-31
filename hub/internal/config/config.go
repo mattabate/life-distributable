@@ -27,13 +27,32 @@ func bindsAll(addr string) bool {
 	return ip != nil && ip.IsUnspecified()
 }
 
+// onTailnet: Tailscale's own ranges or a MagicDNS name. A LAN address passed
+// bindsAll and put the hub on the home network.
+func onTailnet(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = strings.Trim(addr, "[]")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return strings.HasSuffix(strings.ToLower(host), ".ts.net")
+	}
+	for _, cidr := range []string{"100.64.0.0/10", "fd7a:115c:a1e0::/48"} {
+		if _, n, err := net.ParseCIDR(cidr); err == nil && n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 type Project struct {
 	Name string `json:"name"`
 	Dir  string `json:"dir"`
 }
 
 type Config struct {
-	// ListenAddr is the Tailscale IP:port. Never 0.0.0.0 — see DESIGN.md.
+	// ListenAddr is the Tailscale IP:port. Never 0.0.0.0 — Load refuses it.
 	ListenAddr string `json:"listen_addr"`
 	CertFile   string `json:"cert_file"`
 	KeyFile    string `json:"key_file"`
@@ -162,6 +181,8 @@ func Load(path string) (*Config, error) {
 		bad = append(bad, "listen_addr required")
 	} else if bindsAll(c.ListenAddr) {
 		bad = append(bad, fmt.Sprintf("listen_addr %q would bind all interfaces, refused", c.ListenAddr))
+	} else if !onTailnet(c.ListenAddr) {
+		bad = append(bad, fmt.Sprintf("listen_addr %q is not a Tailscale address, refused", c.ListenAddr))
 	}
 	if len(bad) > 0 {
 		return nil, fmt.Errorf("%s: %s", path, strings.Join(bad, "; "))

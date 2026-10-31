@@ -436,8 +436,8 @@ const PLACE_RIDES_ALONG = 'The page you came from goes with your message.';
 // A NEW SESSION IS AN EMPTY CHAT. Same head, same transcript pane, same
 // composer box as an open session — the transcript just has nothing in it
 // yet. The goal and the cadence are the session's to infer from the owner's
-// words (DESIGN.md: "Goals are inferred by the agent… follow-through is the
-// agent's call"), so there are no selects asking for them.
+// words (goals are inferred by the agent, follow-through is the agent's
+// call), so there are no selects asking for them.
 // It is also what `#/sessions` shows with no session open (drawSessions) —
 // the one chat surface, empty until the owner types.
 async function newSession() {

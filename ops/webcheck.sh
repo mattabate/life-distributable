@@ -5,7 +5,7 @@
 # The console is served as plain scripts with no build step, so a typo is not
 # caught by `make check` — it blanks the whole page at load time instead. This
 # is deliberately NOT part of `make check`: the hub is one static binary with
-# no node toolchain and the gate should not grow a JS lane (DESIGN.md). Run it
+# no node toolchain and the gate should not grow a JS lane. Run it
 # by hand after editing web/, before `ops/hub.sh restart`.
 set -euo pipefail
 cd "$(dirname "$0")/.."

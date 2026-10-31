@@ -19,6 +19,18 @@ func TestBindsAll(t *testing.T) {
 	}
 }
 
+func TestOnTailnet(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"100.64.0.1:8443": true, "100.127.255.255:8443": true, "[fd7a:115c:a1e0::1]:8443": true, "mini.tail.ts.net:8443": true,
+		"192.168.1.20:8443": false, "10.0.0.5:8443": false, "100.63.255.255:8443": false, "100.128.0.0:8443": false,
+		"127.0.0.1:8443": false, "[fe80::1]:8443": false, "example.com:8443": false, "evil.ts.net.example.com:8443": false,
+	} {
+		if onTailnet(addr) != want {
+			t.Errorf("onTailnet(%q) = %v", addr, !want)
+		}
+	}
+}
+
 // A bad hub.json names every problem in one error, so one restart fixes it.
 func TestLoadNamesEveryProblemAtOnce(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "hub.json")

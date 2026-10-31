@@ -17,9 +17,9 @@ one endpoint's contract.
   (`hub/internal/usage`, off unless the owner said yes at setup; the app's
   Settings switches it), which carries counts only.
 - The hub binds only to the Tailscale interface. Nothing public-facing, ever.
-- Gate (hub-enforced): money, delete, contact, share, commit →
+- Gate (hub-enforced): money, delete, contact, share, push →
   `lifectl propose`. Approval needs the decider code, which only the owner
-  holds (`ops/decider-set.sh`).
+  holds (`ops/decider-set.sh`). A local `git commit` is not gated.
 - `ops/secrets/`, `ops/hub.json`, `ops/app.env`, `app/local.xcconfig` are
   written at setup, git-ignored, and never printed into a chat.
 

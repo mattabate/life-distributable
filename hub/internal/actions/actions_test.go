@@ -369,6 +369,10 @@ func TestApproveRunsAndNotifies(t *testing.T) {
 	if len(open) != 0 {
 		t.Fatal(open)
 	}
+	// A state is a parameter: a quote in it matches nothing, and is no error.
+	if none, err := q.List("x' OR '1'='1", 10); err != nil || len(none) != 0 {
+		t.Errorf("quoted state: %d rows, err %v", len(none), err)
+	}
 }
 
 // cardNfy is a notifier with the card lane: the push SPEAKS a sentence
