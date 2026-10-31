@@ -189,7 +189,14 @@ func (s *Store) Create(g Goal) (Goal, error) {
 	}
 	g.ID = slug(g.Title)
 	if g.ID == "" {
-		return Goal{}, errors.New("title must contain letters")
+		// A title in another alphabet leaves no ASCII to slug: its hash is the
+		// id, the title stays.
+		if strings.TrimSpace(g.Title) == "" {
+			return Goal{}, errors.New("title must contain letters")
+		}
+		h := fnv.New32a()
+		h.Write([]byte(strings.TrimSpace(g.Title)))
+		g.ID = fmt.Sprintf("goal-%08x", h.Sum32())
 	}
 	now := time.Now().UTC()
 	g.CreatedAt, g.UpdatedAt = now, now

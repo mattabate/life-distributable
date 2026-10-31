@@ -337,6 +337,13 @@ func TestRefHeaderNamesTheReferencedRow(t *testing.T) {
 	if h := m.refHeader("action:act-1", "denied", "decision"); !strings.Contains(h, `act-1 "Sell 3 shares"`) || !strings.Contains(h, "DENIED") || !strings.Contains(h, "Do not do it") {
 		t.Fatal(h)
 	}
+	// Words on the card with no pick decide nothing, even a spoken "I approve".
+	if h := m.refHeader("action:act-1", "", "decision"); !strings.Contains(h, `act-1 "Sell 3 shares"`) || !strings.Contains(h, "did NOT decide") || !strings.Contains(h, "Do not carry it out") || strings.Contains(h, "Carry out exactly") {
+		t.Fatal(h)
+	}
+	if h := m.refHeader("action:act-1", "approved", "decision"); !strings.Contains(h, "APPROVED") || !strings.Contains(h, "Carry out exactly") {
+		t.Fatal(h)
+	}
 	// A rec answer: its three verdicts are outcomes about a rec and nothing
 	// else; the frame is the rec package's when wired, a one-liner otherwise.
 	th2, _ := m.Create("", "life", "", "Thread.", "", "", nil)

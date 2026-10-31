@@ -1071,18 +1071,27 @@ func (m *Manager) apps() string {
 // and decide assignment up front burns several tool calls on a one-off task
 // before it starts. Five short lines in a prompt that is only sent on fresh starts
 // cost nearly nothing; the tool-call chain cost real money on every thread.
+//
+// A failed read says so: the preamble calls this list complete and forbids
+// `lifectl goals`, so a read error shown as "none" would have a session skip
+// goal work with no way to find out.
 func (m *Manager) activeGoals() string {
+	const unread = "  - (could not be read, NOT complete: run `lifectl goals`)\n"
 	rows, err := m.db.Query(`SELECT id, title FROM goals WHERE status='active' ORDER BY id`)
 	if err != nil {
-		return ""
+		return unread
 	}
 	defer rows.Close()
 	var b strings.Builder
 	for rows.Next() {
 		var id, title string
-		if rows.Scan(&id, &title) == nil {
-			b.WriteString("  - `" + id + "` — " + title + "\n")
+		if rows.Scan(&id, &title) != nil {
+			return unread
 		}
+		b.WriteString("  - `" + id + "` — " + title + "\n")
+	}
+	if rows.Err() != nil {
+		return unread
 	}
 	return b.String()
 }
@@ -1179,14 +1188,17 @@ const costCol = `t.cost_usd + COALESCE((SELECT SUM(r.live_cost_usd) FROM thread_
 // moves exactly when the count does (the turn's start until the first call).
 // The run's last output would also creep forward on thinking and text with
 // the count standing still. CASE keeps the sub-selects off every session
-// that is not running. scan() reads them in this order.
+// that is not running. The count and clock read busy runs only: a run closed
+// at idle but alive on a background task still has finished_at NULL, and its
+// last turn's calls would be added to the new turn's. scan() reads them in
+// this order.
 const turnCols = `CASE WHEN t.status='running' THEN (SELECT COUNT(*) FROM thread_runs r JOIN thread_events e ON e.thread_id=r.thread_id
 		AND e.run_id=(CASE WHEN r.turns<=1 THEN r.id ELSE r.id||'-t'||r.turns END)
-		WHERE r.thread_id=t.id AND r.finished_at IS NULL AND e.kind='tool_use') ELSE 0 END,
+		WHERE r.thread_id=t.id AND r.finished_at IS NULL AND r.busy=1 AND e.kind='tool_use') ELSE 0 END,
 	CASE WHEN t.status='running' THEN (SELECT COALESCE(SUM(r.live_cost_usd),0) FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL) ELSE 0 END,
 	CASE WHEN t.status='running' THEN (SELECT MAX(COALESCE((SELECT MAX(e.ts) FROM thread_events e WHERE e.thread_id=r.thread_id
 		AND e.run_id=(CASE WHEN r.turns<=1 THEN r.id ELSE r.id||'-t'||r.turns END) AND e.kind='tool_use'), r.last_output))
-		FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL) END,
+		FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL AND r.busy=1) END,
 	CASE WHEN t.status='running' THEN (SELECT r.bg_list FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL AND r.bg_tasks>0 ORDER BY r.rowid DESC LIMIT 1) END`
 
 // tokCols: settled tokens plus what the turn in flight has burned so far, so
@@ -2045,7 +2057,10 @@ func stripSnapPreamble(s string) string {
 var (
 	mdLead = regexp.MustCompile(`^(?:[-*+]\s+|\d+[.)]\s+|#{1,6}\s+|>\s+)`)
 	mdLink = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
-	mdEmph = regexp.MustCompile(`\*([^*\n]+)\*`)
+	// A pair of stars is emphasis only when it hugs its words and stands clear
+	// of letters and digits: "*.go and *.py" and "5*3 and 2*4" keep theirs.
+	mdEmph = regexp.MustCompile(`(^|[^\p{L}\p{N}*])\*([^*\s](?:[^*\n]*[^*\s])?)\*($|[^\p{L}\p{N}*])`)
+	mdCode = regexp.MustCompile("`([^`\n]+)`")
 )
 
 // titleLike: Haiku, handed a transcript full of tool calls, sometimes answers
@@ -2083,10 +2098,22 @@ func openingWords(msgs []Message) string {
 func plainTitle(s string) string {
 	s = mdLead.ReplaceAllString(strings.TrimSpace(s), "")
 	s = mdLink.ReplaceAllString(s, "$1")
+	// A code span is literal: `__init__.py` must not reach a banner as init.py.
+	// Each span waits behind a NUL while the markers around it are flattened.
+	var spans []string
+	s = mdCode.ReplaceAllStringFunc(s, func(m string) string {
+		spans = append(spans, m[1:len(m)-1])
+		return "\x00"
+	})
 	s = strings.ReplaceAll(s, "**", "")
 	s = strings.ReplaceAll(s, "__", "")
-	s = mdEmph.ReplaceAllString(s, "$1")
+	// Twice: a match eats the separator the next pair needs, as in "*a* *b*".
+	s = mdEmph.ReplaceAllString(s, "$1$2$3")
+	s = mdEmph.ReplaceAllString(s, "$1$2$3")
 	s = strings.ReplaceAll(s, "`", "")
+	for _, span := range spans {
+		s = strings.Replace(s, "\x00", span, 1)
+	}
 	return strings.TrimSpace(s)
 }
 

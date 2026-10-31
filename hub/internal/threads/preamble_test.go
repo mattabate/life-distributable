@@ -19,6 +19,31 @@ func TestHandoffBudget(t *testing.T) {
 	}
 }
 
+// The preamble calls its goal list complete and forbids `lifectl goals`, so a
+// read that failed must not read as "no goals".
+func TestPreambleGoalListSaysWhenUnread(t *testing.T) {
+	m, _, _ := setup(t)
+	th := Thread{ID: "th-goals", Project: "life"}
+	if _, err := m.db.Exec(`DROP TABLE IF EXISTS goals`); err != nil {
+		t.Fatal(err)
+	}
+	if p := m.systemPreamble(th); !strings.Contains(p, "could not be read") || strings.Contains(p, "(none right now)") {
+		t.Fatalf("a failed goal read did not say so:\n%.600s", p)
+	}
+	if _, err := m.db.Exec(`CREATE TABLE goals (id TEXT, title TEXT, status TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if p := m.systemPreamble(th); !strings.Contains(p, "(none right now)") || strings.Contains(p, "could not be read") {
+		t.Fatalf("an empty goal list should read as none:\n%.600s", p)
+	}
+	if _, err := m.db.Exec(`INSERT INTO goals VALUES ('g-1','Ship it','active')`); err != nil {
+		t.Fatal(err)
+	}
+	if p := m.systemPreamble(th); !strings.Contains(p, "`g-1` — Ship it") {
+		t.Fatalf("an active goal is missing:\n%.600s", p)
+	}
+}
+
 // The preamble rides every fresh session and every lean wake, and the CLI
 // re-reads it on every completion of that process: context is cost. It is
 // one terse line per rule. Adding a rule is fine — keep it one line, and keep
@@ -26,6 +51,10 @@ func TestHandoffBudget(t *testing.T) {
 func TestPreambleBudget(t *testing.T) {
 	m, _, _ := setup(t)
 	th := Thread{ID: "th-budget", Project: "life"}
+	// A healthy hub has the table; the failed-read line is not what is budgeted.
+	if _, err := m.db.Exec(`CREATE TABLE IF NOT EXISTS goals (id TEXT, title TEXT, status TEXT)`); err != nil {
+		t.Fatal(err)
+	}
 	p := m.systemPreamble(th)
 	t.Logf("preamble bytes: %d", len(p))
 	if len(p) > 12000 {

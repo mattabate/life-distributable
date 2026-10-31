@@ -737,6 +737,23 @@ async function openThread(id, focus) {
 // STARTED (the ts of the run's earliest message), a key that never moves.
 // Keying a run by its latest message would put a turn with no
 // reply yet above the previous turn whose reply landed a second later.
+// The starters of the turn in flight: no reply yet, and no later turn has been
+// answered. A turn that died unanswered (a plan limit) stays reply-less for
+// good, so "no reply" alone brought an old relay and limit note back every
+// time the session next worked. Same rule as the phone's inFlightStarters
+// (ThreadDetail.swift).
+function liveStarterMsgs(ordered) {
+  const start = {}, replied = new Set();
+  for (const m of ordered) {
+    if (!m.run_id) continue;
+    if (!(m.run_id in start) || m.ts < start[m.run_id]) start[m.run_id] = m.ts;
+    if (m.role === 'claude' || m.kind === 'error') replied.add(m.run_id);
+  }
+  let answered = '';
+  for (const r of replied) if (start[r] > answered) answered = start[r];
+  return ordered.filter(m => m.run_id && m.role !== 'claude' && !replied.has(m.run_id) && start[m.run_id] > answered);
+}
+
 function orderedMsgs(msgs) {
   const runStart = {};
   for (const m of msgs) if (m.run_id) runStart[m.run_id] = Math.min(runStart[m.run_id] || Infinity, +new Date(m.ts));
@@ -797,8 +814,8 @@ async function refreshThread(id, first) {
   chatState.thread = t; chatState.running = running;
   // The turn in flight = the newest starter whose reply has not landed: its
   // ts is where "starting · N s" counts from.
-  const replied = new Set(ordered.filter(m => m.role === 'claude' || m.kind === 'error').map(m => m.run_id).filter(Boolean));
-  const live = running ? ordered.filter(m => m.run_id && m.role !== 'claude' && !replied.has(m.run_id)).pop() : null;
+  const starters = running ? liveStarterMsgs(ordered) : [];
+  const live = starters[starters.length - 1] || null;
   chatState.liveSince = live ? Date.parse(live.ts) : 0;
   chatState.liveRun = (live && live.run_id) || '';
   // The owner's message landed: the "sending · N s" count is over (a Send
@@ -902,7 +919,7 @@ async function refreshThread(id, first) {
   // turns the full chat on, so the card is there to land on.
   if (focusNeedsFull(chatState.focus, askById, recById, acts)) chatState.full = true;
   const full = chatState.full;
-  const liveIDs = new Set(running && !full ? ordered.filter(m => m.run_id && m.role !== 'claude' && !replied.has(m.run_id)).map(m => m.id) : []);
+  const liveIDs = new Set(full ? [] : starters.filter(m => m.role === 'owner').map(m => m.id));
   let rows;
   if (full) {
     rows = ordered.map(m => msgHTML(m, askByMsg[m.id], actByMsg[m.id], recByMsg[m.id], askById, recById)).join('')

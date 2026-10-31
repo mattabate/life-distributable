@@ -572,7 +572,8 @@ func (s *Store) Add(r Rec) (Rec, error) {
 		return Rec{}, errors.New("title required")
 	}
 	if len(r.Title) > 200 {
-		r.Title = r.Title[:200]
+		// A byte cut can land inside a character; drop the broken tail.
+		r.Title = strings.ToValidUTF8(r.Title[:200], "")
 	}
 	if r.Domain == "" {
 		r.Domain = "other"

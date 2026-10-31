@@ -51,3 +51,12 @@ print()
 print("  The hub keeps only ops/secrets/decider.hash. From now on Approve/Deny")
 print("  needs this code: the hub token alone cannot approve anything.")
 PY
+
+# Armed for good only once the hub has seen the file and written it down, so ask
+# now: a file lost before the first decision would otherwise leave token-only
+# approval open.
+if lifectl api GET /api/v1/decider 2>/dev/null | grep -Eq '"armed": *true'; then
+  echo "  The hub has recorded it: armed for good."
+else
+  echo "  WARNING: the hub did not confirm it. It records the code when it next starts." >&2
+fi

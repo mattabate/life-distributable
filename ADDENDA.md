@@ -751,3 +751,18 @@ Entry format:
 - For: everyone
 - Offer: Docs only. Reported by @noamsto: `README.md`, `SETUP.md` and `CLAUDE.md` said code commits are gated, and they are not; pushes and shares are, and a local commit is not. Reported by @cristiangirlea: references to a `DESIGN.md` this repo lacks are repointed or removed.
 - How: same merge as add-0008. By hand: those three docs and the comments.
+
+## add-0077 · 2026-10-31 · A session can no longer write into another session as you
+- For: everyone
+- Offer: A security fix, worth taking. The messages route now refuses a caller whose `X-Life-Thread` header names a different session, and a queued prompt's author comes from that header instead of the request body, so one session cannot post into another in your name. The hub also arms the decider latch at start, `ops/decider-set.sh` confirms the code was recorded, and a goal title with no ASCII letters gets a `goal-<hash>` id instead of an error.
+- How: same merge as add-0008. By hand: `server/threads.go`, `server/prompts.go`, `server/server.go`, `goals/goals.go`, `ops/decider-set.sh`, new `server/session_as_owner_test.go`.
+
+## add-0078 · 2026-10-31 · A reply on an approval card is not an approval
+- For: everyone
+- Offer: Typing a reply under an approval card used to reach the session framed as "decided on the action, carry it out now". It now says you did not decide it, so the session answers your words and waits for the buttons.
+- How: same merge as add-0008. By hand: `threads/prompts.go`, `threads/prompts_test.go`.
+
+## add-0079 · 2026-10-31 · Chat rows and small fixes
+- For: everyone
+- Offer: In chat, a turn that died unanswered is never shown in flight again, and only your own messages show as working rows (web and phone). A turn's tool count and clock read only the run that is busy, not an idle leftover. Also: push titles keep `__init__.py` and `*.go` intact inside code spans; a failed goals read tells a new session the list could not be read instead of "(none right now)"; a relay to a session with no persona is refused with the reason; rec titles and HTTP error bodies are cut on a character boundary, never mid UTF-8.
+- How: same merge as add-0008. By hand: `web/views/threads.js`, `web/test/sending.test.js`, `app/Life/Sources/ThreadDetail.swift`, `threads/threads.go`, `threads/relay.go`, `recs/recs.go`, `httpx/httpx.go`, their tests.

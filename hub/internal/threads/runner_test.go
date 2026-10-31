@@ -1131,3 +1131,23 @@ func TestSessionsCannotWriteSecrets(t *testing.T) {
 		t.Fatalf("denied: %v", got)
 	}
 }
+
+// A run closed at idle but alive on a background task keeps finished_at NULL;
+// its last turn's calls are not the new turn's.
+func TestTurnToolsSkipAnIdleLeftoverRun(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Hello", "", "", nil)
+	pendingOut(t, m, th.ID)
+	msgs, _ := m.Messages(th.ID, 50)
+	if _, err := m.db.Exec(`INSERT INTO thread_runs (id, thread_id, started_at, trigger, out_file, in_file, busy, turns, last_boundary, last_output, bg_tasks) VALUES ('old',?,?,'message','o','i',0,1,?,?,1)`, th.ID, ts(time.Now().Add(-time.Hour)), ts(time.Now()), ts(time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []string{"old", "old", msgs[0].RunID} {
+		if _, err := m.db.Exec(`INSERT INTO thread_events (thread_id, run_id, ts, kind, title, body, summary) VALUES (?,?,?,'tool_use','t','','')`, th.ID, run, ts(time.Now())); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if th, _ = m.Get(th.ID); th.TurnTools != 1 {
+		t.Fatalf("turn tools = %d, want 1", th.TurnTools)
+	}
+}

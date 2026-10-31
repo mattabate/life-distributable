@@ -92,6 +92,19 @@ func TestDatedCarriesDecisionsAndScores(t *testing.T) {
 	}
 }
 
+// The 200-byte cap can land inside a multi-byte character: the stored title
+// stays whole characters.
+func TestAddCapKeepsWholeCharacters(t *testing.T) {
+	s := newStore(t, time.Date(2026, 8, 23, 12, 0, 0, 0, time.Local))
+	r, err := s.Add(Rec{Title: strings.Repeat("a", 199) + "é and more", Source: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Title != strings.Repeat("a", 199) {
+		t.Fatalf("title %q", r.Title)
+	}
+}
+
 func TestAddValidates(t *testing.T) {
 	s := newStore(t, time.Date(2026, 8, 23, 12, 0, 0, 0, time.Local))
 	if _, err := s.Add(Rec{}); err == nil {

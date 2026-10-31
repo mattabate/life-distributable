@@ -128,6 +128,7 @@ func (s *Server) Draining() { s.stopOnce.Do(func() { close(s.stopping) }) }
 func New(cfg *config.Config, token string, acts *actions.Queue, sch *sched.Scheduler, gs *goals.Store, os_ *obs.Store, thr *threads.Manager) *Server {
 	s := &Server{cfg: cfg, token: token, acts: acts, sch: sch, goals: gs, obs: os_, thr: thr, mux: http.NewServeMux(), usage: spend.NewCache(cfg.ClaudeProjectsDir), quota: spend.NewQuotaFetcher(), stopping: make(chan struct{})}
 	s.register()
+	s.decider().Armed() // a hash already on disk latches now, not at the first decision
 	if os_ != nil {
 		s.registerKinds()
 	}

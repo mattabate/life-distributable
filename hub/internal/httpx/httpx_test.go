@@ -29,6 +29,19 @@ func TestJSON(t *testing.T) {
 	}
 }
 
+// The 300-byte cap on an error body can land inside a multi-byte character.
+func TestStatusErrorBodyCapKeepsWholeCharacters(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, strings.Repeat("a", 299)+"é and more", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+	var out struct{}
+	err := JSON(context.Background(), srv.Client(), "GET", srv.URL, nil, nil, &out)
+	if err == nil || !strings.HasSuffix(err.Error(), strings.Repeat("a", 299)) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 // A transport failure prints the request URL; an API key riding in the query
 // must not ride along into the stored error.
 func TestTransportErrorScrubsQueryKey(t *testing.T) {
