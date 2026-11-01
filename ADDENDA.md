@@ -885,3 +885,28 @@ Entry format:
 - For: everyone
 - Offer: Sessions no longer hold a standing grant to merge upstream. When you say yes to an update, the session shows you the incoming commits and you run the one merge line in Terminal; it then resolves conflicts and runs `make check`.
 - How: delete the line `"Bash(git merge upstream/main)",` from `prompt_tools` in `ops/schedule.json`, then `ops/hub.sh restart`. Nothing else changes.
+
+## add-0103 · 2026-11-01 · The console and the phone follow the hub's time zone
+- For: everyone outside New York
+- Offer: GET /api/v1/status now carries `time_zone`: the hub's `time_zone` from `ops/hub.json`, or the Mac's own zone when that key is empty. The web console and the phone format a prompt's day and clock, and the Spend chart's today, in that zone; they were fixed to New York. A hub that reports no zone falls back to the device's own zone (follow-up to #55).
+- How: same merge as add-0008. By hand: `config/config.go` (`ZoneName`), `server/server.go`, `server/server_test.go`, `shared/api.md`, `shared/fixtures/status.json`, `web/ui.js`, `web/app.js`, the app's `Fmt` and `BoardStore.loadStatus`.
+
+## add-0104 · 2026-11-01 · Titles and spoken lines keep their literal characters
+- For: everyone
+- Offer: Push banners and session titles deleted every `**` and `__`, so "2**10 is 1024" or `__init__.py` arrived changed, and an underscore inside a bare web address could vanish. Bold and emphasis are now flattened only when they hug their words; a stray `**` left by a cut-off bold still goes.
+- How: same merge as add-0008. By hand: `threads/threads.go` (`plainTitle`), `threads/threads_test.go`.
+
+## add-0105 · 2026-11-01 · Two files sent under one name both keep their copy
+- For: everyone who sends files to sessions
+- Offer: Two uploads with the same name arriving at once (two `Statement.pdf`) could overwrite each other in the intake folder. Each file is now written whole to a hidden temporary name and linked in under the first free name, so neither is lost and no reader sees a half-written file. The same bytes sent twice still land as one file.
+- How: same merge as add-0008. By hand: `obs/obs.go`, `obs/intake_test.go`.
+
+## add-0106 · 2026-11-01 · The Spend bar keeps its meters
+- For: everyone
+- Offer: The "All models · 5 hours" meter disappeared when the usage reply sent that window only inside its `limits` list; an unscoped entry there now fills the all-models meters, and a top-level figure still wins. One very large line in a session transcript (a pasted file or picture) took that session's whole spend off the board; it is now skipped with a log line.
+- How: same merge as add-0008. By hand: `spend/quota.go`, `spend/quota_test.go`, `spend/parse.go`, `spend/spend_test.go`.
+
+## add-0107 · 2026-11-01 · Figures sit on white; phone calendar cards fill their cell
+- For: everyone
+- Offer: An inline chart or figure with no background of its own took the card's tint, so a chart on a red card was drawn on red; on the web console and the phone it now sits on white. On the phone, an approval or install card on a calendar item's page is the whole cell, with no white row and padding around it.
+- How: same merge as add-0008. By hand: `web/app.css` (`.att img`), the app's `Attachments.swift` (`BlobImage`), `Card.swift` (`cardRow`), `CalendarView.swift`.

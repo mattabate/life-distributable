@@ -90,6 +90,8 @@ const get = p => api(p);
 const post = (p, b) => api(p, { method: 'POST', body: b === undefined ? undefined : JSON.stringify(b) });
 const patch = (p, b) => api(p, { method: 'PATCH', body: JSON.stringify(b) });
 const put = (p, b) => api(p, { method: 'PUT', body: JSON.stringify(b) });
+// The hub's wall clock for easternFields (ui.js); the browser's zone until it answers.
+get('/status').then(s => { if (s && s.time_zone) hubZone = s.time_zone; }).catch(() => {});
 
 // ---------- live: one change feed instead of a timer per page ----------
 // The phone's loop, on the console: refresh → GET /changes?since=… (parked up

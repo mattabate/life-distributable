@@ -6,6 +6,8 @@ package spend
 import (
 	"bufio"
 	"encoding/json"
+	"io"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -46,10 +48,40 @@ type record struct {
 	} `json:"message"`
 }
 
+// maxLine: a transcript line longer than this is skipped, never parsed. A
+// billed assistant record is a few KB; the long lines are tool results (a
+// pasted file, a screenshot's base64), which carry no usage.
+var maxLine = 64 << 20
+
+// readLine is the next line of r without its newline; long reports a line
+// over maxLine, read past and dropped. err is io.EOF after the last line.
+func readLine(r *bufio.Reader) (line []byte, long bool, err error) {
+	for {
+		chunk, isPrefix, err := r.ReadLine()
+		if err != nil {
+			return nil, false, err
+		}
+		if !long {
+			line = append(line, chunk...)
+			if len(line) > maxLine {
+				line, long = nil, true
+			}
+		}
+		if !isPrefix {
+			return line, long, nil
+		}
+	}
+}
+
 // ParseFile returns the deduplicated usages in one transcript. Claude Code
 // writes one record per content block, all carrying the same message id and
 // usage, so we keep the last record per (message id, request id) — same
 // rule ccusage uses.
+//
+// A line over maxLine is skipped and the rest of the file still read. With a
+// bufio.Scanner it ended the scan with ErrTooLong, and Cache.refresh drops a
+// file whose parse errs, so one oversized tool result took that session's
+// whole spend off the board, the lines before it included.
 func ParseFile(path string) ([]Usage, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -58,10 +90,20 @@ func ParseFile(path string) ([]Usage, error) {
 	defer f.Close()
 	byKey := map[string]Usage{}
 	var order []string
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1<<20), 64<<20)
-	for sc.Scan() {
-		line := sc.Bytes()
+	rd := bufio.NewReaderSize(f, 1<<20)
+	skipped := 0
+	for {
+		line, long, err := readLine(rd)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if long {
+			skipped++
+			continue
+		}
 		if !strings.Contains(string(line), `"type":"assistant"`) {
 			continue
 		}
@@ -88,11 +130,14 @@ func ParseFile(path string) ([]Usage, error) {
 			CacheWrite5m: w5, CacheWrite1h: w1,
 		}
 	}
+	if skipped > 0 {
+		log.Printf("spend: %s: %d line(s) over %d bytes skipped", path, skipped, maxLine)
+	}
 	out := make([]Usage, 0, len(order))
 	for _, k := range order {
 		out = append(out, byKey[k])
 	}
-	return out, sc.Err()
+	return out, nil
 }
 
 // ParseAll walks the projects dir once. The hub keeps a Cache instead (one

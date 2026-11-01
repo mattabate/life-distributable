@@ -2063,7 +2063,16 @@ var (
 	// A pair of stars is emphasis only when it hugs its words and stands clear
 	// of letters and digits: "*.go and *.py" and "5*3 and 2*4" keep theirs.
 	mdEmph = regexp.MustCompile(`(^|[^\p{L}\p{N}*])\*([^*\s](?:[^*\n]*[^*\s])?)\*($|[^\p{L}\p{N}*])`)
-	mdCode = regexp.MustCompile("`([^`\n]+)`")
+	// Literal runs that wait out the flattening: a code span (kept without its
+	// backticks) and a bare address, whose _ and * are part of it.
+	mdKeep = regexp.MustCompile("`[^`\n]+`|https?://[^\\s<>]*[^\\s<>*_.,;:!?)]")
+	// Bold, under the same hug-the-words rule as mdEmph: "2**10" and
+	// "__init__.py" are not emphasis, "**Done:**" and "__Note__" are.
+	mdStrong = regexp.MustCompile(`(^|[^\p{L}\p{N}*])\*\*([^*\s](?:[^*\n]*[^*\s])?)\*\*($|[^\p{L}\p{N}*])`)
+	mdUnder  = regexp.MustCompile(`(^|[^\p{L}\p{N}_/.])__([^_\s](?:[^_\n]*[^_\s])?)__($|[^\p{L}\p{N}_.(])`)
+	// A ** left over (a bold the truncation cut short) goes unless it sits
+	// between two letters or digits, as in 2**10.
+	mdLoneStrong = regexp.MustCompile(`(^|[^\p{L}\p{N}])\*\*|\*\*($|[^\p{L}\p{N}])`)
 )
 
 // titleLike: Haiku, handed a transcript full of tool calls, sometimes answers
@@ -2101,18 +2110,24 @@ func openingWords(msgs []Message) string {
 func plainTitle(s string) string {
 	s = mdLead.ReplaceAllString(strings.TrimSpace(s), "")
 	s = mdLink.ReplaceAllString(s, "$1")
-	// A code span is literal: `__init__.py` must not reach a banner as init.py.
-	// Each span waits behind a NUL while the markers around it are flattened.
+	// A code span and a bare address are literal: `__init__.py` must not reach
+	// a banner as init.py, nor .../run__2 as .../run2. Each waits behind a NUL
+	// while the markers around it are flattened.
+	s = strings.ReplaceAll(s, "\x00", "")
 	var spans []string
-	s = mdCode.ReplaceAllStringFunc(s, func(m string) string {
-		spans = append(spans, m[1:len(m)-1])
+	s = mdKeep.ReplaceAllStringFunc(s, func(m string) string {
+		if strings.HasPrefix(m, "`") {
+			m = m[1 : len(m)-1]
+		}
+		spans = append(spans, m)
 		return "\x00"
 	})
-	s = strings.ReplaceAll(s, "**", "")
-	s = strings.ReplaceAll(s, "__", "")
 	// Twice: a match eats the separator the next pair needs, as in "*a* *b*".
-	s = mdEmph.ReplaceAllString(s, "$1$2$3")
-	s = mdEmph.ReplaceAllString(s, "$1$2$3")
+	for _, re := range []*regexp.Regexp{mdStrong, mdUnder, mdEmph} {
+		s = re.ReplaceAllString(s, "$1$2$3")
+		s = re.ReplaceAllString(s, "$1$2$3")
+	}
+	s = mdLoneStrong.ReplaceAllString(s, "$1$2")
 	s = strings.ReplaceAll(s, "`", "")
 	for _, span := range spans {
 		s = strings.Replace(s, "\x00", span, 1)

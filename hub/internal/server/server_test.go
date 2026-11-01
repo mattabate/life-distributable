@@ -40,6 +40,7 @@ func newTest(t *testing.T) *Server {
 // tests that look at the schema or seed rows directly.
 func newTestDB(t *testing.T) (*Server, *store.DB) {
 	cfg := &config.Config{ListenAddr: "127.0.0.1:0", ClaudeProjectsDir: t.TempDir(), Root: t.TempDir(),
+		TimeZone: "America/New_York", // a fixed zone keeps the status fixture the same on every Mac
 		Projects: []config.Project{{Name: "life", Dir: "/Users/owner/life"}}}
 	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -722,7 +723,8 @@ func TestGoalsAndStatus(t *testing.T) {
 	if w := do("GET", "/api/v1/goals", ""); strings.Contains(w.Body.String(), "two accounts") {
 		t.Fatal("goal list must omit the digest:", w.Body.String())
 	}
-	if w := do("GET", "/api/v1/status", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"pending_actions":0`) {
+	if w := do("GET", "/api/v1/status", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"pending_actions":0`) ||
+		!strings.Contains(w.Body.String(), `"time_zone":"America/New_York"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }

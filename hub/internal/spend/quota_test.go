@@ -12,6 +12,27 @@ import (
 	"time"
 )
 
+// The all-models session meter can arrive only as an unscoped "limits" entry
+// (no top-level five_hour mid-window). It maps to five_hour; a top-level
+// bucket, when there, still wins.
+func TestUnscopedLimitsFillTheAllModelsMeters(t *testing.T) {
+	raw := map[string]json.RawMessage{
+		"five_hour": json.RawMessage(`null`),
+		"seven_day": json.RawMessage(`{"utilization":59,"resets_at":"2026-11-03T14:00:00Z"}`),
+		"limits": json.RawMessage(`[
+			{"kind":"session","group":"session","percent":42,"resets_at":"2026-10-31T21:40:00Z"},
+			{"kind":"weekly_all","group":"weekly","percent":11,"resets_at":"2026-11-03T14:00:00Z"},
+			{"kind":"weekly_scoped","group":"weekly","percent":7,"resets_at":"2026-11-03T14:00:00Z","scope":{"model":{"id":"x","display_name":"Fable"}}}]`),
+	}
+	got := map[string]float64{}
+	for _, w := range windowsFrom(raw) {
+		got[w.Key] = w.Utilization
+	}
+	if got["five_hour"] != 42 || got["seven_day"] != 59 || got["seven_day_fable"] != 7 || len(got) != 3 {
+		t.Fatalf("windows: %v", got)
+	}
+}
+
 func TestQuota(t *testing.T) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

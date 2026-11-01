@@ -375,18 +375,30 @@ func scopedWindows(raw json.RawMessage) []Window {
 	}
 	var out []Window
 	for _, e := range entries {
-		if e.Percent == nil || e.Scope == nil || e.Scope.Model == nil {
-			continue // unscoped: already covered by the top-level buckets
-		}
-		fam := Family(strings.ToLower(strings.ReplaceAll(e.Scope.Model.DisplayName, " ", "-")))
-		if fam == "" {
+		if e.Percent == nil {
 			continue
 		}
 		base := sevenDayKey
 		if e.Group == "session" || strings.HasPrefix(e.Kind, "session") {
 			base = fiveHourKey
 		}
-		w := Window{Key: base + "_" + fam, ScopeModel: fam, Utilization: *e.Percent, ByModel: []Bucket{}}
+		var key, fam string
+		if e.Scope == nil || e.Scope.Model == nil {
+			// Unscoped: the all-models meter. The top-level bucket wins when
+			// it is there (windowsFrom de-dupes); the payload can drop a
+			// top-level five_hour mid-window and send only this entry.
+			if base == sevenDayKey && e.Kind != "weekly_all" {
+				continue
+			}
+			key = base
+		} else {
+			fam = Family(strings.ToLower(strings.ReplaceAll(e.Scope.Model.DisplayName, " ", "-")))
+			if fam == "" {
+				continue
+			}
+			key = base + "_" + fam
+		}
+		w := Window{Key: key, ScopeModel: fam, Utilization: *e.Percent, ByModel: []Bucket{}}
 		if t, err := time.Parse(time.RFC3339, e.ResetsAt); err == nil {
 			w.ResetsAt = t
 		}

@@ -424,7 +424,9 @@ struct BlobImage: View {
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image).resizable().scaledToFit()
+                // A figure with no background of its own (an agent's SVG
+                // chart) sits on white, never the card's tint.
+                Image(uiImage: image).resizable().scaledToFit().background(Color.white)
             } else if failed {
                 Label("photo unavailable", systemImage: "photo.badge.exclamationmark").font(.caption).foregroundStyle(.secondary).padding(8)
             } else {

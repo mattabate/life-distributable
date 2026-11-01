@@ -612,12 +612,15 @@ const LIVE_PILL = { running: runningPill, speaking: speakingPill,
   waiting: w => `<span class="pill waiting"><span class="dot"></span>${esc(w)}</span>` };
 const livePillsHTML = pills => (pills || []).map(p => LIVE_PILL[p.tone] ? LIVE_PILL[p.tone](p.word) : '').join('');
 
-// A day + clock time is read by the hub in Eastern — the hub's clock — so the
-// instant picked is formatted there rather than in the browser's zone.
+// A day + clock time is read by the hub in its own zone (hub.json time_zone,
+// or the hub Mac's), so the instant picked is formatted there. app.js sets
+// hubZone from GET /status; until it answers (or when the hub names none)
+// that is the browser's own zone.
+let hubZone;
 function easternFields(date) {
   const p = {};
   for (const part of new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: hubZone, year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', hour12: false,
   }).formatToParts(date)) p[part.type] = part.value;
   return { on: `${p.year}-${p.month}-${p.day}`, at_time: `${p.hour === '24' ? '00' : p.hour}:${p.minute}` };

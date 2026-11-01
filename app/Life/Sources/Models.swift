@@ -379,6 +379,8 @@ struct HubStatus: Codable {
     var uptime_s: Int
     var pending_actions: Int
     var jobs: Int
+    /// The hub's IANA zone; nil from an older hub.
+    var time_zone: String?
     var app_installed: String?
     var app_profile_expires: String?
     var app_profile_days_left: Int?

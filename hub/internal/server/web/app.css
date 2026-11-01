@@ -403,6 +403,9 @@ textarea { resize: vertical; }
 .att img {
   max-height: 200px; max-width: 260px; border-radius: 8px; display: block;
   border: 1px solid rgba(127,127,127,.25);
+  /* A figure with no background of its own (an agent's SVG chart) sits on
+     white, never the card's tint. */
+  background: #fff;
 }
 .att { text-decoration: none; }
 .att-file { display: inline-block; padding: 3px 0; }

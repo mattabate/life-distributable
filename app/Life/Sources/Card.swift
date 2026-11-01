@@ -94,6 +94,16 @@ func foldButton(_ ref: CardRef, _ id: String, back: Bool, hub: HubClient,
     }
 }
 
+extension View {
+    /// A chat card as a List row: the card is the whole cell, no white row
+    /// and padding round it.
+    func cardRow() -> some View {
+        listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+    }
+}
+
 struct Card: View {
     /// The open card's colour: red (needs you), blue (read), teal (install),
     /// purple (rec). Grey when closed or folded.

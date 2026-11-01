@@ -16,15 +16,23 @@ enum Fmt {
         f.timeZone = .current
         return f
     }()
-    /// Eastern day / clock — what `POST /prompts` `on` + `at_time` take.
+    /// The hub's day / clock — what `POST /prompts` `on` + `at_time` take.
+    /// The device's zone until GET /status names the hub's (hub.json
+    /// time_zone, or the hub Mac's own); the console's easternFields does the
+    /// same. Names kept from when the zone was fixed.
     static let easternDay: DateFormatter = eastern("yyyy-MM-dd")
     static let easternClock: DateFormatter = eastern("HH:mm")
     private static func eastern(_ format: String) -> DateFormatter {
         let d = DateFormatter()
         d.locale = Locale(identifier: "en_US_POSIX")
-        d.timeZone = TimeZone(identifier: "America/New_York")
+        d.timeZone = .current
         d.dateFormat = format
         return d
+    }
+    static func useHubZone(_ name: String?) {
+        guard let name, let z = TimeZone(identifier: name), z != easternDay.timeZone else { return }
+        easternDay.timeZone = z
+        easternClock.timeZone = z
     }
     /// RFC3339 with fractional seconds, for what the phone writes. A value
     /// type, so safe from any thread.

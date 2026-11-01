@@ -157,18 +157,42 @@ func (s *Store) PutIntake(ref, name string) (string, error) {
 	name = intakeName(name, filepath.Ext(src))
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
+	// The whole file is written to a hidden temp beside the in-box first and
+	// hard-linked in under the free name: the link fails if the name is
+	// taken, so the check and the claim are one step. A read-then-write let
+	// two uploads under one name in flight at once both see it free, and the
+	// second overwrote the first; a reader never sees a half-written copy.
+	tmp, err := os.CreateTemp(s.IntakeDir, ".intake-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return "", err
+	}
 	for i := 1; i <= 99; i++ {
 		cand := name
 		if i > 1 {
 			cand = fmt.Sprintf("%s-%d%s", stem, i, ext)
 		}
 		dst := filepath.Join(s.IntakeDir, cand)
+		err := os.Link(tmp.Name(), dst)
+		if err == nil {
+			return dst, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
 		have, err := os.ReadFile(dst)
 		if errors.Is(err, os.ErrNotExist) {
-			if err := os.WriteFile(dst, data, 0o644); err != nil {
-				return "", err
-			}
-			return dst, nil
+			continue // renamed away since the link: the next name
 		}
 		if err != nil {
 			return "", err

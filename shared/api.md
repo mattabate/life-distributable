@@ -228,7 +228,12 @@ Query `job`, `limit`. → `[{id, job, started_at, finished_at?, ok?, summary?, o
 ## Status & goals
 
 ### GET /api/v1/status
-→ `{ok, time, uptime_s, pending_actions, jobs, app_installed?, app_profile_expires?, app_profile_days_left?, clock: [ClockTask]}`
+→ `{ok, time, uptime_s, pending_actions, jobs, time_zone?, app_installed?, app_profile_expires?, app_profile_days_left?, clock: [ClockTask]}`
+
+`time_zone` is the IANA name of the hub's clock: hub.json `time_zone`, or this
+Mac's own zone when that is empty. Clients format "today" and clock times in
+it; absent (an older hub, or a Mac whose zone has no findable name) they use
+the device's own zone.
 
 ClockTask: `{name, every, next_due, last_start?, last_end?, running, last_error?, runs, errors, syncer?}` —
 `syncer` marks a task registered with `clock.Sync` (it pulls from outside; each run lands in `sync_runs`) —

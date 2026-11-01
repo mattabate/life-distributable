@@ -882,6 +882,13 @@ func TestTitleMarkdownSurvivesButNotEchoes(t *testing.T) {
 		{"*.go and *.py", "*.go and *.py"},
 		{"5*3 and 2*4", "5*3 and 2*4"},
 		{"*a* *b*", "a b"},
+		// Not emphasis: an exponent, a dunder, and an address's own _ and *.
+		{"2**10 is 1024", "2**10 is 1024"},
+		{"edit __init__.py and setup.py", "edit __init__.py and setup.py"},
+		{"run https://x.io/a__b__c/*x* now", "run https://x.io/a__b__c/*x* now"},
+		{"**see https://x.io/a_b**", "see https://x.io/a_b"},
+		{"__Note__ the **two** fixes", "Note the two fixes"},
+		{"**Done: cut short by trunc…", "Done: cut short by trunc…"},
 	} {
 		if got := plainTitle(c.in); got != c.want {
 			t.Fatalf("plainTitle(%q) = %q, want %q", c.in, got, c.want)

@@ -288,6 +288,12 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"ok": true, "time": time.Now(), "uptime_s": int(time.Since(startedAt).Seconds()),
 		"pending_actions": pending, "jobs": len(s.sch.Table().Jobs),
+		// The hub's own clock (hub.json time_zone, or this Mac's zone): the
+		// zone the clients format "today" in. Omitted when the Mac's zone has
+		// no findable name, and the clients then use the device's.
+	}
+	if z := s.cfg.ZoneName(); z != "" {
+		out["time_zone"] = z
 	}
 	if s.StatusExtra != nil {
 		for k, v := range s.StatusExtra() {

@@ -206,6 +206,32 @@ func (c *Config) Zone() (*time.Location, error) {
 	return time.LoadLocation(c.TimeZone)
 }
 
+// ZoneName is the IANA name of Zone(): time_zone when set, else the Mac's own
+// zone read from $TZ or the /etc/localtime link. Empty when the Mac's zone has
+// no name that can be found (clients then use their own device's zone).
+func (c *Config) ZoneName() string {
+	if c.TimeZone != "" {
+		return c.TimeZone
+	}
+	if tz := strings.TrimPrefix(os.Getenv("TZ"), ":"); tz != "" {
+		if _, err := time.LoadLocation(tz); err == nil && tz != "Local" {
+			return tz
+		}
+	}
+	if link, err := os.Readlink("/etc/localtime"); err == nil {
+		if i := strings.Index(link, "zoneinfo/"); i >= 0 {
+			name := link[i+len("zoneinfo/"):]
+			if _, err := time.LoadLocation(name); err == nil {
+				return name
+			}
+		}
+	}
+	if n := time.Local.String(); n != "" && n != "Local" {
+		return n
+	}
+	return ""
+}
+
 // AllProjects merges the explicit list with subdirectories of ProjectsRoot.
 func (c *Config) AllProjects() []Project {
 	seen := map[string]bool{}

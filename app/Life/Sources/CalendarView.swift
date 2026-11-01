@@ -1285,7 +1285,7 @@ struct CalEntrySheet: View {
                 if isProposedAction {
                     Section {
                         if let a = action {
-                            ApprovalCard(a: a, inThread: false) { shut() }
+                            ApprovalCard(a: a, inThread: false) { shut() }.cardRow()
                         } else if error == nil {
                             HStack { ProgressView(); Text("Loading the proposal…").font(.caption).foregroundStyle(.secondary) }
                         }
@@ -1294,8 +1294,7 @@ struct CalEntrySheet: View {
                 if isOpenInstall {
                     Section {
                         if let a = ask {
-                            AskCard(a: a, goals: goals, reload: { shut() })
-                                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                            AskCard(a: a, goals: goals, reload: { shut() }).cardRow()
                         } else if error == nil {
                             HStack { ProgressView(); Text("Loading the build…").font(.caption).foregroundStyle(.secondary) }
                         }

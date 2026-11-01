@@ -119,6 +119,7 @@ final class BoardStore {
             if freshGoals != goals { goals = freshGoals }
             if freshBoard != board { board = freshBoard }
             if let t = try? await hub.personaThreads(), t != team { team = t }
+            if status == nil { await loadStatus(hub) }
             error = nil
         } catch { if !error.isCancellation { self.error = error.localizedDescription } }
     }
@@ -130,5 +131,6 @@ final class BoardStore {
     func loadStatus(_ hub: HubClient) async {
         guard hub.isConfigured, let s = try? await hub.status() else { return }
         status = s
+        Fmt.useHubZone(s.time_zone)
     }
 }

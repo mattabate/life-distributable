@@ -3,6 +3,7 @@ package spend
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -129,6 +130,29 @@ func TestSummaryHistoryIsAllTime(t *testing.T) {
 	}
 	if h := Summarize(nil, 7, now, func(string) string { return "" }).History; h == nil || len(h) != 0 {
 		t.Fatalf("no transcripts: an empty list, never null: %v", h)
+	}
+}
+
+// A tool result longer than the line cap is skipped; the usages before and
+// after it still count. A bufio.Scanner stopped at it with ErrTooLong and
+// refresh dropped the whole file.
+func TestParseSkipsOversizedLine(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "x", "a.jsonl")
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	lines := strings.Split(strings.TrimSpace(sample), "\n")
+	big := `{"type":"user","message":{"content":[{"type":"tool_result","content":"` +
+		strings.Repeat("A", 64<<20+10) + `"}]}}`
+	body := lines[1] + "\n" + big + "\n" + lines[3] // the last line has no newline
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	us, err := ParseAll(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(us) != 2 {
+		t.Fatalf("want both usages around the long line, got %d", len(us))
 	}
 }
 
