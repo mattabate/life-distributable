@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -67,25 +68,51 @@ func (db *DB) Migrate(pkg string, stmts []string) ([]string, error) {
 // statements run, in a snapshots/ directory next to the database.
 const preMigrateFile = "pre-migrate.db"
 
+// preMigrateKeep: a snapshot younger than this is an unfinished upgrade's —
+// a hub in a crash loop restarts within seconds — and is kept.
+const preMigrateKeep = 15 * time.Minute
+
+// preMigrated: the open databases that took their snapshot this process.
+var preMigrated sync.Map
+
 // preMigrateSnapshot: a bad backfill UPDATE in a new statement could only be
 // undone from the last nightly backup, up to a day of writes behind. So
 // before an already-migrated package runs anything new, the database is
-// copied with VACUUM INTO (never a file copy: WAL), one file overwritten each
-// time. A failure is logged and the migration goes ahead.
+// copied with VACUUM INTO (never a file copy: WAL), one file replaced by the
+// next upgrade. A failure is logged and the migration goes ahead.
+//
+// Once per process, and never over a snapshot from the last few minutes
+// (#79): each package's Migrate used to retake it, so the copy held the
+// first packages' new statements, and a crash loop overwrote the good copy
+// with a half-migrated one. The copy lands under a temporary name and is
+// renamed, so a failed VACUUM never removes the last one.
 func (db *DB) preMigrateSnapshot(pkg string) {
+	if _, done := preMigrated.LoadOrStore(db.DB, true); done {
+		return
+	}
 	var seq int
 	var name, path string
 	if err := db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil || path == "" {
 		return // in-memory
 	}
 	dst := filepath.Join(filepath.Dir(path), "snapshots", preMigrateFile)
+	if fi, err := os.Stat(dst); err == nil && time.Since(fi.ModTime()) < preMigrateKeep {
+		log.Printf("store: %s has new statements; keeping %s from %s (an unfinished upgrade's)", pkg, dst, fi.ModTime().Format(time.RFC3339))
+		return
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		log.Printf("store: pre-migrate snapshot (%s): %v", pkg, err)
 		return
 	}
-	os.Remove(dst)
+	tmp := dst + ".tmp"
+	os.Remove(tmp)
 	start := time.Now()
-	if _, err := db.Exec(`VACUUM INTO ?`, dst); err != nil {
+	if _, err := db.Exec(`VACUUM INTO ?`, tmp); err != nil {
+		os.Remove(tmp)
+		log.Printf("store: pre-migrate snapshot (%s): %v", pkg, err)
+		return
+	}
+	if err := os.Rename(tmp, dst); err != nil {
 		log.Printf("store: pre-migrate snapshot (%s): %v", pkg, err)
 		return
 	}

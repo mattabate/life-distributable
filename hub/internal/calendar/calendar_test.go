@@ -127,6 +127,63 @@ func TestMonthlyRepeatOnThe31st(t *testing.T) {
 	}
 }
 
+// The 31st holds after a one-off move: the chain's anchor is stamped on the
+// next row, not read back off the moved one (#78).
+func TestMonthlyThe31stSurvivesAOneOffMove(t *testing.T) {
+	c, _, _ := newTest(t)
+	now := time.Date(2027, 1, 30, 9, 0, 0, 0, time.Local)
+	c.Now = func() time.Time { return now }
+	it, err := c.Add(Item{Title: "Sweep the balance", Day: "2027-01-31", Kind: "owner", Repeat: "monthly", Source: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Update(it.ID, map[string]string{"day": "2027-02-01", "scope": "one"}); err != nil {
+		t.Fatal(err)
+	}
+	feb, _ := c.List("2027-02-02", "2027-03-31", "")
+	if len(feb) != 1 || feb[0].Day != "2027-02-28" {
+		t.Fatalf("after the move: %+v", feb)
+	}
+	now = time.Date(2027, 2, 28, 9, 0, 0, 0, time.Local)
+	c.Tick()
+	mar, _ := c.List("2027-03-01", "2027-04-30", "")
+	if len(mar) != 1 || mar[0].Day != "2027-03-31" || mar[0].PrevID != feb[0].ID {
+		t.Fatalf("after Feb 28: %+v", mar)
+	}
+}
+
+// Moving every future occurrence to a new day re-dates the already-minted
+// next one, so the chain goes on (#77: the stale child fired first and
+// spawnNext refused the moved row's next).
+func TestFutureMoveRedatesTheNextOccurrence(t *testing.T) {
+	c, _, _ := newTest(t)
+	now := time.Date(2026, 9, 3, 19, 0, 0, 0, time.Local)
+	c.Now = func() time.Time { return now }
+	it, _ := c.Add(Item{Title: "Pouch check", Day: "2026-09-03", At: "07:00", Kind: "owner", Repeat: "daily", Source: "owner"})
+	c.Tick() // fires, mints 09-04
+	if _, err := c.Update(it.ID, map[string]string{"day": "2026-09-04", "at": "18:00", "scope": "future"}); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := c.List("2026-09-04", "2026-09-30", "scheduled")
+	if len(next) != 2 {
+		t.Fatalf("want the moved row and its next: %+v", next)
+	}
+	var kid Item
+	for _, n := range next {
+		if n.PrevID == it.ID {
+			kid = n
+		}
+	}
+	if kid.Day != "2026-09-05" || kid.At != "18:00" {
+		t.Fatalf("the next occurrence should follow the move: %+v", next)
+	}
+	now = time.Date(2026, 9, 4, 19, 0, 0, 0, time.Local)
+	c.Tick()
+	if after, _ := c.List("2026-09-05", "2026-09-06", ""); len(after) != 1 || after[0].Day != "2026-09-05" {
+		t.Fatalf("the chain should go on once, the day after: %+v", after)
+	}
+}
+
 // A one-digit hour is stored zero-padded, on add and on edit, so the string
 // comparisons against HH:MM (overdue, ordering) read it as the time it is.
 func TestOneDigitHourIsStoredPadded(t *testing.T) {

@@ -123,6 +123,11 @@ CREATE INDEX IF NOT EXISTS item_step_plans_item ON item_step_plans(item_id, day)
 	day_from TEXT NOT NULL, day_until TEXT NOT NULL, source TEXT NOT NULL DEFAULT '',
 	state TEXT NOT NULL DEFAULT 'on', note TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS away_days ON away(state, day_until);`,
+	// chain_dom: the day of the month a monthly or yearly row's chain belongs
+	// on, stamped by spawnNext (0 = unknown, chainDay walks). Walking prev_id
+	// alone read a row moved for one occurrence as the anchor, so a chain on
+	// the 31st drifted to the 28th (#78).
+	`ALTER TABLE items ADD COLUMN chain_dom INTEGER NOT NULL DEFAULT 0`,
 }
 
 // setItem is the ONE writer of an item's state: query is the row's own write
@@ -1312,13 +1317,30 @@ func (c *Calendar) Update(id string, in map[string]string) (Item, error) {
 			// fork the chain.
 			c.spawnNext(it)
 			set, args = append(set, "repeat=?"), append(args, "")
-		} else if hasAt {
+		} else if hasAt || (hasDay && dayAfter != it.Day) {
 			// "future": fire() spawns the next occurrence at fire time, so a
 			// fired item's chain already carries the OLD time — the new one
 			// has to reach the scheduled child too, or "every future one"
 			// would move exactly one.
-			c.db.Exec(`UPDATE items SET at=?, updated_at=? WHERE src='cal' AND prev_id=? AND state='scheduled'`,
-				strings.TrimSpace(in["at"]), ts(now), it.ID)
+			if hasAt {
+				c.db.Exec(`UPDATE items SET at=?, updated_at=? WHERE src='cal' AND prev_id=? AND state='scheduled'`,
+					strings.TrimSpace(in["at"]), ts(now), it.ID)
+			}
+			// A new day re-dates the child to the step after it (never today or
+			// before): left on its old day, a child dated before the moved row
+			// fires first and spawnNext then refuses the moved row's next, so
+			// the chain ended (#77).
+			if hasDay && dayAfter != it.Day {
+				if nd := nextDay(dayAfter, it.Repeat, 0); nd != "" {
+					for today := now.Format("2006-01-02"); nd <= today; {
+						nd = nextDay(nd, it.Repeat, 0)
+					}
+					c.db.Exec(`UPDATE items SET day=?, chain_dom=0, updated_at=? WHERE src='cal' AND prev_id=? AND state='scheduled'`,
+						nd, ts(now), it.ID)
+				}
+				// The new day is the chain's anchor from here on (#78).
+				set, args = append(set, "chain_dom=?"), append(args, 0)
+			}
 			var childID string
 			if c.db.QueryRow(`SELECT id FROM items WHERE src='cal' AND prev_id=? AND state='scheduled'`, it.ID).Scan(&childID) == nil {
 				if child, err := c.Get(childID); err == nil && child.Kind == "agent" {
@@ -2058,6 +2080,16 @@ func (c *Calendar) chainDay(it Item) int {
 		return 0
 	}
 	dom, prev := d.Day(), it.PrevID
+	// The stamp spawnNext left wins on a month-end row (a clamped one); on any
+	// other day the row's own day is the anchor (a move to the 15th holds).
+	var stamp int
+	c.db.QueryRow(`SELECT chain_dom FROM items WHERE id=?`, it.ID).Scan(&stamp)
+	if stamp > 0 {
+		if cadence.MonthEnd(d) {
+			return max(dom, stamp)
+		}
+		return dom
+	}
 	for i := 0; i < 24 && dom < 31 && prev != "" && cadence.MonthEnd(d); i++ {
 		var day string
 		if c.db.QueryRow(`SELECT day, COALESCE(prev_id,'') FROM items WHERE id=?`, prev).Scan(&day, &prev) != nil {
@@ -2119,6 +2151,9 @@ func (c *Calendar) spawnNext(it Item) {
 	if nx, err := c.Add(next); err != nil {
 		log.Printf("calendar: next occurrence of %s: %v", it.ID, err)
 	} else {
+		if dom > 0 {
+			c.db.Exec(`UPDATE items SET chain_dom=? WHERE id=?`, dom, nx.ID)
+		}
 		c.carryPlans(it.ID, nx)
 	}
 }

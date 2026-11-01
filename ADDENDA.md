@@ -856,3 +856,18 @@ Entry format:
 - For: everyone with repeating calendar items
 - Offer: A repeating item's `--say` was spoken on the first occurrence only: the next one was made without it and fell back to the generic reminder. Every occurrence now carries it (#74). Thanks [@DlaregY](https://github.com/mattabate/life-distributable/issues/74).
 - How: same merge as add-0008. By hand: `calendar/calendar.go`, `calendar/chore_say_test.go`.
+
+## add-0098 · 2026-11-01 · Moving every future occurrence to a new day keeps the chain going
+- For: everyone with repeating calendar items
+- Offer: Moving a repeating item that had already fired to a new day, for every future occurrence, left its next occurrence on the old day. That one fired first, and the moved row's next was then refused as a duplicate, so the chain ended. The next occurrence now moves with it, to the step after the new day (#77). Thanks [@atharvb7](https://github.com/mattabate/life-distributable/issues/77).
+- How: same merge as add-0008. By hand: `calendar/calendar.go`, `calendar/calendar_test.go`.
+
+## add-0099 · 2026-11-01 · A monthly item on the 31st stays on the 31st after a one-off move
+- For: everyone with monthly or yearly items late in the month
+- Offer: Moving one occurrence of a monthly item on the 31st sent every month after February to the 28th: the chain's day was read back off the moved row. Each next occurrence now carries its chain's day of the month (`items.chain_dom`, a new column added on start), and a move of every future occurrence resets it to the new day (#78). Thanks [@atharvb7](https://github.com/mattabate/life-distributable/issues/78).
+- How: same merge as add-0008. By hand: `calendar/calendar.go`, `calendar/calendar_test.go`.
+
+## add-0100 · 2026-11-01 · The pre-upgrade snapshot is the database before the upgrade
+- For: everyone
+- Offer: The copy taken before new schema statements run was retaken by every package, so it already held the first packages' changes, and a hub restarting in a crash loop overwrote the good copy with a half-migrated one. It is now taken once per start, kept if it is under 15 minutes old, and written under a temporary name then renamed, so a failed copy never removes the last one (#79). Thanks [@atharvb7](https://github.com/mattabate/life-distributable/issues/79).
+- How: same merge as add-0008. By hand: `store/migrate.go`, `store/migrate_test.go`.

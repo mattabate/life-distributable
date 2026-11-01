@@ -65,6 +65,64 @@ func TestMigrateRecordsAndTolerates(t *testing.T) {
 	}
 }
 
+// One snapshot per upgrade (#79): the second package's new statements do not
+// retake it with the first's applied, and a restart minutes later (a crash
+// loop) keeps it rather than copying a half-migrated database.
+func TestPreMigrateSnapshotIsTheUpgradesFirst(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := []string{`CREATE TABLE IF NOT EXISTS apples (id TEXT PRIMARY KEY)`}
+	b := []string{`CREATE TABLE IF NOT EXISTS pears (id TEXT PRIMARY KEY)`}
+	for pkg, s := range map[string][]string{"a": a, "b": b} {
+		if _, err := db.Migrate(pkg, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	// The upgrade: a new process, both packages with a new column.
+	if db, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Migrate("a", append(a, `ALTER TABLE apples ADD COLUMN x TEXT NOT NULL DEFAULT ''`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Migrate("b", append(b, `ALTER TABLE pears ADD COLUMN y TEXT NOT NULL DEFAULT ''`)); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	snap := filepath.Join(filepath.Dir(path), "snapshots", preMigrateFile)
+	pre := func(when string) {
+		t.Helper()
+		old, err := Open(snap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer old.Close()
+		if _, err := old.Exec(`SELECT x FROM apples`); err == nil {
+			t.Fatalf("%s: the snapshot carries a's new column", when)
+		}
+		if _, err := old.Exec(`SELECT y FROM pears`); err == nil {
+			t.Fatalf("%s: the snapshot carries b's new column", when)
+		}
+	}
+	pre("after the upgrade")
+	// A restart straight after, with another new statement, keeps it.
+	if db, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Migrate("a", append(a, `ALTER TABLE apples ADD COLUMN x TEXT NOT NULL DEFAULT ''`, `ALTER TABLE apples ADD COLUMN z TEXT NOT NULL DEFAULT ''`)); err != nil {
+		t.Fatal(err)
+	}
+	pre("after a restart")
+	if _, err := os.Stat(snap + ".tmp"); err == nil {
+		t.Fatal("a temporary copy was left behind")
+	}
+}
+
 func dbPath(t *testing.T, db *DB) string {
 	var seq int
 	var name, path string
