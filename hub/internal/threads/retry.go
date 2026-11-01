@@ -78,11 +78,13 @@ func (m *Manager) lastTurnID(runID string) string {
 }
 
 // requeueTurn hands a turn's input back to the queue so the next launch
-// replays it: the owner's messages and scheduled check-ins (a `system` note the
-// hub wrote about the failure itself is not input and stays put). Returns how
-// many messages went back. Caller holds m.mu.
+// replays it: the owner's messages, scheduled check-ins and another session's
+// relay (a `system` note the hub wrote about the failure itself is not input
+// and stays put). A relay left out was lost: nothing went back, the relaunch
+// found an empty queue and the session read "running" with no process.
+// Returns how many messages went back. Caller holds m.mu.
 func (m *Manager) requeueTurn(turnID string) int {
-	res, err := m.db.Exec(`UPDATE thread_messages SET queued=1, run_id='', delivered_at='', steered=0 WHERE run_id=? AND (role='owner' OR kind='checkin')`, turnID)
+	res, err := m.db.Exec(`UPDATE thread_messages SET queued=1, run_id='', delivered_at='', steered=0 WHERE run_id=? AND (role='owner' OR kind IN ('checkin','relay'))`, turnID)
 	if err != nil || res == nil {
 		return 0
 	}
@@ -126,10 +128,7 @@ func (m *Manager) retryTransient(r run, text string) bool {
 	if err != nil {
 		return false
 	}
-	if err := m.launch(t); err != nil {
-		log.Printf("thread %s: retry launch: %v", r.thread, err)
-		m.db.Exec(`UPDATE threads SET status='idle', updated_at=? WHERE id=?`, ts(now), r.thread)
-	}
+	m.relaunch(t, "retry launch")
 	return true
 }
 

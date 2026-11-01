@@ -910,3 +910,8 @@ Entry format:
 - For: everyone
 - Offer: An inline chart or figure with no background of its own took the card's tint, so a chart on a red card was drawn on red; on the web console and the phone it now sits on white. On the phone, an approval or install card on a calendar item's page is the whole cell, with no white row and padding around it.
 - How: same merge as add-0008. By hand: `web/app.css` (`.att img`), the app's `Attachments.swift` (`BlobImage`), `Card.swift` (`cardRow`), `CalendarView.swift`.
+
+## add-0108 · 2026-11-01 · A check-in or relay that hits a plan limit is re-run, not dropped
+- For: everyone with scheduled sessions or team mode
+- Offer: When a turn hit a plan limit (or a model the CLI does not know), the relaunch put back only the owner's messages. A scheduled check-in or another session's relay was left off the queue, so the new launch started nothing, the session showed "running" with no process, and every later check-in was held behind it with no card. Now the turn's check-in or relay goes back on the queue and is re-run on the next model, a resume note covers a turn with nothing to replay, and a relaunch that starts nothing settles the session's status (#85). Thanks [@eduelias](https://github.com/mattabate/life-distributable/issues/85).
+- How: same merge as add-0008. By hand: `threads/retry.go` (`requeueTurn`), `threads/runner.go` (`relaunchBelow`, new `relaunch`), `threads/ladder_test.go`.

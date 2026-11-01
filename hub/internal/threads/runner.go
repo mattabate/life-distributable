@@ -2231,9 +2231,11 @@ func (m *Manager) relaunchBelow(r run, text string) bool {
 	now := time.Now()
 	m.Run("tmux", "kill-session", "-t", m.tmuxSession(r.thread, r.id))
 	m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0, cost_seen=? WHERE id=?`, ts(now), r.costSeen, r.id)
-	// Every message this process has seen since its last settled turn goes
-	// back on the queue (turn ids are <run>, <run>-t2, …).
-	m.db.Exec(`UPDATE thread_messages SET queued=1, run_id='', delivered_at='', steered=0 WHERE run_id=? AND role != 'claude' AND role != 'system'`, r.turnID())
+	// The turn's input goes back on the queue (turn ids are <run>, <run>-t2,
+	// …); with none, a resume note, or launch finds nothing and starts nothing.
+	if m.requeueTurn(r.turnID()) == 0 {
+		m.resumeNote(r.thread, text)
+	}
 	why := "plan limit on " + orDefault(r.model)
 	if spend.IsUnsupportedModelError(text) && !spend.IsLimitError(text) {
 		why = "the CLI does not support " + orDefault(r.model)
@@ -2241,11 +2243,26 @@ func (m *Manager) relaunchBelow(r run, text string) bool {
 	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, run_id) VALUES (?,?,?,?,?,?)`, r.thread, ts(now), "system", "message",
 		fmt.Sprintf("%s (%s); restarting on %s", why, firstLine(text, 120), orDefault(next)), r.turnID())
 	log.Printf("thread %s: %s, relaunching on %q", r.thread, why, next)
-	if err := m.launch(t); err != nil {
-		log.Printf("thread %s: relaunch: %v", r.thread, err)
-		m.db.Exec(`UPDATE threads SET status='idle', updated_at=? WHERE id=?`, ts(now), r.thread)
-	}
+	m.relaunch(t, "relaunch")
 	return true
+}
+
+// relaunch starts the next process after a turn was killed for a restart. A
+// launch that started nothing (an empty queue) must not leave the thread
+// 'running': the caller returns true, so finishTurn/finishProcess skip
+// settleStatus, and fireStanding holds every later check-in while the status
+// is running, so the schedule is wedged with no card (#85). Caller holds m.mu.
+func (m *Manager) relaunch(t Thread, what string) {
+	if err := m.launch(t); err != nil {
+		log.Printf("thread %s: %s: %v", t.ID, what, err)
+		m.db.Exec(`UPDATE threads SET status='idle', updated_at=? WHERE id=?`, ts(time.Now()), t.ID)
+		return
+	}
+	var open int
+	if m.db.QueryRow(`SELECT COUNT(*) FROM thread_runs WHERE thread_id=? AND finished_at IS NULL`, t.ID).Scan(&open); open == 0 {
+		log.Printf("thread %s: %s started nothing; settling status", t.ID, what)
+		m.settleStatus(t.ID)
+	}
 }
 
 // failureTitle: what the owner reads on the board when a session stops badly.

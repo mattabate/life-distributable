@@ -66,6 +66,112 @@ func TestLimitFallsDownLadder(t *testing.T) {
 	}
 }
 
+// A turn another session's relay opened falls down the ladder with that relay:
+// left off the queue, the relaunch started nothing and the session read
+// "running" with no process.
+func TestLimitRelaunchKeepsTheRelay(t *testing.T) {
+	m, _, cmds := setup(t)
+	ladder := []string{"claude-fable-5", "claude-opus-5"}
+	var exhausted []string
+	m.Model = func(string) string { return ladder[len(exhausted)] }
+	m.ModelExhausted = func(model string) { exhausted = append(exhausted, model) }
+	th, _ := m.Create("", "life", "", "Watch the money.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	appendOut(t, out, `{"type":"system","subtype":"init","session_id":"sess-1"}
+{"type":"result","subtype":"success","is_error":false,"result":"On it.","total_cost_usd":0.01,"session_id":"sess-1"}
+`)
+	m.Poll()
+	if err := m.run(th.ID, "system", "relay", "From the assistant: the quarterly review is yours.", nil); err != nil {
+		t.Fatal(err)
+	}
+	appendOut(t, out, `{"type":"result","subtype":"error","is_error":true,"result":"You've reached your Fable limit.","total_cost_usd":0,"session_id":"sess-1"}
+`)
+	m.Poll()
+	if len(*cmds) != 3 || !strings.Contains((*cmds)[2], "'--model' 'claude-opus-5'") {
+		t.Fatalf("not relaunched: %v", *cmds)
+	}
+	if b, _ := os.ReadFile(inFile(t, m, th.ID)); !strings.Contains(string(b), "the quarterly review is yours") {
+		t.Fatalf("relay lost: %s", b)
+	}
+	var live int
+	m.db.QueryRow(`SELECT COUNT(*) FROM thread_runs WHERE thread_id=? AND finished_at IS NULL`, th.ID).Scan(&live)
+	if live != 1 {
+		t.Fatalf("live runs: %d", live)
+	}
+}
+
+// A standing session's check-in (queued as role system, kind checkin) that
+// hits a plan limit is re-run on the next rung with its own words: left off
+// the queue, the relaunch started nothing, the thread sat `running` with no
+// process and fireStanding held every later occurrence (#85). Both exits: a
+// result envelope and a process killed outright.
+func TestLimitRelaunchKeepsTheCheckIn(t *testing.T) {
+	for _, viaStderr := range []bool{false, true} {
+		m, n, cmds := setup(t)
+		ladder := []string{"claude-fable-5", "claude-opus-5"}
+		var exhausted []string
+		m.Model = func(string) string { return ladder[len(exhausted)] }
+		m.ModelExhausted = func(model string) { exhausted = append(exhausted, model) }
+		th, _ := m.Create("", "life", "", "Watch the money.", "", "", nil)
+		complete(t, m, th.ID, "On it.")
+		if err := m.CheckIn(th.ID, "checkin"); err != nil {
+			t.Fatal(err)
+		}
+		before := len(*cmds)
+		out := pendingOut(t, m, th.ID)
+		if viaStderr {
+			os.WriteFile(out+".err", []byte("You've reached your Fable 5 limit. Switch to another model, or manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, to continue."), 0o644)
+			os.WriteFile(out+".done", nil, 0o644)
+		} else {
+			appendOut(t, out, `{"type":"system","subtype":"init","session_id":"sess-1"}
+{"type":"result","subtype":"error","is_error":true,"result":"You've reached your Fable limit.","total_cost_usd":0,"session_id":"sess-1"}
+`)
+		}
+		m.Poll()
+		if len(exhausted) != 1 || len(*cmds) <= before || !strings.Contains((*cmds)[len(*cmds)-1], "'--model' 'claude-opus-5'") {
+			t.Fatalf("stderr=%v not relaunched: exhausted=%v %v", viaStderr, exhausted, *cmds)
+		}
+		if b, _ := os.ReadFile(inFile(t, m, th.ID)); !strings.Contains(string(b), "[scheduled check-in]") || strings.Contains(string(b), "[restart]") {
+			t.Fatalf("stderr=%v check-in lost: %s", viaStderr, b)
+		}
+		var live int
+		m.db.QueryRow(`SELECT COUNT(*) FROM thread_runs WHERE thread_id=? AND finished_at IS NULL`, th.ID).Scan(&live)
+		if th, _ = m.Get(th.ID); th.Status != "running" || live != 1 {
+			t.Fatalf("stderr=%v status=%s live runs=%d", viaStderr, th.Status, live)
+		}
+		asks, _ := m.ListAsks("active", th.ID, 10)
+		for _, a := range asks {
+			if a.Kind == "error" {
+				t.Fatalf("stderr=%v error card: %+v", viaStderr, a)
+			}
+		}
+		if len(n.msgs) != 0 {
+			t.Fatalf("stderr=%v notes=%v", viaStderr, n.msgs)
+		}
+	}
+}
+
+// The safety net under #85: a relaunch whose launch starts nothing (nothing
+// left on the queue) settles the status instead of leaving the thread
+// `running` with no process, which held every later check-in.
+func TestRelaunchThatStartsNothingSettles(t *testing.T) {
+	m, _, cmds := setup(t)
+	th, _ := m.Create("", "life", "", "Watch the money.", "", "", nil)
+	complete(t, m, th.ID, "On it.")
+	m.db.Exec(`UPDATE threads SET status='running' WHERE id=?`, th.ID)
+	before := len(*cmds)
+	th, _ = m.Get(th.ID)
+	m.mu.Lock()
+	m.relaunch(th, "relaunch")
+	m.mu.Unlock()
+	if len(*cmds) != before {
+		t.Fatalf("launched with an empty queue: %v", (*cmds)[before:])
+	}
+	if th, _ = m.Get(th.ID); th.Status == "running" {
+		t.Fatalf("status still running with no process")
+	}
+}
+
 // A plan limit that kills the process outright (the CLI prints it on stderr
 // and exits with no result envelope) must also step down the ladder, not land
 // on the owner's board as a raw "Session failed" card.
