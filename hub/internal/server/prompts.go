@@ -3,6 +3,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -94,6 +95,10 @@ func (s *Server) addPrompt(w http.ResponseWriter, r *http.Request) {
 	p, err := s.thr.Queue(threads.Prompt{Author: in.Author, Target: in.Target, Text: in.Text,
 		InReplyTo: in.InReplyTo, Outcome: in.Outcome, Replies: in.Replies, NotBefore: when,
 		Title: in.Title, GoalID: in.GoalID, Attachments: in.Attachments, Via: via})
+	if errors.Is(err, threads.ErrActionDecided) {
+		jsonErr(w, 409, err.Error())
+		return
+	}
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return

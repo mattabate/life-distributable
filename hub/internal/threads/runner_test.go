@@ -129,6 +129,73 @@ func TestGoneIdleProcessCloses(t *testing.T) {
 	}
 }
 
+// Another session's relay (or a fired step, a check-in) never steers a turn
+// in flight: it waits on the queue and opens the next turn on the live
+// process when this one ends, rather than sitting until the process is
+// closed for idleness (life-distributable#56).
+func TestRelayWaitsForTheTurnToEnd(t *testing.T) {
+	m, _, cmds := setup(t)
+	th, _ := m.Create("", "life", "", "Plan the trip.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	in := inFile(t, m, th.ID)
+	appendOut(t, out, `{"type":"system","subtype":"init","session_id":"sess-1"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"WebFetch","input":{"url":"https://example.com"}}]}}
+`)
+	m.Poll()
+	if err := m.run(th.ID, "system", "relay", "The booking step is yours now.", nil); err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ := m.Messages(th.ID, 50)
+	if b, _ := os.ReadFile(in); strings.Count(string(b), "\n") != 1 || len(msgs) != 2 || !msgs[1].Queued {
+		t.Fatalf("relay steered into the running turn: %s %+v", b, msgs)
+	}
+	appendOut(t, out, `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"..."}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"Two hotels fit.","total_cost_usd":0.05,"session_id":"sess-1"}
+`)
+	m.Poll()
+	msgs, _ = m.Messages(th.ID, 50)
+	b, _ := os.ReadFile(in)
+	if strings.Count(string(b), "\n") != 2 || !strings.Contains(string(b), "The booking step is yours now") || len(*cmds) != 1 {
+		t.Fatalf("held relay not delivered as the next turn: %s %v", b, *cmds)
+	}
+	for _, x := range msgs {
+		if x.Kind == "relay" && (x.Queued || x.Steered || x.RunID != msgs[0].RunID+"-t2") {
+			t.Fatalf("%+v", x)
+		}
+	}
+	if th, _ = m.Get(th.ID); th.Status != "running" {
+		t.Fatalf("%+v", th)
+	}
+}
+
+// A failed save of the batch's offset (or a crash before it) made the next
+// Poll re-read lines whose effects had landed: the reply row, the read card,
+// its tool events and the thread's tokens twice (life-distributable#62). The
+// offset is saved with each settled turn, so a re-read starts past it.
+func TestFailedOffsetSaveReplaysNoTurn(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Look it up.", "", "", nil)
+	appendOut(t, pendingOut(t, m, th.ID), `{"type":"system","subtype":"init","session_id":"sess-1"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"ls","description":"List files"}}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"Found it.","total_cost_usd":0.02,"session_id":"sess-1","usage":{"output_tokens":50}}
+`)
+	// Only the batch's closing save writes bg_tasks: make it fail, once.
+	if _, err := m.db.Exec(`CREATE TRIGGER fail_save BEFORE UPDATE OF bg_tasks ON thread_runs BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END`); err != nil {
+		t.Fatal(err)
+	}
+	m.Poll()
+	m.db.Exec(`DROP TRIGGER fail_save`)
+	m.Poll()
+	var replies, reads, uses, tokOut int
+	m.db.QueryRow(`SELECT COUNT(*) FROM thread_messages WHERE thread_id=? AND role='claude'`, th.ID).Scan(&replies)
+	m.db.QueryRow(`SELECT COUNT(*) FROM items WHERE src='ask' AND thread_id=? AND kind='read'`, th.ID).Scan(&reads)
+	m.db.QueryRow(`SELECT COUNT(*) FROM thread_events WHERE thread_id=? AND kind='tool_use'`, th.ID).Scan(&uses)
+	m.db.QueryRow(`SELECT tok_out FROM threads WHERE id=?`, th.ID).Scan(&tokOut)
+	if replies != 1 || reads != 1 || uses != 1 || tokOut != 50 {
+		t.Fatalf("replayed: replies=%d read cards=%d tool_use events=%d tok_out=%d", replies, reads, uses, tokOut)
+	}
+}
+
 // The owner can message a working session: the message is written to claude's
 // stdin at once (steered into the running turn); between turns the same
 // process serves the next turn; tool calls streamed by claude land in events

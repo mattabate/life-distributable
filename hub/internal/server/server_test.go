@@ -891,6 +891,10 @@ func TestPromptDecidesAction(t *testing.T) {
 	s.thr.DecideAction = func(id, outcome, note, via string) error {
 		return s.acts.DecideQuiet(id, outcome == "approved", via, note)
 	}
+	s.thr.CheckAction = func(id, outcome string) error {
+		_, err := s.acts.CanDecide(id, outcome == "approved")
+		return err
+	}
 	s.acts.OnDecided = func(a actions.Action, approved bool, note string) {
 		t.Errorf("a decision on a prompt must not relay a second prompt (%s)", a.ID)
 	}
@@ -940,6 +944,42 @@ func TestPromptDecidesAction(t *testing.T) {
 	}
 	if got, _ := s.acts.Get(o); got.State != "proposed" {
 		t.Fatalf("a reply without a pick must not decide: %+v", got)
+	}
+	// A pick against a row already decided the other way, or dismissed, is
+	// refused with 409 and nothing is queued: the session would be told to act
+	// on a proposal the record says no to, or told no after it ran
+	// (life-distributable#60). The same pick again stays fine.
+	if w := do("POST", "/api/v1/actions/"+o+"/dismiss", ``, ""); w.Code != 200 {
+		t.Fatalf("dismiss: %d %s", w.Code, w.Body)
+	}
+	for _, c := range []struct{ id, outcome, text string }{
+		{d, "approved", "stale yes on a denied row"},
+		{o, "approved", "stale yes on a dismissed row"},
+		{a, "denied", "stale no on an approved row"},
+	} {
+		body := `{"target":"` + th.ID + `","text":"` + c.text + `","in_reply_to":"action:` + c.id + `","outcome":"` + c.outcome + `"}`
+		if w := do("POST", "/api/v1/prompts", body, ""); w.Code != 409 {
+			t.Fatalf("%s: want 409, got %d %s", c.text, w.Code, w.Body)
+		}
+		if w := do("GET", "/api/v1/prompts?thread="+th.ID, "", ""); strings.Contains(w.Body.String(), c.text) {
+			t.Fatalf("%s: a refused pick must not be queued: %s", c.text, w.Body)
+		}
+	}
+	if got, _ := s.acts.Get(d); got.State != "denied" {
+		t.Fatalf("a refused pick must leave the row: %+v", got)
+	}
+	if w := do("POST", "/api/v1/prompts", `{"target":"`+th.ID+`","text":"still no","in_reply_to":"action:`+d+`","outcome":"denied"}`, ""); w.Code != 201 {
+		t.Fatalf("the same pick again must still queue: %d %s", w.Code, w.Body)
+	}
+	// Two picks on one message, the second refused: neither is decided, so no
+	// approved row is left without the prompt that tells its session.
+	n := propose()
+	two := `{"target":"` + th.ID + `","text":"both","replies":[{"ref":"action:` + n + `","outcome":"approved"},{"ref":"action:` + d + `","outcome":"approved"}]}`
+	if w := do("POST", "/api/v1/prompts", two, ""); w.Code != 409 {
+		t.Fatalf("two picks, one on a denied row: want 409, got %d %s", w.Code, w.Body)
+	}
+	if got, _ := s.acts.Get(n); got.State != "proposed" {
+		t.Fatalf("a refused second pick must leave the first undecided: %+v", got)
 	}
 
 	// Armed hub: the prompt needs the code like /approve does; a refusal is

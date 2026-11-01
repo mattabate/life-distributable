@@ -480,7 +480,7 @@ func TestRunGroupDoesNotWaitOnAnOrphanedPipe(t *testing.T) {
 	bin := filepath.Join(dir, "claude")
 	os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30 &\necho $! > "+pidf+"\necho '{\"result\":\"done\"}'\n"), 0o755)
 	start := time.Now()
-	out, err := runGroup(exec.CommandContext(context.Background(), bin), 200*time.Millisecond)
+	out, err := runGroup(exec.CommandContext(context.Background(), bin), 200*time.Millisecond, nil)
 	if err != nil || !strings.Contains(string(out), `"result":"done"`) {
 		t.Fatalf("err=%v out=%q", err, out)
 	}
@@ -499,10 +499,66 @@ func TestRunGroupDoesNotWaitOnAnOrphanedPipe(t *testing.T) {
 	defer cancel()
 	os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30\n"), 0o755)
 	start = time.Now()
-	if _, err := runGroup(exec.CommandContext(ctx, bin), 200*time.Millisecond); err == nil {
+	if _, err := runGroup(exec.CommandContext(ctx, bin), 200*time.Millisecond, nil); err == nil {
 		t.Fatal("a timed-out run reported no error")
 	}
 	if d := time.Since(start); d > 5*time.Second {
 		t.Fatalf("timeout took %v", d)
+	}
+}
+
+// A job's claude runs in its own process group, so a hub restart (launchd
+// kills the hub, SIGTERM or SIGKILL) leaves it running with its tool grant
+// and no timeout: the 20-minute bound lived in the dead hub. The next hub
+// kills the group of a run it finds open (life-distributable#61).
+func TestRestartKillsTheOrphanedRun(t *testing.T) {
+	s, _, _ := setup(t, `{"jobs":[{"name":"j","project":"life","when":"every@1h","prompt":"p"}]}`)
+	dir := t.TempDir()
+	pidf := filepath.Join(dir, "pid")
+	s.claudeBin = filepath.Join(dir, "claude")
+	os.WriteFile(s.claudeBin, []byte("#!/bin/sh\nsleep 30 &\necho $! > "+pidf+"\nwait\n"), 0o755)
+	if st, why := s.Fire("j", "p-1"); st != "started" {
+		t.Fatal(st, why)
+	}
+	var pid int
+	for deadline := time.Now().Add(5 * time.Second); pid == 0; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the job never started")
+		}
+		b, _ := os.ReadFile(pidf)
+		fmt.Sscan(string(b), &pid)
+	}
+	defer syscall.Kill(pid, syscall.SIGKILL)
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		var pg int
+		if s.db.QueryRow(`SELECT COALESCE(pgid,0) FROM runs WHERE job='j'`).Scan(&pg) == nil && pg > 0 {
+			break
+		}
+	}
+	// The old hub is gone (its goroutine is abandoned here); a new one starts.
+	if _, err := New(s.db, s.tablePath, nil, s.claudeBin, s.projDir); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(2 * time.Second); syscall.Kill(pid, 0) == nil; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the restarted hub left job process %d running", pid)
+		}
+	}
+
+	// A row older than its job's timeout names a group from a hub long gone
+	// (a reboot): its number may be anyone's now, so it is left alone.
+	other := exec.Command("sleep", "30")
+	other.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer other.Process.Kill()
+	s.db.Exec(`INSERT INTO runs (job, started_at, pgid) VALUES ('j',?,?)`, store.TS(time.Now().Add(-2*time.Hour)), other.Process.Pid)
+	if _, err := New(s.db, s.tablePath, nil, s.claudeBin, s.projDir); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if syscall.Kill(other.Process.Pid, 0) != nil {
+		t.Fatal("killed the group of a run older than its timeout")
 	}
 }

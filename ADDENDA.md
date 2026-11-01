@@ -781,3 +781,43 @@ Entry format:
 - For: everyone outside New York
 - Offer: `time_zone` in `ops/hub.json` (an IANA name such as `America/Los_Angeles`) sets the hub's wall clock: the day boundary, the budget guard and spend reset times, prompt times, the nightly backup hour, `lifectl` and the ops scripts. Empty means this Mac's own zone, so a hub outside New York now counts its own day; set `"time_zone": "America/New_York"` to keep the old behaviour. A name Go cannot load is refused at start-up. The console and phone still format times in New York for now (#55).
 - How: same merge as add-0008. By hand: `config/config.go`, `store/ids.go`, `cmd/hub/main.go`, `cmd/lifectl/main.go`, `server/prompts.go`, `budget/budget.go`, `spend/quota.go`, `ops/hublib.py`, `ops/hub.json.example`, their tests.
+
+## add-0083 · 2026-10-31 · A held relay opens the next turn
+- For: everyone
+- Offer: A relay, a fired calendar step or a check-in that arrives while a turn is running waits for that turn, as before, but now opens the next turn on the same process the moment the turn ends, instead of sitting queued until the idle process closes 15 minutes later (#56). Thanks [@milad-ahmd](https://github.com/mattabate/life-distributable/issues/56).
+- How: same merge as add-0008. By hand: `threads/runner.go`, `threads/runner_test.go`.
+
+## add-0084 · 2026-10-31 · Restart never runs two processes on one session
+- For: everyone
+- Offer: Restart on an error card (an API 400, a plan limit, a dead login) used to start a second claude process beside the idle failed one, both resuming the same conversation, and an old process exiting under a busy new one could start a third. Now Restart closes the idle process and replays the turn on one fresh process once it exits, and no process starts while another has a turn in flight (#57). Thanks [@milad-ahmd](https://github.com/mattabate/life-distributable/issues/57).
+- How: same merge as add-0008. By hand: `threads/retry.go`, `threads/runner.go`, `threads/retry_test.go`.
+
+## add-0085 · 2026-10-31 · An approved claude action ends when claude does
+- For: everyone who approves `claude` actions
+- Offer: An approved `claude` action now runs in its own process group like a `shell` one: a background child of one of its tools no longer keeps the action running after claude has answered, and the timeout kills the children too, so the action ends cut off instead of hanging (#58). Thanks [@milad-ahmd](https://github.com/mattabate/life-distributable/issues/58).
+- How: same merge as add-0008. By hand: `actions/actions.go`, `actions/actions_test.go`.
+
+## add-0086 · 2026-10-31 · An approval the hub never started runs after a restart
+- For: everyone
+- Offer: A proposal you approved just as the hub restarted could stay "approved" forever with nothing to run it. On start the hub now runs every approved action that never started, once (#59). Thanks [@milad-ahmd](https://github.com/mattabate/life-distributable/issues/59).
+- How: same merge as add-0008. By hand: `actions/actions.go`, `cmd/hub/main.go`, `actions/actions_test.go`.
+
+## add-0087 · 2026-10-31 · A stale Approve or Deny is refused
+- For: everyone
+- Offer: An Approve or Deny sent from the chat bar is now decided on the proposal before the message is queued. If the proposal was already decided the other way, or dismissed, the send is refused (409) and nothing reaches the session, so a session is never told to carry out a denied proposal, or told no after one ran (#60). Every pick on a message is checked before any is decided, so a refused second pick never leaves the first approved with no message to its session. Thanks [@milad-ahmd](https://github.com/mattabate/life-distributable/issues/60).
+- How: same merge as add-0008. By hand: `threads/prompts.go`, `threads/threads.go`, `actions/actions.go`, `cmd/hub/main.go`, `server/prompts.go`, `server/server_test.go`, `shared/api.md`.
+
+## add-0088 · 2026-10-31 · A hub restart stops its scheduled job
+- For: everyone with scheduled jobs
+- Offer: A scheduled job's claude runs in its own process group, so a hub restart left it running with its tools and no timeout, and the next run could start beside it. Each run now records its process group (`runs.pgid`), and the next hub kills a still-running job left by the last one; a row older than its job's timeout is left alone, since its group number may be reused (#61). Thanks [@milad-ahmd](https://github.com/mattabate/life-distributable/issues/61).
+- How: same merge as add-0008. By hand: `sched/sched.go`, `sched/sched_test.go`.
+
+## add-0089 · 2026-10-31 · A failed offset save replays no turn
+- For: everyone
+- Offer: If saving a run's read position failed (or the hub stopped before it), the next read replayed the batch and landed the reply, the read card, the tool events and the tokens twice. The position is now saved the moment each turn settles, and a failed save is logged (#62). Thanks [@milad-ahmd](https://github.com/mattabate/life-distributable/issues/62).
+- How: same merge as add-0008. By hand: `threads/runner.go`, `threads/runner_test.go`.
+
+## add-0090 · 2026-10-31 · A failing TLS renewal becomes a card
+- For: everyone
+- Offer: A failed `ops/renew-cert.sh` used to leave one log line until TLS broke and the phone lost the hub. It now raises a card on the Hub thread, the way a failed backup does, and the hub reads its own cert daily and raises one card when it is 21 days from expiry (#64). Thanks [@omertahaoztop](https://github.com/mattabate/life-distributable/issues/64).
+- How: same merge as add-0008. By hand: `ops/renew-cert.sh`, new `cmd/hub/cert.go` and `cmd/hub/cert_test.go`, `cmd/hub/main.go`.

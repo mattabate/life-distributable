@@ -327,6 +327,9 @@ func main() {
 	// One session hands another a task only on a card the owner approved (relay.go).
 	acts.RelayTarget = thr.RelayTarget
 	acts.Relay = thr.Relay
+	// An approval the last hub committed but never started runs now, with
+	// every hook above in place (actions.ResumeApproved, life-distributable#59).
+	acts.ResumeApproved()
 	// A decision that arrives ON a prompt (the card arms the composer)
 	// is recorded on the row without the relay above — that prompt is it.
 	thr.DecideAction = func(id, outcome, note, via string) error {
@@ -334,6 +337,10 @@ func main() {
 			via = "app"
 		}
 		return acts.DecideQuiet(id, outcome == "approved", via, note)
+	}
+	thr.CheckAction = func(id, outcome string) error {
+		_, err := acts.CanDecide(id, outcome == "approved")
+		return err
 	}
 	// Every second, not three: a session's first step sat in its .out file
 	// for up to 3 s before anything drew it. Poll reads one indexed query
@@ -450,6 +457,20 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		_, err := h.Usage.Send(ctx)
+		return err
+	})
+	// The hub's own TLS cert, read daily: inside 21 days of its NotAfter one
+	// ask (per cert, by its dated title) on the idle "hub" thread, where the
+	// hub's own asks go (cert.go, life-distributable#64).
+	ck.Every("cert", 24*time.Hour, true, func() error {
+		title, detail, due, err := certAsk(cfg.CertFile, time.Now())
+		if err != nil || !due {
+			return err
+		}
+		if thr.AskSeen("hub", title) {
+			return nil
+		}
+		_, err = thr.AddAskOn("hub", "", title, detail, "other", "", "any")
 		return err
 	})
 	h.StatusExtra = func() map[string]any {

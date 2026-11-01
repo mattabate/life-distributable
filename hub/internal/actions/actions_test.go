@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -146,6 +148,48 @@ func TestShellDoesNotWaitOnItsChildren(t *testing.T) {
 	}
 }
 
+// The claude exec type had the same hang: a tool's backgrounded child held
+// the output pipe after the CLI printed its result, so the action ran as
+// long as the child; and a timeout killed only the CLI, not its children
+// (life-distributable#58).
+func TestClaudeExecDoesNotWaitOnItsChildren(t *testing.T) {
+	old := shellGrace
+	shellGrace = 200 * time.Millisecond
+	defer func() { shellGrace = old }()
+	dir := t.TempDir()
+	fake := func(body string) string {
+		p := filepath.Join(dir, fmt.Sprintf("claude%d", time.Now().UnixNano()))
+		if err := os.WriteFile(p, []byte("#!/bin/bash\n"+body+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	proj := func(string) (string, bool) { return dir, true }
+	p := json.RawMessage(`{"project":"x","prompt":"hi"}`)
+
+	e := DefaultExecutor{ClaudeBin: fake(`(sleep 20) & printf '{"result":"done","is_error":false}'`), ProjectDir: proj}
+	start := time.Now()
+	out, err := e.Exec(context.Background(), "claude", p)
+	if err != nil || out != "done" {
+		t.Fatalf("got %q %v", out, err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("waited %s on a background child", took)
+	}
+
+	e.ClaudeBin = fake(`sleep 20; echo never`)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start = time.Now()
+	_, err = e.Exec(ctx, "claude", p)
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("a timed-out run took %s", took)
+	}
+	if !cutOff(ctx, err) {
+		t.Fatalf("want a cut-off run, got %v", err)
+	}
+}
+
 func TestUngatedRunsImmediately(t *testing.T) {
 	q, ex, nf := setup(t)
 	a, err := q.Propose(Proposal{Kind: "other", Title: "tidy", ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"true"}`)})
@@ -244,6 +288,32 @@ func TestRestartMakesOrphanedRunsUncertain(t *testing.T) {
 
 // blockExec runs until its context is cut off, or fails on its own.
 type blockExec struct{ fail bool }
+
+// An approval committed by a hub that stopped before run claimed it is left
+// 'approved' with nothing to start it; the next hub runs it, once
+// (life-distributable#59).
+func TestRestartRunsAnApprovalThatNeverStarted(t *testing.T) {
+	q, ex, nf := setup(t)
+	a, err := q.Propose(Proposal{Kind: "delete", Title: "tidy", ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"rm x"}`)})
+	if err != nil || a.State != "proposed" {
+		t.Fatal(a, err)
+	}
+	// The hub died between Decide's commit and run's claim.
+	if _, err := q.db.Exec(`UPDATE items SET state='approved' WHERE id=?`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	q = New(q.db, ex, nf)
+	if n := q.ResumeApproved(); n != 1 {
+		t.Fatalf("resumed %d", n)
+	}
+	waitState(t, q, a.ID, "done")
+	q.ResumeApproved()
+	q.run(a.ID)
+	time.Sleep(30 * time.Millisecond)
+	if len(ex.calls) != 1 {
+		t.Fatalf("ran %d times", len(ex.calls))
+	}
+}
 
 func (b blockExec) Exec(ctx context.Context, _ string, _ json.RawMessage) (string, error) {
 	if b.fail {

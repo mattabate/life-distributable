@@ -410,6 +410,36 @@ func (q *Queue) closeOrphans() {
 	}
 }
 
+// ResumeApproved starts every action left 'approved' at startup. Decide
+// commits the approval and only then does run claim it (approved → running),
+// so a hub that stopped between the two (a restart right after the owner's
+// tap, or a failed read in run) left a row the owner said yes to that
+// nothing would ever run, shown open on the board as approved, and
+// closeOrphans looks only at 'running'. Nothing of it ran, so this is not
+// uncertain: it runs now, and run's claim keeps a second start from running
+// it twice. main calls it once the relay hooks are set, since a relay needs
+// them (life-distributable#59).
+func (q *Queue) ResumeApproved() int {
+	rows, err := q.db.Query(`SELECT id FROM items WHERE src='action' AND state='approved'`)
+	if err != nil {
+		log.Printf("actions: resume approved: %v", err)
+		return 0
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		log.Printf("actions: %s was approved but never started; running it now", id)
+		go q.run(id)
+	}
+	return len(ids)
+}
+
 // cutOff: the run was stopped from outside (its context ran out, the
 // 30-minute timeout, or a signal ended it: "signal: killed", "signal:
 // terminated") rather than exiting on its own.
@@ -612,19 +642,36 @@ func (q *Queue) Decide(id string, approve bool, via, note string) (Action, error
 // is left alone (nil error) — /actions/{id}/approve records first and then
 // relays through the same prompt, so the second arrival must not be a fault.
 func (q *Queue) DecideQuiet(id string, approve bool, via, note string) error {
-	if a, err := q.Get(id); err == nil && a.State != "proposed" {
-		// An approved row moves on to running/done/failed on its own.
-		same := a.State == "denied"
-		if approve {
-			same = a.State == "approved" || a.State == "running" || a.State == "done" || a.State == "failed" || a.State == Uncertain
-		}
-		if same {
-			return nil
-		}
-		return fmt.Errorf("action is %s, not proposed", a.State)
+	open, err := q.CanDecide(id, approve)
+	if err != nil || !open {
+		return err
 	}
-	_, err := q.decide(id, approve, via, note, false)
+	_, err = q.decide(id, approve, via, note, false)
 	return err
+}
+
+// CanDecide reads, and changes nothing: open = the row is proposed (a decide
+// would record it); nil error with !open = already in the asked-for state; an
+// error = the row refuses this answer. A prompt with several picks checks them
+// all before deciding any, so a refused second pick never leaves the first
+// decided with no message to its session.
+func (q *Queue) CanDecide(id string, approve bool) (open bool, err error) {
+	a, err := q.Get(id)
+	if err != nil {
+		return false, err
+	}
+	if a.State == "proposed" {
+		return true, nil
+	}
+	// An approved row moves on to running/done/failed on its own.
+	same := a.State == "denied"
+	if approve {
+		same = a.State == "approved" || a.State == "running" || a.State == "done" || a.State == "failed" || a.State == Uncertain
+	}
+	if same {
+		return false, nil
+	}
+	return false, fmt.Errorf("action is %s, not proposed", a.State)
 }
 
 func (q *Queue) decide(id string, approve bool, via, note string, relay bool) (Action, error) {
@@ -1063,9 +1110,15 @@ func (e DefaultExecutor) Exec(ctx context.Context, typ string, payload json.RawM
 		c := exec.CommandContext(ctx, e.ClaudeBin, ClaudeExecArgs(extra)...)
 		c.Dir = dir
 		c.Stdin = strings.NewReader(p.Prompt)
-		out, err := c.CombinedOutput()
+		// runShell, not CombinedOutput: a Bash tool's backgrounded child
+		// holds the pipe after claude prints its result and exits, and the
+		// timeout killed only claude, so an approved claude action stayed
+		// running as long as that child lived (the same hang sched.runGroup
+		// fixed for jobs; life-distributable#58).
+		s, err := runShell(c)
+		out := []byte(s)
 		if err != nil {
-			return string(out), err
+			return s, err
 		}
 		var r struct {
 			Result  string `json:"result"`

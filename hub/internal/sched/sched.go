@@ -220,7 +220,10 @@ CREATE TABLE IF NOT EXISTS digest (id INTEGER PRIMARY KEY, created_at TEXT NOT N
 	`DROP TABLE IF EXISTS digest`,
 	// prompt_id: the wake (a child prompt row) this run answers — '' for
 	// `lifectl job run` and runs made before the column existed.
-	`ALTER TABLE runs ADD COLUMN prompt_id TEXT NOT NULL DEFAULT ''`}
+	`ALTER TABLE runs ADD COLUMN prompt_id TEXT NOT NULL DEFAULT ''`,
+	// pgid: the process group of the run's claude (runGroup), so the next hub
+	// can kill a run the last one left open (life-distributable#61).
+	`ALTER TABLE runs ADD COLUMN pgid INTEGER NOT NULL DEFAULT 0`}
 
 // Clock is what the scheduler needs from the one clock (threads.Manager):
 // the standing prompt rows that carry every job's cadence.
@@ -358,8 +361,11 @@ func New(db *store.DB, tablePath string, acts *actions.Queue, claudeBin string, 
 	if err != nil {
 		return nil, err
 	}
-	// A run is a child of this process: one still open at startup died with
-	// the last hub and will never be closed by anyone else.
+	// A run still open at startup belonged to the last hub and will never be
+	// closed by anyone else. Its claude did not die with that hub: it runs in
+	// its own process group, which launchd's kill of the hub misses, and its
+	// timeout lived in the dead hub, so it is killed here.
+	killOrphans(db, t, time.Now())
 	if _, err := db.Exec(`UPDATE runs SET finished_at=?, ok=0, error='hub restarted mid-run' WHERE finished_at IS NULL`, store.TS(time.Now())); err != nil {
 		log.Printf("sched: closing orphaned runs: %v", err)
 	}
@@ -367,6 +373,61 @@ func New(db *store.DB, tablePath string, acts *actions.Queue, claudeBin string, 
 		Now: time.Now, running: map[string]bool{}}
 	s.RunClaude = s.runClaude
 	return s, nil
+}
+
+// killOrphans kills the process group of each run the last hub left open.
+// A pgid number outlives its group, so only a run younger than its own
+// timeout (plus the pipe grace) is touched: launchd brings the hub back in
+// seconds, so a restart is always inside that window, while an older row
+// belongs to a hub that was down longer, most likely a reboot, where the
+// group is long gone and its number may be anyone's (life-distributable#61).
+func killOrphans(db *store.DB, t Table, now time.Time) {
+	rows, err := db.Query(`SELECT id, job, started_at, pgid FROM runs WHERE finished_at IS NULL AND pgid>0`)
+	if err != nil {
+		log.Printf("sched: reading orphaned runs: %v", err)
+		return
+	}
+	type orphan struct {
+		id, pgid int64
+		job, st  string
+	}
+	var open []orphan
+	for rows.Next() {
+		var o orphan
+		if rows.Scan(&o.id, &o.job, &o.st, &o.pgid) == nil {
+			open = append(open, o)
+		}
+	}
+	rows.Close()
+	for _, o := range open {
+		started, _ := time.Parse(time.RFC3339Nano, o.st)
+		limit := 20 * time.Minute
+		for _, j := range t.Jobs {
+			if j.Name == o.job {
+				limit = jobTimeout(j)
+			}
+		}
+		if now.Sub(started) > limit+pipeGrace {
+			log.Printf("sched: run %d (%s) open past its timeout; group %d left alone", o.id, o.job, o.pgid)
+			continue
+		}
+		if syscall.Kill(-int(o.pgid), 0) != nil {
+			continue // the group died with the hub
+		}
+		if err := syscall.Kill(-int(o.pgid), syscall.SIGKILL); err != nil {
+			log.Printf("sched: run %d (%s): killing group %d: %v", o.id, o.job, o.pgid, err)
+			continue
+		}
+		log.Printf("sched: run %d (%s) outlived the last hub; group %d killed", o.id, o.job, o.pgid)
+	}
+}
+
+// jobTimeout: the job's timeout, default 20m.
+func jobTimeout(j JobSpec) time.Duration {
+	if d, err := time.ParseDuration(j.Timeout); err == nil && d > 0 {
+		return d
+	}
+	return 20 * time.Minute
 }
 
 func (s *Scheduler) Table() Table { return s.table }
@@ -543,12 +604,13 @@ func (s *Scheduler) begin(name, via, promptID string) (begun, error) {
 func (s *Scheduler) exec(b begun) (int64, error) {
 	spec, name, dir, via, id := &b.spec, b.spec.Name, b.dir, b.via, b.id
 	defer func() { s.mu.Lock(); delete(s.running, name); s.mu.Unlock() }()
-	timeout := 20 * time.Minute
-	if d, err := time.ParseDuration(spec.Timeout); err == nil && d > 0 {
-		timeout = d
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), jobTimeout(*spec))
 	defer cancel()
+	ctx = context.WithValue(ctx, startedKey{}, func(pgid int) {
+		if _, err := s.db.Exec(`UPDATE runs SET pgid=? WHERE id=?`, pgid, id); err != nil {
+			log.Printf("sched: run %d pgid not recorded: %v", id, err)
+		}
+	})
 	log.Printf("sched: run %s (%s) via %s", name, spec.Project, via)
 	tools := spec.AllowedTools
 	if len(tools) == 0 {
@@ -781,9 +843,14 @@ func (s *Scheduler) runClaude(ctx context.Context, dir, prompt string, tools []s
 	c.Dir = dir
 	c.Env = jobEnv()
 	c.Stdin = strings.NewReader(prompt)
-	raw, err := runGroup(c, pipeGrace)
+	started, _ := ctx.Value(startedKey{}).(func(int))
+	raw, err := runGroup(c, pipeGrace, started)
 	return decodeResult(raw, err)
 }
+
+// startedKey: the context value exec hands runClaude, called with the run's
+// process group once claude has started, so the run row carries it.
+type startedKey struct{}
 
 // pipeGrace: how long a job's output pipe may stay open after claude itself
 // exited (or its timeout fired) before the hub stops reading it.
@@ -795,14 +862,22 @@ var pipeGrace = 10 * time.Second
 // written its result and exited: the timeout only kills claude, so a run
 // could stay open far past its timeout with the job held "already running".
 // Now the timeout kills the whole group, the pipe is dropped `grace` after
-// claude exits, and any straggler is killed then.
-func runGroup(c *exec.Cmd, grace time.Duration) ([]byte, error) {
+// claude exits, and any straggler is killed then. started (nil = none) gets
+// the group's id once claude is running: the group outlives a hub restart,
+// so New kills it.
+func runGroup(c *exec.Cmd, grace time.Duration, started func(pgid int)) ([]byte, error) {
 	var buf bytes.Buffer
 	c.Stdout, c.Stderr = &buf, &buf
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
 	c.WaitDelay = grace
-	err := c.Run()
+	err := c.Start()
+	if err == nil {
+		if started != nil {
+			started(c.Process.Pid)
+		}
+		err = c.Wait()
+	}
 	if c.Process != nil {
 		syscall.Kill(-c.Process.Pid, syscall.SIGKILL) // stragglers; claude is reaped
 	}

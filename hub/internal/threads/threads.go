@@ -457,6 +457,9 @@ type Manager struct {
 	// twice. via = the surface that carried it. Wired by main. nil = the
 	// decision is only on the message.
 	DecideAction func(actionID, outcome, note, via string) error
+	// CheckAction: would DecideAction accept this pick? Read-only; Queue runs
+	// it on every pick before deciding any. nil = no pre-check.
+	CheckAction func(actionID, outcome string) error
 	// CalHeader frames the owner's answer to a calendar step from the item's own
 	// row (its title, done vs won't). nil = a one-line frame naming the id.
 	CalHeader func(calID, outcome string) string

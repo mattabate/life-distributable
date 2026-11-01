@@ -776,6 +776,15 @@ func (m *Manager) launch(t Thread) error {
 	if !ok {
 		return fmt.Errorf("unknown project %q", t.Project)
 	}
+	// Never a second process on the session while one has a turn in flight:
+	// an old process exiting under a newer busy one launched a third on the
+	// same Claude session (life-distributable#57). The queue waits for that
+	// turn's end (finishTurn) or its process's exit (finishProcess).
+	var busy int
+	if m.db.QueryRow(`SELECT COUNT(*) FROM thread_runs WHERE thread_id=? AND finished_at IS NULL AND busy=1`, t.ID).Scan(&busy); busy > 0 {
+		log.Printf("thread %s: a process has a turn in flight; queue waits for it", t.ID)
+		return nil
+	}
 	qs, err := m.queued(t.ID)
 	if err != nil || len(qs) == 0 {
 		return err
@@ -877,6 +886,21 @@ func (m *Manager) capUSD(t Thread, trigger string) float64 {
 		return 0
 	}
 	return m.Policy.Resolve(trigger, t.ModelClass, t.GoalID).MaxBudgetUSD
+}
+
+// outgrown: a capped process (a check-in wake's) whose next queued turn runs
+// uncapped is closed at the turn's end rather than handed it, so the next
+// launch resumes the same chat with no cap (runRef does the same for an idle
+// one).
+func (m *Manager) outgrown(r run, qs []queuedMsg) bool {
+	if len(qs) == 0 {
+		return false
+	}
+	t, err := m.Get(r.thread)
+	if err != nil || m.capUSD(t, r.trigger) == 0 {
+		return false
+	}
+	return m.resolve(t, qs[0].kind).MaxBudgetUSD == 0
 }
 
 // capNote heads every prompt a capped process reads - its launch and each
@@ -1098,6 +1122,15 @@ func (m *Manager) Poll() {
 			// steered message was folded into that turn.
 			log.Printf("thread %s: turn settled by timeout (steered message folded)", r.thread)
 			m.db.Exec(`UPDATE thread_runs SET busy=0 WHERE id=?`, r.id)
+			// A relay held for the turn's end opens the next one now.
+			if qs, _ := m.queued(r.thread); len(qs) > 0 && r.in != "" && r.eof == 0 {
+				if t, err := m.Get(r.thread); err == nil {
+					r.busy = 0
+					if m.deliver(t, r) == nil {
+						break
+					}
+				}
+			}
 			m.reopenUnclosed(r.thread)
 			m.settleStatus(r.thread)
 		case r.busy == 1 && r.held == "" && r.tasks == 0 && now.Sub(r.lastOutput) > hangTTL:
@@ -1237,7 +1270,19 @@ func (m *Manager) tail(r run) run {
 			r.liveMsg = rememberMsg(r.liveMsg, id)
 		}
 	}
+	// A settled turn's effects (its reply row, card, tokens) are written as
+	// its line is read, so the offset past that line is saved right then: a
+	// failed save at the end of the batch, or a crash before it, re-read the
+	// whole batch next Poll and landed every reply, card and token count twice
+	// (life-distributable#62).
+	start, pos := r.off, 0
+	settled := func() {
+		if _, err := m.db.Exec(`UPDATE thread_runs SET out_offset=? WHERE id=?`, start+int64(pos), r.id); err != nil {
+			log.Printf("thread %s: save offset: %v", r.thread, err)
+		}
+	}
 	for _, line := range strings.Split(string(buf[:end]), "\n") {
+		pos += len(line) + 1
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -1273,6 +1318,7 @@ func (m *Manager) tail(r run) run {
 			if h, ok := r.heldResult(); ok && len(m.deliveredAfter(r, h.At)) > 0 {
 				r = m.finishTurn(r, h)
 				live, liveUSD = Tokens{}, 0
+				settled()
 			}
 			// The turn claude just opened has a starter, never a steer: a
 			// message handed over as the previous turn was ending was stamped
@@ -1315,6 +1361,7 @@ func (m *Manager) tail(r run) run {
 				} else {
 					r = m.finishTurn(r, h)
 					live, liveUSD = Tokens{}, 0 // settled for real; drop the estimate
+					settled()
 				}
 			}
 		default:
@@ -1358,9 +1405,11 @@ func (m *Manager) tail(r run) run {
 	if dirty {
 		r.lastOutput = now
 	}
-	m.db.Exec(`UPDATE thread_runs SET out_offset=?, busy=?, last_boundary=?, last_output=?, live_msg=?, bg_tasks=?, held=?,
+	if _, err := m.db.Exec(`UPDATE thread_runs SET out_offset=?, busy=?, last_boundary=?, last_output=?, live_msg=?, bg_tasks=?, held=?,
 		live_tok_in=live_tok_in+?, live_tok_out=live_tok_out+?, live_tok_cache_read=live_tok_cache_read+?, live_tok_cache_write=live_tok_cache_write+? , live_cost_usd=live_cost_usd+? WHERE id=?`,
-		r.off, r.busy, ts(r.lastBoundary), ts(r.lastOutput), r.liveMsg, r.tasks, r.held, live.In, live.Out, live.CacheRead, live.CacheWrite, liveUSD, r.id)
+		r.off, r.busy, ts(r.lastBoundary), ts(r.lastOutput), r.liveMsg, r.tasks, r.held, live.In, live.Out, live.CacheRead, live.CacheWrite, liveUSD, r.id); err != nil {
+		log.Printf("thread %s: save tail: %v", r.thread, err)
+	}
 	return r
 }
 
@@ -2108,6 +2157,20 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 				r.busy = 1
 				r.turns++
 				now = time.Now() // the boundary is past the note, so it is not late
+			}
+		}
+	} else if qs, _ := m.queued(threadID); len(qs) > 0 {
+		// What deliver held for the end of this turn (a relay, a fired step)
+		// opens the next one, on the live process if it is still there; an
+		// exited one's queue is finishProcess's next launch
+		// (life-distributable#56).
+		if _, err := os.Stat(r.out + ".done"); err != nil && r.in != "" && r.eof == 0 {
+			if m.toolsStale(r) || m.outgrown(r, qs) {
+				m.sendEOF(r)
+			} else if t, err := m.Get(threadID); err == nil && m.deliver(t, r) == nil {
+				r.busy = 1
+				r.turns++
+				now = time.Now()
 			}
 		}
 	}

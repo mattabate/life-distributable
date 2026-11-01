@@ -290,7 +290,10 @@ func (m *Manager) retryAsk(id, by, note string) (Thread, error) {
 	if t.Status == "archived" {
 		return Thread{}, errors.New("session is archived")
 	}
-	if r, ok := m.liveRun(a.ThreadID); ok && r.busy == 1 {
+	m.mu.Lock()
+	r, live := m.liveRun(a.ThreadID)
+	m.mu.Unlock()
+	if live && r.busy == 1 {
 		return Thread{}, errors.New("this session is running again already")
 	}
 	if _, err := m.ResolveAsk(id, "done", by, note); err != nil {
@@ -304,7 +307,17 @@ func (m *Manager) retryAsk(id, by, note string) (Thread, error) {
 	if a.RunID == "" || m.requeueTurn(m.lastTurnID(a.RunID)) == 0 {
 		m.resumeNote(a.ThreadID, a.Detail)
 	}
-	if err := m.launch(t); err != nil {
+	// An error result leaves its process alive and idle: a launch beside it
+	// resumed the same Claude session twice (life-distributable#57). It is
+	// closed instead, and finishProcess starts the replay on a fresh one (a
+	// fresh login too, for ResumeAuthFailed); one winding down already does,
+	// and one that took a turn since the check above delivers it at its end.
+	if r, ok := m.liveRun(a.ThreadID); ok {
+		if r.busy == 0 && r.in != "" && r.eof == 0 {
+			m.sendEOF(r)
+		}
+		m.db.Exec(`UPDATE threads SET status='running', updated_at=? WHERE id=?`, ts(time.Now()), a.ThreadID)
+	} else if err := m.launch(t); err != nil {
 		return Thread{}, err
 	}
 	log.Printf("ask %s: session %s restarted by the owner", id, a.ThreadID)

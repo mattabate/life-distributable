@@ -294,6 +294,10 @@ func refOutcomeWant(outcome string) string {
 
 func promptID() string { return store.NewID("p") }
 
+// ErrActionDecided: an approve/deny on a prompt that the proposal's row
+// refuses (already decided the other way, or dismissed). Nothing is queued.
+var ErrActionDecided = errors.New("that proposal is no longer open for this answer")
+
 // Queue records a prompt and delivers it if it is due now. A future one waits
 // for DuePrompts (the scheduler tick).
 func (m *Manager) Queue(p Prompt) (Prompt, error) {
@@ -343,8 +347,52 @@ func (m *Manager) Queue(p Prompt) (Prompt, error) {
 	if p.Repeat != "" && p.NotBefore.IsZero() {
 		p.NotBefore = cadence.Next(p.Repeat, time.Time{}, time.Now())
 	}
+	// The owner's approve/deny is decided on the row BEFORE the prompt exists:
+	// the prompt tells the session what was decided, so a row that refuses
+	// (decided the other way, dismissed) refuses the prompt too. Logged and
+	// delivered anyway, it told a session to carry out a denied proposal, or
+	// not to do one that had already run (life-distributable#60).
+	// Every pick is checked before any is decided, and the prompt is written
+	// before the first decide: an approved row must never be left without the
+	// prompt that tells its session (two picks with the second refused, or a
+	// failed insert after the decide).
+	var picks []Reply
+	if p.Author == "owner" && m.DecideAction != nil {
+		for _, r := range p.Replies {
+			if kind, id := store.SplitRef(r.Ref); kind == "action" && (r.Outcome == "approved" || r.Outcome == "denied") {
+				if m.CheckAction != nil {
+					if err := m.CheckAction(id, r.Outcome); err != nil {
+						return p, fmt.Errorf("%w: %v", ErrActionDecided, err)
+					}
+				}
+				picks = append(picks, r)
+			}
+		}
+	}
 	if err := m.insertPrompt(&p, "queued", ""); err != nil {
 		return p, err
+	}
+	decided := map[string]bool{}
+	for _, r := range picks {
+		_, id := store.SplitRef(r.Ref)
+		if err := m.DecideAction(id, r.Outcome, p.Text, p.Via); err != nil {
+			if len(decided) == 0 {
+				// Nothing decided yet: the prompt goes nowhere, as if refused
+				// at the check. The row is already 'queued', so the delivery
+				// tick could hand it out in the gap before this cancel; that
+				// takes another decide racing this row inside the gap, and is
+				// accepted.
+				why := "refused: " + err.Error()
+				m.db.Exec(`UPDATE prompts SET state='cancelled', error=? WHERE id=?`, why, p.ID)
+				return p, fmt.Errorf("%w: %v", ErrActionDecided, err)
+			}
+			// A row changed between the check and its decide while an earlier
+			// pick is already decided: the prompt still goes, so that session
+			// hears its approval.
+			log.Printf("prompt %s: SECURITY action %s %s refused after the check, delivered with %d decided pick(s): %v", p.ID, id, r.Outcome, len(decided), err)
+			continue
+		}
+		decided[r.Ref] = true
 	}
 	if p.Repeat != "" {
 		// A standing row never fires on insert, even when its first occurrence
@@ -414,17 +462,13 @@ func (m *Manager) Queue(p Prompt) (Prompt, error) {
 					}
 				}
 			case kind == "action" && (r.Outcome == "approved" || r.Outcome == "denied"):
-				// The proposal is decided on its own row the moment it is said
+				// Decided on its own row above, before the prompt was written
 				// (an approved one starts running); this prompt is the relay
 				// to the session, so the queue posts none of its own.
-				if m.DecideAction != nil {
-					if err := m.DecideAction(id, r.Outcome, p.Text, p.Via); err != nil {
-						log.Printf("prompt %s: action %s %s: %v", p.ID, id, r.Outcome, err)
-					} else if r.Outcome == "approved" && m.ActionExec != nil && m.ActionExec(id) == "relay" {
-						// The hub carries an approved relay out itself: a bare
-						// Approve leaves the proposer nothing to do (relay.go).
-						quiet = true
-					}
+				if decided[r.Ref] && r.Outcome == "approved" && m.ActionExec != nil && m.ActionExec(id) == "relay" {
+					// The hub carries an approved relay out itself: a bare
+					// Approve leaves the proposer nothing to do (relay.go).
+					quiet = true
 				}
 			}
 			if !quiet {
