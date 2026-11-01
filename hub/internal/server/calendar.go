@@ -104,9 +104,7 @@ func (s *Server) calendarMerge(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "need {into}")
 		return
 	}
-	if in.By == "" {
-		in.By = "owner"
-	}
+	in.By = s.actor(r, in.By)
 	it, err := s.Cal.Merge(r.PathValue("id"), in.Into, in.By)
 	if err != nil {
 		jsonErr(w, 400, err.Error())
@@ -187,9 +185,7 @@ func (s *Server) calendarStep(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "step must be its number")
 		return
 	}
-	if in.By == "" {
-		in.By = "owner"
-	}
+	in.By = s.actor(r, in.By)
 	var it calendar.Item
 	if len(in.Days) > 0 {
 		it, err = s.Cal.PlanStep(r.PathValue("id"), n, in.Days, in.Outcome, in.By, in.Note)
@@ -235,12 +231,14 @@ func (s *Server) calendarResolve(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad json")
 		return
 	}
-	if in.By == "" {
-		in.By = "owner"
-	}
+	in.By = s.actor(r, in.By)
 	// A button of the row's `outcomes` pressed: the hub, not the client, says
 	// which state done|wont closes it with.
 	if in.State == "" && (in.Outcome == "nudge" || in.Outcome == "extend") {
+		// The owner's button: the answer goes to the session as theirs.
+		if s.ownerOnly(w, r, in.Outcome) {
+			return
+		}
 		it, err := s.Cal.AnswerWaiting(r.PathValue("id"), in.Outcome, in.Note)
 		if err != nil {
 			jsonErr(w, 409, err.Error())

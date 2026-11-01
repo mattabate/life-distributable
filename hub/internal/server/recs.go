@@ -154,8 +154,10 @@ func (s *Server) recsDecide(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad json")
 		return
 	}
-	if in.By == "" {
-		in.By = "owner"
+	in.By = s.actor(r, in.By)
+	// Delivering sends the verdict as the owner's message into a session.
+	if in.Deliver != "" && s.ownerOnly(w, r, "deliver") {
+		return
 	}
 	at, err := in.when()
 	if err != nil {
@@ -309,9 +311,11 @@ func (s *Server) recsReply(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad json")
 		return
 	}
-	if in.By == "" {
-		in.By = "owner"
+	// A reply always reaches a session as the owner's note: theirs alone.
+	if s.ownerOnly(w, r, "reply") {
+		return
 	}
+	in.By = s.actor(r, in.By)
 	at, err := in.when()
 	if err != nil {
 		jsonErr(w, 400, err.Error())

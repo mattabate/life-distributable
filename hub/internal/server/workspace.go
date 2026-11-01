@@ -105,6 +105,10 @@ func (s *Server) putWorkspaceFile(w http.ResponseWriter, r *http.Request) {
 		}
 		body = b
 	}
+	// A session writes as itself, whichever body it sent.
+	if id := s.caller(r); id != "" {
+		by = "claude:thread:" + id
+	}
 	f, err := s.WS.Write(key, r.PathValue("name"), body, by)
 	if err != nil {
 		if errors.Is(err, workspace.ErrForbidden) {

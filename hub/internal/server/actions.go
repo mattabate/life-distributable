@@ -76,6 +76,15 @@ func (s *Server) proposeAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad json: "+err.Error())
 		return
 	}
+	// A proposal is its proposer's: approved, it is carried out by the session
+	// it names, with that session's grants, under "the action you proposed".
+	if from := s.caller(r); from != "" {
+		if p.ThreadID != "" && p.ThreadID != from {
+			jsonErr(w, 403, "a session proposes as itself, not as another session; to hand a task over: `lifectl relay <session-id> \"…\"`")
+			return
+		}
+		p.ThreadID, p.Source = from, "claude:thread:"+from
+	}
 	a, err := s.acts.Propose(p)
 	if err != nil {
 		jsonErr(w, 400, err.Error())

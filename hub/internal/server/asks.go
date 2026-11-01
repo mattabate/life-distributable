@@ -70,9 +70,7 @@ func (s *Server) resolveAsk(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad json")
 		return
 	}
-	if in.By == "" {
-		in.By = "owner"
-	}
+	in.By = s.actor(r, in.By)
 	a, err := s.thr.ResolveAsk(r.PathValue("id"), in.State, in.By, in.Note)
 	if err != nil {
 		jsonErr(w, 409, err.Error())
@@ -122,9 +120,7 @@ func (s *Server) rewordAsk(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad json")
 		return
 	}
-	if in.By == "" {
-		in.By = "owner"
-	}
+	in.By = s.actor(r, in.By)
 	a, err := s.thr.RewordAsk(r.PathValue("id"), in.Title, in.Detail, in.Say, in.By)
 	if err != nil {
 		code := 409

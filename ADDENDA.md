@@ -871,3 +871,8 @@ Entry format:
 - For: everyone
 - Offer: The copy taken before new schema statements run was retaken by every package, so it already held the first packages' changes, and a hub restarting in a crash loop overwrote the good copy with a half-migrated one. It is now taken once per start, kept if it is under 15 minutes old, and written under a temporary name then renamed, so a failed copy never removes the last one (#79). Thanks [@atharvb7](https://github.com/mattabate/life-distributable/issues/79).
 - How: same merge as add-0008. By hand: `store/migrate.go`, `store/migrate_test.go`.
+
+## add-0101 · 2026-11-01 · A session is the actor it is
+- For: everyone
+- Offer: Three routes a session could reach with `lifectl api` still took the caller from the body: closing another session's card went in as the owner's close (the other session heard "Done" in the owner's voice, and a card the owner had closed could be re-closed), a role's files could be overwritten by another session, and a proposal could be filed under another session, which would carry it out on approval with its own grants. Now a request from a session (`X-Life-Thread`, as lifectl sends it) is `by` that session on every `by?=owner` route and the workspace write, a proposal naming another session is a 403 and one naming none is the caller's, and a session's rec reply or `deliver`, and the owner's nudge/extend buttons, are 403 (#76). Thanks [@atharvb7](https://github.com/mattabate/life-distributable/issues/76).
+- How: same merge as add-0008. By hand: `server/caller.go` (new), `server/asks.go`, `server/calendar.go`, `server/recs.go`, `server/workspace.go`, `server/actions.go`, `server/session_as_owner_test.go`, `shared/api.md`.
