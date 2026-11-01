@@ -171,9 +171,12 @@ Your data lives on your Mac. The hub listens only on your private
   (push notifications), your own backup bucket, and an optional weekly
   heartbeat to the project's [PostHog](https://posthog.com) analytics.
 - **The heartbeat is off unless you say yes.** The agent asks once at
-  setup, and the answer defaults to no. If you say yes, it sends a random
-  install id, the version and a few counts to PostHog
-  (`hub/internal/usage`). Never text, titles, names or amounts. Settings
+  setup, and the answer defaults to no. If you say yes, once a week it
+  posts one event to `https://us.i.posthog.com/capture/` with a random
+  install id and these fields only: `version`, `active_days`,
+  `sessions_started`, `goals`, `pages` and `token_bucket` (a range such as
+  "1-10M"), with GeoIP lookup disabled (`hub/internal/usage`). Never text,
+  titles, names or amounts. Settings
   shows the payload and where it goes, and switches it off; `usage_host` in
   `ops/hub.json` sends it somewhere else.
 - **Backups are yours.** Encrypted on your Mac before upload, so the
