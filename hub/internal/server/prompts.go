@@ -149,10 +149,5 @@ func promptWhen(at, in, on, atTime string) (time.Time, error) {
 	return time.Time{}, nil
 }
 
-// eastern: the owner's clock. A prompt for "09:00" means their morning.
-func eastern() *time.Location {
-	if loc, err := time.LoadLocation("America/New_York"); err == nil {
-		return loc
-	}
-	return time.Local
-}
+// eastern: the owner's clock (hub.json time_zone). A prompt for "09:00" means their morning.
+func eastern() *time.Location { return store.Eastern }

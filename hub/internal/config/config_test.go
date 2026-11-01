@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Only a named interface passes: the hub binds to Tailscale, nothing wider.
@@ -46,5 +47,18 @@ func TestLoadNamesEveryProblemAtOnce(t *testing.T) {
 	}
 	if strings.Count(err.Error(), "; ") != 2 {
 		t.Errorf("want three problems on one line: %v", err)
+	}
+}
+
+// #55: time_zone names the household's clock; a name Go cannot load is
+// refused at start-up, not discovered at midnight. Empty is the Mac's zone.
+func TestTimeZoneIsValidated(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "hub.json")
+	os.WriteFile(p, []byte(`{"listen_addr": ":8443", "time_zone": "Nowhere/Land"}`), 0o644)
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), `time_zone "Nowhere/Land"`) {
+		t.Fatalf("a bad time_zone loaded: %v", err)
+	}
+	if loc, err := (&Config{}).Zone(); err != nil || loc != time.Local {
+		t.Fatalf("empty time_zone = %v, %v; want the Mac's own", loc, err)
 	}
 }

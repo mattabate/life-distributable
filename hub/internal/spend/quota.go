@@ -199,6 +199,7 @@ type QuotaFetcher struct {
 	cachedErr    error
 	lastRecorded time.Time
 	refreshing   bool
+	failedAt     time.Time // last refresh that failed over a good reading
 }
 
 // staleTTL is how old a reading may be and still be shown at once while a
@@ -206,6 +207,11 @@ type QuotaFetcher struct {
 // anyway, so a reading older than this means the sampler is not running and
 // the request should wait for a real one.
 const staleTTL = 15 * time.Minute
+
+// staleCeiling is how long a failing fetch may keep serving the last good
+// reading. Past it the hub says "unavailable" instead of steering the model
+// picker on hours-old meters (#54).
+const staleCeiling = 30 * time.Minute
 
 func NewQuotaFetcher() *QuotaFetcher {
 	return &QuotaFetcher{Token: KeychainToken, Client: &http.Client{Timeout: 15 * time.Second}, URL: usageURL}
@@ -227,6 +233,12 @@ func (q *QuotaFetcher) rawAt(ctx context.Context) (map[string]json.RawMessage, t
 	if age < windowTTL && (q.cachedRaw != nil || q.cachedErr != nil) {
 		defer q.mu.Unlock()
 		return q.cachedRaw, q.cachedAt, q.cachedErr
+	}
+	// A refresh just failed: serve the kept reading for a TTL rather than
+	// making every request wait out another 15-second failure.
+	if q.cachedRaw != nil && age < staleCeiling && time.Since(q.failedAt) < windowTTL {
+		defer q.mu.Unlock()
+		return q.cachedRaw, q.cachedAt, nil
 	}
 	if q.cachedRaw != nil && age < staleTTL {
 		if !q.refreshing {
@@ -252,9 +264,14 @@ func (q *QuotaFetcher) refresh(ctx context.Context) (map[string]json.RawMessage,
 	defer q.mu.Unlock()
 	q.refreshing = false
 	if err != nil && q.cachedRaw != nil {
-		// Keep serving the last good answer over a transient failure.
-		return q.cachedRaw, q.cachedAt, nil
+		if time.Since(q.cachedAt) < staleCeiling {
+			// Keep serving the last good answer over a transient failure.
+			q.failedAt = time.Now()
+			return q.cachedRaw, q.cachedAt, nil
+		}
+		err = fmt.Errorf("plan usage: no good reading for %s: %w", time.Since(q.cachedAt).Round(time.Minute), err)
 	}
+	q.failedAt = time.Time{}
 	q.cachedRaw, q.cachedErr = raw, err
 	q.cachedAt = time.Now()
 	return q.cachedRaw, q.cachedAt, q.cachedErr
@@ -760,12 +777,9 @@ func fillBurn(w *Window, us []Usage, now, start time.Time, lockedFams map[string
 
 // eastern is the wall clock the reset/fill times are written in — the hub's, not
 // the laptop's or the phone's.
-var eastern = func() *time.Location {
-	if loc, err := time.LoadLocation("America/New_York"); err == nil {
-		return loc
-	}
-	return time.Local
-}()
+// It is time.Local read at call time, which main pins to hub.json's
+// time_zone (store.UseZone) after this package has initialised.
+func eastern() *time.Location { return time.Local }
 
 // fillWords sets the tone, outlook and foot line of a window from its numbers.
 //
@@ -853,7 +867,7 @@ func leftWords(d time.Duration) string {
 
 // clockWhen is "3:33 AM" today and "Sep 15 3:33 AM" otherwise, Eastern.
 func clockWhen(t, now time.Time) string {
-	t, now = t.In(eastern), now.In(eastern)
+	t, now = t.In(eastern()), now.In(eastern())
 	if t.Format("2006-01-02") == now.Format("2006-01-02") {
 		return t.Format("3:04 PM")
 	}

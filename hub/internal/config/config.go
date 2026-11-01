@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"life/hub/internal/spend"
 )
@@ -127,6 +128,10 @@ type Config struct {
 	// Off by default: one plain session per message. `ops/py.sh setup.py hub
 	// --team yes` writes it; a restart applies it.
 	TeamMode bool `json:"team_mode"`
+	// TimeZone is the household's wall clock, an IANA name such as
+	// "America/Los_Angeles": every "today", day boundary and HH:MM schedule
+	// in the hub and lifectl. Empty = the Mac's own zone (#55).
+	TimeZone string `json:"time_zone"`
 	// Root is the repo checkout (~/life), derived at load time from the
 	// config file's location (<root>/ops/hub.json); never written in the file.
 	Root string `json:"-"`
@@ -184,10 +189,21 @@ func Load(path string) (*Config, error) {
 	} else if !onTailnet(c.ListenAddr) {
 		bad = append(bad, fmt.Sprintf("listen_addr %q is not a Tailscale address, refused", c.ListenAddr))
 	}
+	if _, err := c.Zone(); err != nil {
+		bad = append(bad, fmt.Sprintf("time_zone %q: %v", c.TimeZone, err))
+	}
 	if len(bad) > 0 {
 		return nil, fmt.Errorf("%s: %s", path, strings.Join(bad, "; "))
 	}
 	return c, nil
+}
+
+// Zone is time_zone loaded, or the Mac's own zone when it is empty.
+func (c *Config) Zone() (*time.Location, error) {
+	if c.TimeZone == "" {
+		return time.Local, nil
+	}
+	return time.LoadLocation(c.TimeZone)
 }
 
 // AllProjects merges the explicit list with subdirectories of ProjectsRoot.

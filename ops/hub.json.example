@@ -1,6 +1,7 @@
 {
-  "_comment": "ops/py.sh setup.py hub writes ops/hub.json (git-ignored) from this file. claude_bin must be an absolute path (`which claude`): launchd has no nvm PATH. cert/key files are what `tailscale cert` writes (ops/renew-cert.sh). The apns_* keys are optional (paid Apple Developer team; ops/py.sh setup.py apns); apns_bundle_id = LIFE_BUNDLE_ID in app/local.xcconfig.",
+  "_comment": "ops/py.sh setup.py hub writes ops/hub.json (git-ignored) from this file. claude_bin must be an absolute path (`which claude`): launchd has no nvm PATH. cert/key files are what `tailscale cert` writes (ops/renew-cert.sh). The apns_* keys are optional (paid Apple Developer team; ops/py.sh setup.py apns); apns_bundle_id = LIFE_BUNDLE_ID in app/local.xcconfig. time_zone is the household's clock as an IANA name (America/Los_Angeles); empty = this Mac's own zone.",
   "owner_name": "<your first name>",
+  "time_zone": "",
   "surfaces": ["phone", "desktop", "web"],
   "team_mode": false,
   "listen_addr": "<tailscale-ip>:8443",

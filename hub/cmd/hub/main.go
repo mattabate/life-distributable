@@ -41,13 +41,17 @@ import (
 )
 
 func main() {
-	store.UseEastern() // every "today" in the hub is Eastern, whatever the Mac says
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, "life", "ops", "hub.json"), "config file")
 	flag.Parse()
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		log.Fatal(err)
+	}
+	// Every "today" in the hub is hub.json's time_zone, or the Mac's own
+	// zone when it names none (#55); Load has checked it.
+	if loc, err := cfg.Zone(); err == nil {
+		store.UseZone(loc)
 	}
 	token, err := loadOrCreateToken(cfg.TokenFile)
 	if err != nil {

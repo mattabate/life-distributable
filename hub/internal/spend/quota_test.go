@@ -171,6 +171,45 @@ func TestRawServesStaleWhileRefreshing(t *testing.T) {
 	}
 }
 
+// #54: a failing fetch keeps the last good reading only up to staleCeiling,
+// and does not retry on every request in the meantime.
+func TestStaleReadingHasACeiling(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits.Add(1) > 1 {
+			http.Error(w, "down", http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprint(w, `{"five_hour":{"utilization":10,"resets_at":"2026-08-21T14:00:00Z"}}`)
+	}))
+	defer srv.Close()
+	q := &QuotaFetcher{Token: func(context.Context) (string, error) { return "tok", nil }, Client: srv.Client(), URL: srv.URL}
+	age := func(d time.Duration) {
+		q.mu.Lock()
+		q.cachedAt = time.Now().Add(-d)
+		q.mu.Unlock()
+	}
+	ctx := context.Background()
+	if _, err := q.raw(ctx); err != nil {
+		t.Fatal(err)
+	}
+	age(staleTTL + 5*time.Minute)
+	if _, err := q.raw(ctx); err != nil {
+		t.Fatalf("inside the ceiling the kept reading should serve: %v", err)
+	}
+	if _, err := q.raw(ctx); err != nil || hits.Load() != 2 {
+		t.Fatalf("a just-failed refresh was retried at once: hits %d, err %v", hits.Load(), err)
+	}
+	age(2 * time.Hour)
+	q.mu.Lock()
+	q.failedAt = time.Time{}
+	q.mu.Unlock()
+	got := q.Quota(ctx, nil, time.Now())
+	if got.Available || got.Error == "" {
+		t.Fatalf("a 2h-old reading still shown as available: %+v", got)
+	}
+}
+
 // The burn line is the point of the page: it must react to what is happening
 // now, stay silent when it cannot know, and never project a full meter.
 func TestFillBurn(t *testing.T) {

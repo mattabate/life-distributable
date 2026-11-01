@@ -40,11 +40,6 @@ func opsDir() string {
 }
 
 func main() {
-	// Dates are Eastern here, whatever TZ
-	// the calling shell carries; the hub pins the same zone (store.UseEastern).
-	if loc, err := time.LoadLocation("America/New_York"); err == nil {
-		time.Local = loc
-	}
 	if len(os.Args) < 2 {
 		usage()
 	}
@@ -65,9 +60,17 @@ func main() {
 	}
 	var cfg struct {
 		PublicHost string `json:"public_host"`
+		TimeZone   string `json:"time_zone"`
 	}
 	if err := json.Unmarshal(cfgB, &cfg); err != nil || cfg.PublicHost == "" {
 		die("hub.json: no public_host (%v)", err)
+	}
+	// Dates here are the hub's zone (hub.json time_zone, #55), whatever TZ
+	// the calling shell carries; empty = the Mac's own, as the hub does.
+	if cfg.TimeZone != "" {
+		if loc, err := time.LoadLocation(cfg.TimeZone); err == nil {
+			time.Local = loc
+		}
 	}
 	tokB, err := os.ReadFile(filepath.Join(ops, "secrets", "hub.token"))
 	if err != nil {

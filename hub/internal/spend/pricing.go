@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -33,8 +34,8 @@ type priceRow struct {
 }
 
 var (
-	// Longest prefix first where one id contains another: "claude-fable-5"
-	// would otherwise swallow "claude-fable-5-1".
+	// Longest prefix first (init sorts): "claude-fable-5" would otherwise
+	// swallow "claude-fable-5-1".
 	prices       []priceRow
 	unknownPrice Price
 	cacheRead    float64
@@ -55,6 +56,10 @@ func init() {
 	if err := json.Unmarshal(pricesJSON, &t); err != nil || len(t.Models) == 0 {
 		panic(fmt.Sprintf("spend: bad prices.json (%d models): %v", len(t.Models), err))
 	}
+	// Sorted here, not trusted to the file's order: a short row added above
+	// a longer one would silently price the longer id at the wrong rate
+	// (#53).
+	sort.SliceStable(t.Models, func(i, j int) bool { return len(t.Models[i].Prefix) > len(t.Models[j].Prefix) })
 	prices = t.Models
 	unknownPrice = Price{t.Unknown.Input, t.Unknown.Output, t.Unknown.CacheRead}
 	cacheRead, cacheWrite5m, cacheWrite1h = t.Cache.Read, t.Cache.Write5m, t.Cache.Write1h

@@ -91,7 +91,24 @@ def call(method, path, body=None, timeout=30):
 
 # --- time: Eastern, DST-correct ---------------------------------------------
 
-ET = ZoneInfo("America/New_York")
+def _zone():
+    """hub.json `time_zone`, the hub's own wall clock (#55); empty = the
+    Mac's own zone, read from /etc/localtime as the hub does."""
+    name = ""
+    try:
+        with open(os.path.join(ROOT, "ops", "hub.json")) as f:
+            name = json.load(f).get("time_zone") or ""
+    except Exception:
+        pass
+    if not name:
+        name = os.path.realpath("/etc/localtime").partition("zoneinfo/")[2]
+    try:
+        return ZoneInfo(name or "UTC")
+    except Exception:
+        return ZoneInfo("UTC")
+
+
+ET = _zone()
 
 
 def now_et():

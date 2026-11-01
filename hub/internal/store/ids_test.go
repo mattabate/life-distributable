@@ -29,6 +29,22 @@ func TestNewIDAndTS(t *testing.T) {
 	}
 }
 
+// #55: a household on hub.json time_zone America/Los_Angeles counts 22:00
+// Pacific as that Pacific day, not the next New York one.
+func TestUseZoneMovesTheDayBoundary(t *testing.T) {
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Skip(err)
+	}
+	was, local := Eastern, time.Local
+	defer func() { Eastern, time.Local = was, local }()
+	UseZone(la)
+	at := time.Date(2026, 8, 26, 22, 0, 0, 0, la) // 01:00 the 27th in New York
+	if Day(at) != "2026-08-26" || Clock(at) != "22:00" || time.Now().Location() != la {
+		t.Fatalf("Day %s Clock %s Local %s", Day(at), Clock(at), time.Now().Location())
+	}
+}
+
 // Every id shape the hub has ever minted resolves to its kind: the 2-byte
 // ids from before Phase 0, today's 4-byte ones, thread slugs (with either
 // suffix), the stamped proposal/run form, and the prompt queue's p-.

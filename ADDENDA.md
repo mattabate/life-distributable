@@ -766,3 +766,18 @@ Entry format:
 - For: everyone
 - Offer: In chat, a turn that died unanswered is never shown in flight again, and only your own messages show as working rows (web and phone). A turn's tool count and clock read only the run that is busy, not an idle leftover. Also: push titles keep `__init__.py` and `*.go` intact inside code spans; a failed goals read tells a new session the list could not be read instead of "(none right now)"; a relay to a session with no persona is refused with the reason; rec titles and HTTP error bodies are cut on a character boundary, never mid UTF-8.
 - How: same merge as add-0008. By hand: `web/views/threads.js`, `web/test/sending.test.js`, `app/Life/Sources/ThreadDetail.swift`, `threads/threads.go`, `threads/relay.go`, `recs/recs.go`, `httpx/httpx.go`, their tests.
+
+## add-0080 · 2026-10-31 · Price rows match longest prefix first
+- For: everyone who edits `prices.json`
+- Offer: The price table is sorted longest prefix first when the hub loads it, so a short row added above a longer one can no longer price the longer model at its rate (#53).
+- How: same merge as add-0008. By hand: `spend/pricing.go`, new `spend/pricing_test.go`.
+
+## add-0081 · 2026-10-31 · A stale plan reading expires
+- For: everyone
+- Offer: When the plan usage fetch fails, the last good reading is kept for at most 30 minutes; after that Spend says the meters are unavailable instead of steering the model picker on old numbers. A fetch that just failed is not retried on every request (each one waited up to 15 s) (#54).
+- How: same merge as add-0008. By hand: `spend/quota.go`, `spend/quota_test.go`.
+
+## add-0082 · 2026-10-31 · The hub's day follows your time zone
+- For: everyone outside New York
+- Offer: `time_zone` in `ops/hub.json` (an IANA name such as `America/Los_Angeles`) sets the hub's wall clock: the day boundary, the budget guard and spend reset times, prompt times, the nightly backup hour, `lifectl` and the ops scripts. Empty means this Mac's own zone, so a hub outside New York now counts its own day; set `"time_zone": "America/New_York"` to keep the old behaviour. A name Go cannot load is refused at start-up. The console and phone still format times in New York for now (#55).
+- How: same merge as add-0008. By hand: `config/config.go`, `store/ids.go`, `cmd/hub/main.go`, `cmd/lifectl/main.go`, `server/prompts.go`, `budget/budget.go`, `spend/quota.go`, `ops/hublib.py`, `ops/hub.json.example`, their tests.

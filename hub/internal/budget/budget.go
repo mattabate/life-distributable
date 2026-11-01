@@ -78,12 +78,8 @@ func New(db *store.DB, dailyUSD, threadDailyUSD, fableDailyUSD float64, fableFlo
 	if _, err := db.Migrate("budget", Schema); err != nil {
 		return nil, err
 	}
-	loc, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		loc = time.Local
-	}
 	return &Guard{db: db, DailyUSD: dailyUSD, ThreadDailyUSD: threadDailyUSD,
-		FableDailyUSD: fableDailyUSD, FableFloor: fableFloor, Now: time.Now, Loc: loc}, nil
+		FableDailyUSD: fableDailyUSD, FableFloor: fableFloor, Now: time.Now, Loc: store.Eastern}, nil
 }
 
 // day and the UTC timestamp prefix its first second sorts at (ts columns

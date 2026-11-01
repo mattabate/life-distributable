@@ -89,8 +89,10 @@ func Clock(t time.Time) string { return t.In(Eastern).Format("15:04") }
 
 // Eastern is the hub's one wall clock. Every day boundary — calendar items,
 // review dates, "today" — used to be time.Local, which is right only while
-// the Mac's zone is Eastern; UseEastern pins time.Local at start-up so that
-// stays true wherever the binary runs.
+// the Mac's zone is Eastern; UseZone pins time.Local at start-up so that
+// stays true wherever the binary runs. The name is historical: main sets it
+// to hub.json's time_zone, or the Mac's own zone when that is empty (#55);
+// New York is only what a test sees.
 var Eastern = mustLoad("America/New_York")
 
 func mustLoad(name string) *time.Location {
@@ -105,3 +107,7 @@ func mustLoad(name string) *time.Location {
 // UseEastern makes time.Local Eastern for the process. Call first thing in
 // main; tests do not need it (they build times in time.Local on purpose).
 func UseEastern() { time.Local = Eastern }
+
+// UseZone makes loc the hub's wall clock (Eastern and time.Local) for the
+// process. Call in main once hub.json is read, before anything starts.
+func UseZone(loc *time.Location) { Eastern, time.Local = loc, loc }
