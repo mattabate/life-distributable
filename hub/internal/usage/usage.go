@@ -1,7 +1,8 @@
 // Package usage is the opt-in weekly heartbeat: the only call the hub makes
 // on its own to anywhere but the owner's devices. It says an install is alive
 // and roughly how much it is used — a random install id, the version, and
-// counts. Never text, names, amounts, paths or the host.
+// counts. Never text, names, amounts, paths or the host. It goes to the
+// project's PostHog unless `usage_host` names another (Settings shows which).
 //
 // Off unless the owner said yes at setup (`usage_opt_in` in ops/hub.json);
 // after that the switch is the `usage:on` setting, which Settings flips
@@ -133,15 +134,21 @@ func Bucket(n int) string {
 	return "1B+"
 }
 
+// Destination is where a send goes: `usage_host` in ops/hub.json, else the
+// project's PostHog. Settings shows it beside the payload.
+func (h *Heartbeat) Destination() string {
+	if h.Host != "" {
+		return h.Host
+	}
+	return DefaultHost
+}
+
 // Send posts one heartbeat when the switch is on; off is a quiet no-op.
 func (h *Heartbeat) Send(ctx context.Context) (bool, error) {
 	if !h.On() {
 		return false, nil
 	}
-	host, token := h.Host, h.Token
-	if host == "" {
-		host = DefaultHost
-	}
+	host, token := h.Destination(), h.Token
 	if token == "" {
 		token = DefaultToken
 	}

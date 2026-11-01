@@ -643,9 +643,13 @@ func (s *Store) Add(r Rec) (Rec, error) {
 	if err != nil {
 		return Rec{}, err
 	}
-	// Superseding one closes the old row, so the list never shows both.
+	// Superseding one closes the old row, so the list never shows both. A
+	// deferred one too: it sat out of the list until Wake put it back beside
+	// its own replacement.
 	if r.PrevID != "" {
-		s.setRec(r.PrevID, r.Source, "superseded by "+r.ID, stmt(`UPDATE items SET state='superseded', updated_at=? WHERE id=? AND src='rec' AND state IN ('proposed','accepted')`, ts(now), r.PrevID))
+		if moved, err := s.setRec(r.PrevID, r.Source, "superseded by "+r.ID, stmt(`UPDATE items SET state='superseded', updated_at=? WHERE id=? AND src='rec' AND state IN ('proposed','accepted','deferred')`, ts(now), r.PrevID)); err != nil || !moved {
+			log.Printf("recs: %s names %s as superseded, but it was not open (err %v)", r.ID, r.PrevID, err)
+		}
 	}
 	log.Printf("recs: %s %s/%s: %s", r.ID, r.Domain, r.Kind, r.Title)
 	return s.Get(r.ID)

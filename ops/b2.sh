@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # The Backblaze side of the backup. Three verbs, one file:
 #
-#   b2.sh check   What may the key in ops/secrets/restic.env actually do?
-#                 Exit 0 = SAFE (write-only). Exit 1 = it can destroy backups,
-#                 or it no longer authenticates, which means NO backup is
+#   b2.sh check   What may the key in ops/secrets/restic.env actually do, and
+#                 do the bucket's lifecycle rules keep what it writes?
+#                 Exit 0 = SAFE (write-only key, keep-all bucket). Exit 1 = the
+#                 key or a rule can destroy backups, the rules could not be
+#                 read, or the key no longer authenticates, which means NO backup is
 #                 running. ops/backup.sh runs this at the end of every night.
 #                 Never prints the key.
 #   b2.sh mint    ONE-TIME, RUN BY THE OWNER IN A TERMINAL (after
@@ -43,48 +45,9 @@ need_tty() {
 
 check() {
   set -a; source "$ENV"; set +a
-  python3 - <<'PY'
-import base64, json, os, sys, urllib.error, urllib.request
-
-kid, key = os.environ["B2_ACCOUNT_ID"], os.environ["B2_ACCOUNT_KEY"]
-req = urllib.request.Request(
-    "https://api.backblazeb2.com/b2api/v2/b2_authorize_account",
-    headers={"Authorization": "Basic " + base64.b64encode(f"{kid}:{key}".encode()).decode()})
-try:
-    with urllib.request.urlopen(req, timeout=20) as r:
-        auth = json.load(r)
-except urllib.error.HTTPError as e:
-    if e.code in (401, 403):
-        print(f"DEAD:    the key in secrets/restic.env ({kid}) no longer authenticates")
-        print("         -> NO BACKUP IS RUNNING. Fix: ops/b2.sh mint (needs the")
-        print("            master key) installs a fresh nightly key.")
-        sys.exit(1)
-    raise
-except urllib.error.URLError as e:
-    print(f"UNKNOWN: could not reach Backblaze ({e.reason}) — key not checked")
-    sys.exit(1)
-
-allowed = auth.get("allowed", {})
-caps = set(allowed.get("capabilities", []))
-bucket = allowed.get("bucketName") or "ALL BUCKETS"
-master = auth.get("accountId") == kid
-
-# Everything the nightly run needs, and nothing else.
-NEEDED = {"listBuckets", "listFiles", "readFiles", "writeFiles"}
-# Capabilities that let the holder destroy or silently expire the backups.
-DANGEROUS = {"deleteFiles", "deleteBuckets", "deleteKeys", "writeKeys",
-             "writeBuckets", "writeBucketLifecycleRules", "writeBucketReplications"}
-
-print(f"bucket:  {bucket}{' (MASTER KEY)' if master else ''}")
-print(f"needed:  {', '.join(sorted(NEEDED))} -> {'all present' if NEEDED <= caps else 'MISSING ' + ', '.join(sorted(NEEDED - caps))}")
-held = sorted(caps & DANGEROUS)
-if held or master:
-    print(f"UNSAFE:  this key can destroy backups: {', '.join(held) or 'master key, every capability'}")
-    print("         fix: ops/b2.sh mint mints a bucket-scoped key with")
-    print("         listBuckets, listFiles, readFiles, writeFiles only.")
-    sys.exit(1)
-print("SAFE:    write-only key — nothing on this Mac can delete a backup")
-PY
+  # The key's capabilities and the bucket's lifecycle rules, with the
+  # reasons: ops/b2-key-check.py (its --test runs in make check).
+  ./py.sh b2-key-check.py
 }
 
 mint() {

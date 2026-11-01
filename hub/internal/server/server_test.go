@@ -1466,7 +1466,7 @@ func TestUsageSwitch(t *testing.T) {
 		return w
 	}
 	s.thr.CreateIdle("th-private", "A private title", "life")
-	if w := do("GET", "/api/v1/usage", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"on":false`) || !strings.Contains(w.Body.String(), `"pages":4`) || strings.Contains(w.Body.String(), "private") {
+	if w := do("GET", "/api/v1/usage", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"on":false`) || !strings.Contains(w.Body.String(), `"pages":4`) || !strings.Contains(w.Body.String(), `"host":"https://us.i.posthog.com"`) || strings.Contains(w.Body.String(), "private") {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	if w := do("PUT", "/api/v1/usage", `{}`); w.Code != 400 {

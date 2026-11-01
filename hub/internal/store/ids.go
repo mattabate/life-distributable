@@ -105,7 +105,8 @@ func mustLoad(name string) *time.Location {
 }
 
 // UseEastern makes time.Local Eastern for the process. Call first thing in
-// main; tests do not need it (they build times in time.Local on purpose).
+// main; a test package whose fixtures word times in the hub's zone calls it
+// from TestMain, so the suite passes on a Mac in any zone.
 func UseEastern() { time.Local = Eastern }
 
 // UseZone makes loc the hub's wall clock (Eastern and time.Local) for the

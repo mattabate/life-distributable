@@ -145,9 +145,10 @@ is past the budget; the meter keeps counting. Under budget nothing is paused, so
 is configured.
 
 ### GET /api/v1/usage
-The opt-in weekly heartbeat (hub/internal/usage). → `{on, last_sent, install_id, payload}` —
+The opt-in weekly heartbeat (hub/internal/usage). → `{on, last_sent, install_id, host, payload}` —
 `payload` is exactly what a send carries: `{version, active_days, sessions_started, goals, pages,
-token_bucket}`, counts only. Off unless the owner said yes at setup (`usage_opt_in`).
+token_bucket}`, counts only. `host` is where it goes: `usage_host` in ops/hub.json, else the
+project's PostHog (`https://us.i.posthog.com`). Off unless the owner said yes at setup (`usage_opt_in`).
 
 ### PUT /api/v1/usage
 Body `{"on": true|false}` — the Settings switch. → State (as GET). 400 without `on`.

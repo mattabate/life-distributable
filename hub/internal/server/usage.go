@@ -21,11 +21,12 @@ type usageState struct {
 	On        bool           `json:"on"`
 	LastSent  string         `json:"last_sent"`
 	InstallID string         `json:"install_id"`
+	Host      string         `json:"host"`
 	Payload   map[string]any `json:"payload"`
 }
 
 func (s *Server) usageView(h *usage.Heartbeat) usageState {
-	return usageState{On: h.On(), LastSent: h.LastSent(), InstallID: h.InstallID(), Payload: h.Payload()}
+	return usageState{On: h.On(), LastSent: h.LastSent(), InstallID: h.InstallID(), Host: h.Destination(), Payload: h.Payload()}
 }
 
 func (s *Server) getUsage(w http.ResponseWriter, r *http.Request) {

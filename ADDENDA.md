@@ -821,3 +821,38 @@ Entry format:
 - For: everyone
 - Offer: A failed `ops/renew-cert.sh` used to leave one log line until TLS broke and the phone lost the hub. It now raises a card on the Hub thread, the way a failed backup does, and the hub reads its own cert daily and raises one card when it is 21 days from expiry (#64). Thanks [@omertahaoztop](https://github.com/mattabate/life-distributable/issues/64).
 - How: same merge as add-0008. By hand: `ops/renew-cert.sh`, new `cmd/hub/cert.go` and `cmd/hub/cert_test.go`, `cmd/hub/main.go`.
+
+## add-0091 · 2026-11-01 · The backup key check reads the bucket's lifecycle rules
+- For: everyone with a Backblaze backup
+- Offer: `ops/b2.sh check` printed SAFE from the key's capabilities alone, but a bucket lifecycle rule deletes on its own: one that hides files after upload expires every backup, and one that deletes hidden files lets a write-only key delete (it may hide, the rule erases). The check now reads the bucket's rules too, and is SAFE only with a write-only key and no rule that removes files; rules it could not read are UNKNOWN, never SAFE (#63). Thanks [@omertahaoztop](https://github.com/mattabate/life-distributable/issues/63).
+- How: same merge as add-0008. By hand: new `ops/b2-key-check.py`, `ops/b2.sh`, `Makefile` (its `--test` in `pylint`).
+
+## add-0092 · 2026-11-01 · A failed code bundle no longer passes as tonight's
+- For: everyone with a backup
+- Offer: `ops/backup.sh` made the git bundle with `|| echo`, so a failed night left last week's `life.bundle` in place and restic backed it up as current. The bundle is now written beside it, verified, then moved in; a failure renames the old one `life.bundle.stale` and raises a card on the Hub thread, without blocking the data backup (#65). Thanks [@omertahaoztop](https://github.com/mattabate/life-distributable/issues/65).
+- How: same merge as add-0008. By hand: new `ops/git-bundle-snap.sh`, `ops/backup.sh`, `Makefile`.
+
+## add-0093 · 2026-11-01 · Tests pass on a Mac outside New York
+- For: anyone running `make check` outside the US Eastern zone
+- Offer: The spend, recs and threads tests word times in the hub's zone, which `main` pins and the tests did not, so `make check` failed elsewhere. Each package now pins it in `TestMain`, and one fixture's "today" uses `store.Day` (#68). Thanks [@Slaymish](https://github.com/mattabate/life-distributable/issues/68).
+- How: same merge as add-0008. By hand: new `zone_test.go` in `spend/`, `recs/`, `threads/`; `threads/relay_test.go`.
+
+## add-0094 · 2026-11-01 · One truncator
+- For: everyone
+- Offer: The calendar's first-line clip and the actions' truncate each cut text their own way; both now call `format.Truncate`, which counts characters, so a title never ends in half a letter (#69). Thanks [@Slaymish](https://github.com/mattabate/life-distributable/issues/69).
+- How: same merge as add-0008. By hand: `calendar/calendar.go`, `actions/actions.go`.
+
+## add-0095 · 2026-11-01 · Settings says where the heartbeat goes
+- For: everyone who opted in to the heartbeat
+- Offer: The README and Settings named the heartbeat's payload but not its recipient. Both now say it goes to the project's PostHog; `GET /api/v1/usage` carries `host` (the `usage_host` override, else PostHog), and Settings shows it beside the payload (#70). Thanks [@Slaymish](https://github.com/mattabate/life-distributable/issues/70).
+- How: same merge as add-0008. By hand: `usage/usage.go`, `server/usage.go`, `server/server_test.go`, `shared/api.md`, `shared/fixtures/usage.json`, `app/Life/Sources/SettingsView.swift`, `README.md`, `CLAUDE.md`.
+
+## add-0096 · 2026-11-01 · A superseded deferred rec stays closed
+- For: everyone who uses recs
+- Offer: A rec filed to replace a deferred one left the old one deferred, so on its day it came back beside its replacement and its check-in woke a session. Superseding now closes a deferred rec too and cancels its check-in, and a supersede that names a rec that was not open is logged (#73). Thanks [@shiy1022](https://github.com/mattabate/life-distributable/issues/73).
+- How: same merge as add-0008. By hand: `recs/recs.go`, `recs/recs_test.go`, `server/recs.go`.
+
+## add-0097 · 2026-11-01 · A repeating item keeps its own words
+- For: everyone with repeating calendar items
+- Offer: A repeating item's `--say` was spoken on the first occurrence only: the next one was made without it and fell back to the generic reminder. Every occurrence now carries it (#74). Thanks [@DlaregY](https://github.com/mattabate/life-distributable/issues/74).
+- How: same merge as add-0008. By hand: `calendar/calendar.go`, `calendar/chore_say_test.go`.

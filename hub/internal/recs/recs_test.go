@@ -235,6 +235,32 @@ func TestSupersedeClosesPrevious(t *testing.T) {
 	}
 }
 
+// A deferred rec is superseded too, so Wake on its day never puts it back
+// beside its replacement.
+func TestSupersedeClosesADeferredOne(t *testing.T) {
+	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.Local)
+	s := newStore(t, now)
+	old, _ := s.Add(Rec{Title: "Buy GLD", Domain: "money"})
+	if _, err := s.Defer(old.ID, "2026-08-25", "owner", "later"); err != nil {
+		t.Fatal(err)
+	}
+	nw, err := s.Add(Rec{Title: "Buy SPY instead", Domain: "money", PrevID: old.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Now = func() time.Time { return now.AddDate(0, 0, 3) }
+	if _, err := s.Wake(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(old.ID); got.Status != "superseded" {
+		t.Fatalf("%+v", got)
+	}
+	open, _ := s.List(Filter{})
+	if len(open) != 1 || open[0].ID != nw.ID {
+		t.Fatalf("%+v", open)
+	}
+}
+
 func TestExpireAndDueFilter(t *testing.T) {
 	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.Local)
 	s := newStore(t, now)

@@ -40,9 +40,15 @@ fi
 
 # A bundle of every ref of the repo rides the encrypted backup too, so a dead
 # disk never costs local commits. Restore: git clone data/mirrors/life.bundle life
+# A failed bundle renames the old one life.bundle.stale (ops/git-bundle-snap.sh)
+# and raises an ask; it never blocks the data backup below.
 mkdir -p "$ROOT/data/mirrors"
-git -C "$ROOT" bundle create "$ROOT/data/mirrors/life.bundle" --all 2>/dev/null || \
-  echo "bundle: git bundle failed" >&2
+source "$ROOT/ops/git-bundle-snap.sh"
+bundle_snap "$ROOT" "$ROOT/data/mirrors/life.bundle" || \
+  "$LIFECTL" ask add "Code bundle failed last night" \
+    --thread hub --kind other \
+    --detail "ops/backup.sh $(date '+%F %T'): git bundle of the repo failed; the last good one is data/mirrors/life.bundle.stale. See ops/logs/backup.log." \
+    2>/dev/null || echo "bundle: failed and could not raise the ask (hub down?)" >&2
 
 restic backup "$ROOT/data" --exclude "$DB" --exclude "$DB-wal" --exclude "$DB-shm" --tag nightly
 restic check --read-data-subset=5%

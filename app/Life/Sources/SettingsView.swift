@@ -299,6 +299,9 @@ struct SettingsView: View {
                     }))
                     Text("v\(u.payload.version) · \(u.payload.active_days) active days · \(u.payload.sessions_started) sessions · \(u.payload.goals) goals · \(u.payload.pages) pages · \(u.payload.token_bucket) tokens")
                         .font(.caption).foregroundStyle(.secondary)
+                    if !u.host.isEmpty {
+                        LabeledContent("Sends to", value: u.host.replacingOccurrences(of: "https://", with: ""))
+                    }
                 }
             }
             Section {
@@ -340,6 +343,7 @@ struct UsageState: Codable, Sendable {
     var on: Bool = false
     var last_sent: String = ""
     var install_id: String = ""
+    var host: String = ""
     var payload: Payload = Payload()
 }
 

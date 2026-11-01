@@ -169,11 +169,13 @@ Your data lives on your Mac. The hub listens only on your private
   hub through Tailscale.
 - **Outbound, only four places:** Anthropic (your Claude sessions), Apple
   (push notifications), your own backup bucket, and an optional weekly
-  heartbeat.
+  heartbeat to the project's [PostHog](https://posthog.com) analytics.
 - **The heartbeat is off unless you say yes.** The agent asks once at
   setup, and the answer defaults to no. If you say yes, it sends a random
-  install id, the version and a few counts. Never text, titles, names or
-  amounts. You can switch it off in Settings.
+  install id, the version and a few counts to PostHog
+  (`hub/internal/usage`). Never text, titles, names or amounts. Settings
+  shows the payload and where it goes, and switches it off; `usage_host` in
+  `ops/hub.json` sends it somewhere else.
 - **Backups are yours.** Encrypted on your Mac before upload, so the
   storage only ever sees noise. The nightly key can't delete anything.
 - **The gate.** Anything that spends money, deletes, contacts a person,
@@ -215,7 +217,8 @@ No. The agent runs every command. You click, copy and paste where it tells you.
 **Is my data sent anywhere?**
 Your Claude sessions go to Anthropic, like any Claude Code session. Push
 notifications go through Apple. Backups go to your own Backblaze bucket,
-encrypted first. Nothing else, unless you opt in to the counts-only heartbeat.
+encrypted first. Nothing else, unless you opt in to the counts-only heartbeat
+(to PostHog).
 
 **Can I skip the iPhone app?**
 Yes. Pick web only and skip the Apple Developer membership. The console

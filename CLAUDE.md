@@ -13,9 +13,10 @@ one endpoint's contract.
 
 - `data/` holds the owner's personal data: never commit it, never send it to
   any external service. Besides Anthropic (plan usage) and Apple (push), the
-  hub's only outbound call is the opt-in weekly heartbeat
-  (`hub/internal/usage`, off unless the owner said yes at setup; the app's
-  Settings switches it), which carries counts only.
+  hub's only outbound call is the opt-in weekly heartbeat to the project's
+  PostHog (`hub/internal/usage`, `usage_host` overrides; off unless the
+  owner said yes at setup; the app's Settings switches it), which carries
+  counts only.
 - The hub binds only to the Tailscale interface. Nothing public-facing, ever.
 - Gate (hub-enforced): money, delete, contact, share, push →
   `lifectl propose`. Approval needs the decider code, which only the owner

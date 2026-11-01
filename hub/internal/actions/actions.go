@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"life/hub/internal/format"
 	"life/hub/internal/notify"
 	"life/hub/internal/store"
 )
@@ -1022,12 +1023,7 @@ func b2i(b bool) int {
 	}
 	return 0
 }
-func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[:n] + "…"
-	}
-	return s
-}
+func truncate(s string, n int) string { return format.Truncate(s, n) }
 
 // NoMCP: the headless runs the hub starts (scheduled jobs, the "claude"
 // exec type) connect no MCP server. Without it the CLI connects every

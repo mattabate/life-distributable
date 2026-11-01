@@ -72,6 +72,13 @@ func (s *Server) recsAdd(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, err.Error())
 		return
 	}
+	// A superseded deferral's check-in would wake a session on its day to
+	// re-serve the idea its replacement already carries.
+	if rec.PrevID != "" {
+		if prev, err := s.Recs.Get(rec.PrevID); err == nil && prev.Status == "superseded" {
+			s.flow().CancelCheckIn(prev)
+		}
+	}
 	writeJSON(w, 201, rec)
 }
 

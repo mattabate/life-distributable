@@ -33,6 +33,7 @@ import (
 	"unicode/utf8"
 
 	"life/hub/internal/cadence"
+	"life/hub/internal/format"
 	"life/hub/internal/notify"
 	"life/hub/internal/store"
 	"life/hub/internal/threads"
@@ -2111,7 +2112,7 @@ func (c *Calendar) spawnNext(it Item) {
 	// own session as its source, so without a reason the guard would refuse it
 	// against the row itself or a same-goal sibling citing the same rec.
 	next := Item{Title: it.Title, Detail: it.Detail, Kind: it.Kind, Day: nd, At: it.At, Repeat: it.Repeat, GoalID: it.GoalID, ThreadID: it.ThreadID, Source: it.Source, NagMin: it.NagMin, PrevID: it.ID, Due: it.Due,
-		Surface: it.Surface, AskKind: it.AskKind, CheckHint: it.CheckHint, Distinct: "next occurrence of " + it.ID}
+		Surface: it.Surface, AskKind: it.AskKind, CheckHint: it.CheckHint, Say: it.Say, Distinct: "next occurrence of " + it.ID}
 	for _, t := range store.StepTitles(store.LoadSteps(c.db, it.ID)[it.ID]) {
 		next.Steps = append(next.Steps, store.Step{Title: t})
 	}
@@ -2877,8 +2878,5 @@ func firstLine(s string, n int) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
 	}
-	if len(s) > n {
-		s = s[:n] + "…"
-	}
-	return s
+	return format.Truncate(s, n)
 }

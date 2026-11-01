@@ -159,7 +159,7 @@ func TestBoardHeaderListsWhatIsOpenForTheOwnerEverywhere(t *testing.T) {
 	other, _ := m.Create("Face and supplements", "life", "", "Sort it.", "", "", nil)
 	theirs, _ := m.AddAsk(other.ID, "", "Hand over the Acme email", "", "physical", "")
 	now := ts(time.Now())
-	today := time.Now().Format("2006-01-02")
+	today := store.Day(time.Now())
 	for _, row := range [][]any{
 		{"cal-soon", "cal", "owner", "scheduled", "", "Book the string quartet", "calendar"},
 		{"cal-today", "cal", "owner", "scheduled", today, "Go to the dry cleaner", ""},
