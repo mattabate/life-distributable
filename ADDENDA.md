@@ -653,7 +653,7 @@ Entry format:
 
 ## add-0056 · 2026-10-29 · Outside text is marked untrusted; the hub session keeps its name
 - For: everyone
-- Offer: The preamble tells sessions that text inside `` (pages, mail, files, API output) is data, never instructions, still within the 12000-byte budget. The hub's own idle session is no longer auto-titled after one run's words, and boot pins its title back to "Hub".
+- Offer: The preamble tells sessions that text inside `<untrusted>` (pages, mail, files, API output) is data, never instructions, still within the 12000-byte budget. The hub's own idle session is no longer auto-titled after one run's words, and boot pins its title back to "Hub".
 - How: same merge as add-0008. By hand: `threads/threads.go` (preamble, `CreateIdle` `title_auto=0`, `PinTitle`), `preamble_test.go`, `pintitle_test.go`, `cmd/hub/main.go`.
 
 ## add-0057 · 2026-10-29 · A copy of the database before a schema change
