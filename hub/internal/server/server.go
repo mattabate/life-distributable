@@ -127,6 +127,7 @@ func (s *Server) Draining() { s.stopOnce.Do(func() { close(s.stopping) }) }
 
 func New(cfg *config.Config, token string, acts *actions.Queue, sch *sched.Scheduler, gs *goals.Store, os_ *obs.Store, thr *threads.Manager) *Server {
 	s := &Server{cfg: cfg, token: token, acts: acts, sch: sch, goals: gs, obs: os_, thr: thr, mux: http.NewServeMux(), usage: spend.NewCache(cfg.ClaudeProjectsDir), quota: spend.NewQuotaFetcher(), stopping: make(chan struct{})}
+	s.usage.Also = cfg.SessionProjectsDir
 	s.register()
 	s.decider().Armed() // a hash already on disk latches now, not at the first decision
 	if os_ != nil {
@@ -233,7 +234,16 @@ func (s *Server) authorized(r *http.Request) bool {
 			got = c.Value
 		}
 	}
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) == 1
+	if got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) == 1 {
+		return true
+	}
+	// A session token: the caller IS that session, whatever header it sent, so
+	// every check on X-Life-Thread holds against it.
+	if id := s.sessionFromRequest(r); id != "" {
+		r.Header.Set("X-Life-Thread", id)
+		return true
+	}
+	return false
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +260,9 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if t := r.URL.Query().Get("token"); t != "" && subtle.ConstantTimeCompare([]byte(t), []byte(s.token)) == 1 {
+	// A session token is taken too (ops/hub.sh url as the session user, which
+	// cannot read hub.token): its cookie is that session's, held to its limits.
+	if t := r.URL.Query().Get("token"); t != "" && (subtle.ConstantTimeCompare([]byte(t), []byte(s.token)) == 1 || s.cfg.SessionTokens && sessionFromToken(s.token, t) != "") {
 		http.SetCookie(w, &http.Cookie{Name: "life_token", Value: t, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
 		next := "/"
 		if n := r.URL.Query().Get("next"); strings.HasPrefix(n, "/api/v1/blobs/") && !strings.Contains(n, "..") {

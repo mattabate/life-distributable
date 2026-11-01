@@ -76,6 +76,9 @@ func (s *Server) postObs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		o.Source, o.Kind, o.TZ = r.FormValue("source"), r.FormValue("kind"), r.FormValue("tz")
+		if s.ownerSource(w, r, o.Source) {
+			return
+		}
 		if v := r.FormValue("ts"); v != "" {
 			t, err := time.Parse(time.RFC3339Nano, v)
 			if err != nil {
@@ -118,7 +121,7 @@ func (s *Server) postObs(w http.ResponseWriter, r *http.Request) {
 			o.Payload, _ = json.Marshal(pl)
 		}
 	} else {
-		if !decode(w, r, &o, 4<<20) {
+		if !decode(w, r, &o, 4<<20) || s.ownerSource(w, r, o.Source) {
 			return
 		}
 	}
@@ -240,6 +243,9 @@ func (s *Server) postObsBatch(w http.ResponseWriter, r *http.Request) {
 	for i := range body.Items {
 		if body.Items[i].Source == "" {
 			body.Items[i].Source = body.Source
+		}
+		if s.ownerSource(w, r, body.Items[i].Source) {
+			return
 		}
 	}
 	// One transaction; the kinds' hooks run once after it (obs.Ingest).

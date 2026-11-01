@@ -30,6 +30,7 @@ import (
 //     session would wait on it.
 type Cache struct {
 	Root   string
+	Also   string        // a second tree walked after Root ("" = none)
 	MaxAge time.Duration // 0 = defaultMaxAge
 	Store  string        // the parsed tree, kept across restarts; "" = never written
 
@@ -138,7 +139,7 @@ func (c *Cache) refresh() ([]Usage, error) {
 
 	next := make(map[string]cachedFile, len(old)+16)
 	parsed := 0
-	err := filepath.WalkDir(c.Root, func(p string, d fs.DirEntry, err error) error {
+	walk := func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".jsonl") {
 			return nil
 		}
@@ -157,7 +158,13 @@ func (c *Cache) refresh() ([]Usage, error) {
 		next[p] = cachedFile{size: info.Size(), mod: info.ModTime(), us: us}
 		parsed++
 		return nil
-	})
+	}
+	err := filepath.WalkDir(c.Root, walk)
+	// The session user's transcripts (config session_projects_dir): an
+	// unreadable or missing tree adds nothing.
+	if c.Also != "" && filepath.Clean(c.Also) != filepath.Clean(c.Root) {
+		filepath.WalkDir(c.Also, walk)
+	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

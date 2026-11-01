@@ -84,6 +84,7 @@ func (s *Server) proposeAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.ThreadID, p.Source = from, "claude:thread:"+from
+		s.sessionProposal(&p)
 	}
 	a, err := s.acts.Propose(p)
 	if err != nil {

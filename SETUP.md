@@ -372,3 +372,37 @@ It takes one message.
    `--usage` and `--surfaces` as step 5, `ops/hub.sh restart`, then
    `lifectl thread calendar persona assistant`. Whatever they answer, do
    not ask again for two weeks (CLAUDE.md, "Team mode").
+
+## Optional: run sessions as a separate user
+
+Off by default, and nothing in steps 0 to 10 needs it. Offer it only if the
+owner asks for more hardening. With `session_user` set, every session runs as
+a second macOS user (`life-agent` here) in a clone of its own, so a session
+cannot write the main checkout, read `ops/secrets/` (the hub token, the
+decider hash) or write the database. Its commits reach main through the hub
+(`bash ops/land.sh`), and app builds run as the owner (`make ship WHY="..."`,
+`make mac WHY="..."`), both with no card. The owner types steps 1 to 4 in a
+Terminal; each `sudo` asks for their Mac password.
+
+1. **The user.** `sudo sysadminctl -addUser life-agent -fullName "Life sessions" -password -`
+   (type a long password; nobody logs in as it). Then
+   `sudo visudo -f /etc/sudoers.d/life-agent` and add the one line
+   `<owner's short name> ALL=(life-agent) NOPASSWD: ALL` (short name: `id -un`).
+2. **Its Claude.** `sudo -u life-agent -H bash -c 'curl -fsSL https://claude.ai/install.sh | bash'`, then
+   `sudo -u life-agent -H bash -c '~/.local/bin/claude setup-token'` and
+   sign in. Save the token it prints:
+   `sudo -u life-agent -H bash -c 'umask 077; cat > ~/.claude-token'`, paste,
+   Return, Ctrl-D.
+3. **Prepare and prove.** `bash ops/session-user-prep.sh life-agent`.
+   **Verify:** it ends `== 0 failed`.
+4. **Switch.** `bash ops/session-user-move.sh life-agent` is a dry run: it
+   lists the sessions it would move. Then
+   `bash ops/session-user-move.sh --go life-agent`: it waits for working
+   sessions to finish, gives each open session its clone, sets `session_user`
+   in `ops/hub.json` and restarts the hub.
+5. **Audit.** Ask any session to run `ops/py.sh session-user-audit.py`.
+   **Verify:** it ends `0 failed`.
+
+To turn it off: `bash ops/session-user-move.sh --undo` (puts the
+transcripts back, empties `session_user`, restarts the hub). Commits left in
+the clones stay on their `th-` branches under that user's `~/worktrees`.

@@ -43,7 +43,7 @@ func (s *Server) patchGoal(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &patch, 0) {
 		return
 	}
-	g, err := s.goals.Update(r.PathValue("id"), patch)
+	g, err := s.goals.Update(r.PathValue("id"), unstamped(patch))
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return

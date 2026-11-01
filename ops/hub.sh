@@ -108,7 +108,9 @@ case "${1:-}" in
   stop)    launchctl bootout "gui/$UID_/com.life.hub" ;;
   status)  launchctl print "gui/$UID_/com.life.hub" | grep -E "state|pid" | head -3; curl -fsS --max-time 3 "https://$HOST/healthz" && echo ;;
   logs)    tail -f logs/hub.log ;;
-  url)     echo "https://$HOST/?token=$(cat secrets/hub.token)" ;;
+  # A session user has only its own token (LIFE_SESSION_TOKEN): the console
+  # opens as that session, so browse.js and web-smoke.sh work from its clone.
+  url)     echo "https://$HOST/?token=${LIFE_SESSION_TOKEN:-$(cat secrets/hub.token)}" ;;
   web)     open "https://$HOST/?token=$(cat secrets/hub.token)" ;;
   *) sed -n '2,10p' "$0"; exit 1 ;;
 esac

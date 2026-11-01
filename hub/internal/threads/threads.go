@@ -379,11 +379,16 @@ type Manager struct {
 	// tokens instead of letting it grow to the model's full window. See the
 	// config field for the measurement that motivated it. 0 = CLI default.
 	AutoCompactWindow int
+	// SessionToken: the token a session process calls the hub with
+	// (LIFE_SESSION_TOKEN). Nil = off, it uses the hub token.
+	SessionToken func(threadID string) string
 	// Transcripts is the CLI's projects dir (~/.claude/projects). The CLI
 	// deletes a transcript 30 days after its last write, and `--resume` on a
 	// deleted one fails on every retry. When the session's <dir>/*/<id>.jsonl
 	// is gone the launch goes lean instead. "" = no check.
 	Transcripts string
+	// RunAs: start sessions as another macOS user (runas.go). Zero = off.
+	RunAs RunAs
 	// Model picks the --model for a new process from a starting rung
 	// (spend.Picker.PickFrom: the rung the policy names, stepping down when
 	// its bucket is full; "" = the top). nil = the rung as named, or the CLI
@@ -1158,6 +1163,9 @@ func (m *Manager) systemPreamble(t Thread) string {
 	}
 	if m.TeamMode {
 		sched += "Team mode is on: some sessions play a named role (the people at the foot of the Sessions list); a message that belongs to a role's lane goes to that session with `lifectl relay <id> \"…\"`, and a role's own files are `lifectl workspace <role>`.\n"
+	}
+	if m.RunAs.User != "" {
+		sched += "You run as a separate user in a clone of the hub repo of your own (branch th-" + t.ID + "): commit there, then `bash ops/land.sh` puts it on main through the hub and prints how it ended; `make ship WHY=\"fixes ...\"` and `make mac WHY=\"fixes ...\"` build from main the same way, so land first. The main checkout, ops/secrets and the database are read-only to you.\n"
 	}
 	owner, who := m.owner(), ""
 	if owner != "the owner" {

@@ -43,6 +43,7 @@ func (s *Server) routes() []route {
 		{"POST /api/v1/actions/{id}/dismiss", s.moveAction("dismissed"), false},
 		{"POST /api/v1/actions/{id}/reopen", s.moveAction("proposed"), false},
 		{"GET /api/v1/decider", s.deciderStatus, false},
+		{"POST /api/v1/land", s.land, false},
 		{"GET /api/v1/schedule", s.schedule, false},
 		{"POST /api/v1/schedule/reload", s.scheduleReload, false},
 		{"POST /api/v1/schedule/{job}/run", s.scheduleRun, false},
@@ -120,6 +121,7 @@ func (s *Server) routes() []route {
 		{"POST /api/v1/app/install", s.appInstall, false},
 		{"GET /api/v1/app/install/status", s.appInstallStatus, false},
 		{"POST /api/v1/app/mac", s.macBuild, false},
+		{"POST /api/v1/app/ship", s.appShip, false},
 		{"GET /ota/{token}/{file}", s.ota, true},
 	}
 }
@@ -138,7 +140,7 @@ func (s *Server) register() {
 	for _, r := range s.routes() {
 		h := r.h
 		if !r.open {
-			h = s.auth(h)
+			h = s.auth(s.sessionLimits(r.pattern, h))
 		}
 		s.mux.HandleFunc(r.pattern, h)
 	}

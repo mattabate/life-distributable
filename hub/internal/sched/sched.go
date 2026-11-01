@@ -136,6 +136,11 @@ type Scheduler struct {
 	// a job's `claude -p`, from the model policy (spend/policy.go) through
 	// the ladder picker. nil = the CLI's defaults.
 	ModelArgs func() []string
+	// JobToken is a job's own hub token, a session token for "job-<name>"
+	// (server/sessiontoken.go), handed to its lifectl as LIFE_SESSION_TOKEN.
+	// A job runs as the hub's user, so without it lifectl reads hub.token and
+	// every call is the owner's. nil = "session_tokens": false in hub.json.
+	JobToken func(name string) string
 
 	mu      sync.Mutex
 	running map[string]bool
@@ -606,6 +611,7 @@ func (s *Scheduler) exec(b begun) (int64, error) {
 	defer func() { s.mu.Lock(); delete(s.running, name); s.mu.Unlock() }()
 	ctx, cancel := context.WithTimeout(context.Background(), jobTimeout(*spec))
 	defer cancel()
+	ctx = context.WithValue(ctx, jobKey{}, name)
 	ctx = context.WithValue(ctx, startedKey{}, func(pgid int) {
 		if _, err := s.db.Exec(`UPDATE runs SET pgid=? WHERE id=?`, pgid, id); err != nil {
 			log.Printf("sched: run %d pgid not recorded: %v", id, err)
@@ -831,6 +837,11 @@ func jobDenied(dir string, tools []string) []string {
 			out = append(out, t+"(/"+p+"/**)")
 		}
 	}
+	// Nor reads ops/secrets: a job runs as the hub's user, and lifectl calls
+	// with the job's own token (JobToken), so the hub token is no use to it.
+	if dir != "" {
+		out = append(out, "Read(/"+filepath.Join(dir, "ops", "secrets")+"/**)")
+	}
 	return out
 }
 
@@ -842,10 +853,25 @@ func (s *Scheduler) runClaude(ctx context.Context, dir, prompt string, tools []s
 	c := exec.CommandContext(ctx, s.claudeBin, jobArgs(dir, tools, model)...)
 	c.Dir = dir
 	c.Env = jobEnv()
+	if tok := s.jobToken(ctx); tok != "" {
+		c.Env = append(c.Env, "LIFE_SESSION_TOKEN="+tok)
+	}
 	c.Stdin = strings.NewReader(prompt)
 	started, _ := ctx.Value(startedKey{}).(func(int))
 	raw, err := runGroup(c, pipeGrace, started)
 	return decodeResult(raw, err)
+}
+
+// jobKey: the job's name, which exec hands runClaude for its token.
+type jobKey struct{}
+
+// jobToken is the token the job's lifectl calls with, or "".
+func (s *Scheduler) jobToken(ctx context.Context) string {
+	name, _ := ctx.Value(jobKey{}).(string)
+	if s.JobToken == nil || name == "" {
+		return ""
+	}
+	return s.JobToken("job-" + name)
 }
 
 // startedKey: the context value exec hands runClaude, called with the run's

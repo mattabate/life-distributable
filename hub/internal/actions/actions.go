@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -1074,6 +1075,19 @@ func runShell(c *exec.Cmd) (string, error) {
 	return buf.String(), err
 }
 
+// shellEnv: the hub's environment plus the action's own dir as a git
+// safe.directory. A session user's clone (config session_user) belongs to that
+// user and the hub runs as the owner's, so git refuses an approved command
+// there with "detected dubious ownership". Only that one dir is trusted, for
+// that one command; git's guard stays on everywhere else.
+func shellEnv(env []string, dir string) []string {
+	out := append([]string{}, env...)
+	if dir != "" {
+		out = append(out, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0="+dir)
+	}
+	return out
+}
+
 func (e DefaultExecutor) Exec(ctx context.Context, typ string, payload json.RawMessage) (string, error) {
 	switch typ {
 	case "shell":
@@ -1086,6 +1100,7 @@ func (e DefaultExecutor) Exec(ctx context.Context, typ string, payload json.RawM
 		}
 		c := exec.CommandContext(ctx, "/bin/bash", "-lc", p.Cmd)
 		c.Dir = p.Dir
+		c.Env = shellEnv(os.Environ(), p.Dir)
 		return runShell(c)
 	case "claude":
 		var p struct {

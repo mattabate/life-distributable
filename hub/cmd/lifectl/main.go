@@ -1,7 +1,7 @@
 // lifectl: tiny CLI for Claude sessions (and the owner) to talk to the hub.
 // `lifectl` alone prints every command (usageText; a test keeps it whole).
-// Reads ops/hub.json `public_host` for the address and ops/secrets/hub.token
-// for auth. Writes are stamped with actor(): claude:thread:$LIFE_THREAD_ID
+// Reads ops/hub.json `public_host` for the address and $LIFE_SESSION_TOKEN,
+// else ops/secrets/hub.token, for auth. Writes are stamped with actor(): claude:thread:$LIFE_THREAD_ID
 // from a session, else owner. Flag names only ever gain aliases (cal set --on,
 // goal note --actor): a running session's command keeps
 // working.
@@ -72,9 +72,12 @@ func main() {
 			time.Local = loc
 		}
 	}
-	tokB, err := os.ReadFile(filepath.Join(ops, "secrets", "hub.token"))
-	if err != nil {
-		die("token: %v", err)
+	// A session or job given its own token uses it (server/sessiontoken.go).
+	tokB := []byte(os.Getenv("LIFE_SESSION_TOKEN"))
+	if len(tokB) == 0 {
+		if tokB, err = os.ReadFile(filepath.Join(ops, "secrets", "hub.token")); err != nil {
+			die("token: %v", err)
+		}
 	}
 	c := client{base: "https://" + cfg.PublicHost, token: strings.TrimSpace(string(tokB))}
 	// --json anywhere: the list commands print the hub's JSON as before;

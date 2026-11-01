@@ -12,11 +12,16 @@ import (
 // its body says (#76: the asks, workspace and actions routes took the body's
 // `by`/`thread_id`, so one session could close another's card in the owner's
 // voice, overwrite another role's files, or file a proposal as another
-// session, to be carried out with that session's grants).
+// session, to be carried out with that session's grants). With session tokens
+// (sessiontoken.go) it is a proof: authorized sets the header from the token,
+// whatever the caller sent.
 
 // caller is the session a request comes from, or "" for the owner.
 func (s *Server) caller(r *http.Request) string {
-	return strings.TrimSpace(r.Header.Get("X-Life-Thread"))
+	if from := strings.TrimSpace(r.Header.Get("X-Life-Thread")); from != "" {
+		return from
+	}
+	return s.sessionFromRequest(r)
 }
 
 // actor is who a write is by: the calling session, else the body's claim,

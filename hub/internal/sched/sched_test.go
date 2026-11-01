@@ -46,7 +46,7 @@ func TestJobArgsDenyUngrantedFileTools(t *testing.T) {
 		t.Fatalf("read-only job may still edit: %s", got)
 	}
 	d := strings.Join(jobDenied("/l", []string{"Read", "Write(/data/tmp/pdf/**)"}), ",")
-	for _, want := range []string{"Edit", "Write(//l/ops/secrets/**)", "Write(//l/.git/**)", "NotebookEdit"} {
+	for _, want := range []string{"Edit", "Write(//l/ops/secrets/**)", "Write(//l/.git/**)", "NotebookEdit", "Read(//l/ops/secrets/**)"} {
 		if !strings.Contains(","+d+",", ","+want+",") {
 			t.Fatalf("denials lack %q: %s", want, d)
 		}
@@ -223,6 +223,29 @@ func TestReconcileTableIntoStandingRows(t *testing.T) {
 	}
 	if len(c.sets) != 0 {
 		t.Fatal(c.sets)
+	}
+}
+
+// A job calls the hub with a token of its own, never the owner's: it runs as
+// the hub's user, so lifectl without LIFE_SESSION_TOKEN would read hub.token.
+func TestJobCallsWithItsOwnToken(t *testing.T) {
+	s, _, _ := setup(t, `{"jobs":[{"name":"j","project":"life","when":"every@1h","prompt":"p"}]}`)
+	s.JobToken = func(id string) string { return "tok-" + id }
+	got := make(chan string, 1)
+	s.RunClaude = func(ctx context.Context, _, _ string, _ []string) (Output, error) {
+		got <- s.jobToken(ctx)
+		return ParseOutput(`{"summary":"ok","findings":[],"needs_you":[]}`, "")
+	}
+	if st, why := s.Fire("j", "p-1"); st != "started" {
+		t.Fatal(st, why)
+	}
+	select {
+	case tok := <-got:
+		if tok != "tok-job-j" {
+			t.Fatalf("job token %q", tok)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("job never ran")
 	}
 }
 

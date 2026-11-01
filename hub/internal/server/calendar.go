@@ -139,7 +139,7 @@ func (s *Server) calendarUpdate(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad json")
 		return
 	}
-	it, err := s.Cal.Update(r.PathValue("id"), in)
+	it, err := s.Cal.Update(r.PathValue("id"), unstamped(in))
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return

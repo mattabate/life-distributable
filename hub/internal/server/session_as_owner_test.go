@@ -140,4 +140,11 @@ func TestSessionHeaderNamesTheActor(t *testing.T) {
 	if code, got := call("POST", "/api/v1/calendar/"+it["id"].(string)+"/resolve", a, js, `{"state":"done"}`); code != 200 || got["resolved_by"] != asA {
 		t.Fatalf("A closing the owner's step: %d resolved_by=%v", code, got["resolved_by"])
 	}
+
+	// 6. Observations under the owner's sources are refused on a session's
+	// token only (TestSessionTokenCannotSpeakForOwner): with just the header,
+	// a session still logs what the owner told it.
+	if code, _ := call("POST", "/api/v1/observations", a, js, `{"source":"app","kind":"note","payload":{"count":3}}`); code != 201 {
+		t.Fatalf("a session logging for the owner with the header: %d", code)
+	}
 }

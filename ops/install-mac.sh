@@ -11,6 +11,16 @@
 # top bar shows Update, and ops/mac-swap.sh installs it once the app quits.
 # Needs: DEVELOPMENT_TEAM in app/local.xcconfig (setup writes it).
 set -euo pipefail
+# In a session clone (session_user: its origin is a main checkout it cannot
+# write) there is no signing setup and no /Applications: the hub builds main
+# as the owner's user on the standing approval (ops/ship.py). Land first.
+origin=$(git -C "$(dirname "$0")" remote get-url origin 2>/dev/null || true)
+if [ -d "$origin/.git" ] && [ ! -w "$origin/.git" ]; then
+  why=; while [ $# -gt 0 ]; do [ "$1" != --why ] || why=${2:-}; shift; done
+  [ -n "$why" ] || { echo "install-mac.sh: make mac WHY=\"fixes ...\" (what the build does)" >&2; exit 2; }
+  exec "$(dirname "$0")/py.sh" ship.py mac "$why"
+fi
+[ "${1:-}" != --why ] || shift 2
 cd "$(dirname "$0")"
 ROOT=$(cd .. && pwd)
 

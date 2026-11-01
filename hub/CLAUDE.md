@@ -86,7 +86,9 @@ shows a model under "Unpriced models".
   shell `cmd` is one plain line on `Queue.FreeShell` (main sets it; `ls` by
   default): otherwise a proposal would run the hub's own bash past both
   lists. Add only read-only commands there. Sessions get `--disallowedTools`
-  Edit/Write on `ops/secrets/**`, and the decider fails closed once armed
+  Edit/Write/MultiEdit/NotebookEdit on `ops/secrets/**` and `.git/**`, jobs
+  are also denied Read of `ops/secrets/**`, and each calls the hub with its own session
+  token (`session_tokens`, shared/api.md Auth), never the hub token. The decider fails closed once armed
   (an emptied `decider.hash` refuses every approval).
 - **No `python3`, `sqlite3` or `curl` on either list**: each is
   one line past every other control. Use `lifectl api

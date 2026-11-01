@@ -87,7 +87,7 @@ func (m *Manager) gone(r run, now time.Time) bool {
 		m.probed = map[string]time.Time{}
 	}
 	m.probed[r.id] = now
-	if _, err := m.Run("tmux", "has-session", "-t", m.tmuxSession(r.thread, r.id)); err == nil {
+	if _, err := m.tmux("has-session", "-t", m.tmuxSession(r.thread, r.id)); err == nil {
 		return false
 	}
 	delete(m.probed, r.id)
@@ -789,6 +789,8 @@ func (m *Manager) launch(t Thread) error {
 	if err != nil || len(qs) == 0 {
 		return err
 	}
+	// As the session user, its own clone (runas.go).
+	dir = m.sessionDir(t, dir)
 	// Model, effort, the CLI's own budget and whether this wake is LEAN come
 	// from the policy for the kind of wake that starts this process
 	// (spend/policy.go).
@@ -855,17 +857,18 @@ func (m *Manager) launch(t Thread) error {
 	// with "bash: …/bin/claude: No such file or directory" and put an error
 	// card on the board. Wait for the binary inside the tmux shell — never under
 	// m.mu — and only then start; past 90 s the old error is the right one.
-	cmd := waitForBin(m.ClaudeBin) + shellQuote(m.feedBin()) + " feed " + shellQuote(base+".in") + " | LIFE_THREAD_ID=" + shellQuote(t.ID) + " LIFE_RUN_ID=" + shellQuote(runID)
+	claudeBin := m.sessionClaudeBin()
+	cmd := waitForBin(claudeBin) + shellQuote(m.feedBin()) + " feed " + shellQuote(base+".in") + " | LIFE_THREAD_ID=" + shellQuote(t.ID) + " LIFE_RUN_ID=" + shellQuote(runID) + m.sessionTokenEnv(t.ID) + m.sessionUserEnv()
 	if m.AutoCompactWindow > 0 {
 		cmd += " CLAUDE_CODE_AUTO_COMPACT_WINDOW=" + strconv.Itoa(m.AutoCompactWindow)
 	}
-	cmd += " " + shellQuote(m.ClaudeBin)
+	cmd += " " + shellQuote(claudeBin)
 	for _, a := range args {
 		cmd += " " + shellQuote(a)
 	}
 	cmd += fmt.Sprintf(" > %s 2>%s.err; touch %s.done", shellQuote(base+".out"), shellQuote(base+".out"), shellQuote(base+".out"))
 	tmuxName := m.tmuxSession(t.ID, runID)
-	if out, err := m.Run("tmux", "new-session", "-d", "-s", tmuxName, "-c", dir, cmd); err != nil {
+	if out, err := m.tmux("new-session", "-d", "-s", tmuxName, "-c", dir, cmd); err != nil {
 		return fmt.Errorf("tmux: %s", strings.TrimSpace(string(out)))
 	}
 	// The run row, its delivered messages and the running status land together.
@@ -873,7 +876,7 @@ func (m *Manager) launch(t Thread) error {
 	// polled it, its reply never landed, and the messages stayed queued for a
 	// second process. If the record cannot be written the process is stopped.
 	if err := m.recordStart(runID, t.ID, qs, now, base, model, res.Effort); err != nil {
-		m.Run("tmux", "kill-session", "-t", tmuxName)
+		m.tmux("kill-session", "-t", tmuxName)
 		return fmt.Errorf("record run: %w", err)
 	}
 	return nil
@@ -1062,7 +1065,7 @@ func (m *Manager) killRuns(id, note, status string) error {
 	now := time.Now()
 	for _, runID := range runs {
 		// Ignore "no such session": the process may already be gone.
-		m.Run("tmux", "kill-session", "-t", m.tmuxSession(id, runID))
+		m.tmux("kill-session", "-t", m.tmuxSession(id, runID))
 		m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0 WHERE id=?`, ts(now), runID)
 	}
 	// Anything not yet handed over stays queued for the next process.
@@ -1138,7 +1141,7 @@ func (m *Manager) Poll() {
 			// result or a folded steer settles its own way first. Not transient
 			// words: the same call usually hangs again, so the card, no retry.
 			log.Printf("thread %s: process %s: %s", r.thread, r.id, hangText)
-			m.Run("tmux", "kill-session", "-t", m.tmuxSession(r.thread, r.id))
+			m.tmux("kill-session", "-t", m.tmuxSession(r.thread, r.id))
 			os.WriteFile(r.out+".err", []byte(hangText), 0o600)
 			m.finishProcess(r)
 		case r.busy == 0 && r.eof == 0 && now.Sub(r.lastOutput) > idleTTL:
@@ -1181,8 +1184,9 @@ func (m *Manager) deliveredAfter(r run, t time.Time) []int64 {
 
 // deniedTools: no session writes ops/secrets/ (hub.token, decider.hash, the
 // connector keys), whatever --allowedTools grants Edit and Write elsewhere
-// (a session could empty decider.hash). Edit rules cover every file-writing
-// tool; "//" is an absolute path.
+// (a session could empty decider.hash). Every file-writing tool is named,
+// MultiEdit and NotebookEdit included, rather than trusting one rule to cover
+// the others; "//" is an absolute path.
 //
 // Nor the repo's .git/ (the common dir every worktree shares): its config
 // (core.fsmonitor, core.hooksPath, filter/diff drivers) and hooks/ name
@@ -1201,9 +1205,20 @@ func (m *Manager) deniedTools() []string {
 	var out []string
 	for _, p := range []string{filepath.Join(dir, "ops", "secrets"), filepath.Join(dir, ".git")} {
 		g := "/" + p + "/**"
-		out = append(out, "Edit("+g+")", "Write("+g+")")
+		for _, t := range []string{"Edit", "Write", "MultiEdit", "NotebookEdit"} {
+			out = append(out, t+"("+g+")")
+		}
 	}
 	return out
+}
+
+// sessionTokenEnv is the session's own hub token, for lifectl and hublib
+// (server/sessiontoken.go); "" when the hub hands none.
+func (m *Manager) sessionTokenEnv(threadID string) string {
+	if m.SessionToken == nil {
+		return ""
+	}
+	return " LIFE_SESSION_TOKEN=" + shellQuote(m.SessionToken(threadID))
 }
 
 // toolsStale: a live process keeps the --allowedTools it launched with, so a
@@ -2229,7 +2244,7 @@ func (m *Manager) relaunchBelow(r run, text string) bool {
 		return false
 	}
 	now := time.Now()
-	m.Run("tmux", "kill-session", "-t", m.tmuxSession(r.thread, r.id))
+	m.tmux("kill-session", "-t", m.tmuxSession(r.thread, r.id))
 	m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0, cost_seen=? WHERE id=?`, ts(now), r.costSeen, r.id)
 	// The turn's input goes back on the queue (turn ids are <run>, <run>-t2,
 	// …); with none, a resume note, or launch finds nothing and starts nothing.

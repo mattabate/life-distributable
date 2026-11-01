@@ -10,6 +10,26 @@ import (
 const extra = `{"type":"assistant","requestId":"r3","sessionId":"s1","cwd":"/Users/owner/life","timestamp":"2026-08-20T11:00:00Z","message":{"id":"m3","model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
 `
 
+// The session user's transcripts (Also) count beside the owner's; a missing
+// second tree adds nothing and is no error.
+func TestCacheReadsTheSecondTree(t *testing.T) {
+	dir, also := t.TempDir(), t.TempDir()
+	for _, p := range []string{filepath.Join(dir, "x", "a.jsonl"), filepath.Join(also, "y", "b.jsonl")} {
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte(sample), 0o644)
+	}
+	c := NewCache(dir)
+	c.Also = also
+	if us, err := c.Usages(); err != nil || len(us) != 4 {
+		t.Fatalf("both trees: %d usages, %v", len(us), err)
+	}
+	c = NewCache(dir)
+	c.Also = filepath.Join(also, "gone")
+	if us, err := c.Usages(); err != nil || len(us) != 2 {
+		t.Fatalf("missing second tree: %d usages, %v", len(us), err)
+	}
+}
+
 // A refresh must cost a stat walk plus the files that changed — never the
 // whole 600 MB tree again (the 2.5–5.6 s Spend page, 2026-08-28).
 func TestCacheReparsesOnlyWhatChanged(t *testing.T) {

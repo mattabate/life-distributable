@@ -9,6 +9,15 @@
 # Ad-hoc builds carry aps-environment=production: the hub must run with
 # apns_production=true (ops/hub.json) while an OTA build is on the phone.
 set -euo pipefail
+# In a session clone (session_user: its origin is a main checkout it cannot
+# write) there is no signing setup: the hub builds main as the owner's user
+# on the standing approval (ops/ship.py). Land first.
+origin=$(git -C "$(dirname "$0")" remote get-url origin 2>/dev/null || true)
+if [ -d "$origin/.git" ] && [ ! -w "$origin/.git" ]; then
+  [ "${1:-}" = --why ] && [ -n "${2:-}" ] || { echo "ota.sh: make ship WHY=\"fixes ...\" (what the build does)" >&2; exit 2; }
+  exec "$(dirname "$0")/py.sh" ship.py phone "$2"
+fi
+[ "${1:-}" != --why ] || shift 2
 cd "$(dirname "$0")"
 ROOT=$(cd .. && pwd)
 source ./app-identity.sh

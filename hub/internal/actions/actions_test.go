@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -709,5 +710,20 @@ func TestDecisionRelayedToThread(t *testing.T) {
 	d, err := q.Decide(c.ID, true, "app", "")
 	if err != nil || d.ThreadID != "thread-new" || d.RunID != "7" {
 		t.Fatalf("%+v %v", d, err)
+	}
+}
+
+// A shell action's git trusts its own dir (a session user's clone, which the
+// hub's user does not own) and no other.
+func TestShellTrustsOnlyItsOwnDirForGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip(err)
+	}
+	dir := t.TempDir()
+	var e DefaultExecutor
+	p, _ := json.Marshal(map[string]string{"cmd": "git config --get-all safe.directory", "dir": dir})
+	out, err := e.Exec(context.Background(), "shell", p)
+	if err != nil || !strings.Contains(out, dir) || strings.Contains(out, "*") {
+		t.Fatalf("got %q %v", out, err)
 	}
 }

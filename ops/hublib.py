@@ -7,7 +7,8 @@ lives in one place:
   hub address   ops/hub.json `public_host` — the ONLY place it is written
                 (lifectl and ops/hub.sh read the same key). Moving the hub to
                 another machine is that one line (+ its cert files).
-  hub auth      ops/secrets/hub.token, Bearer; TLS VERIFIED (the ts.net cert
+  hub auth      $LIFE_SESSION_TOKEN in a session, else ops/secrets/hub.token,
+                Bearer; TLS VERIFIED (the ts.net cert
                 is publicly trusted — no CERT_NONE anywhere).
   life.db       read-only (`mode=ro`); writes go through the hub.
   Eastern time  ET / now_et() / today_et() — never a fixed -4h offset.
@@ -59,8 +60,13 @@ def url(path=""):
 
 
 def token():
-    with open(os.path.expanduser(config().get("token_file", SECRETS + "/hub.token"))) as f:
-        return f.read().strip()
+    if os.environ.get("LIFE_SESSION_TOKEN"):  # a session's own (server/sessiontoken.go)
+        return os.environ["LIFE_SESSION_TOKEN"].strip()
+    try:
+        with open(os.path.expanduser(config().get("token_file", SECRETS + "/hub.token"))) as f:
+            return f.read().strip()
+    except OSError:  # a session user (session_user) reads no hub token
+        raise SystemExit("hublib: no hub token readable here and no LIFE_SESSION_TOKEN")
 
 
 def tls():
@@ -131,7 +137,13 @@ def et(ts):
 # --- life.db, read-only -----------------------------------------------------
 
 def db_path():
-    return os.path.expanduser(config().get("db_path", ROOT + "/data/life.db"))
+    p = config().get("db_path", ROOT + "/data/life.db")
+    # The owner's home, whoever is asking: a session user's ~ holds no database.
+    # ops/hub.json is the owner's file (a session clone links to it).
+    if p.startswith("~/"):
+        import pwd
+        return pwd.getpwuid(os.stat(REPO + "/ops/hub.json").st_uid).pw_dir + p[1:]
+    return p
 
 
 def db():
@@ -146,7 +158,7 @@ def env(name):
     out = {}
     try:
         lines = open(SECRETS + "/" + name + ".env").read().splitlines()
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError):  # a session user reads none
         return out
     for line in lines:
         line = line.strip()

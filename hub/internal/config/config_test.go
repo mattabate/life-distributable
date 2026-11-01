@@ -50,6 +50,62 @@ func TestLoadNamesEveryProblemAtOnce(t *testing.T) {
 	}
 }
 
+// Session tokens are on unless hub.json turns them off by name.
+func TestSessionTokensDefaultOn(t *testing.T) {
+	dir := t.TempDir()
+	for extra, want := range map[string]bool{
+		``:                          true,
+		`, "session_tokens": true`:  true,
+		`, "session_tokens": false`: false,
+	} {
+		p := filepath.Join(dir, "hub.json")
+		os.WriteFile(p, []byte(`{"listen_addr": "100.64.0.1:8443", "claude_bin": "/bin/sh", "db_path": "x"`+extra+`}`), 0o644)
+		c, err := Load(p)
+		if err != nil {
+			t.Fatalf("%q: %v", extra, err)
+		}
+		if c.SessionTokens != want {
+			t.Errorf("%q: session_tokens = %v, want %v", extra, c.SessionTokens, want)
+		}
+	}
+}
+
+// session_user is off when empty; set, its paths default from its home, and it
+// refuses a name sudo would read as a flag or a config without session tokens.
+func TestSessionUserDefaultsAndRefusals(t *testing.T) {
+	dir := t.TempDir()
+	load := func(extra string) (*Config, error) {
+		p := filepath.Join(dir, "hub.json")
+		os.WriteFile(p, []byte(`{"listen_addr": "100.64.0.1:8443", "claude_bin": "/bin/sh", "db_path": "x"`+extra+`}`), 0o644)
+		return Load(p)
+	}
+	c, err := load(``)
+	if err != nil || c.SessionUser != "" || c.SessionWorktrees != "" {
+		t.Fatalf("off by default: %+v %v", c, err)
+	}
+	c, err = load(`, "session_user": "sessions"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.SessionClaudeBin != "/Users/sessions/.local/bin/claude" || c.SessionTmuxBin != "/opt/homebrew/bin/tmux" ||
+		c.SessionWorktrees != "/Users/sessions/worktrees" || c.SessionProjectsDir != "/Users/sessions/.claude/projects" {
+		t.Errorf("defaults: %+v", c)
+	}
+	c, err = load(`, "session_user": "life-agent", "session_worktrees": "/Volumes/x/clones"`)
+	if err != nil || c.SessionWorktrees != "/Volumes/x/clones" {
+		t.Errorf("an explicit path is kept: %v %v", c, err)
+	}
+	for extra, want := range map[string]string{
+		`, "session_user": "-u root"`:                                "not a macOS short name",
+		`, "session_user": "life-agent", "session_tokens": false`:    "needs session_tokens",
+		`, "session_user": "life-agent", "session_tmux_bin": "tmux"`: "absolute",
+	} {
+		if _, err := load(extra); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: want %q, got %v", extra, want, err)
+		}
+	}
+}
+
 // #55: time_zone names the household's clock; a name Go cannot load is
 // refused at start-up, not discovered at midnight. Empty is the Mac's zone.
 func TestTimeZoneIsValidated(t *testing.T) {

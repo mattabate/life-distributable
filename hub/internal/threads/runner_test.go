@@ -1193,9 +1193,22 @@ func TestSessionsCannotWriteSecrets(t *testing.T) {
 	m, _, _ := setup(t)
 	m.ProjectDir = func(p string) (string, bool) { return "/x/life", p == "life" }
 	got := strings.Join(m.deniedTools(), ",")
-	want := "Edit(//x/life/ops/secrets/**),Write(//x/life/ops/secrets/**),Edit(//x/life/.git/**),Write(//x/life/.git/**)"
+	want := "Edit(//x/life/ops/secrets/**),Write(//x/life/ops/secrets/**),MultiEdit(//x/life/ops/secrets/**),NotebookEdit(//x/life/ops/secrets/**)," +
+		"Edit(//x/life/.git/**),Write(//x/life/.git/**),MultiEdit(//x/life/.git/**),NotebookEdit(//x/life/.git/**)"
 	if got != want {
 		t.Fatalf("denied: %v", got)
+	}
+}
+
+// A session process calls the hub with its own token when the hub hands one.
+func TestSessionTokenEnv(t *testing.T) {
+	m := &Manager{}
+	if got := m.sessionTokenEnv("th-1"); got != "" {
+		t.Fatalf("off: %q", got)
+	}
+	m.SessionToken = func(id string) string { return "tok-" + id }
+	if got := m.sessionTokenEnv("th-1"); got != " LIFE_SESSION_TOKEN='tok-th-1'" {
+		t.Fatalf("on: %q", got)
 	}
 }
 

@@ -9,6 +9,20 @@ decodes to `shared/fixtures/` (`make generate` rewrites them) and the app's
 Base: `https://<public_host>` (ops/hub.json, e.g. `my-mac.example.ts.net:8443`)
 Auth: `Authorization: Bearer <ops/secrets/hub.token>` on everything except
 `/healthz` and `/`. The dashboard sets a `life_token` cookie from `/?token=`.
+Session tokens (on unless ops/hub.json has `"session_tokens": false`): every
+session the hub runs gets its own bearer token in `LIFE_SESSION_TOKEN`, and
+every scheduled job one for `job-<name>`; lifectl and `ops/hublib.py` send it
+in place of the hub token. It is `s1.<id>.<hex HMAC-SHA256 of the id under
+the hub token>`, so nothing is stored. With it the hub sets `X-Life-Thread`
+to that session whatever the caller sent, and writes the session as `by` and
+`author` into every JSON object body. It is refused (403) on the owner-only
+routes: the approve/deny/dismiss/reopen of an action, `POST
+/api/v1/spend/budget/clear`, `PUT /api/v1/spend/model`, `PUT /api/v1/usage`,
+`POST /api/v1/threads/{id}/messages`, `POST /api/v1/devices`, `POST
+/api/v1/app/install`, `POST /api/v1/app/mac` and `POST
+/api/v1/recs/{id}/reply`; on observations with source `app`, `health` or
+`phone`; and on `POST /api/v1/threads` from a job (a session's own new one is
+its sub-session). The hub token is the owner's and passes all of them.
 Errors: `{"error": "..."}` with a 4xx/5xx status.
 **Caching (speed phase, 2026-08-26):** every 200 JSON GET carries an `ETag` (a hash of the body); send it back as `If-None-Match` and an unchanged answer is a bodiless 304. Pair with `GET /api/v1/changes` to learn *when* to re-fetch. Responses over ~1.4 KB are gzipped for a client that accepts it.
 
@@ -202,6 +216,9 @@ Every Ask, Action and Rec row also carries where it stands with the owner (`stor
 
 ### GET /api/v1/decider
 Is the code this surface holds the right one? Reads `X-Life-Decider` like approve does but decides nothing. → 200 `{armed, sent, ok, set_at?}`; `ok` is true when the code verifies **or** no code is armed; `set_at` (RFC 3339, only when armed) is when the hub's current code was made, so a refused code can be dated against it. Lets a surface check itself before an approval fails on it.
+
+### POST /api/v1/land
+A session's commits on their way to main, when sessions run as their own user (`session_user`; `ops/land.sh` sends it from the session's clone). `{branch, bundle_b64, say?}`, with a session token (or `X-Life-Thread`) naming the session. Fetches the bundle to `refs/incoming/<session>` and proposes a commit action that runs `git merge --ff-only <sha>` in the main checkout (plus `make build` and a hub restart when `hub/` changed). A local commit is not gated, so the hub decides it at once (`decided_via: standing`) and it runs with no card; `ops/land.sh` waits for the result. → 201 the action; 400 bad bundle; 403 no session; 409 the lane is off (no `session_user`), main has moved, or nothing to land.
 
 ## Scheduler (ops/schedule.json)
 
@@ -576,6 +593,9 @@ Body `{lane?: "ota"|"lan"|"mac", ask?, build?}` (default `ota`). `ota` runs `mak
 
 ### POST /api/v1/app/mac
 Body `{build}`: the desktop app reports the build it runs, on every launch (it never registers as a push device). Kept as the `mac_build` setting; closes "Install desktop build N" cards with N ≤ build → 204.
+
+### POST /api/v1/app/ship
+A session builds an app from main as the owner's user, since the session user (`session_user`) cannot read the signing setup. `{target: phone|mac, why}` (`ops/ship.py`, which `make ship` and `make mac` call from a session's clone): why (one line, ≤200 chars) is what the build fixes. phone runs `make ship`, whose output ends with the install link for the session's one install ask; mac runs `ops/install-mac.sh`. Decided on the standing approval like a landing. → 201 the action; 400 a bad field; 403 no session; 409 the lane is off.
 
 ### GET /api/v1/app/install/status
 → `{running, tail[], log_at?, ota?}` last lines of ops/logs/app-install.log; `log_at` is that file's mtime (RFC3339) — the log outlives its run, so a client must drop a tail older than the build it started or a finished run's lines read as live. `ota` = the newest published OTA build (`data/ota/current.json`: `{version, build, url, profile_expires, aps, built_at, commit}`) plus `head` = the build the next `make ship` would produce (repo commit count; absent if git fails) and `app_changed` = whether anything under `app/` differs from `commit` (committed or working-tree; absent if git fails). The app opens `itms-services://?action=download-manifest&url=<url with manifest.plist>` to install. `build` is often BEHIND the phone: the LAN lane (`ops/install-phone.sh`) installs without republishing, so the app must compare `build`, its own `CFBundleVersion` and `head` before calling anything installable — and `head > build` alone does NOT mean newer app code, since the build number counts every commit in the repo including docs; that is what `app_changed` is for. `/status` carries the same `ota` object plus `devices:[{token (prefix), env, build}]` (env = aps-environment the app reported: development/production).

@@ -164,7 +164,22 @@ func main() {
 	thr.BlobPath = ob.BlobPath
 	thr.IntakePath = ob.IntakePath
 	thr.AutoCompactWindow = cfg.AutoCompactWindow
+	if cfg.SessionTokens {
+		// Each session and job calls the hub with a token of its own, never
+		// hub.token (server/sessiontoken.go).
+		thr.SessionToken = func(id string) string { return server.SessionToken(token, id) }
+		sch.JobToken = func(id string) string { return server.SessionToken(token, id) }
+	}
 	thr.Transcripts = filepath.Join(home, ".claude", "projects")
+	if cfg.SessionUser != "" {
+		// Sessions run as another macOS user, each in its own clone, and
+		// land through the hub (threads/runas.go, server/land.go). Its CLI
+		// files their transcripts under its own home.
+		thr.RunAs = threads.RunAs{User: cfg.SessionUser, ClaudeBin: cfg.SessionClaudeBin, TmuxBin: cfg.SessionTmuxBin, CloneRoot: cfg.SessionWorktrees, Repo: cfg.Root}
+		thr.Transcripts = cfg.SessionProjectsDir
+		usage.Also = cfg.SessionProjectsDir
+		log.Printf("sessions run as %s, clones in %s", cfg.SessionUser, cfg.SessionWorktrees)
+	}
 	if push != nil {
 		// A spoken card marks its session "speaking" on the Sessions list.
 		push.Voice = thr.Voice

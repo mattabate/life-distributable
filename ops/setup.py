@@ -139,6 +139,23 @@ def cmd_backup(a):
     print("wrote ops/secrets/restic.env for bucket %s; next: ops/b2.sh mint in Terminal" % a.bucket)
 
 
+def cmd_session_user(a):
+    """session_user on or off in ops/hub.json (ops/session-user-move.sh calls
+    this). On needs session_tokens: that user cannot read the hub token. The
+    other session_* paths are left to the hub's defaults for that user."""
+    cfg = json.load(open(HUB_JSON))
+    if a.off:
+        cfg["session_user"] = ""
+    else:
+        cfg["session_user"] = a.user
+        cfg["session_tokens"] = True
+    with open(HUB_JSON, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+    print("session_user %s in ops/hub.json (restart the hub: ops/hub.sh restart)"
+          % ("off" if a.off else "= " + a.user))
+
+
 def cmd_show(_):
     def mark(ok, what):
         print(("  ok   " if ok else "  --   ") + what)
@@ -183,10 +200,14 @@ def main():
     k.add_argument("--key-file", required=True)
     b = sub.add_parser("backup")
     b.add_argument("--bucket", required=True, help="the B2 bucket name")
+    su = sub.add_parser("session-user", help="run sessions as a separate macOS user (SETUP.md)")
+    g = su.add_mutually_exclusive_group(required=True)
+    g.add_argument("--user", help="the macOS short name, e.g. life-agent")
+    g.add_argument("--off", action="store_true")
     sub.add_parser("show")
     a = p.parse_args()
     {"hub": cmd_hub, "app": cmd_app, "apns": cmd_apns, "backup": cmd_backup,
-     "show": cmd_show}[a.cmd](a)
+     "session-user": cmd_session_user, "show": cmd_show}[a.cmd](a)
 
 
 if __name__ == "__main__":

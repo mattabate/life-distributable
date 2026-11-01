@@ -132,6 +132,22 @@ type Config struct {
 	// "America/Los_Angeles": every "today", day boundary and HH:MM schedule
 	// in the hub and lifectl. Empty = the Mac's own zone (#55).
 	TimeZone string `json:"time_zone"`
+	// SessionTokens gives each session and scheduled job a hub token of its
+	// own (server/sessiontoken.go), so a call from one is never the owner's.
+	// On unless hub.json says "session_tokens": false.
+	SessionTokens bool `json:"session_tokens"`
+	// SessionUser starts sessions as this macOS user (threads/runas.go), which
+	// cannot write the owner's checkout, ops/secrets or the database: each
+	// session works in its own clone and lands through the hub (server/land.go).
+	// Empty (the default) = sessions run as the hub's own user. The other four
+	// default from that user's home: ~/.local/bin/claude,
+	// /opt/homebrew/bin/tmux, ~/worktrees (its clones) and ~/.claude/projects
+	// (its CLI's transcripts, read beside ClaudeProjectsDir).
+	SessionUser        string `json:"session_user,omitempty"`
+	SessionClaudeBin   string `json:"session_claude_bin,omitempty"`
+	SessionTmuxBin     string `json:"session_tmux_bin,omitempty"`
+	SessionWorktrees   string `json:"session_worktrees,omitempty"`
+	SessionProjectsDir string `json:"session_projects_dir,omitempty"`
 	// Root is the repo checkout (~/life), derived at load time from the
 	// config file's location (<root>/ops/hub.json); never written in the file.
 	Root string `json:"-"`
@@ -155,7 +171,7 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{TmuxPrefix: "life"}
+	c := &Config{TmuxPrefix: "life", SessionTokens: true}
 	if err := json.Unmarshal(b, c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -179,6 +195,18 @@ func Load(path string) (*Config, error) {
 	} else if _, err := os.Stat(c.ClaudeBin); err != nil {
 		bad = append(bad, fmt.Sprintf("claude_bin: %v", err))
 	}
+	if c.SessionUser != "" {
+		c.sessionDefaults()
+		if !validUser(c.SessionUser) {
+			bad = append(bad, fmt.Sprintf("session_user %q is not a macOS short name", c.SessionUser))
+		}
+		if !filepath.IsAbs(c.SessionClaudeBin) || !filepath.IsAbs(c.SessionTmuxBin) || !filepath.IsAbs(c.SessionWorktrees) || !filepath.IsAbs(c.SessionProjectsDir) {
+			bad = append(bad, "session_user needs absolute session_claude_bin, session_tmux_bin, session_worktrees and session_projects_dir")
+		}
+		if !c.SessionTokens {
+			bad = append(bad, "session_user needs session_tokens: the session user cannot read hub.token")
+		}
+	}
 	if c.DBPath == "" {
 		bad = append(bad, "db_path required")
 	}
@@ -196,6 +224,38 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("%s: %s", path, strings.Join(bad, "; "))
 	}
 	return c, nil
+}
+
+// sessionDefaults fills the session user's paths left empty, from its home
+// (/Users/<session_user>).
+func (c *Config) sessionDefaults() {
+	home := filepath.Join("/Users", c.SessionUser)
+	for _, d := range []struct {
+		p   *string
+		def string
+	}{
+		{&c.SessionClaudeBin, filepath.Join(home, ".local", "bin", "claude")},
+		{&c.SessionTmuxBin, "/opt/homebrew/bin/tmux"},
+		{&c.SessionWorktrees, filepath.Join(home, "worktrees")},
+		{&c.SessionProjectsDir, filepath.Join(home, ".claude", "projects")},
+	} {
+		if *d.p == "" {
+			*d.p = d.def
+		}
+	}
+}
+
+// validUser: a macOS short name, so it goes into sudo -u and paths as is.
+func validUser(u string) bool {
+	if u == "" || len(u) > 32 || u[0] == '-' {
+		return false
+	}
+	for _, r := range u {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 // Zone is time_zone loaded, or the Mac's own zone when it is empty.

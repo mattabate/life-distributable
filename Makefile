@@ -108,8 +108,9 @@ install-phone:
 
 # The desktop app (LifeMac, Mac Catalyst over the same sources): build, sign,
 # install into /Applications and relaunch. `make mac-build` only compiles it.
+# From a session clone (session_user): make mac WHY="fixes ...".
 mac:
-	bash ops/install-mac.sh
+	bash ops/install-mac.sh $(if $(WHY),--why "$(WHY)")
 
 # Screenshot every desktop page (ops/logs/screens/mac/); PAGES='recs thread:<id>'.
 mac-screens:
@@ -137,6 +138,7 @@ screens-dark: app-build-sim
 # archive + export, .ipa + manifest served by the hub at /ota/<token>/, you
 # install from Safari anywhere on the tailnet (no LAN, no cable). Then raise
 # a physical ask with the link (data/ota/url). LAN fallback: install-phone.
+# From a session clone (session_user): make ship WHY="fixes ...".
 ship ota:
 	chmod +x ops/ota.sh
-	ops/ota.sh
+	ops/ota.sh $(if $(WHY),--why "$(WHY)")

@@ -69,6 +69,16 @@ func (s *Server) createThread(w http.ResponseWriter, r *http.Request) {
 	if in.Project == "" {
 		in.Project = "life"
 	}
+	// A session token names none of the owner's surfaces: its via would route
+	// its words as the owner's. A token whose session is no thread (a scheduled
+	// job's) starts nothing, since its new session would be loose as the owner's.
+	if id := s.sessionFromRequest(r); id != "" {
+		in.Via = ""
+		if _, err := s.thr.Get(id); err != nil {
+			jsonErr(w, 403, "only the owner starts a session that is not a sub-session")
+			return
+		}
+	}
 	// Team mode: a plain new message from one of the owner's surfaces (no
 	// title, goal or schedule chosen) goes past the router first, which may
 	// hand it to the session that owns that work. lifectl's new sessions and
@@ -133,7 +143,7 @@ func (s *Server) patchThread(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad json")
 		return
 	}
-	t, err := s.thr.Update(r.PathValue("id"), patch)
+	t, err := s.thr.Update(r.PathValue("id"), unstamped(patch))
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
