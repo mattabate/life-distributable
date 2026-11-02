@@ -52,6 +52,17 @@ func (m *Manager) sessionClaudeBin() string {
 	return m.RunAs.ClaudeBin
 }
 
+func (m *Manager) sessionCLICommand(args ...string) (string, []string) {
+	if m.RunAs.User == "" {
+		return m.ClaudeBin, args
+	}
+	command := m.sessionUserEnv() + " " + shellQuote(m.sessionClaudeBin())
+	for _, arg := range args {
+		command += " " + shellQuote(arg)
+	}
+	return "/usr/bin/sudo", []string{"-n", "-H", "-u", m.RunAs.User, "/bin/sh", "-c", command}
+}
+
 // sessionUserEnv is what a session process needs that sudo clears: its login,
 // the UTF-8 locale tmux wants, and Homebrew, its CLI and the main checkout's
 // ops/bin (lifectl, which its grant names bare) on PATH. Expanded by the

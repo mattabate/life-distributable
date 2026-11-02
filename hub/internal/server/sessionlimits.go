@@ -75,10 +75,21 @@ func (s *Server) sessionLimits(pattern string, h http.HandlerFunc) http.HandlerF
 			jsonErr(w, 403, "only the owner does this")
 			return
 		}
-		if r.Method != "GET" && r.Method != "HEAD" && !stampActor(w, r, "claude:thread:"+id) {
+		if r.Method != "GET" && r.Method != "HEAD" && stampActorRequired(pattern, r) && !stampActor(w, r, "claude:thread:"+id) {
 			return
 		}
 		h(w, r)
+	}
+}
+
+func stampActorRequired(pattern string, r *http.Request) bool {
+	switch pattern {
+	case "POST /api/v1/blobs":
+		return false
+	case "PUT /api/v1/workspace/{persona}/{name...}":
+		return strings.HasPrefix(r.Header.Get("Content-Type"), "application/json")
+	default:
+		return true
 	}
 }
 
@@ -94,6 +105,10 @@ func stampActor(w http.ResponseWriter, r *http.Request, who string) bool {
 	in := map[string]json.RawMessage{}
 	if len(bytes.TrimSpace(raw)) > 0 && json.Unmarshal(raw, &in) != nil {
 		return true
+	}
+	if in == nil {
+		jsonErr(w, 400, "expected JSON object")
+		return false
 	}
 	// Go matches a JSON key to a field whatever its case.
 	for k := range in {
