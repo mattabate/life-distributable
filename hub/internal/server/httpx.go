@@ -31,6 +31,13 @@ func decode(w http.ResponseWriter, r *http.Request, v any, max int64) bool {
 	return true
 }
 
+// jsonBody is r's body capped at maxJSON, for a handler that answers a bad
+// body in its own words. Without it one caller could stream a body without
+// end into the hub; TestNoUncappedBody keeps it that way.
+func jsonBody(w http.ResponseWriter, r *http.Request) io.Reader {
+	return http.MaxBytesReader(w, r.Body, maxJSON)
+}
+
 // decodeOptional is decode for a body that may be absent: no body leaves v
 // as it was; a body that is there must parse.
 func decodeOptional(w http.ResponseWriter, r *http.Request, v any, max int64) bool {

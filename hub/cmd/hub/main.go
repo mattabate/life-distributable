@@ -498,7 +498,12 @@ func main() {
 		Addr:              cfg.ListenAddr,
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
-		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
+		// A kept-alive connection with no request on it closes after this.
+		// No ReadTimeout or WriteTimeout: they would cut the /changes long
+		// poll and a minutes-long land; a body's own deadline is
+		// server.timeBody.
+		IdleTimeout: 2 * time.Minute,
+		TLSConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 	log.Printf("hub listening on https://%s (projects: %d, jobs: %d)", cfg.ListenAddr, len(cfg.AllProjects()), len(sch.Table().Jobs))
 	// Graceful stop: launchd's kickstart -k / bootout sends SIGTERM. In-flight

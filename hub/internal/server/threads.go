@@ -62,7 +62,7 @@ func (s *Server) createThread(w http.ResponseWriter, r *http.Request) {
 		// the session then gets a pointer to the console's own log, not the log.
 		Via string
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -116,7 +116,7 @@ func (s *Server) createThread(w http.ResponseWriter, r *http.Request) {
 // another Ollama model in place of the default.
 func (s *Server) routeDry(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Prompt, Model string }
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || strings.TrimSpace(in.Prompt) == "" {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil || strings.TrimSpace(in.Prompt) == "" {
 		jsonErr(w, 400, "need {prompt}")
 		return
 	}
@@ -139,7 +139,7 @@ func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) patchThread(w http.ResponseWriter, r *http.Request) {
 	var patch map[string]string
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&patch); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -217,7 +217,7 @@ func (s *Server) sendThread(w http.ResponseWriter, r *http.Request) {
 		Attachments []string
 		Via         string
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || (strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0) {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil || (strings.TrimSpace(in.Text) == "" && len(in.Attachments) == 0) {
 		jsonErr(w, 400, "need {text} and/or {attachments}")
 		return
 	}

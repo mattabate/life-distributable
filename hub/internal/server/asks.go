@@ -32,7 +32,7 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 		// Say: the sentence the push speaks instead of the title (notify/voice.go).
 		Say string `json:"say"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -66,7 +66,7 @@ func (s *Server) getAsk(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) resolveAsk(w http.ResponseWriter, r *http.Request) {
 	var in struct{ State, By, Note string }
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -83,7 +83,7 @@ func (s *Server) resolveAsk(w http.ResponseWriter, r *http.Request) {
 // on the phone), "mobile", "any". The escape hatch for a bad inference.
 func (s *Server) setAskSurface(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Surface string }
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -99,7 +99,7 @@ func (s *Server) setAskSurface(w http.ResponseWriter, r *http.Request) {
 // filed under the wrong kind (a do-these-steps card offering Granted).
 func (s *Server) setAskKind(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Kind string }
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -116,7 +116,7 @@ func (s *Server) setAskKind(w http.ResponseWriter, r *http.Request) {
 // above the newest message: then it moves below it and speaks again.
 func (s *Server) rewordAsk(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Title, Detail, Say, By string }
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}

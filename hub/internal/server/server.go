@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -141,6 +142,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Set before anything can write: a 304 out of the ETag layer keeps the
 	// headers already on the map, so even a fully-cached poll carries it.
 	w.Header().Set("X-Hub-Build", consoleBuild)
+	timeBody(w, r)
 	sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
 	gw, done := maybeGzip(sw, r)
 	// ETag sits above gzip: it hashes the plain JSON, so the tag is the same
@@ -152,6 +154,58 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if took := time.Since(start); logRequest(r.Method, r.URL.Path, sw.code, took) {
 		log.Printf("%s %s %d %s", r.Method, logPath(r.URL.Path), sw.code, took.Round(time.Millisecond))
 	}
+}
+
+// A request body that sends nothing for bodyIdle, or is still arriving after
+// bodyTotal, is cut off. With only ReadHeaderTimeout, a caller could trickle
+// a body, or none, after its headers and hold a handler for good.
+// http.Server.ReadTimeout cannot do it: that deadline stays on the connection
+// while the handler runs, and when it fires the server's background read
+// cancels the request, which would kill a parked /changes poll or a land that
+// runs make check for minutes. So the deadline is per body and comes off at
+// its end.
+var bodyIdle = 30 * time.Second // a var so the test can shorten it
+
+const bodyTotal = 10 * time.Minute
+
+// timeBody puts the body deadline on r (nothing for a request without one).
+func timeBody(w http.ResponseWriter, r *http.Request) {
+	if r.Body == nil || r.Body == http.NoBody {
+		return
+	}
+	b := &timedBody{ReadCloser: r.Body, rc: http.NewResponseController(w), end: time.Now().Add(bodyTotal)}
+	b.extend()
+	r.Body = b
+}
+
+type timedBody struct {
+	io.ReadCloser
+	rc   *http.ResponseController
+	end  time.Time
+	done bool
+}
+
+func (b *timedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if b.done {
+		return n, err
+	}
+	if err != nil {
+		// EOF (or the cut): the handler may now run as long as it needs.
+		b.done = true
+		_ = b.rc.SetReadDeadline(time.Time{})
+		return n, err
+	}
+	b.extend()
+	return n, err
+}
+
+func (b *timedBody) extend() {
+	d := time.Now().Add(bodyIdle)
+	if d.After(b.end) {
+		d = b.end
+	}
+	_ = b.rc.SetReadDeadline(d) // ErrNotSupported under httptest's recorder
 }
 
 // secretPaths: open routes whose path segment after the prefix is the

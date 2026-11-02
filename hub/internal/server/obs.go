@@ -71,6 +71,10 @@ func (s *Server) postObs(w http.ResponseWriter, r *http.Request) {
 	var o obs.Observation
 	ct := r.Header.Get("Content-Type")
 	if strings.HasPrefix(ct, "multipart/form-data") {
+		// ParseMultipartForm's figure is only what it holds in memory; a file
+		// part past it spills to a temp file of any size, so the body itself
+		// is capped too, at the blob route's 64 MB plus the fields.
+		r.Body = http.MaxBytesReader(w, r.Body, 65<<20)
 		if err := r.ParseMultipartForm(64 << 20); err != nil {
 			jsonErr(w, 400, "bad multipart: "+err.Error())
 			return

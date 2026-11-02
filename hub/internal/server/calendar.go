@@ -29,7 +29,7 @@ func (s *Server) calendarAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in calendar.Item
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -66,7 +66,7 @@ func (s *Server) calendarAwayAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in calendar.Away
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -84,7 +84,7 @@ func (s *Server) calendarAwayEnd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct{ Note string }
-	json.NewDecoder(r.Body).Decode(&in)
+	json.NewDecoder(jsonBody(w, r)).Decode(&in)
 	a, err := s.Cal.EndAway(r.PathValue("id"), in.Note)
 	if err != nil {
 		jsonErr(w, 404, err.Error())
@@ -100,7 +100,7 @@ func (s *Server) calendarMerge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct{ Into, By string }
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Into == "" {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil || in.Into == "" {
 		jsonErr(w, 400, "need {into}")
 		return
 	}
@@ -135,7 +135,7 @@ func (s *Server) calendarUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in map[string]string
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -154,7 +154,7 @@ func (s *Server) calendarSteps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct{ Steps []string }
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "need {steps: [titles]}")
 		return
 	}
@@ -176,7 +176,7 @@ func (s *Server) calendarStep(w http.ResponseWriter, r *http.Request) {
 		Outcome, By, Note string
 		Days              []string // a repeat's days ahead (Calendar.PlanStep)
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -206,7 +206,7 @@ func (s *Server) calendarRaise(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct{ By, Note string }
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -227,7 +227,7 @@ func (s *Server) calendarResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct{ State, By, Note, Outcome string }
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}

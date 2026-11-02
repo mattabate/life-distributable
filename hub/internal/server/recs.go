@@ -56,7 +56,7 @@ func (s *Server) recsAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in recs.Rec
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -150,7 +150,7 @@ func (s *Server) recsDecide(w http.ResponseWriter, r *http.Request) {
 		Attachments []string
 		recWhen
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -307,7 +307,7 @@ func (s *Server) recsReply(w http.ResponseWriter, r *http.Request) {
 		Attachments       []string
 		recWhen
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -353,7 +353,7 @@ func (s *Server) recsScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct{ Outcome, By, Note string }
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
@@ -373,7 +373,7 @@ func (s *Server) recsLink(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Refs []string `json:"refs"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
 		return
 	}
