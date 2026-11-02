@@ -930,3 +930,38 @@ Entry format:
 - For: everyone
 - Offer: Hardening (#96). Every handler that decoded the request body with no cap now reads at most 4 MB (`jsonBody`), and a multipart observation upload is capped at 65 MB. Each request body gets a 30 s idle and 10 min total read deadline, which comes off once the body has been read, so the /changes long poll and a long land are untouched. Idle kept-alive connections close after 2 minutes. `TestNoUncappedBody` fails if an uncapped read comes back.
 - How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `server/httpx.go` (`jsonBody`), `server/server.go` (`timeBody`), `server/obs.go`, `server/asks.go`, `server/calendar.go`, `server/recs.go`, `server/threads.go`, `server/bodylimit_test.go` (new), `cmd/hub/main.go`.
+
+## add-0112 · 2026-11-02 · An approved hub-run proposal is not carried out twice
+- For: everyone
+- Fix: an approved `shell` or `claude` proposal is run by the hub itself, but the proposing session was told "Carry out exactly that action now" and ran it again, minting a duplicate proposal. Its decision message now says the hub runs it and to check the result with `lifectl api GET /api/v1/actions/<id>`. A scheduled job's approved hub-run proposal starts no carry-out session unless the owner wrote a note. `none` and Deny behave as before. Reported by [eduelias](https://github.com/eduelias) in [#86](https://github.com/mattabate/life-distributable/issues/86).
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `threads/threads.go` (`HubRuns`, `JobDecisionOpener`), `threads/prompts.go`, `cmd/hub/main.go`, `shared/api.md`.
+
+## add-0113 · 2026-11-02 · A cancelled agent wake skips its run and the repeat goes on
+- For: everyone with repeating agent items
+- Fix: an agent item whose queued wake was cancelled sat scheduled forever, and a repeating one never minted its next run. The tick now dismisses that day's row ("wake cancelled") and the chain continues. A moved item, whose wake is replaced rather than cancelled, is left alone. Reported by [eduelias](https://github.com/eduelias) in [#87](https://github.com/mattabate/life-distributable/issues/87).
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `calendar/calendar.go` (`cancelledWake`), `calendar/chains_test.go` (new).
+
+## add-0114 · 2026-11-02 · Two repeats of one title on different days both go on
+- For: everyone with repeating items
+- Fix: weekly "Gym" on Monday and weekly "Gym" on Friday are two chains, but closing Monday's found Friday's row and silently minted no next Monday. The guard now looks only along the item's own chain (same weekday; same day of the month, or a clamped month end; yearly by month too). The agenda's projected rows and the due-ahead list tell the two chains apart the same way, so both project and both are due. Reported by [eduelias](https://github.com/eduelias) in [#88](https://github.com/mattabate/life-distributable/issues/88).
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `calendar/calendar.go` (`sameChain`, `oneChain`, `spawnNext`, `DueAhead`, `coming`), `calendar/chains_test.go`.
+
+## add-0115 · 2026-11-02 · A late-fired daily on-the-day step still owes today
+- For: everyone with daily on-the-day steps
+- Fix: a 21:00 daily whose Saturday row only fired at 07:00 Sunday (the Mac slept) minted Monday's occurrence and skipped Sunday's. An on-the-day step's next now lands on today at the earliest; a by-the-day step still starts tomorrow. Reported by [eduelias](https://github.com/eduelias) in [#89](https://github.com/mattabate/life-distributable/issues/89).
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `calendar/calendar.go` (`spawnNext`), `calendar/chains_test.go`.
+
+## add-0116 · 2026-11-02 · Sessions can open the photos you send
+- For: owners running sessions as a separate user (`session_user`)
+- Fix: every uploaded blob was written 0600, so a session running as the session user got a permission error opening a photo sent from the phone. New blobs are 0644, and the hub makes older ones readable at start.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `obs/obs.go` (`repairBlobModes`), `obs/obs_test.go`.
+
+## add-0117 · 2026-11-02 · Cards under one message draw oldest first
+- For: everyone
+- Fix: the hub lists approvals and asks newest first, and the chat placed them in that order, so three approvals under one message read backwards. The console and the app now sort them oldest first.
+- How: same merge as add-0008, then `make check`; the app needs `make ship`. By hand: `web/views/threads.js`, `app/Life/Sources/ThreadDetail.swift`.
+
+## add-0118 · 2026-11-02 · The ask verifier stops trying calls its grant refuses
+- For: everyone with the ask-verifier job
+- Fix: the hourly ask verifier piped `lifectl asks --json` into python3 and tried Gmail searches, refused every run. Its prompt now says to read the list unpiped and to leave hints that need mail, a website or the phone.
+- How: same merge as add-0008. By hand: the ask-verifier `prompt` in `ops/schedule.json`, `sched/sched_test.go`.

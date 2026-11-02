@@ -320,7 +320,7 @@ struct ThreadDetail: View {
         var by: [Int: [Ask]] = [:], tail: [Ask] = []
         let order = ordered
         let active = { (a: Ask) in !a.isClosed }
-        for a in all {
+        for a in all.sorted(by: { $0.created_at < $1.created_at }) {
             // Dismissed — or a read marked Read — folds to one grey line
             // where it was, with Reopen inside, so it can still be answered.
             if let mid = a.message_id, order.contains(where: { $0.id == mid }) {
@@ -355,7 +355,9 @@ struct ThreadDetail: View {
         actions = pending
         var by: [Int: [Action]] = [:], tail: [Action] = []
         let order = ordered
-        for a in pending {
+        // Oldest first: the hub lists them newest first, so three approvals
+        // under one message drew backwards.
+        for a in pending.sorted(by: { $0.created_at < $1.created_at }) {
             if let host = order.last(where: { $0.ts <= a.created_at }) {
                 by[host.id, default: []].append(a)
                 if a.open == true || a.id == focusCard { widen(toRow: host.id) }

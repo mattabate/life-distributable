@@ -1013,8 +1013,17 @@ func (m *Manager) refHeader(ref, outcome, msgKind string) string {
 			return fmt.Sprintf("[The owner wrote back about the action you proposed — %s — and did NOT decide it, even if their words sound like a yes or a no: only Approve or Deny on the card decides, and this message changes nothing on the row. Do not carry it out on this. Answer their words below.]\n", which)
 		}
 		what := "Carry out exactly that action now — nothing more — and report the outcome briefly."
-		if m.ActionExec != nil && m.ActionExec(id) == "relay" {
+		exec := ""
+		if m.ActionExec != nil {
+			exec = m.ActionExec(id)
+		}
+		if exec == "relay" {
 			what = "The hub delivers it to that session itself: send nothing, and end with `[end]` unless their words below ask for more."
+		} else if HubRuns(exec) {
+			// shell/claude: the hub runs the payload on approval
+			// (actions.run); a session told to carry it out ran it twice
+			// (life-distributable#86).
+			what = hubRanCheck(id)
 		}
 		if outcome == "denied" {
 			what = "Do not do it; adjust or drop the plan."

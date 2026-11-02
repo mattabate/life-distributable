@@ -311,6 +311,44 @@ func TestReadCardClosesOnReplyAndNeverWakesTheSession(t *testing.T) {
 	}
 }
 
+// An approved shell/claude proposal is run by the hub itself (actions.run),
+// so neither the proposing session nor a session started for a job's
+// proposal is told to carry it out: it ran twice (life-distributable#86,
+// eduelias). `none` is still the session's to carry out.
+func TestApprovedHubRunActionIsNotCarriedOutAgain(t *testing.T) {
+	m, _, _ := setup(t)
+	exec := map[string]string{"act-sh": "shell", "act-cl": "claude", "act-no": "none"}
+	m.ActionExec = func(id string) string { return exec[id] }
+	m.ActionTitle = func(id string) string { return "Land the fix" }
+	for _, id := range []string{"act-sh", "act-cl"} {
+		h := m.refHeader("action:"+id, "approved", "decision")
+		if strings.Contains(h, "Carry out") || !strings.Contains(h, "hub runs it itself") || !strings.Contains(h, "lifectl api GET /api/v1/actions/"+id) {
+			t.Fatalf("%s: %s", id, h)
+		}
+		if h := m.refHeader("action:"+id, "denied", "decision"); !strings.Contains(h, "Do not do it") {
+			t.Fatalf("a denial still reaches the session: %s", h)
+		}
+		// a job's proposal: no carry-out session; the owner's note still
+		// gets one, told the hub runs it
+		if s := JobDecisionOpener(true, id, exec[id], "Land", "ops/land.sh", ""); s != "" {
+			t.Fatalf("%s: a job's hub-run approval started a session: %s", id, s)
+		}
+		s := JobDecisionOpener(true, id, exec[id], "Land", "ops/land.sh", "and tell the team")
+		if strings.Contains(s, "Carry out") || !strings.Contains(s, "hub runs it itself") || !strings.Contains(s, "and tell the team") {
+			t.Fatalf("%s: %s", id, s)
+		}
+	}
+	if h := m.refHeader("action:act-no", "approved", "decision"); !strings.Contains(h, "Carry out exactly") {
+		t.Fatal(h)
+	}
+	if s := JobDecisionOpener(true, "act-no", "none", "Do it", "", ""); !strings.Contains(s, "Carry out exactly") {
+		t.Fatal(s)
+	}
+	if JobDecisionOpener(false, "act-no", "none", "Do it", "", "") != "" || JobDecisionOpener(false, "act-sh", "shell", "Land", "", "why") != "" {
+		t.Fatal("a denied job proposal starts no session")
+	}
+}
+
 // The framing is rendered from the referenced row at wake time, never parsed
 // out of the owner's words.
 func TestRefHeaderNamesTheReferencedRow(t *testing.T) {

@@ -1664,27 +1664,55 @@ func (c *Calendar) DueAhead() ([]Item, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []Item{}
-	// Chains already listed, and whether a listed row repeats: an occurrence
-	// moved on its own ("only this one") has lost its repeat, its next has not.
-	listed := map[string]string{}
+	var cands []Item
 	for rows.Next() {
 		it, err := scanItem(rows)
 		if err != nil {
 			return nil, err
 		}
 		if d, err := time.ParseInLocation("2006-01-02", it.Day, time.Local); err == nil && daysBetween(day0, d) < leadDays(it, d) {
-			k := chainKey(it)
-			if first, ok := listed[k]; ok && (it.Repeat != "" || first != "") {
-				continue
-			}
-			if _, ok := listed[k]; !ok {
-				listed[k] = it.Repeat
-			}
-			out = append(out, it)
+			cands = append(cands, it)
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	out := []Item{}
+	// Each chain's first listed row, and whether it repeats: an occurrence
+	// moved on its own ("only this one") has lost its repeat, its next has not.
+	var listed []Item
+next:
+	for _, it := range cands {
+		for _, first := range listed {
+			if c.oneChain(first, it) {
+				if it.Repeat != "" || first.Repeat != "" {
+					continue next
+				}
+				out = append(out, it)
+				continue next
+			}
+		}
+		listed = append(listed, it)
+		out = append(out, it)
+	}
+	return out, nil
+}
+
+// oneChain: are rows a and b occurrences of one repeat chain? The same
+// chainKey, and, as spawnNext's guard asks, on the same chain of that title:
+// weekly Gym Monday and weekly Gym Friday are two (sameChain; a cadence of its
+// own is another chain too). A row that lost its repeat (moved "only this
+// one"), or the next one minted from a row (prev_id), still belongs to its
+// chain whatever its weekday.
+func (c *Calendar) oneChain(a, b Item) bool {
+	if chainKey(a) != chainKey(b) {
+		return false
+	}
+	if a.Repeat == "" || b.Repeat == "" || a.PrevID == b.ID || b.PrevID == a.ID {
+		return true
+	}
+	return a.Repeat == b.Repeat && sameChain(a.Day, b.Day, a.Repeat, c.chainDay(a))
 }
 
 // chainKey: the rows of one repeat chain — the same kind and title, which is
@@ -2103,9 +2131,35 @@ func (c *Calendar) chainDay(it Item) int {
 	return dom
 }
 
+// sameChain: could the row on `other` be an occurrence of the chain whose row
+// is on `day`? Weekly: the same weekday. Monthly: the chain's day of the month
+// (dom, from chainDay), or a month's last day short of it (a clamped row).
+// Yearly: the same month too. Daily and every<N>d: any day, as before.
+func sameChain(day, other, repeat string, dom int) bool {
+	a, err1 := time.ParseInLocation("2006-01-02", day, time.Local)
+	b, err2 := time.ParseInLocation("2006-01-02", other, time.Local)
+	if err1 != nil || err2 != nil {
+		return true
+	}
+	if dom < 1 {
+		dom = a.Day()
+	}
+	onDom := b.Day() == dom || (cadence.MonthEnd(b) && b.Day() < dom)
+	switch repeat {
+	case "weekly":
+		return a.Weekday() == b.Weekday()
+	case "monthly":
+		return onDom
+	case "yearly":
+		return a.Month() == b.Month() && onDom
+	}
+	return true
+}
+
 // spawnNext mints the next occurrence of a repeating item. It steps from the
-// item's own day but never lands before tomorrow: an every2d item that sat
-// unfired for ten days gets one next date, not five asks of backlog.
+// item's own day but never lands before tomorrow (an on-the-day step: before
+// today): an every2d item that sat unfired for ten days gets one next date,
+// not five asks of backlog.
 //
 // Callers are Tick/Resolve (under c.mu) and OnDelivered (inside the clock,
 // no c.mu), so the "does the chain already continue?" check and the insert
@@ -2119,8 +2173,21 @@ func (c *Calendar) spawnNext(it Item) {
 		return
 	}
 	today := c.Now().Format("2006-01-02")
-	for nd <= today {
-		nd = nextDay(nd, it.Repeat, dom)
+	if it.Due == "on" {
+		// An on-the-day step lands on today at the earliest, not tomorrow: a
+		// 21:00 daily whose Saturday row fired at 07:00 Sunday (the Mac slept)
+		// still owes Sunday's, not Monday's (life-distributable#89, eduelias).
+		// Today's window has not closed (missAt is a day after its moment).
+		for nd != "" && nd < today {
+			nd = nextDay(nd, it.Repeat, dom)
+		}
+	} else {
+		for nd != "" && nd <= today {
+			nd = nextDay(nd, it.Repeat, dom)
+		}
+	}
+	if nd == "" {
+		return
 	}
 	c.spawnMu.Lock()
 	defer c.spawnMu.Unlock()
@@ -2135,8 +2202,21 @@ func (c *Calendar) spawnNext(it Item) {
 	// An EARLIER row that already fired is debt, not the chain's continuation:
 	// a by-the-day homework the owner missed stays owed, it minted its
 	// next when it fired, and the week after still comes.
-	c.db.QueryRow(`SELECT COUNT(*) FROM items WHERE src='cal' AND kind=? AND repeat=? AND lower(title)=lower(?) AND id<>? AND (state='scheduled' OR (state='open' AND day>=?))`,
-		it.Kind, it.Repeat, it.Title, it.ID, it.Day).Scan(&n)
+	// Only along the item's OWN chain: weekly Gym Monday and weekly Gym
+	// Friday are two chains, and Monday's row finding Friday's minted no
+	// next Monday, silently (life-distributable#88, eduelias). A stray
+	// duplicate of a chain sits on the chain's weekday / day of the month.
+	rows, err := c.db.Query(`SELECT day FROM items WHERE src='cal' AND kind=? AND repeat=? AND lower(title)=lower(?) AND id<>? AND (state='scheduled' OR (state='open' AND day>=?))`,
+		it.Kind, it.Repeat, it.Title, it.ID, it.Day)
+	if err == nil {
+		for rows.Next() {
+			var d string
+			if rows.Scan(&d) == nil && sameChain(it.Day, d, it.Repeat, dom) {
+				n++
+			}
+		}
+		rows.Close()
+	}
 	if n > 0 {
 		return
 	}
@@ -2193,7 +2273,11 @@ func (c *Calendar) Tick() {
 		switch it.State {
 		case "scheduled":
 			// A soon item has no moment to fire at: no ask, no push, no nag.
-			if it.Day == "" || (it.Kind == "agent" && it.PromptID != "") {
+			if it.Day == "" {
+				continue
+			}
+			if it.Kind == "agent" && it.PromptID != "" {
+				c.cancelledWake(it)
 				continue
 			}
 			if !now.Before(c.fireAt(it)) {
@@ -2203,6 +2287,29 @@ func (c *Calendar) Tick() {
 			c.followUp(it, now)
 		}
 	}
+}
+
+// cancelledWake: an agent item is the clock's while its wake is queued, but a
+// wake cancelled with the row still scheduled (the owner's cancel on the
+// queued prompt) will never be delivered, so OnDelivered never closes the row
+// and a repeat never mints its next. The cancel skips this run: the row is
+// dismissed by the owner and the chain goes on (life-distributable#87,
+// eduelias). Re-read under the lock, so a move that requeued the wake since
+// the tick's list (old one cancelled, new one queued) is left alone.
+func (c *Calendar) cancelledWake(it Item) {
+	if p, err := c.thr.GetPrompt(it.PromptID); err != nil || p.State != "cancelled" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cur, err := c.Get(it.ID)
+	if err != nil || cur.State != "scheduled" || cur.Kind != "agent" || cur.PromptID == "" {
+		return
+	}
+	if p, err := c.thr.GetPrompt(cur.PromptID); err != nil || p.State != "cancelled" {
+		return
+	}
+	c.resolveLocked(cur, "dismissed", "owner", "wake cancelled", true)
 }
 
 // waitingTick: a waiting item is the clock's while its look is queued. One
@@ -2744,17 +2851,25 @@ func (c *Calendar) coming(from, to, today string, have map[string]bool) []Entry 
 		log.Printf("calendar: agenda coming: %v", err)
 		return nil
 	}
-	var tails []Item
-	seen := map[string]bool{}
+	var all []Item
 	for rows.Next() {
-		it, err := scanItem(rows)
-		if err != nil || seen[chainKey(it)] {
-			continue
+		if it, err := scanItem(rows); err == nil {
+			all = append(all, it)
 		}
-		seen[chainKey(it)] = true
-		tails = append(tails, it)
 	}
 	rows.Close()
+	// Each chain's latest row (the rows come latest first); two chains of one
+	// title (weekly Gym Monday and Friday) each keep their own.
+	var tails []Item
+next:
+	for _, it := range all {
+		for _, t := range tails {
+			if c.oneChain(t, it) {
+				continue next
+			}
+		}
+		tails = append(tails, it)
+	}
 	var out []Entry
 	for _, it := range tails {
 		// 400 steps: a daily repeat reaches a year out, and a window further

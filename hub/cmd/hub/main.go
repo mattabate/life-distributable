@@ -273,7 +273,11 @@ func main() {
 			}
 			return
 		}
-		if !approved {
+		// The hub runs shell/claude itself (actions.run): a job's approved
+		// one gets no carry-out session, only one for the owner's note
+		// (life-distributable#86).
+		starter := threads.JobDecisionOpener(approved, a.ID, a.ExecType, a.Title, a.Detail, note)
+		if starter == "" {
 			return
 		}
 		proj := a.Project
@@ -281,7 +285,7 @@ func main() {
 			proj = "life"
 		}
 		id, _, err := deliver.Deliverer{Thr: thr}.ToSession(deliver.Target{Title: a.Title, Project: proj,
-			Starter: threads.DecisionPrompt(true, a.ID, a.Title, a.Detail, note)})
+			Starter: starter})
 		if err != nil {
 			log.Printf("actions: start thread for approved %s: %v", a.ID, err)
 			return

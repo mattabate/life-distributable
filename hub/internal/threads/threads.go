@@ -424,8 +424,9 @@ type Manager struct {
 	// ActionTitle names a proposal so a prompt answering one can say what it
 	// answers (prompts.go refHeader). nil = the id alone.
 	ActionTitle func(actionID string) string
-	// ActionExec is a proposal's exec_type: a `relay` is carried out by the
-	// hub, so its approval tells the proposer to send nothing. nil = unknown.
+	// ActionExec is a proposal's exec_type: anything but `none` is carried
+	// out by the hub (HubRuns), so its approval tells the proposer not to
+	// repeat it (a relay: send nothing). nil = unknown.
 	ActionExec func(actionID string) string
 	// RecHeader frames a prompt answering a recommendation (`rec:<id>` with
 	// outcome accepted|declined|deferred|"") from the rec's own row — the
@@ -914,10 +915,48 @@ func (m *Manager) Decision(id string, approved bool, actionID, title, note strin
 	return err
 }
 
+// HubRuns: an approved proposal of this exec_type is carried out by the hub
+// itself (actions.run: shell, claude, relay), so the proposer must not repeat
+// it. Only `none` is the proposing session's to carry out; "" (the type could
+// not be looked up) keeps the old "carry it out" wording.
+// life-distributable#86 (eduelias): an approved `shell` command ran in the
+// hub and the session, told "Carry out exactly that action now", ran it again
+// and minted a duplicate proposal.
+func HubRuns(execType string) bool {
+	return execType != "" && execType != "none"
+}
+
+// hubRanCheck is the line a proposer of a hub-run action is given instead
+// of "carry it out".
+func hubRanCheck(actionID string) string {
+	return fmt.Sprintf("The hub runs it itself: do NOT run it again or propose it again. Check its result with `lifectl api GET /api/v1/actions/%s` (state done|failed|uncertain, result, error) and report the outcome briefly.", actionID)
+}
+
+// JobDecisionOpener: the opener of the session the hub starts when the owner
+// decides a scheduled job's proposal (no thread_id), or "" for none. A
+// denial starts none (as before); an approved `none` starts one to carry it
+// out; an approved hub-run type starts one only when they wrote a note, since
+// the hub already runs it (life-distributable#86).
+func JobDecisionOpener(approved bool, actionID, execType, title, detail, note string) string {
+	if !approved {
+		return ""
+	}
+	if HubRuns(execType) && strings.TrimSpace(note) == "" {
+		return ""
+	}
+	return DecisionPrompt(true, actionID, execType, title, detail, note)
+}
+
 // DecisionPrompt is the opening message of a thread started for an action
 // that was proposed outside any session (a scheduled job) and then approved.
-func DecisionPrompt(approved bool, actionID, title, detail, note string) string {
-	p := fmt.Sprintf("A scheduled job proposed this gated action and the owner approved it from the app (action id %s). Carry out exactly this — nothing more — then report the outcome briefly; if anything is unclear or needs them, raise it with `lifectl ask add`.\n\nTitle: %s\nDetail: %s", actionID, title, detail)
+// For a hub-run exec_type (HubRuns) the hub starts one only to carry the
+// owner's note, and the opener says the hub runs the action itself.
+func DecisionPrompt(approved bool, actionID, execType, title, detail, note string) string {
+	do := "Carry out exactly this — nothing more — then report the outcome briefly"
+	if HubRuns(execType) {
+		do = hubRanCheck(actionID) + " Then answer their note below"
+	}
+	p := fmt.Sprintf("A scheduled job proposed this gated action and the owner approved it from the app (action id %s). %s; if anything is unclear or needs them, raise it with `lifectl ask add`.\n\nTitle: %s\nDetail: %s", actionID, do, title, detail)
 	if strings.TrimSpace(note) != "" {
 		p += "\n\nThe owner's note (may narrow or change what to do — follow it): " + strings.TrimSpace(note)
 	}

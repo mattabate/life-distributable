@@ -94,6 +94,7 @@ func New(db *store.DB, blobDir string) (*Store, error) {
 	if err := os.MkdirAll(blobDir, 0o755); err != nil {
 		return nil, err
 	}
+	repairBlobModes(blobDir)
 	s := &Store{db: db, BlobDir: blobDir}
 	for _, k := range revisable {
 		s.Register(k)
@@ -130,7 +131,27 @@ func (s *Store) PutBlob(r io.Reader, ext string) (ref string, size int64, err er
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return "", 0, err
 	}
+	// CreateTemp makes the file 0600, and a rename keeps that: the session
+	// user (threads/runas.go) then got EACCES on every photo the owner sent
+	// from the phone.
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return "", 0, err
+	}
 	return ref, size, os.Rename(tmp.Name(), dst)
+}
+
+// repairBlobModes makes every blob written before PutBlob's chmod readable
+// by the session user, as the blob folder itself already is.
+func repairBlobModes(dir string) {
+	filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		if fi, err := d.Info(); err == nil && fi.Mode().Perm()&0o044 != 0o044 {
+			os.Chmod(p, fi.Mode().Perm()|0o044)
+		}
+		return nil
+	})
 }
 
 // PutIntake saves the blob at ref into IntakeDir under its own name — the

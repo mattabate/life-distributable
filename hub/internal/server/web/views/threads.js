@@ -866,7 +866,7 @@ async function refreshThread(id, first) {
   // message written before it, else the end of the chat.
   // Live = not closed (the hub's `closed`, store.AskStanding).
   const activeAsk = a => !a.closed;
-  for (const a of (asks || [])) {
+  for (const a of [...(asks || [])].sort((x, y) => +new Date(x.created_at) - +new Date(y.created_at))) {
     askById[a.id] = a;
     let host = null;
     if (a.message_id && ordered.some(m => m.id === a.message_id)) host = a.message_id;
@@ -885,8 +885,10 @@ async function refreshThread(id, first) {
   // OLDER than every loaded message is history and is not drawn unless it is
   // still waiting on a decision (or is the focused card): the chat loads a
   // newer window, and a decided row from days ago would hang under today's.
+  // Oldest first, as the phone does: the hub lists them newest first, so
+  // three approvals under one message drew backwards.
   const actByMsg = {}, tail = [];
-  for (const a of acts) {
+  for (const a of [...acts].sort((x, y) => +new Date(x.created_at) - +new Date(y.created_at))) {
     const at = +new Date(a.created_at);
     let host = null;
     for (const m of ordered) if (+new Date(m.ts) <= at) host = m;

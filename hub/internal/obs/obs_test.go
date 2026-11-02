@@ -3,6 +3,7 @@ package obs
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,6 +51,34 @@ func TestObservationsAndBlobs(t *testing.T) {
 	cs, _ := s.Counts()
 	if len(cs) != 2 {
 		t.Fatal(cs)
+	}
+}
+
+// A blob is readable by the session user: PutBlob's CreateTemp made it 0600,
+// so a session could not open a photo the owner sent, and New fixes the ones
+// written that way.
+func TestBlobsAreSessionReadable(t *testing.T) {
+	dir := t.TempDir()
+	db, _ := store.Open(filepath.Join(dir, "t.db"))
+	blobs := filepath.Join(dir, "blobs")
+	s, err := New(db, blobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, _, err := s.PutBlob(strings.NewReader("photo"), "jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := s.BlobPath(ref)
+	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o644 {
+		t.Fatalf("new blob mode %v, want 0644", fi.Mode().Perm())
+	}
+	os.Chmod(p, 0o600)
+	if _, err := New(db, blobs); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o644 {
+		t.Fatalf("old blob mode %v after New, want 0644", fi.Mode().Perm())
 	}
 }
 

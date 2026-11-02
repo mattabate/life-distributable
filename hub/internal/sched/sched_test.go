@@ -146,6 +146,35 @@ func TestNoUnrestrictedShellInAnyToolGrant(t *testing.T) {
 	}
 }
 
+// A job's prompt tells it which calls its grant refuses: the ask-verifier
+// piped `lifectl asks --json` into python3 and tried a Gmail search every
+// hour, refused each time, even with the previous run's denials in its prompt.
+func TestAskVerifierPromptNamesWhatItsGrantRefuses(t *testing.T) {
+	live, err := LoadTable("../../../ops/schedule.json")
+	if err != nil {
+		t.Skipf("live schedule.json unreadable (%v)", err)
+	}
+	for _, j := range live.Jobs {
+		if j.Name != "ask-verifier" {
+			continue
+		}
+		grant := strings.Join(live.DefaultTools, " ")
+		if len(j.AllowedTools) > 0 {
+			grant = strings.Join(j.AllowedTools, " ")
+		}
+		for _, refused := range []string{"python3", "ops/py.sh"} {
+			if !strings.Contains(grant, refused) && !strings.Contains(j.Prompt, "no "+refused) && !strings.Contains(j.Prompt, "or "+refused) {
+				t.Errorf("ask-verifier's grant refuses %s and its prompt does not say so", refused)
+			}
+		}
+		if !strings.Contains(j.Prompt, "never pipe") || !strings.Contains(j.Prompt, "Gmail") {
+			t.Errorf("ask-verifier's prompt must say to read `lifectl asks --json` unpiped and to leave Gmail hints: %s", j.Prompt)
+		}
+		return
+	}
+	t.Fatal("no ask-verifier job in the live schedule.json")
+}
+
 func TestWhenParsing(t *testing.T) {
 	for _, ok := range []string{"daily@07:30", "weekly@Mon 09:00", "every@6h", "manual"} {
 		if _, _, err := parseWhen(ok); err != nil {
