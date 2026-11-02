@@ -1063,7 +1063,9 @@ func (m *Manager) haikuSummarize(dir, prompt string) (string, error) {
 	// Not `dir`: from the project the CLI loads its instructions and memory
 	// index into every one-line title (preflight.go sideDir).
 	_ = dir
-	c.Dir = sideDir()
+	d, cleanup := sideDir()
+	defer cleanup()
+	c.Dir = d
 	c.Stdin = strings.NewReader(prompt)
 	out, err := c.Output()
 	if err != nil {

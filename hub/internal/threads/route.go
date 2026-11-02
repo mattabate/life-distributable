@@ -590,7 +590,9 @@ func (m *Manager) haikuPick(prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), routeTimeout)
 	defer cancel()
 	c := exec.CommandContext(ctx, m.ClaudeBin, "-p", "--model", "claude-haiku-4-5-20251001", "--output-format", "text", "--max-turns", "1", "--tools", "")
-	c.Dir = sideDir()
+	d, cleanup := sideDir()
+	defer cleanup()
+	c.Dir = d
 	c.Stdin = strings.NewReader(prompt)
 	out, err := c.Output()
 	if err != nil {

@@ -14,7 +14,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,8 +24,11 @@ import (
 func (m *Manager) probeModel(model string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	c := exec.CommandContext(ctx, m.ClaudeBin, "-p", "--model", model, "--output-format", "text", "--max-turns", "1", "--tools", "")
-	c.Dir = sideDir()
+	name, args := m.sessionCLICommand("-p", "--model", model, "--output-format", "text", "--max-turns", "1", "--tools", "")
+	c := exec.CommandContext(ctx, name, args...)
+	dir, cleanup := sideDir()
+	defer cleanup()
+	c.Dir = dir
 	c.Stdin = strings.NewReader("Reply with the single word OK.")
 	out, err := c.CombinedOutput()
 	return string(out), err
@@ -88,7 +90,8 @@ const preflightKey = "preflight:passed"
 func (m *Manager) cliVersion() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, m.ClaudeBin, "--version").Output()
+	name, args := m.sessionCLICommand("--version")
+	out, err := exec.CommandContext(ctx, name, args...).Output()
 	if err != nil {
 		return ""
 	}
@@ -98,12 +101,18 @@ func (m *Manager) cliVersion() string {
 // sideDir is an empty folder the tool-less one-shot calls (preflight probes,
 // titles and command descriptions) run from, so the CLI loads no project
 // instructions and no memory for a one-word answer.
-func sideDir() string {
-	d := filepath.Join(os.TempDir(), "life-side-calls")
-	if os.MkdirAll(d, 0o700) != nil {
-		return os.TempDir()
+func sideDir() (string, func()) {
+	// macOS's os.TempDir() is private to the hub user, so a session user
+	// cannot traverse it even when the child directory is searchable.
+	d, err := os.MkdirTemp("/tmp", "life-side-calls-")
+	if err != nil {
+		return "/tmp", func() {}
 	}
-	return d
+	if err := os.Chmod(d, 0o711); err != nil {
+		os.Remove(d)
+		return "/tmp", func() {}
+	}
+	return d, func() { _ = os.RemoveAll(d) }
 }
 
 func (m *Manager) raiseStaleCLI(model, out string) {
@@ -115,7 +124,7 @@ func (m *Manager) raiseStaleCLI(model, out string) {
 			}
 		}
 	}
-	detail := fmt.Sprintf("The hub's startup check ran `%s -p --model %s` and the CLI refused the model, so sessions skip that rung and run one rung lower until it is fixed.\n\n1. Open Terminal on the Mac.\n2. Type `claude update` and press Return.\n3. Type `ops/hub.sh restart` from `~/life` so the check runs again.\n\nWhat the CLI said:\n\n```\n%s\n```", m.ClaudeBin, model, truncate(strings.TrimSpace(out), 600))
+	detail := fmt.Sprintf("The hub's startup check ran `%s -p --model %s` and the session CLI refused the model, so sessions skip that rung and run one rung lower until it is fixed.\n\n1. Update the Claude CLI installed for the session user.\n2. Type `ops/hub.sh restart` from `~/life` so the check runs again.\n\nWhat the CLI said:\n\n```\n%s\n```", m.sessionClaudeBin(), model, truncate(strings.TrimSpace(out), 600))
 	say := m.hey() + fmt.Sprintf("the Claude command line tool is too old for %s, so sessions are running on the next model down. Please update it.", ModelLabel(model))
 	if _, err := m.AddAskSaid("hub", "", title, detail, "physical", "the hub log shows `preflight: "+model+" ok` after a restart", "web", say); err != nil {
 		log.Printf("preflight: ask: %v", err)
