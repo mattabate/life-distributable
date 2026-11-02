@@ -14,7 +14,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,7 +26,9 @@ func (m *Manager) probeModel(model string) (string, error) {
 	defer cancel()
 	name, args := m.sessionCLICommand("-p", "--model", model, "--output-format", "text", "--max-turns", "1", "--tools", "")
 	c := exec.CommandContext(ctx, name, args...)
-	c.Dir = sideDir()
+	dir, cleanup := sideDir()
+	defer cleanup()
+	c.Dir = dir
 	c.Stdin = strings.NewReader("Reply with the single word OK.")
 	out, err := c.CombinedOutput()
 	return string(out), err
@@ -100,12 +101,18 @@ func (m *Manager) cliVersion() string {
 // sideDir is an empty folder the tool-less one-shot calls (preflight probes,
 // titles and command descriptions) run from, so the CLI loads no project
 // instructions and no memory for a one-word answer.
-func sideDir() string {
-	d := filepath.Join(os.TempDir(), "life-side-calls")
-	if os.MkdirAll(d, 0o711) != nil || os.Chmod(d, 0o711) != nil {
-		return os.TempDir()
+func sideDir() (string, func()) {
+	// macOS's os.TempDir() is private to the hub user, so a session user
+	// cannot traverse it even when the child directory is searchable.
+	d, err := os.MkdirTemp("/tmp", "life-side-calls-")
+	if err != nil {
+		return "/tmp", func() {}
 	}
-	return d
+	if err := os.Chmod(d, 0o711); err != nil {
+		os.Remove(d)
+		return "/tmp", func() {}
+	}
+	return d, func() { _ = os.RemoveAll(d) }
 }
 
 func (m *Manager) raiseStaleCLI(model, out string) {

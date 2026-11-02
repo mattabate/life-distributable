@@ -1,6 +1,8 @@
 package threads
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -39,5 +41,24 @@ func TestSessionPreflightSelectsSessionCLI(t *testing.T) {
 				t.Errorf("command missing argument %q: %q", arg, got[len(got)-1])
 			}
 		}
+	}
+}
+
+func TestSideDirUsesSharedTemporaryDirectory(t *testing.T) {
+	dir, cleanup := sideDir()
+	defer cleanup()
+	if filepath.Dir(dir) != "/tmp" {
+		t.Errorf("side directory parent is %q, want shared /tmp", filepath.Dir(dir))
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o711 {
+		t.Errorf("side directory permissions are %04o, want 0711", info.Mode().Perm())
+	}
+	cleanup()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("side directory still exists after cleanup: %v", err)
 	}
 }
