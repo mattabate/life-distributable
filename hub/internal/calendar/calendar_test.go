@@ -1168,6 +1168,17 @@ func TestDragMovesFiredAndRepeatingItems(t *testing.T) {
 	if len(next) != 1 || next[0].At != "21:00" || next[0].Repeat != "daily" {
 		t.Fatalf("the chain should carry the new time: %+v", next)
 	}
+	// An occurrence detached with scope=one keeps its own time when the
+	// fired row before it moves with scope=future.
+	if _, err := c.Update(next[0].ID, map[string]string{"at": "10:15", "scope": "one"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Update(pouch.ID, map[string]string{"at": "06:30", "day": "2026-09-03", "scope": "future"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := c.Get(next[0].ID); d.At != "10:15" || d.Day != "2026-09-04" || d.Repeat != "" {
+		t.Fatalf("the detached occurrence was moved: %+v", d)
+	}
 	// And an unknown scope is refused, never guessed.
 	if bad, err := c.Update(pouch.ID, map[string]string{"at": "22:00", "scope": "bogus"}); err == nil {
 		t.Fatalf("bogus scope accepted: %+v", bad)

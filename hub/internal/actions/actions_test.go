@@ -86,6 +86,40 @@ func TestShellOffTheFreeListIsGated(t *testing.T) {
 	}
 }
 
+// A free ls names only the checkout and the intake in-box: it runs as the
+// hub's user, so `ls -la ~/.ssh`, a bare ls with no dir (it starts in "/"), a
+// way out by .. or a link in a root are the owner's to approve.
+func TestFreeLsStaysInItsRoots(t *testing.T) {
+	q, _, _ := setup(t)
+	repo, drop, out := t.TempDir(), t.TempDir(), t.TempDir()
+	os.Symlink(out, filepath.Join(drop, "link"))
+	q.FreeShell, q.LsRoots = []string{"ls"}, []string{repo, drop}
+	for _, c := range []struct {
+		cmd, dir string
+		free     bool
+	}{
+		{"ls -la " + drop, "", true},
+		{"ls -la " + drop + "/", "", true},
+		{"ls ops", repo, true},
+		{"ls", repo, true},
+		{"ls -la ~/.ssh", "", false},
+		{"ls -la /Users", "", false},
+		{"ls", "", false},
+		{"ls -R .", "", false},
+		{"ls " + drop + "/../x", "", false},
+		{"ls ..", repo, false},
+		{"ls " + drop + "/link/", "", false},
+		{"ls " + drop + "/*", "", false},
+		{"ls '" + out + "'", "", false},
+	} {
+		pay, _ := json.Marshal(map[string]string{"cmd": c.cmd, "dir": c.dir})
+		a, err := q.Propose(Proposal{Kind: "other", Title: "x", ExecType: "shell", ExecPayload: pay})
+		if err != nil || a.Gated == c.free {
+			t.Errorf("%q in %q: gated=%v, want free=%v (%v)", c.cmd, c.dir, a.Gated, c.free, err)
+		}
+	}
+}
+
 func waitState(t *testing.T, q *Queue, id, want string) Action {
 	for i := 0; i < 100; i++ {
 		a, _ := q.Get(id)
@@ -115,6 +149,25 @@ func TestProposeRefusesBidiControlInPayload(t *testing.T) {
 	}
 	if _, err := q.Propose(Proposal{Kind: "delete", Title: "tidy", ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"rm ~/tmp/café-ü.txt"}`)}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A key twice in a payload reads as the first value on the phone and the last
+// in Go: refused at any depth and in any case; the same key in two sibling
+// objects is fine.
+func TestProposeRefusesDuplicateKeyInPayload(t *testing.T) {
+	q, ex, _ := setup(t)
+	for _, pay := range []string{`{"cmd":"echo SHOWN","cmd":"echo RAN"}`, `{"cmd":"echo SHOWN","CMD":"echo RAN"}`,
+		`{"a":[{"x":1}],"b":{"to":"x","To":"y"}}`, "{\"kind\":\"a\",\"Kind\":\"b\"}" /* Kelvin sign folds to k */} {
+		if a, err := q.Propose(Proposal{Kind: "other", Title: "tidy", ExecType: "shell", ExecPayload: json.RawMessage(pay)}); err == nil || !strings.Contains(err.Error(), "twice") {
+			t.Fatalf("%s: %+v %v", pay, a, err)
+		}
+	}
+	if len(ex.calls) != 0 {
+		t.Fatal(ex.calls)
+	}
+	if _, ok := dupKey(json.RawMessage(`{"a":{"k":1},"b":{"k":2},"c":[{"k":1},{"k":2}]}`)); ok {
+		t.Fatal("sibling objects flagged")
 	}
 }
 

@@ -2,6 +2,7 @@ package threads
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -92,6 +93,49 @@ func TestGoneProcessRestartsTheTurnThenCards(t *testing.T) {
 	}
 	if th, _ := m.Get(th.ID); th.Status != "needs_you" {
 		t.Fatalf("%+v", th)
+	}
+}
+
+// The real run command, through a shell: a claude that dies while feed still
+// waits for its eof line leaves .done at once, with its own stderr, and the
+// settle hands the orphaned feed its eof so it ends too (the marker had
+// waited on feed, so the run sat until the hang kill).
+func TestCrashedClaudeLeavesDoneWhileFeedWaits(t *testing.T) {
+	m, _, cmds := setup(t)
+	bin := t.TempDir()
+	feed, claude := filepath.Join(bin, "feed"), filepath.Join(bin, "claude")
+	os.WriteFile(feed, []byte("#!/bin/sh\nsleep 30\n"), 0o755)
+	os.WriteFile(claude, []byte("#!/bin/sh\necho 'killed: out of memory' >&2\nexit 137\n"), 0o755)
+	m.FeedBin, m.ClaudeBin = feed, claude
+	th, _ := m.Create("", "life", "", "Hello.", "", "", nil)
+	var launch string
+	for _, c := range *cmds {
+		if strings.HasPrefix(c, "tmux new-session") {
+			launch = c[strings.Index(c, "i=0; "):]
+		}
+	}
+	if launch == "" {
+		t.Fatalf("no launch: %v", *cmds)
+	}
+	sh := exec.Command("/bin/sh", "-c", launch)
+	if err := sh.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer sh.Process.Kill()
+	out := pendingOut(t, m, th.ID)
+	deadline := time.Now().Add(5 * time.Second)
+	for !fileExists(out + ".done") {
+		if time.Now().After(deadline) {
+			t.Fatal("no .done while feed is still running")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if b, _ := os.ReadFile(out + ".err"); !strings.Contains(string(b), "out of memory") {
+		t.Fatalf("stderr lost: %q", b)
+	}
+	m.Poll()
+	if b, _ := os.ReadFile(strings.TrimSuffix(out, ".out") + ".in"); !strings.HasSuffix(string(b), eofSentinel+"\n") {
+		t.Fatalf("the orphaned feed is not told to end: %q", b)
 	}
 }
 
@@ -207,7 +251,7 @@ func TestSteerAndTurns(t *testing.T) {
 	th, _ := m.Create("", "life", "", "Do a long thing.", "", "", nil)
 	out := pendingOut(t, m, th.ID)
 	in := inFile(t, m, th.ID)
-	if c := (*cmds)[0]; !strings.Contains(c, "'/opt/bin/lifectl' feed '"+in+"' | LIFE_THREAD_ID=") || !strings.Contains(c, "'--input-format' 'stream-json'") {
+	if c := (*cmds)[0]; !strings.Contains(c, "'/opt/bin/lifectl' feed '"+in+"' | { LIFE_THREAD_ID=") || !strings.Contains(c, "'--input-format' 'stream-json'") {
 		t.Fatal(c)
 	}
 	// the opening prompt is the first stdin line
@@ -674,7 +718,7 @@ func TestHeldResultReleasedByAMessageEndsItsOwnTurn(t *testing.T) {
 {"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"make ship","run_in_background":true}}]}}
 {"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash","description":"Ship"}]}
 {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"started"}]}}
-{"type":"result","subtype":"success","is_error":false,"result":"Say: Hey Alex, the build you approved finished.","total_cost_usd":0.50,"session_id":"sess-1"}
+{"type":"result","subtype":"success","is_error":false,"result":"The build you approved is running.","total_cost_usd":0.50,"session_id":"sess-1"}
 `)
 		m.Poll()
 		msgs, _ := m.Messages(th.ID, 50)
@@ -788,6 +832,42 @@ func TestHeldResultLandsOnExitOrTimeout(t *testing.T) {
 	msgs, _ = m.Messages(th2.ID, 50)
 	if th2.Status != "needs_you" || len(msgs) != 2 || msgs[1].Text != "" || msgs[1].Kind != "read" {
 		t.Fatalf("%+v %+v", th2, msgs)
+	}
+}
+
+// A "Say:" reply is for the owner even with a background task pending: it
+// lands now, and the task's own turn after it is a turn of its own whose
+// [end] cannot wipe it (a status answer had sat held behind a background
+// task, and one came back an empty row).
+func TestSayReplyIsNotHeldBehindABackgroundTask(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "What's the status?", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	appendOut(t, out, `{"type":"system","subtype":"init","session_id":"sess-1"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash","description":"Scout"}]}
+{"type":"result","subtype":"success","is_error":false,"result":"Say: Hey Alex, the scout is still digging.","total_cost_usd":0.30,"session_id":"sess-1"}
+`)
+	m.Poll()
+	var held string
+	m.db.QueryRow(`SELECT held FROM thread_runs WHERE thread_id=?`, th.ID).Scan(&held)
+	if held != "" {
+		t.Fatalf("a Say reply was held: %s", held)
+	}
+	msgs, _ := m.Messages(th.ID, 50)
+	if len(msgs) != 2 || msgs[1].Kind != "read" {
+		t.Fatalf("%+v", msgs)
+	}
+	// The scout notifies; its turn ends on [end] and leaves the card alone.
+	appendOut(t, out, `{"type":"system","subtype":"task_notification","task_id":"b1"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[]}
+{"type":"system","subtype":"init","session_id":"sess-1"}
+{"type":"assistant","message":{"id":"m2","content":[{"type":"text","text":"[end]"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"[end]","total_cost_usd":0.40,"session_id":"sess-1"}
+`)
+	m.Poll()
+	asks, _ := m.ListAsks("active", th.ID, 10)
+	if len(asks) != 1 || asks[0].Title != "The scout is still digging" || asks[0].MessageID != msgs[1].ID {
+		t.Fatalf("the status card: %+v", asks)
 	}
 }
 

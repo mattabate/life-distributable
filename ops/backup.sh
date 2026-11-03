@@ -35,7 +35,8 @@ fi
 DB="$ROOT/data/life.db"
 if [[ -f "$DB" ]]; then
   mkdir -p "$ROOT/data/snapshots"
-  sqlite3 "$DB" ".backup $ROOT/data/snapshots/life.db"
+  # sqlite splits a dot-command's arguments on spaces itself: quote the path.
+  sqlite3 "$DB" ".backup \"$ROOT/data/snapshots/life.db\""
 fi
 
 # A bundle of every ref of the repo rides the encrypted backup too, so a dead

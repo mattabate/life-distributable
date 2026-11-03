@@ -31,6 +31,14 @@ if [[ "${1:-}" == "tables" ]]; then
 fi
 
 sql="$*"
+# A second flag would land after the database name, where sqlite3 still reads
+# it as an option: `-append` reopens life.db read-write (the last open mode
+# wins) and, with no SQL left, takes statements from stdin. A scheduled job
+# runs as the hub's user and can open the file.
+if [[ "$sql" =~ ^[[:space:]]*- ]]; then
+  echo "ops/db.sh: one flag at most (-json, -line or -csv), then the SQL" >&2
+  exit 2
+fi
 # An argument starting with "." is a dot-command (.shell, .output, .import).
 if [[ "$sql" =~ ^[[:space:]]*\. ]]; then
   echo "ops/db.sh: dot-commands are not allowed — SQL only" >&2
@@ -46,4 +54,6 @@ fi
 # ${fmt[@]+…}: macOS ships bash 3.2, where an empty array trips `set -u`.
 # -safe also turns off writefile(), edit() and load_extension(), which write
 # files or run code from plain SELECTs.
-exec sqlite3 -readonly -safe ${fmt[@]+"${fmt[@]}"} "$DB" "$sql"
+# mode=ro in the URI as a second lock: no later flag can reopen it read-write.
+# Never stdin, so an empty SQL argument reads nothing.
+exec sqlite3 -readonly -safe ${fmt[@]+"${fmt[@]}"} "file:$DB?mode=ro" "$sql" </dev/null

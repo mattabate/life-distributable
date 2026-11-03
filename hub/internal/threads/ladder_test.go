@@ -1,11 +1,32 @@
 package threads
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strings"
 	"testing"
 )
+
+// Preflight asks the CLI sessions run, as their user with its sign-in, from
+// an empty folder of that user's; with no session user, the hub's own CLI.
+func TestPreflightAsksTheSessionCLI(t *testing.T) {
+	m := &Manager{ClaudeBin: "/owner/claude"}
+	if c := m.sessionCLI(context.Background(), "--version"); c.Path != "/owner/claude" || len(c.Args) != 2 {
+		t.Fatalf("owner: %v", c.Args)
+	}
+	m.RunAs = RunAs{User: "sessions", ClaudeBin: "/session/claude"}
+	c := m.sessionCLI(context.Background(), "-p", "--model", "claude-opus-5-5")
+	sh := c.Args[len(c.Args)-1]
+	if c.Path != "/usr/bin/sudo" || strings.Join(c.Args[1:7], " ") != "-n -H -u sessions /bin/sh -c" || c.Dir != "/" {
+		t.Fatalf("session: %v in %q", c.Args, c.Dir)
+	}
+	for _, want := range []string{`cd "$d"`, `.claude-token`, `'/session/claude' '-p' '--model' 'claude-opus-5-5'`, `rmdir "$d"; exit $rc`} {
+		if !strings.Contains(sh, want) || strings.Contains(sh, "/owner/claude") {
+			t.Fatalf("missing %q: %s", want, sh)
+		}
+	}
+}
 
 // Model ladder: the process is launched with the picked --model; a turn
 // that dies on a plan limit is re-queued and relaunched on the next rung,

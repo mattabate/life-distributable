@@ -459,7 +459,7 @@ func TestRecDecisionGoesToAnAgent(t *testing.T) {
 	}
 	// A bad ref fails the delivery loudly; the decision itself stands.
 	id = newRec("Try Notion", th.ID)
-	w = s.do(t, "POST", "/api/v1/recs/"+id+"/decide", map[string]any{"status": "accepted", "deliver": "source", "attachments": []string{"nope"}})
+	w = s.do(t, "POST", "/api/v1/recs/"+id+"/decide", map[string]any{"status": "accepted", "deliver": "source", "attachments": []string{"sha256/ab/nope.png"}})
 	out = decision{}
 	json.Unmarshal(w.Body.Bytes(), &out)
 	if w.Code != 200 || !strings.Contains(out.Err, "no such blob") {

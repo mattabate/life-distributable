@@ -86,10 +86,13 @@ func LoadTable(path string) (Table, error) {
 			"Bash(ops/db.sh:*)", "Bash(ops/py.sh:*)"}
 	}
 	if len(t.DefaultTools) == 0 {
+		// No shell file readers (cat, head, tail, grep, wc): a job runs as
+		// the hub's user, and only the Read tool carries the ops/secrets
+		// denial (jobDenied). Read and Grep cover reading. No git log or
+		// git diff either: --output=<file> writes any file the hub's user can.
 		t.DefaultTools = []string{"Read", "Grep", "Glob", "WebSearch", "WebFetch",
-			"Bash(lifectl:*)", "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)",
-			"Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)",
-			"Bash(date:*)", "Bash(wc:*)", "Bash(ops/db.sh:*)"}
+			"Bash(lifectl:*)", "Bash(git status:*)",
+			"Bash(ls:*)", "Bash(date:*)", "Bash(ops/db.sh:*)"}
 	}
 	for _, j := range t.Jobs {
 		if j.Name == "" || j.Prompt == "" {
@@ -837,8 +840,9 @@ func jobDenied(dir string, tools []string) []string {
 			out = append(out, t+"(/"+p+"/**)")
 		}
 	}
-	// Nor reads ops/secrets: a job runs as the hub's user, and lifectl calls
-	// with the job's own token (JobToken), so the hub token is no use to it.
+	// Nor reads ops/secrets: a job runs as the hub's user. No job holds a
+	// shell file reader (TestNoJobHoldsAShellFileReader), and lifectl calls
+	// with the job's own token (JobToken); no job holds curl or python3.
 	if dir != "" {
 		out = append(out, "Read(/"+filepath.Join(dir, "ops", "secrets")+"/**)")
 	}

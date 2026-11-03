@@ -25,6 +25,11 @@ import (
 // at the bottom.
 var DefaultLadder = []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5"}
 
+// HelperModel: the one-turn, tool-less helper calls (session summaries, the
+// router's pick, steerprobe). One id here so a model change is one line; they
+// had pinned claude-haiku-4-5-20251001 by hand.
+const HelperModel = "claude-haiku-5-5"
+
 // successors: a rung the ladder retired → the id that replaced it. A thread
 // pins its model at birth (threads.DefaultModel), so threads made on a
 // retired rung would resume on the old id forever — off the ladder, so no

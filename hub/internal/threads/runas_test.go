@@ -113,6 +113,37 @@ func TestSessionCloneAsSessionUser(t *testing.T) {
 		t.Errorf("second start:\n%s", got)
 	}
 
+	// A clone with unlanded commits never fast-forwards, so it kept the
+	// scripts it was made with: it is rebased onto main, and a rebase that
+	// stops is aborted.
+	for _, rebaseFails := range []bool{false, true} {
+		cmds = nil
+		m.Run = func(n string, a ...string) ([]byte, error) {
+			line := strings.Join(append([]string{n}, a...), " ")
+			cmds = append(cmds, line)
+			if strings.Contains(line, " merge --ff-only ") || (rebaseFails && strings.Contains(line, " rebase --quiet ")) {
+				return nil, os.ErrInvalid
+			}
+			return nil, nil
+		}
+		m.catchUp(th, wt)
+		want := []string{
+			sudo + "git -C " + wt + " fetch --quiet origin main",
+			sudo + "git -C " + wt + " merge --ff-only --quiet origin/main",
+			sudo + "git -C " + wt + " rebase --quiet origin/main",
+		}
+		if rebaseFails {
+			want = append(want, sudo+"git -C "+wt+" rebase --abort")
+		}
+		if strings.Join(cmds, "\n") != strings.Join(want, "\n") {
+			t.Errorf("diverged clone (rebase fails %v): %v", rebaseFails, cmds)
+		}
+	}
+	m.Run = func(n string, a ...string) ([]byte, error) {
+		cmds = append(cmds, strings.Join(append([]string{n}, a...), " "))
+		return nil, nil
+	}
+
 	// Another project's directory is not cloned.
 	cmds = nil
 	if d := m.sessionDir(Thread{ID: "b"}, "/elsewhere"); d != "/elsewhere" || len(cmds) != 0 {

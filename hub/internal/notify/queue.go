@@ -42,7 +42,7 @@ func (a *APNs) enqueue(card, thread, kind, title, body string) {
 	}
 	now := store.TS(time.Now())
 	if _, err := a.db.Exec(`INSERT INTO voice_queue (card, thread, kind, title, body, queued_at) VALUES (?,?,?,?,?,?)
-		ON CONFLICT(card) DO UPDATE SET thread=excluded.thread, kind=excluded.kind, title=excluded.title, body=excluded.body, queued_at=excluded.queued_at, heard_at=''`,
+		ON CONFLICT(card) DO UPDATE SET thread=excluded.thread, kind=excluded.kind, title=excluded.title, body=excluded.body, queued_at=excluded.queued_at, heard_at='', resumed_at=''`,
 		card, thread, kind, title, body, now); err != nil {
 		log.Printf("voice: queue %s: %v", card, err)
 	}
@@ -115,9 +115,11 @@ func (a *APNs) Resume() {
 	}
 	rows.Close()
 	n := 0
+	// resumed_at is stamped after the push: enqueue clears it, so a card
+	// raised again after one resume is resumed again if a restart cuts it.
 	for _, r := range todo {
-		a.db.Exec(`UPDATE voice_queue SET resumed_at=? WHERE card=?`, store.TS(now), r.card)
 		if a.Open != nil && !a.Open(r.card) {
+			a.db.Exec(`UPDATE voice_queue SET resumed_at=? WHERE card=?`, store.TS(now), r.card)
 			log.Printf("voice: %s was queued unheard but is closed; not re-spoken", r.card)
 			continue
 		}
@@ -126,6 +128,7 @@ func (a *APNs) Resume() {
 		if err := a.push(r.kind, r.title, r.body, r.thread, r.card); err != nil {
 			log.Printf("voice: resume %s: %v", r.card, err)
 		}
+		a.db.Exec(`UPDATE voice_queue SET resumed_at=? WHERE card=?`, store.TS(now), r.card)
 	}
 	if n > 0 {
 		log.Printf("voice: %d card(s) left unheard by the last hub, re-spoken", n)

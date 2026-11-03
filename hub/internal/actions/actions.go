@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -45,6 +46,64 @@ func freeShell(free []string, cmd string) bool {
 	}
 	for _, f := range free {
 		if f != "" && (cmd == f || strings.HasPrefix(cmd, f+" ")) {
+			return true
+		}
+	}
+	return false
+}
+
+// lsInRoots: a free ls names only paths inside roots. It runs as the hub's
+// user, so `ls -la ~/.ssh` (or a bare ls in "/", where a run with no dir
+// starts) would list what no session may see. Each path is resolved against
+// dir lexically; a ~, a quote or a glob is refused outright, since the shell
+// reads them and this does not. Any other command passes.
+func lsInRoots(roots []string, cmd, dir string) bool {
+	args := strings.Fields(cmd)
+	if len(args) == 0 || args[0] != "ls" {
+		return true
+	}
+	paths := []string{}
+	for _, a := range args[1:] {
+		if !strings.HasPrefix(a, "-") {
+			paths = append(paths, a)
+		}
+	}
+	if len(paths) == 0 {
+		paths = []string{"."}
+	}
+	if dir == "" {
+		dir = "/"
+	}
+	for _, a := range paths {
+		if strings.ContainsAny(a, "~'\"*?[") {
+			return false
+		}
+		if !filepath.IsAbs(a) {
+			a = filepath.Join(dir, a)
+		}
+		if !under(roots, filepath.Clean(a)) {
+			return false
+		}
+		// A link inside a root may point anywhere: where it lands must be
+		// inside one too.
+		if real, err := filepath.EvalSymlinks(a); err == nil && !under(roots, real) {
+			return false
+		}
+	}
+	return true
+}
+
+func under(roots []string, p string) bool {
+	for _, r := range roots {
+		if r == "" {
+			continue
+		}
+		if real, err := filepath.EvalSymlinks(r); err == nil {
+			if p == real || strings.HasPrefix(p, real+"/") {
+				return true
+			}
+		}
+		if p == r || strings.HasPrefix(p, r+"/") {
 			return true
 		}
 	}
@@ -189,6 +248,9 @@ type Queue struct {
 	// card (freeShell). main sets read-only ones; nil = every shell run is
 	// gated.
 	FreeShell []string
+	// LsRoots: the folders a free ls may name (lsInRoots); nil = none, so
+	// every ls is the owner's to approve.
+	LsRoots []string
 	// OnDecided fires after the owner approves/denies a gated action (main relays
 	// it into the proposing thread, or starts one). nil = no callback.
 	OnDecided func(a Action, approved bool, note string)
@@ -523,8 +585,59 @@ func bidiControl(raw json.RawMessage) (rune, bool) {
 	return 0, false
 }
 
+// dupKey finds an object key that appears twice in an exec payload, at any
+// depth, matching the way Go's decoder does (case-folded: "cmd" and "CMD" are
+// one field to it). Go keeps the last value and the phone's decoder the
+// first, so {"cmd":"echo shown","cmd":"rm ..."} can read as one command on
+// the card while another runs.
+func dupKey(raw json.RawMessage) (string, bool) {
+	type frame struct {
+		obj, wantKey bool
+		keys         map[string]bool
+	}
+	var stack []*frame
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	for {
+		t, err := dec.Token()
+		if err != nil {
+			return "", false // a bad payload fails where it is decoded
+		}
+		var top *frame
+		if n := len(stack); n > 0 {
+			top = stack[n-1]
+		}
+		if top != nil && top.obj && top.wantKey {
+			if k, ok := t.(string); ok {
+				f := strings.ToLower(strings.ToUpper(k))
+				if top.keys[f] {
+					return k, true
+				}
+				top.keys[f] = true
+				top.wantKey = false
+				continue
+			}
+		}
+		switch t {
+		case json.Delim('{'):
+			stack = append(stack, &frame{obj: true, wantKey: true, keys: map[string]bool{}})
+			continue
+		case json.Delim('['):
+			stack = append(stack, &frame{})
+			continue
+		case json.Delim('}'), json.Delim(']'):
+			stack = stack[:len(stack)-1]
+		}
+		if n := len(stack); n > 0 && stack[n-1].obj {
+			stack[n-1].wantKey = true
+		}
+	}
+}
+
 // Propose records an action. Ungated actions run immediately (async).
 func (q *Queue) Propose(p Proposal) (Action, error) {
+	if k, ok := dupKey(p.ExecPayload); ok {
+		return Action{}, fmt.Errorf("exec_payload has the key %q twice (or in another case): the card and the runner would read different values; send it once", k)
+	}
 	if p.ExecType == "relay" {
 		if err := q.relayCard(&p); err != nil {
 			return Action{}, err
@@ -561,9 +674,10 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 	case "shell":
 		var sp struct {
 			Cmd string `json:"cmd"`
+			Dir string `json:"dir"`
 		}
 		json.Unmarshal(p.ExecPayload, &sp)
-		if !freeShell(q.FreeShell, sp.Cmd) {
+		if !freeShell(q.FreeShell, sp.Cmd) || !lsInRoots(q.LsRoots, sp.Cmd, sp.Dir) {
 			gated = true
 		}
 	}

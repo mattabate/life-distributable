@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -104,5 +105,40 @@ func TestSessionTokenCannotActAsOwner(t *testing.T) {
 	})(httptest.NewRecorder(), r)
 	if seen != `{"by":"owner"}` {
 		t.Fatalf("off: %q", seen)
+	}
+}
+
+// A session's upload is stored as sent: a .json blob or a notes file that
+// is a JSON object came back with by/author written into it, and JSON null
+// panicked on the stamp.
+func TestSessionRawBodiesAreStoredAsSent(t *testing.T) {
+	s := newTest(t)
+	th, _ := s.thr.Create("Notes", "life", "", "Notes.", "", "", nil)
+	s.thr.Update(th.ID, map[string]string{"persona": threads.PersonaAssistant})
+	s.cfg.SessionTokens = true
+	call := func(method, path, ctype, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+SessionToken(s.token, th.ID))
+		r.Header.Set("Content-Type", ctype)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	doc := "{\n  \"value\": 42\n}\n"
+	w := call("POST", "/api/v1/blobs?ext=json", "application/octet-stream", doc)
+	var got struct{ Ref string }
+	json.Unmarshal(w.Body.Bytes(), &got)
+	p, err := s.obs.BlobPath(got.Ref)
+	if b, _ := os.ReadFile(p); w.Code != 201 || err != nil || string(b) != doc {
+		t.Fatalf("blob: %d %v %q", w.Code, err, b)
+	}
+	if w := call("PUT", "/api/v1/workspace/assistant/notes.md", "text/plain", doc); w.Code != 200 {
+		t.Fatalf("workspace: %d %s", w.Code, w.Body)
+	}
+	if b, _ := s.WS.Read(threads.PersonaAssistant, "notes.md"); string(b) != doc {
+		t.Fatalf("workspace stored %q", b)
+	}
+	if w := call("POST", "/api/v1/goals", "application/json", "null"); w.Code != 400 {
+		t.Fatalf("null: %d %s", w.Code, w.Body)
 	}
 }

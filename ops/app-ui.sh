@@ -53,7 +53,7 @@ xcrun simctl ui "$UDID" appearance "$APPEARANCE" >/dev/null 2>&1 || true
 
 # NOBUILD=1 walks the LAST GOOD build in app/build instead of compiling the
 # tree first: with several sessions in one tree, somebody's half-made change
-# often stops it compiling, and "what does the app that is on his phone do
+# often stops it compiling, and "what does the app that is on the phone do
 # when I tap this" should not wait on them (10-05: a decider-row repro was
 # blocked by another session's pending delete).
 ACTION=test; [ -z "${NOBUILD:-}" ] || ACTION=test-without-building
@@ -85,8 +85,10 @@ grep -E '^UISTEP|Test Case .*(failed|passed)|error:' "$ROOT/ops/logs/app-ui.log"
 if [ -z "$(ls -A "$OUT" 2>/dev/null)" ] && [ -d "$RESULT" ]; then
   echo "app-ui: no files written directly — exporting attachments from the result bundle"
   xcrun xcresulttool export attachments --path "$RESULT" --output-path "$OUT" >/dev/null 2>&1 || true
-  # The export names files by test + index; the manifest maps them back.
-  "$ROOT/ops/py.sh" xcresult-rename.py "$OUT" || true
+  # The export names files by test + index; the manifest maps them back. No
+  # `|| true`: a missing or broken rename fails the walk instead of leaving
+  # pictures under names the next reader cannot find.
+  "$ROOT/ops/py.sh" xcresult-rename.py "$OUT"
 fi
 
 # KEEP=dir copies the pictures somewhere the NEXT walk's wipe cannot reach —

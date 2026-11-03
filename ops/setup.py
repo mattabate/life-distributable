@@ -9,8 +9,9 @@
     ops/py.sh setup.py show                            # what is configured, what is missing
 
 `hub` reads the tailnet name and IP from the Tailscale CLI and the claude
-binary from PATH, and refuses to overwrite an existing ops/hub.json without
---force. Every file it writes is git-ignored; secrets go to ops/secrets/
+binary from PATH, and refuses to touch an existing ops/hub.json without
+--force; with it, only the keys `hub` sets change (`--team yes --force` turns
+team mode on and keeps the push key). Every file it writes is git-ignored; secrets go to ops/secrets/
 (mode 600) and are never printed.
 """
 import argparse
@@ -42,8 +43,11 @@ def tailscale_self():
 
 
 def cmd_hub(a):
-    if os.path.exists(HUB_JSON) and not a.force:
+    existing = os.path.exists(HUB_JSON)
+    if existing and not a.force:
         sys.exit("setup: ops/hub.json exists (use --force to rewrite it)")
+    if not existing and (a.owner is None or a.usage is None):
+        sys.exit("setup: a new ops/hub.json needs --owner and --usage")
     host, ip = tailscale_self()
     if not host or not ip:
         sys.exit("setup: Tailscale gave no DNS name / IPv4 — enable MagicDNS in the admin console")
@@ -52,24 +56,38 @@ def cmd_hub(a):
         sys.exit("setup: `claude` is not on PATH — install Claude Code first")
     cfg = json.load(open(EXAMPLE))
     cfg.pop("_comment", None)
-    cfg["owner_name"] = a.owner
-    cfg["usage_opt_in"] = a.usage == "yes"
-    cfg["surfaces"] = a.surfaces
-    cfg["team_mode"] = a.team == "yes"
-    cfg["listen_addr"] = "%s:%d" % (ip, a.port)
-    cfg["public_host"] = "%s:%d" % (host, a.port)
+    if existing:
+        # --force rewrites only the keys this command owns: the push key
+        # (apns_*), session_user and anything set by hand survive, and a
+        # flag left out keeps its current value.
+        cfg.update(json.load(open(HUB_JSON)))
+    else:
+        for k in ("apns_key_id", "apns_team_id", "apns_bundle_id", "apns_key_file"):
+            cfg[k] = ""
+    if a.owner is not None:
+        cfg["owner_name"] = a.owner
+    if a.usage is not None:
+        cfg["usage_opt_in"] = a.usage == "yes"
+    if a.surfaces is not None or not existing:
+        cfg["surfaces"] = a.surfaces or list(SURFACES)
+    if a.team is not None or not existing:
+        cfg["team_mode"] = a.team == "yes"
+    port = a.port
+    if port is None:
+        old = str(cfg.get("listen_addr", "")).rpartition(":")[2] if existing else ""
+        port = int(old) if old.isdigit() else 8443
+    cfg["listen_addr"] = "%s:%d" % (ip, port)
+    cfg["public_host"] = "%s:%d" % (host, port)
     cfg["cert_file"] = "~/life/ops/secrets/%s.crt" % host
     cfg["key_file"] = "~/life/ops/secrets/%s.key" % host
     cfg["claude_bin"] = os.path.realpath(claude) if a.resolve else claude
-    for k in ("apns_key_id", "apns_team_id", "apns_bundle_id"):
-        cfg[k] = ""
-    cfg["apns_key_file"] = ""
     os.makedirs(SECRETS, mode=0o700, exist_ok=True)
     with open(HUB_JSON, "w") as f:
         json.dump(cfg, f, indent=2)
         f.write("\n")
-    print("wrote ops/hub.json: owner %s, hub https://%s:%d, apps %s, team mode %s"
-          % (a.owner, host, a.port, ", ".join(a.surfaces), "on" if cfg["team_mode"] else "off"))
+    print("%s ops/hub.json: owner %s, hub https://%s:%d, apps %s, team mode %s"
+          % ("updated" if existing else "wrote", cfg.get("owner_name", ""), host, port,
+             ", ".join(cfg.get("surfaces") or SURFACES), "on" if cfg.get("team_mode") else "off"))
 
 
 SURFACES = ("phone", "desktop", "web")
@@ -181,15 +199,16 @@ def main():
     p = argparse.ArgumentParser(prog="ops/py.sh setup.py")
     sub = p.add_subparsers(dest="cmd", required=True)
     h = sub.add_parser("hub")
-    h.add_argument("--owner", required=True, help="the name your agent calls you")
-    h.add_argument("--usage", choices=["yes", "no"], required=True,
-                   help="send the weekly anonymous usage heartbeat (SETUP.md step 5)")
-    h.add_argument("--surfaces", type=surfaces, default=list(SURFACES),
+    h.add_argument("--owner", help="the name your agent calls you (needed for a new hub.json)")
+    h.add_argument("--usage", choices=["yes", "no"],
+                   help="send the weekly anonymous usage heartbeat (SETUP.md step 5; needed for a new hub.json)")
+    h.add_argument("--surfaces", type=surfaces,
                    help="which apps: comma list of phone,desktop,web (default all three)")
-    h.add_argument("--team", choices=["yes", "no"], default="no",
+    h.add_argument("--team", choices=["yes", "no"],
                    help="team mode: sessions with roles and a router (SETUP.md step 10; default no)")
-    h.add_argument("--port", type=int, default=8443)
-    h.add_argument("--force", action="store_true")
+    h.add_argument("--port", type=int, help="default 8443, or the existing hub.json's port")
+    h.add_argument("--force", action="store_true",
+                   help="update an existing ops/hub.json: only the keys this command sets, the rest kept")
     h.add_argument("--resolve", action="store_true", help="store claude's resolved real path")
     ap = sub.add_parser("app")
     ap.add_argument("--github", required=True, help="your GitHub username (bundle id com.<it>.life)")

@@ -4,6 +4,7 @@
 /data/
 ops/secrets/
 ops/hub.json
+ops/hub.json.tmp
 ops/app.env
 ops/logs/
 ops/bin/

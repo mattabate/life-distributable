@@ -84,7 +84,8 @@ shows a model under "Unpriced models".
 - Neither uses bypassPermissions. Gate-list actions go via `lifectl propose`.
 - A `shell` or `claude` proposal is gated whatever kind it claims, unless the
   shell `cmd` is one plain line on `Queue.FreeShell` (main sets it; `ls` by
-  default): otherwise a proposal would run the hub's own bash past both
+  default, and a free `ls` may name only the checkout and
+  `data/imports/intake`, `Queue.LsRoots`): otherwise a proposal would run the hub's own bash past both
   lists. Add only read-only commands there. Sessions get `--disallowedTools`
   Edit/Write/MultiEdit/NotebookEdit on `ops/secrets/**` and `.git/**`, jobs
   are also denied Read of `ops/secrets/**`, and each calls the hub with its own session

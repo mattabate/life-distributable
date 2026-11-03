@@ -62,7 +62,10 @@ if __name__ == "__main__":
         sys.exit("session-user-audit: run it from a session clone (its origin is the main checkout)")
     for n in ("hub" + ".token", "decider.hash"):
         shut(os.path.join(main, "ops", "secrets", n))
-    for p in ("data/life.db", "ops/bin/hub", ".git", "hub", "ops/hub.json"):
+    # A free ls may name the intake in-box and follows a link in it at run
+    # time (actions.lsInRoots checks links when proposed): a session must not
+    # plant one there.
+    for p in ("data/life.db", "data/life.db-wal", "data/life.db-shm", "data/imports/intake", "ops/bin/hub", ".git", "hub", "ops/hub.json"):
         no_write(os.path.join(main, p))
     row(os.access(os.path.join(main, "data"), os.R_OK), "read " + os.path.join(main, "data"), "not readable")
     writes(os.path.join(REPO, "ops", "logs"))

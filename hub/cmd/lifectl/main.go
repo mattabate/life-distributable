@@ -284,8 +284,11 @@ func main() {
 		fmt.Println("\n# newest notes")
 		c.call("GET", "/api/v1/goals/"+os.Args[2]+fmt.Sprintf("/notes?limit=%d", notes), nil)
 	case "obs":
-		// lifectl obs [kind]         list recent observations
-		// lifectl obs counts         what data exists
+		// lifectl obs [kind] [--kind K] [--source S] [--account A] [--since T] [--until T]
+		//             [--after-id N] [--limit N] [--q TEXT]   list observations (newest 30 by default;
+		//             --q: the payload contains TEXT, any case;
+		//             --after-id reads forward from that id; T = RFC3339 or YYYY-MM-DD)
+		// lifectl obs counts        what data exists
 		// lifectl obs add <source> <kind> '<json payload>' [ts]   (ts = RFC3339 or YYYY-MM-DD, back-dates the observation)
 		if len(os.Args) >= 3 && os.Args[2] == "counts" {
 			c.call("GET", "/api/v1/observations/counts", nil)
@@ -300,11 +303,29 @@ func main() {
 			}
 			c.call("POST", "/api/v1/observations", body)
 		} else {
-			kind := ""
-			if len(os.Args) >= 3 {
-				kind = os.Args[2]
+			// The route takes a window, a source, a cursor and a text match;
+			// each flag passes straight through.
+			q := url.Values{"limit": {"30"}}
+			for i := 2; i < len(os.Args); i++ {
+				a := os.Args[i]
+				param := map[string]string{"--kind": "kind", "--source": "source", "--account": "account", "--q": "q",
+					"--since": "since", "--until": "until", "--after-id": "after_id", "--limit": "limit"}[a]
+				switch {
+				case param != "" && i+1 < len(os.Args):
+					val := os.Args[i+1]
+					if d, err := time.ParseInLocation("2006-01-02", val, time.Local); err == nil && (param == "since" || param == "until") {
+						val = d.Format(time.RFC3339) // the day's local midnight
+					}
+					q.Set(param, val)
+					i++
+				case i == 2 && !strings.HasPrefix(a, "--"):
+					q.Set("kind", a)
+				default:
+					fmt.Fprintln(os.Stderr, "usage: lifectl obs [kind] [--kind K] [--source S] [--account A] [--since T] [--until T] [--after-id N] [--limit N] [--q TEXT]")
+					os.Exit(2)
+				}
 			}
-			c.call("GET", "/api/v1/observations?kind="+kind+"&limit=30", nil)
+			c.call("GET", "/api/v1/observations?"+q.Encode(), nil)
 		}
 	case "prompt":
 		// The one way to say something to a session — this one, a new one, now
@@ -840,6 +861,11 @@ func main() {
 		}
 		if len(os.Args) >= 3 && os.Args[2] == "put" {
 			need(5)
+			// `put --persona x name @file` would write a file named
+			// "--persona" holding "x": the flags come after the text.
+			if strings.HasPrefix(os.Args[3], "-") {
+				die("usage: lifectl workspace put <name> text|@file [--persona p] (the flag goes last)")
+			}
 			fs := flag.NewFlagSet("workspace put", flag.ExitOnError)
 			role := fs.String("persona", os.Getenv("LIFE_THREAD_ID"), "whose workspace (a session's own by default)")
 			fs.Parse(os.Args[5:])

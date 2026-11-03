@@ -25,8 +25,7 @@ import (
 func (m *Manager) probeModel(model string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	c := exec.CommandContext(ctx, m.ClaudeBin, "-p", "--model", model, "--output-format", "text", "--max-turns", "1", "--tools", "")
-	c.Dir = sideDir()
+	c := m.sessionCLI(ctx, "-p", "--model", model, "--output-format", "text", "--max-turns", "1", "--tools", "")
 	c.Stdin = strings.NewReader("Reply with the single word OK.")
 	out, err := c.CombinedOutput()
 	return string(out), err
@@ -88,11 +87,32 @@ const preflightKey = "preflight:passed"
 func (m *Manager) cliVersion() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, m.ClaudeBin, "--version").Output()
+	out, err := m.sessionCLI(ctx, "--version").Output()
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// sessionCLI: the CLI sessions run, as the user they run as, with that user's
+// sign-in. Preflight had asked the hub user's own CLI, which updates on its
+// own schedule, so a rung could pass here and be refused in every session.
+// The session user cannot enter the hub user's temp folder, so it runs from
+// an empty one of its own.
+func (m *Manager) sessionCLI(ctx context.Context, args ...string) *exec.Cmd {
+	if m.RunAs.User == "" {
+		c := exec.CommandContext(ctx, m.ClaudeBin, args...)
+		c.Dir = sideDir()
+		return c
+	}
+	sh := `d=$(mktemp -d) || exit 1; cd "$d" || exit 1;` + m.sessionUserEnv() + " " + shellQuote(m.RunAs.ClaudeBin)
+	for _, a := range args {
+		sh += " " + shellQuote(a)
+	}
+	sh += `; rc=$?; cd /; rmdir "$d"; exit $rc`
+	c := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "-H", "-u", m.RunAs.User, "/bin/sh", "-c", sh)
+	c.Dir = "/"
+	return c
 }
 
 // sideDir is an empty folder the tool-less one-shot calls (preflight probes,
@@ -115,7 +135,11 @@ func (m *Manager) raiseStaleCLI(model, out string) {
 			}
 		}
 	}
-	detail := fmt.Sprintf("The hub's startup check ran `%s -p --model %s` and the CLI refused the model, so sessions skip that rung and run one rung lower until it is fixed.\n\n1. Open Terminal on the Mac.\n2. Type `claude update` and press Return.\n3. Type `ops/hub.sh restart` from `~/life` so the check runs again.\n\nWhat the CLI said:\n\n```\n%s\n```", m.ClaudeBin, model, truncate(strings.TrimSpace(out), 600))
+	update := "`claude update`"
+	if m.RunAs.User != "" {
+		update = "`sudo -u " + m.RunAs.User + " -H " + m.RunAs.ClaudeBin + " update`"
+	}
+	detail := fmt.Sprintf("The hub's startup check ran `%s -p --model %s` and the CLI refused the model, so sessions skip that rung and run one rung lower until it is fixed.\n\n1. Open Terminal on the Mac.\n2. Type %s and press Return.\n3. Type `ops/hub.sh restart` from `~/life` so the check runs again.\n\nWhat the CLI said:\n\n```\n%s\n```", m.sessionClaudeBin(), model, update, truncate(strings.TrimSpace(out), 600))
 	say := m.hey() + fmt.Sprintf("the Claude command line tool is too old for %s, so sessions are running on the next model down. Please update it.", ModelLabel(model))
 	if _, err := m.AddAskSaid("hub", "", title, detail, "physical", "the hub log shows `preflight: "+model+" ok` after a restart", "web", say); err != nil {
 		log.Printf("preflight: ask: %v", err)

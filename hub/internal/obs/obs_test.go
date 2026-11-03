@@ -122,6 +122,24 @@ func TestListByAccount(t *testing.T) {
 	}
 }
 
+// q= finds the rows whose payload mentions a term, any case, inside the
+// other filters.
+func TestListByText(t *testing.T) {
+	dir := t.TempDir()
+	db, _ := store.Open(filepath.Join(dir, "t.db"))
+	s, _ := New(db, filepath.Join(dir, "blobs"))
+	for i, p := range []string{`{"merchant":"Blue Bottle"}`, `{"merchant":"Corner Market"}`, `{"note":"blue bottle again"}`} {
+		s.Insert(Observation{Source: "simplefin", Kind: "transaction", TS: time.Date(2026, 1, 1+i, 0, 0, 0, 0, time.UTC), Payload: json.RawMessage(p)})
+	}
+	s.Insert(Observation{Source: "journal", Kind: "entry", TS: time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC), Payload: json.RawMessage(`{"text":"Blue Bottle"}`)})
+	if got, _ := s.List(Query{Text: "BLUE bottle", Limit: 10}); len(got) != 3 {
+		t.Fatalf("any source: %d rows, want 3", len(got))
+	}
+	if got, _ := s.List(Query{Source: "simplefin", Text: "blue bottle", Limit: 10}); len(got) != 2 {
+		t.Fatalf("simplefin: %d rows, want 2", len(got))
+	}
+}
+
 // A connector that re-reads a window it already sent (late-arriving HealthKit
 // samples) must not duplicate it: uniq_key is the row's identity inside
 // (source, kind). Rows without a key are unaffected.

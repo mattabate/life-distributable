@@ -145,6 +145,9 @@ func main() {
 	// data/blobs → data/imports/intake: the in-box a file sent to a session
 	// is saved in under its own name.
 	ob.IntakeDir = filepath.Join(filepath.Dir(cfg.BlobDir), "imports", "intake")
+	// A free ls names only the checkout and the intake in-box; any other
+	// folder is the owner's to approve (actions.lsInRoots).
+	acts.LsRoots = []string{cfg.Root, ob.IntakeDir}
 	thr, err := threads.New(db, cfg.ClaudeBin, filepath.Join(cfg.JobsDir, "threads"), cfg.TmuxPrefix, projDir, sch.Table().PromptTools, sch)
 	if err != nil {
 		log.Fatal(err)
@@ -154,9 +157,16 @@ func main() {
 	thr.TeamMode = cfg.TeamMode
 	if cfg.TeamMode {
 		// The calendar's home session is the executive assistant from the
-		// day the switch goes on (idempotent; threads.CreateIdle does the
-		// same for a fresh database).
-		db.Exec(`UPDATE threads SET persona=? WHERE id=? AND persona='' AND status != 'archived'`, threads.PersonaAssistant, threads.StepThread)
+		// day the switch goes on. On a database that predates the switch the
+		// idle row may not exist yet (the calendar makes it when a step
+		// first fires), so make it here: CreateIdle gives it the persona.
+		if _, err := thr.Get(threads.StepThread); err != nil {
+			if _, err := thr.CreateIdle(threads.StepThread, "Calendar", "life"); err != nil {
+				log.Printf("calendar thread: %v", err)
+			}
+		} else {
+			db.Exec(`UPDATE threads SET persona=? WHERE id=? AND persona='' AND status != 'archived'`, threads.PersonaAssistant, threads.StepThread)
+		}
 		// The router's local model stays paged in (nothing when Ollama is
 		// not there: routes fall to the cloud model).
 		go thr.WarmLocal()

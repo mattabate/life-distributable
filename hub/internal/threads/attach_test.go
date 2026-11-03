@@ -19,8 +19,22 @@ func TestAttachments(t *testing.T) {
 		}
 		return "/data/blobs/" + ref, nil
 	}
-	if _, err := m.Create("", "life", "", "x", "", "", []string{"nope"}); err == nil || !strings.Contains(err.Error(), "no such blob") {
+	if _, err := m.Create("", "life", "", "x", "", "", []string{"sha256/ab/nope.jpg"}); err == nil || !strings.Contains(err.Error(), "no such blob") {
 		t.Fatalf("bad ref should fail: %v", err)
+	}
+	// Not the shape PutBlob names, even where a file by that name exists: the
+	// ref is drawn into the console's markup.
+	m.BlobPath = func(ref string) (string, error) { return "/data/blobs/" + ref, nil }
+	for _, ref := range []string{"nope", "sha256/ab/x'+alert(1)+'.png", "sha256/ab/<img>.png", "sha256/ab/abc.JPG"} {
+		if _, err := m.Create("", "life", "", "x", "", "", []string{ref}); err == nil || !strings.Contains(err.Error(), "not a blob ref") {
+			t.Fatalf("%s: %v", ref, err)
+		}
+	}
+	m.BlobPath = func(ref string) (string, error) {
+		if ref != "sha256/ab/abc.jpg" {
+			return "", errors.New("no such blob")
+		}
+		return "/data/blobs/" + ref, nil
 	}
 	// Photo-only first message: allowed, title synthesized, prompt lists the path.
 	th, err := m.Create("", "life", "", "", "", "", []string{"sha256/ab/abc.jpg"})

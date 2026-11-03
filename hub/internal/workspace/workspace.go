@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -164,12 +165,10 @@ func (s *Store) Write(key, name string, b []byte, by string) (File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return File{}, err
 	}
+	writeMu.Lock()
+	defer writeMu.Unlock()
 	if old, err := os.ReadFile(path); err == nil && string(old) != string(b) {
-		v := filepath.Join(s.Dir, key, ".versions", filepath.FromSlash(name)+"."+time.Now().UTC().Format("20060102T150405"))
-		if err := os.MkdirAll(filepath.Dir(v), 0o755); err != nil {
-			return File{}, err
-		}
-		if err := os.WriteFile(v, old, 0o644); err != nil {
+		if err := saveVersion(filepath.Join(s.Dir, key, ".versions", filepath.FromSlash(name)), time.Now(), old); err != nil {
 			return File{}, err
 		}
 	}
@@ -192,6 +191,40 @@ func (s *Store) Write(key, name string, b []byte, by string) (File, error) {
 		return File{}, err
 	}
 	return File{Persona: key, Name: name, Bytes: info.Size(), UpdatedAt: info.ModTime().UTC().Format(time.RFC3339), Head: head(path)}, nil
+}
+
+// writeMu: Write's read-old, save-version, rename is one step, so two writes
+// at once cannot both save the same old text and lose the one between.
+var writeMu sync.Mutex
+
+// saveVersion keeps b as <base>.<UTC second>, or <base>.<second>-2, -3 and
+// so on when that name is taken: two writes in one second saved A, then B
+// over A, and A was gone from the file and from .versions/. O_EXCL, so an
+// existing version is never overwritten.
+func saveVersion(base string, at time.Time, b []byte) error {
+	if err := os.MkdirAll(filepath.Dir(base), 0o755); err != nil {
+		return err
+	}
+	stamp := base + "." + at.UTC().Format("20060102T150405")
+	for n := 1; n < 1000; n++ {
+		v := stamp
+		if n > 1 {
+			v = fmt.Sprintf("%s-%d", stamp, n)
+		}
+		f, err := os.OpenFile(v, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := f.Write(b); err != nil {
+			f.Close()
+			return err
+		}
+		return f.Close()
+	}
+	return fmt.Errorf("too many versions of %s in one second", filepath.Base(base))
 }
 
 // Unnest lifts the files a role wrote under its own doubled folder
@@ -229,9 +262,7 @@ func (s *Store) Unnest() []string {
 				ni, _ := d.Info()
 				if ni != nil && !ni.ModTime().After(ti.ModTime()) {
 					// The flat copy is newer: the nested one is the old version.
-					v := filepath.Join(s.Dir, role, ".versions", rel+"."+ni.ModTime().UTC().Format("20060102T150405"))
-					os.MkdirAll(filepath.Dir(v), 0o755)
-					if os.WriteFile(v, b, 0o644) == nil {
+					if saveVersion(filepath.Join(s.Dir, role, ".versions", rel), ni.ModTime(), b) == nil {
 						os.Remove(path)
 						moved = append(moved, role+"/"+name)
 					}

@@ -20,7 +20,10 @@ one endpoint's contract.
 - The hub binds only to the Tailscale interface. Nothing public-facing, ever.
 - Gate (hub-enforced): money, delete, contact, share, push →
   `lifectl propose`. Approval needs the decider code, which only the owner
-  holds (`ops/decider-set.sh`). A local `git commit` is not gated.
+  holds (`bash ops/decider-set.sh`). It is a wall only with `session_user`
+  set (SETUP.md, "Optional: run sessions as a separate user"); without it a
+  session runs as the owner and could reach the hash, so the gate is a rule
+  you follow. A local `git commit` is not gated.
 - `ops/secrets/`, `ops/hub.json`, `ops/app.env`, `app/local.xcconfig` are
   written at setup, git-ignored, and never printed into a chat.
 
@@ -72,7 +75,7 @@ the recipe is in `hub/CLAUDE.md`, read it when that is the task.
 ## Team mode
 
 Optional, off by default (`team_mode` in `ops/hub.json`;
-`ops/py.sh setup.py hub --team yes|no`). On, some sessions take a standing
+`ops/py.sh setup.py hub --team yes|no --force`, which keeps the other keys). On, some sessions take a standing
 role: a `personas` row in `hub/internal/threads/persona.go` (Role, Covers,
 Who, Lane, Brief), a lane in `routeLanes` (`route.go`), and
 `lifectl thread <id> persona <key>` to give a session the role. The router

@@ -175,6 +175,71 @@ func TestAskVerifierPromptNamesWhatItsGrantRefuses(t *testing.T) {
 	t.Fatal("no ask-verifier job in the live schedule.json")
 }
 
+// The ask-verifier only reads and closes asks, so it holds a grant of its own,
+// not default_tools: no bare lifectl (propose, relay, prompt, cal add), no web,
+// and no shell file reader, since a job runs as the hub's user and Read's
+// ops/secrets denial does not cover the shell.
+func TestAskVerifierHoldsANarrowGrant(t *testing.T) {
+	live, err := LoadTable("../../../ops/schedule.json")
+	if err != nil {
+		t.Skipf("live schedule.json unreadable (%v)", err)
+	}
+	for _, j := range live.Jobs {
+		if j.Name != "ask-verifier" {
+			continue
+		}
+		if len(j.AllowedTools) == 0 {
+			t.Fatal("ask-verifier runs on default_tools; give it allowed_tools")
+		}
+		for _, g := range j.AllowedTools {
+			switch {
+			case g == "Bash(lifectl:*)", g == "Bash(lifectl api:*)", g == "WebFetch", g == "WebSearch",
+				strings.HasPrefix(g, "Bash(cat"), strings.HasPrefix(g, "Bash(head"), strings.HasPrefix(g, "Bash(tail"),
+				strings.HasPrefix(g, "Edit"), strings.HasPrefix(g, "Write"):
+				t.Errorf("ask-verifier grants %q", g)
+			}
+		}
+		return
+	}
+	t.Fatal("no ask-verifier job in the live schedule.json")
+}
+
+// A job runs as the hub's user and only the Read tool is denied ops/secrets,
+// so a shell reader in any job's grant (its own or default_tools, live or
+// fallback) reads the hub token and the decider hash. git log and git diff
+// take --output=<file>, a write of any file the hub's user can open.
+func TestNoJobHoldsAShellFileReader(t *testing.T) {
+	readers := []string{"cat", "head", "tail", "grep", "wc", "less", "more", "strings", "xxd", "od", "git log", "git diff"}
+	check := func(label string, tools []string) {
+		for _, g := range tools {
+			for _, r := range readers {
+				if strings.HasPrefix(g, "Bash("+r+":") || strings.HasPrefix(g, "Bash("+r+" ") || g == "Bash("+r+")" {
+					t.Errorf("%s grants %q, a shell read or write past the ops/secrets denial", label, g)
+				}
+			}
+		}
+	}
+	var empty Table
+	b, _ := json.Marshal(empty)
+	p := filepath.Join(t.TempDir(), "schedule.json")
+	if err := os.WriteFile(p, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := LoadTable(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("fallback default_tools", fallback.DefaultTools)
+	live, err := LoadTable("../../../ops/schedule.json")
+	if err != nil {
+		t.Skipf("live schedule.json unreadable (%v)", err)
+	}
+	check("live default_tools", live.DefaultTools)
+	for _, j := range live.Jobs {
+		check("job "+j.Name, j.AllowedTools)
+	}
+}
+
 func TestWhenParsing(t *testing.T) {
 	for _, ok := range []string{"daily@07:30", "weekly@Mon 09:00", "every@6h", "manual"} {
 		if _, _, err := parseWhen(ok); err != nil {

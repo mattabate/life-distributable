@@ -2,9 +2,9 @@ package threads
 
 import "testing"
 
-// `answered` = the ball is with the agent, for one turn. A message to the
-// session answers what blocks it, never the owner's own dated steps; and a
-// turn that ends without closing an answered card hands it back — open, on
+// `answered` = the ball is with the agent, for one turn. Only a reply
+// through a card answers it (a message to the session answers none), and a
+// turn that ends without closing an answered card hands it back - open, on
 // the owner's board.
 func TestAnsweredLastsOneTurn(t *testing.T) {
 	m, _, _ := setup(t)
@@ -31,10 +31,10 @@ func TestAnsweredLastsOneTurn(t *testing.T) {
 		}
 		return
 	}
-	if o, s := state(); o != "answered" || s != "open" {
+	if o, s := state(); o != "open" || s != "open" {
 		t.Fatalf("after the owner's message: order=%s step=%s", o, s)
 	}
-	// A reply THROUGH the step's card still answers it.
+	// A reply THROUGH a card answers it.
 	m.markAnswered(th.ID, "ask:"+step.ID)
 	if _, s := state(); s != "answered" {
 		t.Fatalf("targeted reply to a step: %s", s)

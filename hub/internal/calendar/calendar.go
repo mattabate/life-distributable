@@ -1321,9 +1321,11 @@ func (c *Calendar) Update(id string, in map[string]string) (Item, error) {
 			// "future": fire() spawns the next occurrence at fire time, so a
 			// fired item's chain already carries the OLD time — the new one
 			// has to reach the scheduled child too, or "every future one"
-			// would move exactly one.
+			// would move exactly one. Only a child still on the chain: one the
+			// owner detached with scope=one (repeat='') keeps its own time and
+			// day.
 			if hasAt {
-				c.db.Exec(`UPDATE items SET at=?, updated_at=? WHERE src='cal' AND prev_id=? AND state='scheduled'`,
+				c.db.Exec(`UPDATE items SET at=?, updated_at=? WHERE src='cal' AND prev_id=? AND state='scheduled' AND repeat<>''`,
 					strings.TrimSpace(in["at"]), ts(now), it.ID)
 			}
 			// A new day re-dates the child to the step after it (never today or
@@ -1335,14 +1337,14 @@ func (c *Calendar) Update(id string, in map[string]string) (Item, error) {
 					for today := now.Format("2006-01-02"); nd <= today; {
 						nd = nextDay(nd, it.Repeat, 0)
 					}
-					c.db.Exec(`UPDATE items SET day=?, chain_dom=0, updated_at=? WHERE src='cal' AND prev_id=? AND state='scheduled'`,
+					c.db.Exec(`UPDATE items SET day=?, chain_dom=0, updated_at=? WHERE src='cal' AND prev_id=? AND state='scheduled' AND repeat<>''`,
 						nd, ts(now), it.ID)
 				}
 				// The new day is the chain's anchor from here on (#78).
 				set, args = append(set, "chain_dom=?"), append(args, 0)
 			}
 			var childID string
-			if c.db.QueryRow(`SELECT id FROM items WHERE src='cal' AND prev_id=? AND state='scheduled'`, it.ID).Scan(&childID) == nil {
+			if c.db.QueryRow(`SELECT id FROM items WHERE src='cal' AND prev_id=? AND state='scheduled' AND repeat<>''`, it.ID).Scan(&childID) == nil {
 				if child, err := c.Get(childID); err == nil && child.Kind == "agent" {
 					c.queueWake(child)
 				}

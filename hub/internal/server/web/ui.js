@@ -471,8 +471,18 @@ function attachHTML(ref, caption) {
   if (!isImageRef(ref)) return `<a href="${url}" target="_blank" class="small att-file">📎 ${name}</a>`;
   // Click opens it in the lightbox instead of a new tab - the href stays so
   // ⌘-click and "open in new tab" still work.
+  // The fallback is built from the element, never from the ref spliced into
+  // the handler: the browser decodes &#39; back to a quote before it runs one.
   return `<a href="${url}" target="_blank" class="att" onclick="return !openImage(this.href)"><img src="${url}" alt="${name}"
-    onerror="this.parentElement.outerHTML='<a href=\\'${url}\\' target=_blank class=\\'small att-file\\'>📎 ${name}</a>'"></a>`;
+    onerror="attFallback(this)"></a>`;
+}
+function attFallback(img) {
+  const a = document.createElement('a');
+  a.href = img.parentElement.href;
+  a.target = '_blank';
+  a.className = 'small att-file';
+  a.textContent = '📎 ' + img.alt;
+  img.parentElement.replaceWith(a);
 }
 
 // A line that is only a hub file - `![caption](.../api/v1/blobs/<ref>)`,

@@ -46,6 +46,67 @@ func TestSessionCannotWriteAsOwnerIntoAnother(t *testing.T) {
 	}
 }
 
+// A session acts on itself only: it may not take a persona (a workspace's
+// write key, a router lane), set a status (which clears its asks as the
+// owner), change, stop, archive or check in another session, raise a card on
+// another, or cancel another's wake. Its own schedule and model stay its own,
+// and the owner's surfaces do all of it.
+func TestSessionActsOnItselfOnly(t *testing.T) {
+	s := newTest(t)
+	mk := func(p string) string {
+		var th threads.Thread
+		json.Unmarshal(s.do(t, "POST", "/api/v1/threads", map[string]string{"prompt": p}).Body.Bytes(), &th)
+		return th.ID
+	}
+	a, b := mk("first"), mk("second")
+	call := func(method, path, from, body string) (int, map[string]any) {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer secret")
+		r.Header.Set("Content-Type", "application/json")
+		if from != "" {
+			r.Header.Set("X-Life-Thread", from)
+		}
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		var out map[string]any
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+	_, wake := call("POST", "/api/v1/prompts", b, `{"target":"`+b+`","text":"later","in":"1h"}`)
+	_, ownWake := call("POST", "/api/v1/prompts", a, `{"target":"`+a+`","text":"later","in":"1h"}`)
+	wakeID, _ := wake["id"].(string)
+	ownWakeID, _ := ownWake["id"].(string)
+	if wakeID == "" || ownWakeID == "" {
+		t.Fatalf("wakes: %v %v", wake, ownWake)
+	}
+	for _, c := range []struct {
+		name, method, path, from, body string
+		want                           int
+	}{
+		{"own persona", "PATCH", "/api/v1/threads/" + a, a, `{"persona":"assistant"}`, 403},
+		{"own status", "PATCH", "/api/v1/threads/" + a, a, `{"status":"idle"}`, 403},
+		{"another's schedule", "PATCH", "/api/v1/threads/" + b, a, `{"schedule":"daily@09:00"}`, 403},
+		{"another's persona off", "PATCH", "/api/v1/threads/" + b, a, `{"persona":"off"}`, 403},
+		{"own schedule", "PATCH", "/api/v1/threads/" + a, a, `{"schedule":"daily@09:00"}`, 200},
+		{"own model", "PATCH", "/api/v1/threads/" + a, a, `{"model_class":"auto"}`, 200},
+		{"card on another", "POST", "/api/v1/asks", a, `{"thread_id":"` + b + `","title":"Done: do this","kind":"other"}`, 403},
+		{"cancel another's wake", "POST", "/api/v1/prompts/" + wakeID + "/cancel", a, ``, 403},
+		{"cancel own wake", "POST", "/api/v1/prompts/" + ownWakeID + "/cancel", a, ``, 200},
+		{"stop another", "POST", "/api/v1/threads/" + b + "/stop", a, ``, 403},
+		{"archive another", "POST", "/api/v1/threads/" + b + "/archive", a, ``, 403},
+		{"check in another", "POST", "/api/v1/threads/" + b + "/checkin", a, ``, 403},
+		{"the owner's persona", "PATCH", "/api/v1/threads/" + b, "", `{"persona":"assistant"}`, 200},
+	} {
+		if got, out := call(c.method, c.path, c.from, c.body); got != c.want {
+			t.Errorf("%s: %d, want %d (%v)", c.name, got, c.want, out)
+		}
+	}
+	// A card with no thread named is the caller's.
+	if code, got := call("POST", "/api/v1/asks", a, `{"title":"Pick a date","kind":"decision"}`); code >= 300 || got["thread_id"] != a {
+		t.Fatalf("own card: %d %v", code, got)
+	}
+}
+
 // A session that names itself (lifectl's X-Life-Thread) is the actor on every
 // route that writes as someone, whatever its body claims: it closes another
 // session's card as itself, never as the owner (so B hears no "Done" in the

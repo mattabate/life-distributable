@@ -965,3 +965,135 @@ Entry format:
 - For: everyone with the ask-verifier job
 - Fix: the hourly ask verifier piped `lifectl asks --json` into python3 and tried Gmail searches, refused every run. Its prompt now says to read the list unpiped and to leave hints that need mail, a website or the phone.
 - How: same merge as add-0008. By hand: the ask-verifier `prompt` in `ops/schedule.json`, `sched/sched_test.go`.
+
+## add-0119 · 2026-11-03 · lifectl obs passes the window, source, account, cursor and limit
+- For: everyone
+- Fix: `lifectl obs` sent only a kind and limit=30, so a date-range or per-source question needed hand-written SQL even though the route took since/until/after_id/source/account. It now forwards `--kind --source --account --since --until --after-id --limit`; a `YYYY-MM-DD` for since/until is that day's local midnight, and `lifectl obs <kind>` still works.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/cmd/lifectl/main.go`, `shared/api.md`.
+- Thanks [@LUgABeEEE](https://github.com/mattabate/life-distributable/issues/94)
+
+## add-0120 · 2026-11-03 · Observations answer a text search (q=)
+- For: everyone
+- Fix: there was no way to ask "which rows mention X" without SQL. `GET /api/v1/observations?q=TEXT` (and `lifectl obs --q TEXT`) keeps rows whose payload contains the text, any case, inside the source/kind/window filters; a plain scan, `limit` still caps it.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/obs/obs.go`, `hub/internal/obs/obs_test.go`, `hub/internal/server/obs.go`, `hub/cmd/lifectl/main.go`, `shared/api.md`.
+- Thanks [@LUgABeEEE](https://github.com/mattabate/life-distributable/issues/95)
+
+## add-0121 · 2026-11-03 · A session whose claude crashes settles at once
+- For: everyone
+- Fix: The run command touched `.done` only after both sides of the pipe ended, and feed waits for its end line, so a claude that died mid-turn looked busy until the 45-minute hang kill (or forever with a background task). The claude side now touches `.done` itself, and settling hands the waiting feed its end line so the tmux session closes.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/runner.go`, `hub/internal/threads/runner_test.go`.
+- Thanks [@Vadim2090](https://github.com/mattabate/life-distributable/issues/103)
+
+## add-0122 · 2026-11-03 · Role files written in one second keep every version
+- For: everyone with team mode
+- Fix: A version was named by the UTC second and a later save in that second replaced it, so writes A, B, C in one second lost A. Versions now open exclusively and take -2, -3 on a clash, and one lock covers read, save and rename.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/workspace/workspace.go`, `hub/internal/workspace/workspace_test.go`.
+- Thanks [@Vadim2090](https://github.com/mattabate/life-distributable/issues/105)
+
+## add-0123 · 2026-11-03 · A scope=future move leaves a detached occurrence alone
+- For: everyone
+- Fix: moving a fired repeating item with scope=future also re-timed and re-dated the next occurrence even when the owner had already detached it with scope=one (it keeps its prev_id). The child updates and the agent-wake lookup now match only a child still on the chain (repeat not empty).
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/calendar/calendar.go`, `hub/internal/calendar/calendar_test.go`.
+- Thanks [@ahartzog](https://github.com/mattabate/life-distributable/issues/107)
+
+## add-0124 · 2026-11-03 · A card raised again is re-spoken after a restart
+- For: everyone with spoken cards
+- Fix: Resume stamped `resumed_at` before the push and a re-raise never cleared it, so a card raised again after one resume was never spoken again if a restart cut it. Enqueue now clears the stamp, and Resume sets it after the push.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/notify/queue.go`, `hub/internal/notify/queue_test.go`.
+- Thanks [@ahartzog](https://github.com/mattabate/life-distributable/issues/108)
+
+## add-0125 · 2026-11-03 · Helper calls use the current small model
+- For: everyone
+- Fix: The session summarizer, the router's pick and steerprobe pinned an older Haiku id by hand. They now share one constant, `spend.HelperModel` (`claude-haiku-5-5`).
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/spend/ladder.go`, `hub/internal/threads/threads.go`, `hub/internal/threads/route.go`, `hub/cmd/steerprobe/main.go`.
+- Thanks [@DeStalisGabriele](https://github.com/mattabate/life-distributable/issues/101)
+
+## add-0126 · 2026-11-03 · Preflight checks the CLI sessions actually run
+- For: everyone with session_user
+- Fix: Preflight probed the hub user's own claude, which updates on its own, so a model could pass the check and be refused in every session. With a session user, the probe and `--version` now run as that user with its sign-in, from an empty folder, and the stale-CLI card names that CLI's update command.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/preflight.go`, `hub/internal/threads/ladder_test.go`.
+- Thanks [@yuri-rod](https://github.com/mattabate/life-distributable/pull/97)
+
+## add-0127 · 2026-11-03 · A session's blob or workspace file is stored as sent
+- For: everyone with `session_tokens` on
+- Fix: The actor stamp rewrote any JSON-object body, so a session's .json blob or a notes file shaped like JSON gained by/author fields, an empty upload became that object, and a JSON null body panicked. Blob uploads and non-JSON workspace writes now skip the stamp, and a null body is a 400.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/server/sessionlimits.go`, `hub/internal/server/sessionlimits_test.go`.
+- Thanks [@yuri-rod](https://github.com/mattabate/life-distributable/pull/97)
+
+## add-0128 · 2026-11-03 · The ask verifier holds a narrow grant of its own
+- For: everyone
+- Fix: The hourly ask-verifier job ran on the default job grant, so it held every lifectl verb (propose, relay, prompt) for a job that only reads and closes asks. It now has its own read-only list plus `lifectl ask` to close an ask, and a test keeps it narrow.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `ops/schedule.json`, `hub/internal/sched/sched_test.go`.
+- Thanks [@ahartzog](https://github.com/mattabate/life-distributable/issues/109)
+
+## add-0129 · 2026-11-03 · No job holds a shell file reader, git log or git diff
+- For: everyone
+- Fix: A scheduled job runs as the hub's user, and only the Read tool is kept out of `ops/secrets/`. So `cat`, `head`, `tail`, `grep` or `wc` in a job's grant could read the hub token and the decider hash, and `git log`/`git diff --output=<file>` could write any file. All of them are out of the default job grant, and a test fails if any job gets one back. Sessions keep them.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/sched/sched.go`, `hub/internal/sched/sched_test.go`, `ops/schedule.json`.
+- Thanks [@ahartzog](https://github.com/mattabate/life-distributable/issues/109)
+
+## add-0130 · 2026-11-03 · Nightly backup works from a path with a space
+- For: everyone whose checkout path has a space in it
+- Fix: sqlite splits a dot-command's arguments on spaces, so `.backup` failed every night when the checkout path had one, and no snapshot was taken. The path is now quoted.
+- How: same merge as add-0008, then `make check`. By hand: `ops/backup.sh`.
+- Thanks [@ahartzog](https://github.com/mattabate/life-distributable/issues/109)
+
+## add-0131 · 2026-11-03 · app-ui's fallback rename script ships
+- For: everyone with the phone app
+- Fix: When the simulator could not write screenshots to the host, `ops/app-ui.sh` called `ops/xcresult-rename.py`, which was missing, and `|| true` hid the failure, so the pictures kept their raw export names. The script now ships and renames them to `NN-<name>.png`. A failed rename now fails the walk instead of passing quietly.
+- How: same merge as add-0008. By hand: `ops/xcresult-rename.py`, `ops/app-ui.sh`.
+- Thanks [@HanSur94](https://github.com/mattabate/life-distributable/issues/114)
+
+## add-0132 · 2026-11-03 · decider-set.sh runs on a fresh install
+- For: new installs
+- Fix: `ops/decider-set.sh` shipped without the executable bit, so SETUP step 5.7 ended in "permission denied" and the owner never saw the code. The script is executable now, and SETUP calls it as `bash ops/decider-set.sh` in case file modes are lost on the way.
+- How: same merge as add-0008. By hand: `SETUP.md`, `ops/decider-set.sh`.
+- Thanks [@cerberuschina](https://github.com/mattabate/life-distributable/issues/99)
+
+## add-0133 · 2026-11-03 · Team mode on an existing database gets its calendar session
+- For: everyone who turns team mode on after the hub has run
+- Fix: The idle `calendar` session was only made when a calendar step first fired. On an existing database, `lifectl thread calendar persona assistant` failed with "no rows". The hub now creates that session at startup when team mode is on.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/cmd/hub/main.go`.
+- Thanks [@cerberuschina](https://github.com/mattabate/life-distributable/issues/100)
+
+## add-0134 · 2026-11-03 · Turning team mode on keeps the push key
+- For: everyone with the phone app who turns team mode on later
+- Fix: `setup.py hub --force` rebuilt hub.json from the example and blanked every `apns_*` key, so pushes stopped silently after team mode was turned on. `--force` now changes only the keys it sets and keeps the rest of the file. `setup.py hub --team yes --force` works without repeating the other flags.
+- How: same merge as add-0008. By hand: `ops/setup.py`, `SETUP.md`, `CLAUDE.md`, the team-mode error in `hub/internal/threads/threads.go`.
+- Thanks [@ahartzog](https://github.com/mattabate/life-distributable/issues/106)
+
+## add-0135 · 2026-11-03 · A spoken reply is never held behind a background task
+- For: everyone
+- Fix: A turn that ended while a background task ran was held until the task finished, even when it carried a Say for the owner, so the reply could arrive late or be replaced by the task's own final turn. A result with a Say now goes out at once.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/runner.go`, `hub/internal/threads/runner_test.go`.
+
+## add-0136 · 2026-11-03 · A message to a session no longer answers its cards
+- For: everyone
+- Fix: Any message to a session marked all its open cards answered, so decisions left Your turn while the owner was only talking about something else. Only a reply through a card now marks that card answered.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/asks.go`, `hub/internal/threads/answered_test.go`, `hub/internal/threads/prompts_test.go`, `hub/internal/threads/threads_test.go`.
+
+## add-0137 · 2026-11-03 · A session clone with unlanded commits catches up to main
+- For: everyone with session_user
+- Fix: A clone only fast-forwarded, so one with unlanded commits kept the scripts it was made with, and a land-script fix never reached it. It is now rebased onto main at launch; a rebase that stops is aborted and logged.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/runas.go`, `hub/internal/threads/runas_test.go`.
+
+## add-0138 · 2026-11-03 · ota.sh writes hub.json in one step
+- For: everyone with the phone app
+- Fix: ota.sh rewrote hub.json in place when it synced `apns_production`, so a kill mid-write could leave a truncated config the hub would not load. It now writes beside the file and renames it into place.
+- How: same merge as add-0008. By hand: `ops/ota.sh`, `.gitignore` (`ops/hub.json.tmp`).
+
+## add-0139 · 2026-11-03 · Hardening: tighter limits on sessions, proposals and tools
+- For: everyone
+- Fix: a set of narrower checks, each with a test:
+  - `ops/db.sh` takes one flag at most, opens the file read-only by URI and never reads stdin.
+  - A proposal whose payload names a key twice (or in another case) is refused.
+  - A free `ls` names only the checkout and `data/imports/intake`; anything else is a card.
+  - A session changes, stops, archives, checks in and cancels wakes for itself only, sets neither its persona nor its status, and raises cards only on itself.
+  - A message attachment must be a blob ref (`sha256/<xx>/<hash>.<ext>`); an upload's extension is letters and digits only; the console builds a broken picture's fallback from the element.
+  - `lifectl workspace put` refuses a name starting with '-' (a flag goes last).
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `ops/db.sh`, `ops/session-user-audit.py`, `hub/internal/actions/`, `hub/cmd/hub/main.go`, `hub/internal/server/threads.go`, `asks.go`, `prompts.go`, `obs.go`, `web/ui.js`, `hub/internal/threads/runner.go`, `hub/cmd/lifectl/main.go`, and their tests.
+
+## add-0140 · 2026-11-03 · Setup says plainly what the separate user is for
+- For: everyone
+- Fix: Without `session_user`, a session runs as the owner's account and can do anything it can, the hub token and the decider hash included. SETUP.md and CLAUDE.md now say so, and setup offers the separate user once (step 10) instead of only when asked.
+- How: same merge as add-0008. By hand: `SETUP.md`, `CLAUDE.md`.

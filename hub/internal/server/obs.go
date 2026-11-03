@@ -27,7 +27,7 @@ func (s *Server) registerKinds() {
 
 func (s *Server) listObs(w http.ResponseWriter, r *http.Request) {
 	v := r.URL.Query()
-	q := obs.Query{Source: v.Get("source"), Kind: v.Get("kind"), Account: v.Get("account")}
+	q := obs.Query{Source: v.Get("source"), Kind: v.Get("kind"), Account: v.Get("account"), Text: v.Get("q")}
 	q.Limit, _ = strconv.Atoi(v.Get("limit"))
 	var err error
 	for _, b := range []struct {
@@ -97,6 +97,9 @@ func (s *Server) postObs(w http.ResponseWriter, r *http.Request) {
 		if f, hdr, err := r.FormFile("file"); err == nil {
 			defer f.Close()
 			ext := strings.TrimPrefix(filepath.Ext(hdr.Filename), ".")
+			if !fieldSafe(ext) {
+				ext = "" // the blob is then .bin: a ref never carries markup
+			}
 			ref, size, err := s.obs.PutBlob(f, ext)
 			if err != nil {
 				jsonErr(w, 400, "blob: "+err.Error())

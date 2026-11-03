@@ -1154,30 +1154,23 @@ func ReplyRef(text string) string {
 	return ""
 }
 
-// markAnswered: the owner wrote in the thread — every open ask there is now
-// answered (still on the board until the agent or the owner closes it),
-// unless the message answers ONE thing (ref "ask:<id>", a reply from that
-// card), then only that one.
+// markAnswered: the owner answered ONE card (ref "ask:<id>", a reply from
+// that card), so that card is answered: the ball is with the agent until it
+// closes it.
+//
+// A MESSAGE TO THE SESSION ANSWERS NO CARD. It used to flip every open
+// decision in the thread to answered for the whole turn, so a long turn on
+// something else hid the decisions from Your turn while they still waited on
+// the owner. The agent still sees them in asksHeader and closes what the
+// owner's words resolved.
 func (m *Manager) markAnswered(threadID, ref string) {
 	kind, target := store.SplitRef(ref)
-	if kind != "" && kind != "ask" {
-		// A proposal or a rec was answered; that says nothing about the asks.
+	if kind != "ask" || target == "" {
+		// No card, or a proposal or rec: that says nothing about the asks.
 		return
 	}
 	for _, a := range m.activeAsks(threadID) {
-		if a.State != "open" || (target != "" && a.ID != target) || a.Step() {
-			continue
-		}
-		// A message to the SESSION says nothing about a card that only asked
-		// the owner to read something. A read closes when they answer that
-		// card — through it, not past it.
-		if a.Kind == "read" && target == "" {
-			continue
-		}
-		// …nor about the owner's own dated work: one unrelated question must
-		// not flip every fired step to answered. A step closes through its
-		// card: I did this / Won't do.
-		if OwnerClass(a.Class) && target == "" {
+		if a.State != "open" || a.ID != target || a.Step() {
 			continue
 		}
 		m.moveAsk(askMove{ask: a.ID, from: "open", to: "answered", by: "owner", note: "replied in thread"})

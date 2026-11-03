@@ -227,6 +227,10 @@ test('md: a line that is only a hub file draws the file; anywhere else it is a l
   assert.equal(htmlFileName('sha256/28/28bf.html', ''), '28bf.html');
   assert.equal(htmlFileName('sha256/28/28bf.html', 'a/b: c'), 'a-b- c.html');
   assert.ok(attachHTML('sha256/28/28bf.html').includes('download="28bf.html"'));
+  // A broken picture's fallback never carries the ref in its handler: the
+  // browser decodes &#39; to a quote before it runs one.
+  const evil = attachHTML(`x'+alert(1)+'.png`);
+  assert.ok(evil.includes('onerror="attFallback(this)"') && !/onerror="[^"]*alert/.test(evil), evil);
   // Inside a sentence, in a list, or climbing out of the blob route: not a file.
   assert.equal(blobLineRef(`see ![x](https://h/api/v1/blobs/${ref}) here`), null);
   assert.equal(blobLineRef(`- ![x](https://h/api/v1/blobs/${ref})`), null);

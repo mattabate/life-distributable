@@ -1059,7 +1059,7 @@ func (m *Manager) autoTitle(threadID string) {
 func (m *Manager) haikuSummarize(dir, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	c := exec.CommandContext(ctx, m.ClaudeBin, "-p", "--model", "claude-haiku-4-5-20251001", "--output-format", "text", "--max-turns", "1", "--tools", "")
+	c := exec.CommandContext(ctx, m.ClaudeBin, "-p", "--model", spend.HelperModel, "--output-format", "text", "--max-turns", "1", "--tools", "")
 	// Not `dir`: from the project the CLI loads its instructions and memory
 	// index into every one-line title (preflight.go sideDir).
 	_ = dir
@@ -1868,7 +1868,7 @@ func (m *Manager) Update(id string, patch map[string]string) (Thread, error) {
 			m.db.Exec(`UPDATE threads SET title_auto=0 WHERE id=?`, id) // manual rename pins it
 		case "persona":
 			if !m.TeamMode {
-				return t, errors.New("team mode is off: set team_mode in ops/hub.json (`ops/py.sh setup.py hub --team yes`), restart the hub, then try again")
+				return t, errors.New("team mode is off: set team_mode in ops/hub.json (`ops/py.sh setup.py hub --team yes --force`), restart the hub, then try again")
 			}
 			if v == "off" {
 				v = ""

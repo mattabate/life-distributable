@@ -13,6 +13,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"life/hub/internal/spend"
 )
 
 // Routing a new session (team mode): a message the owner starts a NEW
@@ -589,7 +591,7 @@ func ollamaWarm(model, prompt string) (time.Duration, error) {
 func (m *Manager) haikuPick(prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), routeTimeout)
 	defer cancel()
-	c := exec.CommandContext(ctx, m.ClaudeBin, "-p", "--model", "claude-haiku-4-5-20251001", "--output-format", "text", "--max-turns", "1", "--tools", "")
+	c := exec.CommandContext(ctx, m.ClaudeBin, "-p", "--model", spend.HelperModel, "--output-format", "text", "--max-turns", "1", "--tools", "")
 	c.Dir = sideDir()
 	c.Stdin = strings.NewReader(prompt)
 	out, err := c.Output()

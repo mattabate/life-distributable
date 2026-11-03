@@ -71,8 +71,8 @@ func (m *Manager) tmuxSession(threadID, runID string) string {
 	return fmt.Sprintf("%s-th-%s-%s", m.Prefix, threadID, runID)
 }
 
-// gone: has the run's tmux session disappeared under it? The run command ends
-// with `touch .done`, so a claude that exits (crashed, killed, out of budget)
+// gone: has the run's tmux session disappeared under it? The run command's
+// claude side ends with `touch .done`, so a claude that exits (crashed, killed, out of budget)
 // leaves the marker and Poll settles it. Only the tmux server dying with the
 // process (a reboot, power loss, `tmux kill-server`) leaves a run with no
 // marker, and such a run stayed "running" on the board until the owner
@@ -327,6 +327,8 @@ func scanRun(s scanner) (run, error) {
 	return r, nil
 }
 
+var blobRefShape = regexp.MustCompile(`^sha256/[0-9a-z]{2}/[0-9a-z]+\.[0-9a-z]+$`)
+
 func (m *Manager) run(id, role, kind, text string, attachments []string) error {
 	author := "hub"
 	if role == "owner" {
@@ -363,6 +365,11 @@ func (m *Manager) runRef(id, author, role, kind, text string, attachments []stri
 		if m.BlobPath == nil {
 			return errors.New("attachments not supported")
 		}
+		// The shape PutBlob names: a ref is drawn into the console's markup,
+		// so a quote or a bracket in one is markup.
+		if !blobRefShape.MatchString(ref) {
+			return fmt.Errorf("attachment %q: not a blob ref (sha256/<xx>/<hash>.<ext>)", ref)
+		}
 		if _, err := m.BlobPath(ref); err != nil {
 			return fmt.Errorf("attachment %q: %w", ref, err)
 		}
@@ -375,11 +382,11 @@ func (m *Manager) runRef(id, author, role, kind, text string, attachments []stri
 	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, attachments, queued, in_reply_to, outcome, replies, author, via) VALUES (?,?,?,?,?,?,1,?,?,?,?,?)`, id, ts(now), role, kind, text, string(attJSON), ref, outcome, encodeReplies(replies), author, via)
 	m.db.Exec(`UPDATE threads SET updated_at=? WHERE id=?`, ts(now), id)
 	if role == "owner" {
-		// The owner's OWN words mark the open asks here answered — still on
-		// the board; the agent judges each one and closes what the message
-		// resolved. A message that answers ONE thing (in_reply_to) touches only
-		// that ask: otherwise marking one of two asks done could flip the other
-		// to answered too.
+		// The owner's words through ONE card (in_reply_to) mark that ask
+		// answered; a message to the session marks none (markAnswered) and
+		// the agent closes what it resolved. Only that one ask, never a
+		// sibling: otherwise marking one of two asks done could flip the
+		// other to answered too.
 		// Words with no outcome answer an ask without closing it (the ball is
 		// back with the agent); an outcome is a close and was already recorded
 		// by claimAsk when it was said.
@@ -858,7 +865,11 @@ func (m *Manager) launch(t Thread) error {
 	// card on the board. Wait for the binary inside the tmux shell — never under
 	// m.mu — and only then start; past 90 s the old error is the right one.
 	claudeBin := m.sessionClaudeBin()
-	cmd := waitForBin(claudeBin) + shellQuote(m.feedBin()) + " feed " + shellQuote(base+".in") + " | LIFE_THREAD_ID=" + shellQuote(t.ID) + " LIFE_RUN_ID=" + shellQuote(runID) + m.sessionTokenEnv(t.ID) + m.sessionUserEnv()
+	// The braces: `.done` lands the moment claude exits. Outside them the shell
+	// touched it only once `feed` also ended, and feed waits for its eof line,
+	// so a claude that crashed mid-turn sat "running" until the hang kill
+	// wrote over its stderr, or forever with a background task.
+	cmd := waitForBin(claudeBin) + shellQuote(m.feedBin()) + " feed " + shellQuote(base+".in") + " | { LIFE_THREAD_ID=" + shellQuote(t.ID) + " LIFE_RUN_ID=" + shellQuote(runID) + m.sessionTokenEnv(t.ID) + m.sessionUserEnv()
 	if m.AutoCompactWindow > 0 {
 		cmd += " CLAUDE_CODE_AUTO_COMPACT_WINDOW=" + strconv.Itoa(m.AutoCompactWindow)
 	}
@@ -866,7 +877,7 @@ func (m *Manager) launch(t Thread) error {
 	for _, a := range args {
 		cmd += " " + shellQuote(a)
 	}
-	cmd += fmt.Sprintf(" > %s 2>%s.err; touch %s.done", shellQuote(base+".out"), shellQuote(base+".out"), shellQuote(base+".out"))
+	cmd += fmt.Sprintf(" > %s 2>%s.err; touch %s.done; }", shellQuote(base+".out"), shellQuote(base+".out"), shellQuote(base+".out"))
 	tmuxName := m.tmuxSession(t.ID, runID)
 	if out, err := m.tmux("new-session", "-d", "-s", tmuxName, "-c", dir, cmd); err != nil {
 		return fmt.Errorf("tmux: %s", strings.TrimSpace(string(out)))
@@ -1365,7 +1376,14 @@ func (m *Manager) tail(r run) run {
 				if prev, ok := r.heldResult(); ok {
 					h.Tok = addTokens(prev.Tok, h.Tok) // the folded sub-turns' usage rides on the reply
 				}
-				if r.tasks > 0 && !done && !env.IsError {
+				// A "Say:" line is addressed to the owner, so it is the reply
+				// even with a task pending. Held, a status answer waited
+				// behind a background task for as long as the task ran, and
+				// a task turn ending on [end] superseded it, leaving an empty
+				// row and no card. The task's turn after it opens a turn of
+				// its own (the busy == 0 path below).
+				_, say := splitSay(env.Result)
+				if r.tasks > 0 && !done && !env.IsError && say == "" {
 					// A background task is still pending: the CLI will re-enter
 					// a turn when it notifies, so this is a progress line, not
 					// the reply. Its text is already a fold event; hold the
@@ -2355,6 +2373,15 @@ func (m *Manager) settleStatus(threadID string) {
 // died (or was killed) mid-turn: that is an error the owner should see. Anything
 // queued meanwhile starts a fresh process. Caller holds m.mu.
 func (m *Manager) finishProcess(r run) {
+	// claude has exited; its `feed` may still be waiting for an eof line that
+	// never comes, holding the tmux session open. It gets that line, so it and
+	// the session end with the run. A second eof after sendEOF's is never read.
+	if r.in != "" {
+		if f, err := os.OpenFile(r.in, os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+			f.WriteString(eofSentinel + "\n")
+			f.Close()
+		}
+	}
 	now := time.Now()
 	if r.busy == 1 {
 		errb, _ := os.ReadFile(r.out + ".err")

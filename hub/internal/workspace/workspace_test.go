@@ -64,6 +64,26 @@ func TestOnlyTheRoleWritesAndNothingIsLost(t *testing.T) {
 	}
 }
 
+// Three writes in one second keep both earlier texts: the version name is
+// the second, and the second save had replaced the first.
+func TestWritesInOneSecondKeepEveryVersion(t *testing.T) {
+	s := store(t)
+	for _, text := range []string{"A", "B", "C"} {
+		if _, err := s.Write("assistant", "plan.md", []byte(text), "owner"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vs, _ := os.ReadDir(filepath.Join(s.Dir, "assistant", ".versions"))
+	kept := map[string]bool{}
+	for _, v := range vs {
+		b, _ := os.ReadFile(filepath.Join(s.Dir, "assistant", ".versions", v.Name()))
+		kept[string(b)] = true
+	}
+	if len(vs) != 2 || !kept["A"] || !kept["B"] {
+		t.Fatalf("versions lost: %d files, %v", len(vs), kept)
+	}
+}
+
 // The role is the folder, never part of the name: `put assistant/x.md` and
 // `cat assistant/x.md` mean the assistant's x.md. Files already nested are
 // lifted out at startup, the newer copy winning, the other kept under

@@ -93,13 +93,20 @@ func (m *Manager) sessionDir(t Thread, dir string) string {
 }
 
 // catchUp brings a clone's branch up to main before a process starts in it,
-// when that is a fast-forward. A branch with unlanded commits, or edits the
-// merge would overwrite, is left as it is.
+// when that is a fast-forward. A branch with unlanded commits is rebased onto
+// main when its tree is clean: a clone that only fast-forwarded kept the
+// scripts it was made with, so a fix to ops/land.sh never reached it and its
+// commits could never leave. A conflict is aborted, and a dirty tree (rebase
+// refuses it) is left as it is.
 func (m *Manager) catchUp(t Thread, wt string) {
 	if _, err := m.asSession("git", "-C", wt, "fetch", "--quiet", "origin", "main"); err != nil {
 		return
 	}
-	if out, err := m.asSession("git", "-C", wt, "merge", "--ff-only", "--quiet", "origin/main"); err != nil {
+	if _, err := m.asSession("git", "-C", wt, "merge", "--ff-only", "--quiet", "origin/main"); err == nil {
+		return
+	}
+	if out, err := m.asSession("git", "-C", wt, "rebase", "--quiet", "origin/main"); err != nil {
+		m.asSession("git", "-C", wt, "rebase", "--abort")
 		log.Printf("thread %s: clone not caught up to main: %s", t.ID, strings.TrimSpace(string(out)))
 	}
 }

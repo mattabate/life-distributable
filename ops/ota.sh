@@ -132,14 +132,18 @@ APS=$(unzip -p "$IPA" 'Payload/Life.app/embedded.mobileprovision' | grep -a -A1 
 # here instead of leaving it as a thing to remember.
 WANT=false; [ "$APS" = production ] && WANT=true
 if python3 - "$WANT" "$ROOT/ops/hub.json" <<'PY'
-import json, sys
+import json, os, sys
 want, path = sys.argv[1] == "true", sys.argv[2]
 cfg = json.load(open(path))
 if cfg.get("apns_production") == want:
     sys.exit(1)
 cfg["apns_production"] = want
-json.dump(cfg, open(path, "w"), indent=2)
-open(path, "a").write("\n")
+# Beside it, then one rename: a kill mid-write would leave a truncated
+# hub.json the hub cannot load, right before the restart.
+with open(path + ".tmp", "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+os.replace(path + ".tmp", path)
 PY
 then
   echo "▶ apns_production → $WANT (build is aps=$APS); restarting the hub…"

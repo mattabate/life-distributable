@@ -130,10 +130,10 @@ func TestLifecycle(t *testing.T) {
 	if !strings.Contains((*cmds)[1], "'--resume' 'sess-123'") {
 		t.Fatal((*cmds)[1])
 	}
-	// the owner's reply answers the asks but they stay on the board until closed;
-	// the resumed run is told what is pending
+	// a message to the session answers no card: the first stays open on the
+	// owner's board; the resumed run is told what is pending
 	asks, _ = m.ListAsks("active", th.ID, 10)
-	if len(asks) != 2 || asks[0].State != "answered" || asks[1].State != "answered" {
+	if len(asks) != 2 || asks[0].State != "open" || asks[1].State != "answered" {
 		t.Fatalf("%+v", asks)
 	}
 	if pb, _ := os.ReadFile(promptFile(t, m, th.ID)); !strings.Contains(string(pb), "[Open asks on this thread") || !strings.Contains(string(pb), asks[0].ID) {

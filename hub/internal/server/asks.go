@@ -36,6 +36,16 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad json")
 		return
 	}
+	// A card is its session's: the owner's Done on it wakes that session with
+	// "Done: <title>" in the owner's name, so a session raises cards on itself
+	// only.
+	if from := s.caller(r); from != "" {
+		if in.ThreadID != "" && in.ThreadID != from {
+			jsonErr(w, 403, "a session raises cards on itself, not on another session; to hand a task over: `lifectl relay <session-id> \"...\"`")
+			return
+		}
+		in.ThreadID = from
+	}
 	// A card raised from inside a turn belongs IN that turn's tool chain, and
 	// the only thing that ties it there is the run it was raised in. lifectl
 	// reads that from LIFE_RUN_ID, which the runner puts in the claude

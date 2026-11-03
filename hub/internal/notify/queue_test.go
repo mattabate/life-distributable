@@ -74,6 +74,19 @@ func TestUnheardCardIsSpokenAgainAfterARestart(t *testing.T) {
 	if len(sent) != 0 {
 		t.Fatalf("a card the phone spoke was spoken again: %q", sent)
 	}
+	// A card raised again after one resume is a new line: if a restart cuts
+	// it before it is heard, the next hub speaks it again.
+	if err := fifth.PushCard("read", "line", "Hey Alex, one card, raised again.", "t-1", "ask-1"); err != nil {
+		t.Fatal(err)
+	}
+	sent = nil
+	sixth := hub()
+	sixth.Open = func(card string) bool { return card == "ask-1" }
+	sixth.Resume()
+	if len(sent) != 1 || sent[0] != "Hey Alex, one card, raised again." {
+		t.Fatalf("a card raised again after a resume: %q, want it spoken again", sent)
+	}
+	sixth.Heard("t-1", "Hey Alex, one card, raised again.")
 	// A card left unheard for longer than resumeWindow stays quiet: a
 	// restart an hour later must not read out a stale board.
 	db.Exec(`UPDATE voice_queue SET heard_at='', resumed_at='', queued_at=? WHERE card='ask-2'`, store.TS(time.Now().Add(-2*resumeWindow)))

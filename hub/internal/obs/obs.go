@@ -344,6 +344,10 @@ type Query struct {
 	// Forward asks for that order from the start (after_id=0).
 	AfterID int64
 	Forward bool
+	// Text: the payload contains this, any case - "what do I know about X"
+	// without hand-written SQL. A plain scan inside the other filters; Limit
+	// still caps what comes back.
+	Text string
 }
 
 var fieldName = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
@@ -363,6 +367,10 @@ func (s *Store) List(q Query) ([]Observation, error) {
 	if q.Account != "" {
 		where = append(where, "json_extract(payload,'$.account')=?")
 		args = append(args, q.Account)
+	}
+	if q.Text != "" {
+		where = append(where, "instr(lower(payload), lower(?))>0")
+		args = append(args, q.Text)
 	}
 	if !q.Since.IsZero() {
 		where = append(where, "ts>=?")

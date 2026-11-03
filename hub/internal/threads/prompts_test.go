@@ -259,8 +259,8 @@ func TestReadCardClosesOnReplyAndNeverWakesTheSession(t *testing.T) {
 	if got, _ := m.GetAsk(read.ID); got.State != "open" {
 		t.Fatalf("a reply to the session must not touch a read card: %+v", got)
 	}
-	if got, _ := m.GetAsk(decide.ID); got.State != "answered" {
-		t.Fatalf("the owner's words still answer the cards that asked them something: %+v", got)
+	if got, _ := m.GetAsk(decide.ID); got.State != "open" {
+		t.Fatalf("a message to the session must not hide a decision either: %+v", got)
 	}
 
 	// The one-tap close: the card is done, the session hears nothing.

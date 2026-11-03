@@ -193,7 +193,7 @@ over Tailscale, which only their own devices can join.
    approve anything that spends money, deletes, contacts someone, shares
    data or pushes code, so no session can approve its own request (a local
    commit needs no approval). You
-   open `ops/decider-set.sh` in its own window. Tell them: "The window
+   open `bash ops/decider-set.sh` in its own window. Tell them: "The window
    shows a code. Save it in the Passwords app with the title
    `life decider code`, then close the window." You never see it.
 8. **Open the console** (the web version of the app). You open
@@ -368,15 +368,25 @@ It takes one message.
    you a head start in some directions, but owners who start with less
    generally have a better long-term experience. It is off; want it on?"*
    Default is no, and no is the better answer today. If they say yes:
-   `ops/py.sh setup.py hub --team yes --force` with the same `--owner`,
-   `--usage` and `--surfaces` as step 5, `ops/hub.sh restart`, then
+   `ops/py.sh setup.py hub --team yes --force` (it changes only
+   `team_mode` and keeps the rest of `ops/hub.json`, the push key
+   included), `ops/hub.sh restart`, then
    `lifectl thread calendar persona assistant`. Whatever they answer, do
    not ask again for two weeks (CLAUDE.md, "Team mode").
+6. **Separate user, once.** Ask, in these words: *"Right now a session
+   runs as you, so it can do anything your Mac account can, the hub token
+   and the decider code's hash included. There is an optional step that
+   runs sessions as a second Mac user instead; you type a few commands in
+   Terminal. Want it?"* If yes, follow "Optional: run sessions
+   as a separate user" below. Whatever they answer, do not ask again.
 
 ## Optional: run sessions as a separate user
 
-Off by default, and nothing in steps 0 to 10 needs it. Offer it only if the
-owner asks for more hardening. With `session_user` set, every session runs as
+Off by default, and nothing in steps 0 to 10 needs it. Without it, a
+session runs as the owner's own macOS user and can do anything that account
+can, the hub token and the decider hash included: the decider code is then
+a rule sessions follow, not a wall. Setup offers it once (step 10). With
+`session_user` set, every session runs as
 a second macOS user (`life-agent` here) in a clone of its own, so a session
 cannot write the main checkout, read `ops/secrets/` (the hub token, the
 decider hash) or write the database. Its commits reach main through the hub

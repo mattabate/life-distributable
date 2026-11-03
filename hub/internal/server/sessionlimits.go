@@ -75,11 +75,26 @@ func (s *Server) sessionLimits(pattern string, h http.HandlerFunc) http.HandlerF
 			jsonErr(w, 403, "only the owner does this")
 			return
 		}
-		if r.Method != "GET" && r.Method != "HEAD" && !stampActor(w, r, "claude:thread:"+id) {
+		if r.Method != "GET" && r.Method != "HEAD" && !rawBody(pattern, r) && !stampActor(w, r, "claude:thread:"+id) {
 			return
 		}
 		h(w, r)
 	}
+}
+
+// rawBody: the routes whose body is the stored bytes, not a request. A
+// session's .json blob or a notes file that happened to be a JSON object came
+// back with by/author written into it, and an empty upload became that
+// object. Neither needs the stamp: a blob names nobody, and the workspace PUT
+// writes as the caller whatever the body.
+func rawBody(pattern string, r *http.Request) bool {
+	switch pattern {
+	case "POST /api/v1/blobs":
+		return true
+	case "PUT /api/v1/workspace/{persona}/{name...}":
+		return !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json")
+	}
+	return false
 }
 
 // stampActor rewrites a JSON object body. Any other body passes as it came: a
@@ -94,6 +109,10 @@ func stampActor(w http.ResponseWriter, r *http.Request, who string) bool {
 	in := map[string]json.RawMessage{}
 	if len(bytes.TrimSpace(raw)) > 0 && json.Unmarshal(raw, &in) != nil {
 		return true
+	}
+	if in == nil { // the body was JSON null, and in["by"] below would panic
+		jsonErr(w, 400, "expected a JSON object")
+		return false
 	}
 	// Go matches a JSON key to a field whatever its case.
 	for k := range in {

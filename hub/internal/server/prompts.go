@@ -107,6 +107,14 @@ func (s *Server) addPrompt(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cancelPrompt(w http.ResponseWriter, r *http.Request) {
+	// A session cancels what it sent or what waits for it, never another
+	// session's wake.
+	if from := s.caller(r); from != "" {
+		if p, err := s.thr.GetPrompt(r.PathValue("id")); err == nil && p.Target != from && p.Author != "claude:thread:"+from {
+			jsonErr(w, 403, "a session cancels its own prompts only")
+			return
+		}
+	}
 	p, err := s.thr.CancelPrompt(r.PathValue("id"))
 	if err != nil {
 		jsonErr(w, 400, err.Error())

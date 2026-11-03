@@ -143,6 +143,21 @@ func (s *Server) patchThread(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad json")
 		return
 	}
+	// A session tunes its own schedule, goal and model only. A persona is a
+	// workspace's write key and a lane in the router, and a status clears its
+	// asks as the owner.
+	if from := s.caller(r); from != "" {
+		if from != r.PathValue("id") {
+			jsonErr(w, 403, "a session may not change another session; to hand a task over: `lifectl relay <session-id> \"...\"`")
+			return
+		}
+		for k := range patch {
+			if k == "persona" || k == "status" {
+				s.ownerOnly(w, r, "a session's "+k)
+				return
+			}
+		}
+	}
 	t, err := s.thr.Update(r.PathValue("id"), unstamped(patch))
 	if err != nil {
 		jsonErr(w, 400, err.Error())
@@ -244,7 +259,21 @@ func via(v string) string {
 	return ""
 }
 
+// notAnother answers 403 when a session aims a stop, an archive or a
+// check-in at another session; its own is its own.
+func (s *Server) notAnother(w http.ResponseWriter, r *http.Request, what string) bool {
+	if from := s.caller(r); from != "" && from != r.PathValue("id") {
+		jsonErr(w, 403, "a session may not "+what+" another session")
+		return true
+	}
+	return false
+}
+
 func (s *Server) checkinThread(w http.ResponseWriter, r *http.Request) {
+	// Another session's check-in is a paid turn past the relay allowance.
+	if s.notAnother(w, r, "run a check-in of") {
+		return
+	}
 	if err := s.thr.CheckIn(r.PathValue("id"), "api"); err != nil {
 		jsonErr(w, 409, err.Error())
 		return
@@ -253,6 +282,9 @@ func (s *Server) checkinThread(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) stopThread(w http.ResponseWriter, r *http.Request) {
+	if s.notAnother(w, r, "stop") {
+		return
+	}
 	if err := s.thr.Stop(r.PathValue("id")); err != nil {
 		jsonErr(w, 409, err.Error())
 		return
@@ -261,6 +293,9 @@ func (s *Server) stopThread(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) archiveThread(w http.ResponseWriter, r *http.Request) {
+	if s.notAnother(w, r, "archive") {
+		return
+	}
 	if err := s.thr.Archive(r.PathValue("id")); err != nil {
 		jsonErr(w, 409, err.Error())
 		return

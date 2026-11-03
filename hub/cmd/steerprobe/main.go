@@ -17,6 +17,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"life/hub/internal/spend"
 )
 
 func main() {
@@ -24,7 +26,7 @@ func main() {
 	if len(os.Args) > 1 {
 		bin = os.Args[1]
 	}
-	cmd := exec.Command(bin, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--allowedTools", "Bash", "--model", "claude-haiku-4-5-20251001")
+	cmd := exec.Command(bin, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--allowedTools", "Bash", "--model", spend.HelperModel)
 	cmd.Dir = os.TempDir()
 	stdin, _ := cmd.StdinPipe()
 	stdout, _ := cmd.StdoutPipe()
