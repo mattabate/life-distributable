@@ -591,6 +591,25 @@ test('turnFacts: the turn in flight in a finished turn\'s words', () => {
   assert.equal(turnFacts(null), '');
 });
 
+test('taskRowHTML: a helper\'s kind, name, age, newest line and bar', () => {
+  const now = Date.parse('2026-11-04T03:30:00Z');
+  assert.equal(taskAge({ started_at: '2026-11-04T03:26:10Z' }, now), '3m');
+  assert.equal(taskAge({ started_at: '2026-11-04T02:25:00Z' }, now), '1h 05m');
+  assert.equal(taskAge({}, now), '');
+  assert.equal(taskCount({ done: 3, total: 10 }), '3/10');
+  assert.equal(taskCount({ done: 45, total: 100 }), '45%');
+  assert.equal(taskCount({}), '');
+  assert.equal(taskKind({ type: 'local_bash' }), 'shell');
+  assert.equal(taskKind({ type: 'local_agent' }), 'subagent');
+  const html = taskRowHTML({ id: 'b1', type: 'local_bash', description: 'Post <the> issues', doing: 'posted a/b', done: 3, total: 10 }, { click: "toggleTask('b1')" });
+  assert.match(html, /<span class="verb">shell<\/span><span class="task-d">Post &lt;the&gt; issues<\/span>/);
+  assert.match(html, /width:30%/);
+  assert.match(html, /tbar-n">3\/10</);
+  assert.match(html, /task-doing">posted a\/b</);
+  assert.match(html, /onclick="event.preventDefault\(\);toggleTask\('b1'\)"/);
+  assert.doesNotMatch(taskRowHTML({ type: 'local_agent', description: 'x' }), /tbar|task-doing|<a /);
+});
+
 test('select renders the current option selected', () => {
   assert.equal(select('k', 'Kind', ['a', 'b'], 'b'),
     '<label class="field" style="flex:1;min-width:150px"><span>Kind</span><select id="k">\n    <option value="a">a</option><option value="b" selected>b</option></select></label>');

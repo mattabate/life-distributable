@@ -299,6 +299,35 @@ const helpersWords = n => n ? `${n} subagent${n === 1 ? '' : 's'} running` : '';
 // before any chain is loaded: the working line counts them unopened.
 const taskHelpers = t => ((t && t.turn_tasks) || []).filter(k => k.type === 'local_agent').length;
 
+// THE HELPERS A SESSION HAS GOING, drawn where the owner looks: every
+// background task of the turn, an Agent helper or a background shell, as one
+// row: its kind, what it is, how long it has run, the newest line it printed
+// and, when that line counts ("3/10", "45%"), a bar. The chat's rows open its
+// log; the Sessions card's are the same rows, closed. The phone's `TaskRow`
+// (Format.swift).
+const taskKind = k => k.type === 'local_agent' ? 'subagent' : k.type === 'local_bash' ? 'shell' : String(k.type || 'task').replace(/^local_/, '');
+// "4m", "1h 05m": how long it has run, from when the hub first listed it.
+function taskAge(k, now) {
+  if (!k.started_at) return '';
+  const m = Math.max(0, Math.floor(((now || Date.now()) - Date.parse(k.started_at)) / 60000));
+  return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm';
+}
+// "3/10" or "45%", '' with no count.
+const taskCount = k => !k.total ? '' : k.total === 100 ? k.done + '%' : k.done + '/' + k.total;
+function taskBarHTML(k) {
+  if (!k.total) return '';
+  return `<div class="tbar"><span class="tbar-t"><i style="width:${Math.round(100 * Math.min(k.done, k.total) / k.total)}%"></i></span><span class="tbar-n">${esc(taskCount(k))}</span></div>`;
+}
+// One helper's row. `o.open`: its log is showing; `o.click`: the head's onclick.
+function taskRowHTML(k, o = {}) {
+  const head = `<span class="verb">${esc(taskKind(k))}</span><span class="task-d">${esc(k.description || 'helper')}</span>${k.started_at ? `<span class="muted task-age" title="started ${esc(dayWhen(k.started_at))}">${esc(taskAge(k))}</span>` : ''}`;
+  return `<div class="task-row${o.open ? ' on' : ''}">
+    ${o.click ? `<a href="#" class="task-h" onclick="event.preventDefault();${o.click}"><span class="caret">›</span>${head}</a>` : `<div class="task-h">${head}</div>`}
+    ${taskBarHTML(k)}
+    ${k.doing && !o.open ? `<div class="small muted task-doing">${esc(k.doing)}</div>` : ''}
+    ${o.log || ''}</div>`;
+}
+
 // The Markdown subset the agents are told to write (docs: preamble spec):
 // bullets, numbered lists, # headings, **bold**, `code`, links, pipe tables,
 // ``` fences — anything else renders as plain text rather than as syntax.

@@ -111,6 +111,12 @@ func TestFreeLsStaysInItsRoots(t *testing.T) {
 		{"ls " + drop + "/link/", "", false},
 		{"ls " + drop + "/*", "", false},
 		{"ls '" + out + "'", "", false},
+		{"ls -R " + drop, "", true},
+		{"ls -RL " + drop, "", false}, // follows drop/link out at run time
+		{"ls -L -R " + drop, "", false},
+		{"ls -lH " + drop, "", false},
+		{"ls -R --dereference " + drop, "", false}, // GNU ls's -L
+		{"ls -- " + drop, "", false},
 	} {
 		pay, _ := json.Marshal(map[string]string{"cmd": c.cmd, "dir": c.dir})
 		a, err := q.Propose(Proposal{Kind: "other", Title: "x", ExecType: "shell", ExecPayload: pay})

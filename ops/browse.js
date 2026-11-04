@@ -291,8 +291,16 @@ window.__box = function(sel) {
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     '--ignore-certificate-errors', // the hub serves its own tailnet cert
     `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
-    `--window-size=${winW},${winH}`, 'about:blank',
-  ], { stdio: 'ignore' });
+    `--window-size=${winW},${winH}`, '--use-mock-keychain', 'about:blank',
+  ], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, CFFIXED_USER_HOME: profile } });
+  // Chrome's own stderr, the last few KB, printed when it never answers.
+  let chromeErr = '';
+  // GoogleUpdater, which Chrome wakes, logs to the same pipe; its lines are noise.
+  chrome.stderr.on('data', (b) => {
+    const keep = String(b).split('\n').filter((l) => !/updater|crashpad|GoogleUpdater/i.test(l)).join('\n');
+    chromeErr = (chromeErr + keep).slice(-4000);
+  });
+  chrome.on('exit', (code, sig) => { chromeErr += `\n[chrome exited ${code ?? sig}]`; });
 
   let ws, cdp, failed = false;
   const problems = [];
@@ -369,6 +377,7 @@ window.__box = function(sel) {
   } catch (e) {
     failed = true;
     console.error('browse: FAILED — ' + e.message);
+    if (chromeErr.trim()) console.error('chrome said:\n' + chromeErr.trim());
   }
 
   if (problems.length) {

@@ -229,6 +229,7 @@ function sessionCardHTML(t, o) {
       ${o.pills ? `<div class="small sess-foot">${o.pills}</div>` : ''}
       ${failed ? `<div class="small wrap2 err mt6">${failedPreview(t.last_message)}</div>` : ''}
       ${o.cells || ''}
+      ${live && (t.turn_tasks || []).length ? `<div class="sess-tasks">${t.turn_tasks.map(k => taskRowHTML(k)).join('')}</div>` : ''}
     </div>`;
 }
 
@@ -850,6 +851,7 @@ async function refreshThread(id, first) {
     paintChatPills(t);
     paintWorking(running, t);
     loadChain();
+    loadTasks();
     return;
   }
 
@@ -957,6 +959,7 @@ async function refreshThread(id, first) {
       ${chatFullHTML(full)}
       ${rows}
       <div class="working small muted" id="run-working" hidden></div>
+      <div class="tasks small" id="run-tasks" hidden></div>
       <div class="chain small" id="run-chain" hidden></div>
     </div>
     ${queuedHTML(queued)}
@@ -965,6 +968,7 @@ async function refreshThread(id, first) {
   paintWorking(running, t);
   paintChain();
   loadChain();
+  loadTasks();
   const box = document.getElementById('msgs');
   // Opening a chat places the reader on the newest message; after that the
   // chat never scrolls for them — a redraw puts back what they were reading. `first`
@@ -1266,6 +1270,55 @@ function paintChain() {
   el.hidden = !(chatState.running && c.open && chainLive(c));
   if (!el.hidden) el.innerHTML = chainHTML(toolChain(c.evs, t && t.turn_tasks), c.all, (t && t.turn_tools) || 0,
     { name: t && t.title, me: c.me, subs: c.subs, tasks: (t && t.turn_tasks) || [] });
+}
+// THE HELPERS UNDER THE WORKING LINE (ui.js taskRowHTML), open or not: each
+// row opens its log, a shell's newest lines (/tasks/{task}/output) or an
+// Agent helper's calls (/tasks/{task}/events), re-read on every refresh while
+// open. The newest TASK_LINES lines until the rest is asked for; never a
+// scroll box.
+const TASK_LINES = 30;
+const taskState = { id: null, open: {}, logs: {} };
+function taskLogHTML(k) {
+  const g = taskState.logs[k.id];
+  if (!g) return '<div class="task-log muted">reading…</div>';
+  if (!g.ok) return '<div class="task-log muted">no log to read</div>';
+  const shown = g.all ? g.lines : g.lines.slice(-TASK_LINES);
+  const earlier = g.lines.length - shown.length;
+  return `<div class="task-log">${earlier || g.cut ? `<a href="#" class="chain-more muted" onclick="event.preventDefault();taskAll('${esc(k.id)}')">${earlier ? earlier + ' earlier' : 'older lines are cut'}</a>` : ''}${shown.map(l => `<div>${esc(l)}</div>`).join('')}</div>`;
+}
+function paintTasks() {
+  const el = document.getElementById('run-tasks'), t = chatState.thread;
+  if (!el) return;
+  if (taskState.id !== chatState.id) Object.assign(taskState, { id: chatState.id, open: {}, logs: {} });
+  const tasks = (chatState.running && t && t.turn_tasks) || [];
+  el.hidden = !tasks.length;
+  el.innerHTML = tasks.map(k => taskRowHTML(k, { open: taskState.open[k.id], click: `toggleTask('${esc(k.id)}')`,
+    log: taskState.open[k.id] ? taskLogHTML(k) : '' })).join('');
+}
+function toggleTask(id) {
+  taskState.open[id] = !taskState.open[id];
+  paintTasks();
+  if (taskState.open[id]) loadTasks();
+}
+function taskAll(id) { const g = taskState.logs[id]; if (g) { g.all = true; paintTasks(); } }
+async function loadTasks() {
+  const id = chatState.id, t = chatState.thread;
+  paintTasks();
+  for (const k of ((chatState.running && t && t.turn_tasks) || []).filter(k => taskState.open[k.id])) {
+    const q = `/threads/${encodeURIComponent(id)}/tasks/${encodeURIComponent(k.id)}/`;
+    let lines = null, cut = false;
+    if (k.type === 'local_agent') {
+      const evs = await get(q + 'events?limit=2000').catch(() => null);
+      if (Array.isArray(evs)) lines = toolChain(evs).steps.filter(s => !s.agent).map(s => s.label);
+    } else {
+      const out = await get(q + 'output').catch(() => null);
+      if (out && Array.isArray(out.lines)) ({ lines, cut } = out);
+    }
+    if (chatState.id !== id) return;
+    const was = taskState.logs[k.id];
+    taskState.logs[k.id] = { ok: !!lines, lines: lines || [], cut, all: !!(was && was.all) };
+  }
+  paintTasks();
 }
 function toggleChainMe() { chatState.chain.me = !chatState.chain.me; paintChain(); }
 function toggleChainSub(id) {

@@ -34,6 +34,21 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(helpersWords(3), "3 subagents running")
     }
 
+    func testTaskRowWords() {
+        let now = Date()
+        var k = TurnTask(id: "b", type: "local_bash", description: "Fetch")
+        XCTAssertEqual(taskKind(k), "shell")
+        XCTAssertEqual(taskAge(k, now: now), "")
+        k.started_at = now.addingTimeInterval(-65 * 60)
+        XCTAssertEqual(taskAge(k, now: now), "1h 05m")
+        XCTAssertEqual(taskCount(k), "")
+        k.done = 13; k.total = 42
+        XCTAssertEqual(taskCount(k), "13/42")
+        k.done = 45; k.total = 100
+        XCTAssertEqual(taskCount(k), "45%")
+        XCTAssertEqual(taskKind(TurnTask(type: "local_agent")), "subagent")
+    }
+
     func testSharedCases() throws {
         // The simulator shares the Mac's filesystem, so the repo file is readable.
         let url = URL(fileURLWithPath: #filePath)

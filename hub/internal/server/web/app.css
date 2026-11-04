@@ -442,6 +442,25 @@ a.chain-w:hover, a.chain-w.on { color: var(--accent); }
 .chain-row.live { color: var(--fg); }
 .chain-row.err { color: var(--red); }
 .chain-more { display: block; padding: 2px 0 4px; }
+/* The helpers a turn has going (ui.js taskRowHTML): under the working line,
+   and closed on the Sessions card. */
+.tasks { margin: -4px 8px 10px 21px; display: grid; gap: 6px; }
+.task-row { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); min-width: 0; }
+.task-h { display: flex; align-items: baseline; gap: 7px; color: var(--fg); text-decoration: none; min-width: 0; }
+.task-h .caret { flex: none; width: 10px; color: var(--muted); font-size: 15px; line-height: 1; text-align: center; transition: transform .12s; }
+.task-row.on .task-h .caret { transform: rotate(90deg); }
+.task-h .verb { flex: none; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
+.task-d { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.task-age { flex: none; font-variant-numeric: tabular-nums; }
+.task-doing { margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
+.tbar { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.tbar-t { flex: 1; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 16%, transparent); overflow: hidden; }
+.tbar-t i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.tbar-n { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.task-log { margin: 6px 0 0 17px; font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+.sess-tasks { display: grid; gap: 6px; margin-top: 8px; }
+.sess-tasks .task-row { padding: 5px 8px; }
+.sess-tasks .task-h { font-size: 12.5px; }
 
 /* ---------- the one card (ui.js cardHTML) ----------
    Every card in the chat — ask, approval, rec — is .ask with a --tint: the

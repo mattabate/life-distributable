@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +47,11 @@ type JobSpec struct {
 	Gate string `json:"gate"`
 	// AllowedTools overrides Table.DefaultTools for this job.
 	AllowedTools []string `json:"allowed_tools"`
+	// ExecTypes: the exec types this job's findings may carry ("shell",
+	// "claude"). Unlisted, a finding becomes an exec_type none card: a job
+	// reads outside text, and an approved shell card runs as the owner.
+	// Default none.
+	ExecTypes []string `json:"exec_types"`
 }
 
 type Table struct {
@@ -657,12 +663,15 @@ func (s *Scheduler) exec(b begun) (int64, error) {
 // on (GET /runs/{id}).
 func (s *Scheduler) route(j JobSpec, o Output, runID int64) {
 	for _, f := range o.Findings {
-		et := f.ExecType
-		if et == "" {
-			et = "none"
+		et, payload, detail := f.ExecType, f.ExecPayload, f.Detail
+		if et != "" && et != "none" && !slices.Contains(j.ExecTypes, et) {
+			detail += fmt.Sprintf("\n\n(The job asked for a %q run; %s may not, so approving runs nothing.)", et, j.Name)
 		}
-		if _, err := s.acts.Propose(actions.Proposal{Project: j.Project, Kind: f.Kind, Title: f.Title, Detail: f.Detail,
-			ExecType: et, ExecPayload: f.ExecPayload, Source: "claude:job:" + j.Name, RunID: strconv.FormatInt(runID, 10)}); err != nil {
+		if !slices.Contains(j.ExecTypes, et) {
+			et, payload = "none", nil
+		}
+		if _, err := s.acts.Propose(actions.Proposal{Project: j.Project, Kind: f.Kind, Title: f.Title, Detail: detail,
+			ExecType: et, ExecPayload: payload, Source: "claude:job:" + j.Name, RunID: strconv.FormatInt(runID, 10)}); err != nil {
 			log.Printf("sched: propose from %s: %v", j.Name, err)
 		}
 	}
@@ -721,6 +730,7 @@ func (s *Scheduler) Card(kind, line, say, thread, card string) error {
 }
 
 func (s *Scheduler) wrapPrompt(j JobSpec) string {
+	execTypes := strings.Join(append([]string{"none"}, j.ExecTypes...), "|")
 	return j.Prompt + `
 
 ---
@@ -730,7 +740,7 @@ Rules:
 - NEVER move money, delete anything, contact anyone, share data or commit the owner to anything directly. Instead return such steps as findings with the right kind (money|delete|contact|share|commit); the hub will ask the owner for approval.
 - Your FINAL message must be ONLY a JSON object, no prose, no code fence:
 {"summary": "1-3 sentences on what you did (kept on the run record), or empty string if nothing noteworthy",
- "findings": [{"kind":"money|delete|contact|share|commit|other","title":"...","detail":"what exactly will happen and why","exec_type":"none|shell|claude","exec_payload":{}}],
+ "findings": [{"kind":"money|delete|contact|share|commit|other","title":"...","detail":"what exactly will happen and why","exec_type":"` + execTypes + `","exec_payload":{}}],
  "needs_you": ["things only the owner can do, each one line; empty if none"]}`
 }
 

@@ -433,6 +433,41 @@ func TestFireThatCannotStartIsOnTheRecord(t *testing.T) {
 	}
 }
 
+// A job's findings carry only the exec types its schedule.json entry lists:
+// a job reads outside text, and an approved shell card runs as the owner.
+// Unlisted, the card is exec none and says so.
+func TestJobFindingsKeepOnlyListedExecTypes(t *testing.T) {
+	s, q, _ := setup(t, `{"jobs":[{"name":"plain","project":"life","when":"manual","prompt":"p"},{"name":"runs","project":"life","when":"manual","prompt":"p","exec_types":["shell"]}]}`)
+	out := `{"summary":"s","findings":[` +
+		`{"kind":"money","title":"sh","detail":"d","exec_type":"shell","exec_payload":{"cmd":"echo hi"}},` +
+		`{"kind":"money","title":"cl","detail":"d","exec_type":"claude","exec_payload":{"prompt":"x"}}],"needs_you":[]}`
+	var prompts []string
+	s.RunClaude = func(_ context.Context, _, prompt string, _ []string) (Output, error) {
+		prompts = append(prompts, prompt)
+		return ParseOutput(out, "")
+	}
+	for _, j := range []string{"plain", "runs"} {
+		if _, err := s.Run(j, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !strings.Contains(prompts[0], `"exec_type":"none"`) || !strings.Contains(prompts[1], `"exec_type":"none|shell"`) {
+		t.Fatalf("prompts offer unlisted types:\n%s\n%s", prompts[0], prompts[1])
+	}
+	all, _ := q.List("", 10)
+	got := map[string]string{}
+	for _, a := range all {
+		got[strings.TrimPrefix(a.Source, "claude:job:")+"/"+a.Title] = a.ExecType
+		if a.ExecType == "none" && (string(a.ExecPayload) != "{}" || !strings.Contains(a.Detail, "may not")) {
+			t.Errorf("downgraded card kept its payload or said nothing: %+v", a)
+		}
+	}
+	want := map[string]string{"plain/sh": "none", "plain/cl": "none", "runs/sh": "shell", "runs/cl": "none"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
 func TestRunRoutesOutput(t *testing.T) {
 	s, q, n := setup(t, `{"digest_at":"18:00","jobs":[{"name":"sweep","project":"life","when":"daily@07:00","prompt":"look around"}]}`)
 	s.RunClaude = func(_ context.Context, dir, prompt string, tools []string) (Output, error) {

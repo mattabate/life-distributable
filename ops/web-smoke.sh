@@ -9,8 +9,9 @@
 # Usage: make web-smoke   (after `make build` + `ops/hub.sh restart`)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-[ -x "$chrome" ] || { echo "web-smoke: SKIPPED — no Chrome" >&2; exit 0; }
+[ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] || { echo "web-smoke: SKIPPED — no Chrome" >&2; exit 0; }
+# ops/chrome.sh: Chrome that starts as the session user too.
+chrome() { bash ops/chrome.sh "$@"; }
 
 # `web-smoke.sh preview '#/asks'` — screenshot the console against FIXTURES
 # (ops/web-preview.html), for states the live hub is not in: a pending
@@ -21,7 +22,7 @@ if [ "${1:-}" = "preview" ]; then
   out=ops/logs/web/${4:-preview}.png
   # This tree's console and shared/fixtures, not the hub's: the hub serves
   # main until a merge restarts it, so a branch's change was never drawn.
-  "$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+  chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
     --allow-file-access-from-files \
     --window-size=1500,1100 --virtual-time-budget=6000 \
     --screenshot="$out" \
@@ -38,23 +39,23 @@ url=$(ops/hub.sh url)
 if [ "${1:-}" = "shot" ]; then
   mkdir -p ops/logs/web
   tid=${2:-$(ops/bin/lifectl threads --json | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)}
-  "$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+  chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
     --window-size=1500,1000 --virtual-time-budget=9000 \
     --screenshot=ops/logs/web/list.png "$url" >/dev/null 2>&1 || true
-  "$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+  chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
     --window-size=1500,1000 --virtual-time-budget=9000 \
     --screenshot=ops/logs/web/chat.png "$url#/sessions/$tid" >/dev/null 2>&1 || true
   if [ -n "${3:-}" ]; then
     # SHOT_H: the panes scroll inside the window, so a long page (Calendar) is
     # only visible in one picture when the window itself is tall.
-    "$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+    chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
       --window-size=1500,"${SHOT_H:-2200}" --virtual-time-budget=9000 \
       --screenshot=ops/logs/web/view.png "$url$3" >/dev/null 2>&1 || true
   fi
   ls -l ops/logs/web/
   exit 0
 fi
-dom=$("$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+dom=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
       --virtual-time-budget=8000 --dump-dom "$url" 2>/dev/null || true)
 
 fail() { echo "web-smoke: FAILED — $1"; exit 1; }
@@ -82,7 +83,7 @@ case "$dom" in
   *) fail "Sessions has no badge element (badge-sessions) — the your-turn count has nowhere to go" ;;
 esac
 echo "web-smoke: OK (landed on Sessions)"
-dom=$("$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+dom=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
       --virtual-time-budget=8000 --dump-dom "$url#/sessions" 2>/dev/null || true)
 for want in 'id="list"' 'New session'; do
   case "$dom" in
@@ -96,7 +97,7 @@ echo "web-smoke: OK (sessions list rendered)"
 # render leaves the pane empty rather than erroring anywhere visible.
 tid=$(ops/bin/lifectl threads --json | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)
 [ -n "$tid" ] || { echo "web-smoke: no threads to open"; exit 0; }
-chat=$("$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+chat=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
        --virtual-time-budget=9000 --dump-dom "$url#/sessions/$tid" 2>/dev/null || true)
 # ids are the shared composer's, one per key (composer.js `cdom`): the chat's
 # box is c-chat, its textarea c-chat-draft — they were plain "composer"/"draft"
@@ -114,7 +115,7 @@ echo "web-smoke: OK (chat rendered, thread $tid)"
 # invisible, since a JS error just leaves the page blank.
 for pair in 'goals:Goals' 'recs:Recommendations' 'spend:Spend' 'sources:Sources'; do
   tab=${pair%%:*}; head=${pair#*:}
-  page=$("$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+  page=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
          --virtual-time-budget=8000 --dump-dom "$url#/$tab" 2>/dev/null || true)
   # A heading may carry a count now ("Recommendations · 4"), so match the h2's
   # opening text rather than the whole element — but keep it anchored to <h2
@@ -128,7 +129,7 @@ done
 # Sep 5, 2026"), which changes every day, so there is no literal to match. The
 # grid itself is the better assertion anyway — the title bar, the scroller the
 # hours live in, and the rail that holds the anytime rows.
-cal=$("$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+cal=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
       --virtual-time-budget=9000 --dump-dom "$url#/calendar/week" 2>/dev/null || true)
 for want in 'class="cal-title"' 'id="cal-scroll"' 'class="cal-rail"'; do
   case "$cal" in
@@ -143,7 +144,7 @@ echo "web-smoke: OK (your turn, goals, calendar grid, recs, spend, sources rende
 # rendering proves nothing about them.
 gid=$(ops/bin/lifectl goals | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)
 if [ -n "$gid" ]; then
-  gp=$("$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+  gp=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
        --virtual-time-budget=8000 --dump-dom "$url#/goals/$gid" 2>/dev/null || true)
   for want in 'id="ghead"' 'class="switch"' 'Where this stands' 'Recent notes'; do
     case "$gp" in
@@ -159,7 +160,7 @@ fi
 # is what every phase above tests; this is the only one that tests behaviour,
 # and the Reply button is why it exists.
 base=${url%%/\?token=*}
-cw=$("$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+cw=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
      --virtual-time-budget=9000 --dump-dom "file://$PWD/ops/web-check.html?hub=$base" 2>/dev/null || true)
 # The result block is multi-line, so it comes out as a range, tags stripped.
 res=$(printf '%s\n' "$cw" | sed -n '/<pre id="result">/,/<\/pre>/p' | sed 's/<[^>]*>//g')
@@ -174,7 +175,7 @@ echo "web-smoke: OK (ask card controls behave — $(printf '%s\n' "$res" | grep 
 # outcome, and it is the one place scoring can be done by hand.
 rid=$(ops/bin/lifectl recs all --json | sed -n 's/.*"id": "\(rec-[^"]*\)".*/\1/p' | head -1)
 if [ -n "$rid" ]; then
-  rp=$("$chrome" --headless --disable-gpu --no-first-run --ignore-certificate-errors \
+  rp=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
        --virtual-time-budget=8000 --dump-dom "$url#/recs/$rid" 2>/dev/null || true)
   for want in 'Decision' 'Outcome' '‹ Recommendations'; do
     case "$rp" in

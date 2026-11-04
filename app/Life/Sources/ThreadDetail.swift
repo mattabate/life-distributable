@@ -121,6 +121,11 @@ struct ThreadDetail: View {
     @State private var chainMe = false
     @State private var chainSubs: [String: SubChain] = [:]
     static let chainRows = 12
+    /// The background helper whose log is open, and each one's log as last
+    /// read (the console's taskState); the newest `taskLines` until "N earlier".
+    @State private var taskOpen: String?
+    @State private var taskLogs: [String: TaskLog] = [:]
+    static let taskLines = 30
 
     /// The owner can always write — while the agent works the message is steered
     /// into the running turn (it sees it at its next step), so the composer
@@ -592,6 +597,80 @@ struct ThreadDetail: View {
         }
     }
 
+    /// The turn's background helpers under the working line (the console's
+    /// #run-tasks), each opening to its log: a shell job's newest output
+    /// lines, a subagent's calls.
+    @ViewBuilder var taskRows: some View {
+        let tasks: [TurnTask] = thread.turn_tasks ?? []
+        if !tasks.isEmpty {
+            #if targetEnvironment(macCatalyst)
+            let inset: CGFloat = 13
+            #else
+            let inset: CGFloat = 26
+            #endif
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(tasks, id: \.self) { k in
+                    let tid: String = k.id ?? ""
+                    let open: Bool = !tid.isEmpty && taskOpen == tid
+                    TaskRow(k: k, open: open, tap: tid.isEmpty ? nil : { toggleTask(tid) }) {
+                        if open { taskLogView(tid) }
+                    }
+                }
+            }
+            .padding(.leading, inset).padding(.horizontal).padding(.top, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder func taskLogView(_ tid: String) -> some View {
+        #if targetEnvironment(macCatalyst)
+        let muted = Web.muted, size: CGFloat = 11.5
+        #else
+        let muted = Color.secondary, size: CGFloat = 11.5
+        #endif
+        if let l = taskLogs[tid] {
+            let shown: [String] = l.all ? l.lines : Array(l.lines.suffix(Self.taskLines))
+            let earlier: Int = l.lines.count - shown.count
+            VStack(alignment: .leading, spacing: 2) {
+                if earlier > 0 {
+                    Button { taskLogs[tid]?.all = true } label: { Text("\(earlier) earlier").underline().foregroundStyle(muted) }.buttonStyle(.plain)
+                } else if l.cut {
+                    Text("older lines are cut").foregroundStyle(muted)
+                }
+                if !l.ok || l.lines.isEmpty { Text("no log to read").foregroundStyle(muted) }
+                ForEach(Array(shown.enumerated()), id: \.offset) { _, s in
+                    Text(s).foregroundStyle(Color.primary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
+            }
+            .font(.system(size: size, design: .monospaced))
+            .padding(.top, 2)
+        } else {
+            Text("reading…").font(.system(size: size)).foregroundStyle(muted)
+        }
+    }
+
+    func toggleTask(_ tid: String) {
+        taskOpen = taskOpen == tid ? nil : tid
+        if taskOpen != nil { Task { await loadTaskLogs() } }
+    }
+
+    /// The open helper's log, re-read on each refresh while it is open.
+    func loadTaskLogs() async {
+        guard let tid = taskOpen, let k = (thread.turn_tasks ?? []).first(where: { $0.id == tid }) else { return }
+        let id = thread.id
+        var l: TaskLog = taskLogs[tid] ?? TaskLog()
+        if k.type == "local_agent" {
+            guard let evs = try? await hub.taskEvents(id, task: tid) else { l.ok = false; taskLogs[tid] = l; return }
+            l.ok = true; l.cut = false
+            l.lines = toolChain(evs, tasks: nil).steps.filter { !$0.agent }.map(\.label)
+        } else {
+            guard let o = try? await hub.taskOutput(id, task: tid) else { l.ok = false; taskLogs[tid] = l; return }
+            l.ok = true; l.cut = o.cut ?? false; l.lines = o.lines ?? []
+        }
+        guard thread.id == id else { return }
+        taskLogs[tid] = l
+    }
+
     /// "N earlier": walk back (before=) to the start of the turn.
     func chainEarlier() async {
         chainAll = true
@@ -695,6 +774,7 @@ struct ThreadDetail: View {
                             } else {
                                 workingFacts()
                                 if chainOpen, chainLoaded, !chainRun.isEmpty { chainView }
+                                taskRows
                             }
                         }
                         Color.clear.frame(height: 1).id("bottom")
@@ -1389,6 +1469,7 @@ struct ThreadDetail: View {
                 focusLanded = true
             }
             await loadChain()
+            await loadTaskLogs()
             error = nil
         } catch { if !error.isCancellation { self.error = error.localizedDescription } }
     }
@@ -1792,6 +1873,9 @@ struct ComingUpStrip: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Coming up, \(prompts.count), next \(next.whenLabel)")
+                    // Shut, it forgets "N more": opened again it is the next
+                    // five, not every wake.
+                    .onChange(of: open) { _, o in if !o { all = false } }
                     if open {
                         let shown = comingUpShown(prompts.count, all: all)
                         ForEach(prompts.prefix(shown)) { p in row(p).padding(.top, 6) }
@@ -1836,7 +1920,10 @@ struct ComingUpStrip: View {
             if words != .none {
                 (Text(p.rowLabel) + Text(" · from " + from(p)).foregroundStyle(.secondary))
                     .font(small).lineLimit(1).truncationMode(.tail)
-                    .frame(maxWidth: words == .clipped ? 140 : nil, alignment: .leading)
+                    // Clipped: 140 to fit by, then all the room the row has
+                    // (a long line on the wide desktop was cut at 140).
+                    .frame(idealWidth: words == .clipped ? 140 : nil, maxWidth: words == .clipped ? .infinity : nil, alignment: .leading)
+                    .layoutPriority(words == .clipped ? 1 : 0)
             }
             Spacer(minLength: 0)
             Button(p.standing ? "Turn off" : "Cancel") { cancel(p) }

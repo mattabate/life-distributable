@@ -363,6 +363,9 @@ struct Composer: View {
                 macField
             }
             .padding(.top, 9).padding(.horizontal, 16).padding(.bottom, 6)
+            // The text never draws outside its own band: a long draft,
+            // selected and scrolled up, showed through the button bar.
+            .clipped()
             HStack(spacing: 8) {
                 AttachBar.Menu(draft: attachments, label: "Attach")
                 Spacer(minLength: 8)
@@ -373,7 +376,12 @@ struct Composer: View {
                     .accessibilityLabel(sendLabel)
             }
             .padding(.vertical, 8).padding(.leading, 16).padding(.trailing, 14)
+            // Its own ground, over the text's band: the bar is solid
+            // whatever the text above it does.
+            .background(Web.panel)
             .overlay(alignment: .top) { Rectangle().fill(Web.line).frame(height: 1) }
+            .fixedSize(horizontal: false, vertical: true)
+            .zIndex(1)
         }
         .background(Web.panel)
         .overlay(alignment: .top) {

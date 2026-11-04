@@ -387,6 +387,8 @@ type Manager struct {
 	// deleted one fails on every retry. When the session's <dir>/*/<id>.jsonl
 	// is gone the launch goes lean instead. "" = no check.
 	Transcripts string
+	// TaskTmp: where the CLI writes background task output ("" = /tmp).
+	TaskTmp string
 	// RunAs: start sessions as another macOS user (runas.go). Zero = off.
 	RunAs RunAs
 	// Model picks the --model for a new process from a starting rung
@@ -1292,6 +1294,7 @@ func (m *Manager) Get(id string) (Thread, error) {
 		return t, err
 	}
 	t.CostByModel = m.costByModel(id)
+	m.fillTasks(&t)
 	t.Speaking = m.Voice.Is(t.ID, time.Now())
 	t.WaitingToSpeak = m.Voice.IsWaiting(t.ID)
 	return t, nil
@@ -1401,7 +1404,14 @@ func (m *Manager) list(where string) ([]Thread, error) {
 		t.WaitingToSpeak = m.Voice.IsWaiting(t.ID)
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close() // fillTasks queries; the pool may be one connection
+	for i := range out {
+		m.fillTasks(&out[i])
+	}
+	return out, nil
 }
 
 // ListBrief: every non-archived thread with only id, title, goal_id and status
@@ -1958,6 +1968,29 @@ type TurnTask struct {
 	Type         string `json:"type"`
 	SubagentType string `json:"subagent_type,omitempty"`
 	Description  string `json:"description,omitempty"`
+	// StartedAt: when the hub first saw it in the CLI's list (stored in
+	// bg_list). Doing/Done/Total are read live from its log on every GET
+	// (tasklog.go fillTasks): its newest line or step, and a "45/100" or
+	// "45%" count when its newest output prints one.
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	Doing     string     `json:"doing,omitempty"`
+	Done      int        `json:"done,omitempty"`
+	Total     int        `json:"total,omitempty"`
+}
+
+// stampStarts gives each task the start it had in the previous list, or now.
+func stampStarts(tasks []TurnTask, prev string, now time.Time) {
+	var old []TurnTask
+	json.Unmarshal([]byte(prev), &old)
+	for i := range tasks {
+		at := now
+		for _, o := range old {
+			if o.ID == tasks[i].ID && o.StartedAt != nil {
+				at = *o.StartedAt
+			}
+		}
+		tasks[i].StartedAt = &at
+	}
 }
 
 // parseTurnTasks: a background_tasks_changed line's tasks as TurnTasks.
@@ -1971,7 +2004,7 @@ func parseTurnTasks(raw []json.RawMessage) []TurnTask {
 			Description  string `json:"description"`
 		}
 		if json.Unmarshal(r, &x) == nil {
-			out = append(out, TurnTask{x.TaskID, x.TaskType, x.SubagentType, x.Description})
+			out = append(out, TurnTask{ID: x.TaskID, Type: x.TaskType, SubagentType: x.SubagentType, Description: x.Description})
 		}
 	}
 	return out

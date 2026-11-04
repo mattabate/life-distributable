@@ -107,7 +107,14 @@ func stampActor(w http.ResponseWriter, r *http.Request, who string) bool {
 	}
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	in := map[string]json.RawMessage{}
-	if len(bytes.TrimSpace(raw)) > 0 && json.Unmarshal(raw, &in) != nil {
+	if t := bytes.TrimSpace(raw); len(t) > 0 && json.Unmarshal(raw, &in) != nil {
+		// An object Unmarshal refuses is still one a json.Decoder reads up to
+		// its first value: `{"author":"owner"} {}` kept a forged author on
+		// every decode() handler.
+		if t[0] == '{' {
+			jsonErr(w, 400, "expected one JSON object")
+			return false
+		}
 		return true
 	}
 	if in == nil { // the body was JSON null, and in["by"] below would panic

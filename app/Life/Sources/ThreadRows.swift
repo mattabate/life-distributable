@@ -324,6 +324,8 @@ struct ThreadRow: View {
     func open(_ card: String?) { nav.card = OpenAsk(thread: t, message: nil, card: card) }
     func open(sub c: SessionCell) { if let k = c.sub { nav.card = OpenAsk(thread: k, message: nil, card: c.subFirst) } }
     var subsShown: ArraySlice<SessionCell> { subs.prefix(subsOpen ? subs.count : Self.subRows) }
+    /// Its turn's background helpers, while it runs (the console's sess-tasks).
+    var liveTasks: [TurnTask] { t.status == "running" ? (t.turn_tasks ?? []) : [] }
 
     var body: some View {
         #if targetEnvironment(macCatalyst)
@@ -391,7 +393,10 @@ struct ThreadRow: View {
                         }.buttonStyle(.plain)
                     }
                 }
-                .padding(.top, 10).padding(.horizontal, -14).padding(.bottom, -12)
+                .padding(.top, 10).padding(.horizontal, -14).padding(.bottom, liveTasks.isEmpty ? -12 : 0)
+            }
+            if !liveTasks.isEmpty {
+                VStack(alignment: .leading, spacing: 5) { ForEach(liveTasks, id: \.self) { TaskRow(k: $0) } }.padding(.top, 8)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
@@ -448,6 +453,7 @@ struct ThreadRow: View {
                     Image(systemName: "arrow.turn.down.right").font(.caption2.weight(.semibold)).foregroundStyle(.blue)
                     Text(f.isEmpty ? "starting…" : f).font(.subheadline).foregroundStyle(.blue).monospacedDigit().lineLimit(2)
                 }
+                ForEach(liveTasks, id: \.self) { TaskRow(k: $0) }
             } else if t.last_message_kind == "error", let m = summaryLine(t.last_message) {
                 // A dead turn is a fact about the session, not a description.
                 Text(md("Error: \(m)")).font(.subheadline).foregroundStyle(.red).lineLimit(2)
@@ -482,6 +488,64 @@ struct ThreadRow: View {
                     t.last_message.map { "- last reply:\n\($0.prefix(800))" } ?? ""].filter { !$0.isEmpty }.joined(separator: "\n")))
         // No swipe actions. Clearing and stopping happen inside the chat, where the card is.
     }
+}
+
+/// One background helper of a session's turn (a shell job or a subagent), the
+/// console's taskRowHTML: its kind, what it is, how long it has run, a bar
+/// when its output counts done/total, and its newest line. `open`: the caller
+/// draws its log under it.
+struct TaskRow<Log: View>: View {
+    let k: TurnTask
+    var open: Bool = false
+    var tap: (() -> Void)? = nil
+    @ViewBuilder var log: () -> Log
+
+    var body: some View {
+        #if targetEnvironment(macCatalyst)
+        let accent = Web.accent, muted = Web.muted, size: CGFloat = 12.5
+        #else
+        let accent = Color.accentColor, muted = Color.secondary, size: CGFloat = 13
+        #endif
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if tap != nil {
+                    Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(muted)
+                        .rotationEffect(.degrees(open ? 90 : 0)).frame(width: 10)
+                }
+                Text(taskKind(k).uppercased()).font(.system(size: size - 3, weight: .bold)).foregroundStyle(accent)
+                Text(k.description ?? "helper").font(.system(size: size, weight: .medium)).lineLimit(open ? nil : 1)
+                Spacer(minLength: 4)
+                TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                    Text(taskAge(k, now: ctx.date)).font(.system(size: size - 1)).foregroundStyle(muted).monospacedDigit()
+                }
+            }
+            if let t = k.total, t > 0 {
+                HStack(spacing: 8) {
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(muted.opacity(0.2))
+                            Capsule().fill(accent).frame(width: g.size.width * min(1, Double(k.done ?? 0) / Double(t)))
+                        }
+                    }.frame(height: 5)
+                    Text(taskCount(k)).font(.system(size: size - 1.5, design: .monospaced)).foregroundStyle(muted)
+                }
+            }
+            if !open, let d = k.doing, !d.isEmpty {
+                Text(d).font(.system(size: size - 1.5, design: .monospaced)).foregroundStyle(muted).lineLimit(1).truncationMode(.tail)
+            }
+            log()
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.035)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(open ? accent.opacity(0.5) : Color.primary.opacity(0.1), lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { tap?() }
+    }
+}
+
+extension TaskRow where Log == EmptyView {
+    init(k: TurnTask) { self.init(k: k, log: { EmptyView() }) }
 }
 
 /// What a chat has cost, in dollars, on a session row — "$12.40". Cost, not

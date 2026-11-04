@@ -46,6 +46,27 @@ func TestSessionCannotWriteAsOwnerIntoAnother(t *testing.T) {
 	}
 }
 
+// A second value after the object: decode() stops at the first, so the stamp
+// must not let the body through unparsed.
+func TestSessionCannotForgeAuthorWithTrailingJSON(t *testing.T) {
+	s := newTest(t)
+	var th threads.Thread
+	json.Unmarshal(s.do(t, "POST", "/api/v1/threads", map[string]string{"prompt": "x"}).Body.Bytes(), &th)
+	s.do(t, "POST", "/api/v1/goals", map[string]string{"title": "Make more money", "statement": "s"})
+	s.cfg.SessionTokens = true
+	r := httptest.NewRequest("POST", "/api/v1/goals/make-more-money/notes", strings.NewReader(`{"author":"owner","text":"signed"} {}`))
+	r.Header.Set("Authorization", "Bearer "+SessionToken(s.token, th.ID))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != 400 {
+		t.Fatalf("trailing value: %d %s", w.Code, w.Body.String())
+	}
+	if b := s.do(t, "GET", "/api/v1/goals/make-more-money/notes", nil).Body.String(); strings.Contains(b, "signed") {
+		t.Fatal("note landed:", b)
+	}
+}
+
 // A session acts on itself only: it may not take a persona (a workspace's
 // write key, a router lane), set a status (which clears its asks as the
 // owner), change, stop, archive or check in another session, raise a card on

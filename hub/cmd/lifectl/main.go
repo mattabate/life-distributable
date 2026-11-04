@@ -10,6 +10,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -1146,11 +1148,15 @@ func text(s string) string {
 	var err error
 	switch {
 	case s == "-":
-		b, err = io.ReadAll(os.Stdin)
+		if err = mayRead(""); err == nil {
+			b, err = io.ReadAll(os.Stdin)
+		}
 	case strings.HasPrefix(s, "@") && isFile(strings.TrimPrefix(s, "@")):
 		// Only a path that exists is a file: "@mentions in a message" or
 		// "@handle" is prose and goes through as written.
-		b, err = os.ReadFile(strings.TrimPrefix(s, "@"))
+		if err = mayRead(strings.TrimPrefix(s, "@")); err == nil {
+			b, err = os.ReadFile(strings.TrimPrefix(s, "@"))
+		}
 	default:
 		return s
 	}
@@ -1159,6 +1165,73 @@ func text(s string) string {
 		os.Exit(2)
 	}
 	return strings.TrimRight(string(b), "\n")
+}
+
+// lifeRoot is the checkout lifectl reads its config and token from.
+var lifeRoot = filepath.Dir(opsDir())
+
+// mayRead: an @file or stdin a text goes up as. A job runs as the owner and
+// may hold `lifectl ask:*`, so `ask set --detail @ops/secrets/hub.token` would
+// put the key behind every session token on a card any session reads. Never
+// the secrets or the database, whatever the path or link; a path is the
+// checkout (not data/ but its tmp and people), a temp folder, or a file the
+// owner's user does not own (a session user's own).
+// p == "" checks stdin, which has no path: only the never-list.
+func mayRead(p string) error {
+	var fi os.FileInfo
+	var err error
+	if p == "" {
+		if fi, err = os.Stdin.Stat(); err != nil || !fi.Mode().IsRegular() {
+			return nil // a pipe or a terminal: what was written into it is already out
+		}
+	} else if fi, err = os.Stat(p); err != nil {
+		return err
+	}
+	refused := fmt.Errorf("refused: %s is not a file to put on a card (copy what you mean into data/tmp)", p)
+	if p == "" {
+		refused = errors.New("refused: stdin is a secret or the database")
+	}
+	never, _ := filepath.Glob(filepath.Join(lifeRoot, "ops", "secrets", "*"))
+	never = append(never, filepath.Join(lifeRoot, "data", "life.db"), filepath.Join(lifeRoot, "data", "life.db-wal"), filepath.Join(lifeRoot, "data", "life.db-shm"))
+	for _, n := range never {
+		if nf, err := os.Stat(n); err == nil && os.SameFile(fi, nf) {
+			return refused
+		}
+	}
+	if p == "" {
+		return nil
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return refused
+	}
+	if r, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = r
+	}
+	in := func(dir string) bool {
+		if r, err := filepath.EvalSymlinks(dir); err == nil {
+			dir = r
+		}
+		return abs == dir || strings.HasPrefix(abs, dir+string(filepath.Separator))
+	}
+	switch {
+	case in(filepath.Join(lifeRoot, "ops", "secrets")):
+		return refused
+	case in(filepath.Join(lifeRoot, "data", "tmp")), in(filepath.Join(lifeRoot, "data", "people")):
+		return nil
+	case in(filepath.Join(lifeRoot, "data")):
+		return refused
+	case in(lifeRoot), in(os.TempDir()), in("/tmp"), in("/private/tmp"):
+		return nil
+	}
+	if rf, err := os.Stat(lifeRoot); err == nil {
+		mine, ok1 := fi.Sys().(*syscall.Stat_t)
+		owner, ok2 := rf.Sys().(*syscall.Stat_t)
+		if ok1 && ok2 && mine.Uid != owner.Uid {
+			return nil
+		}
+	}
+	return refused
 }
 
 func isFile(p string) bool {
@@ -1172,9 +1245,13 @@ func readJSONArg(arg string) []byte {
 	var err error
 	switch {
 	case arg == "-":
-		b, err = io.ReadAll(os.Stdin)
+		if err = mayRead(""); err == nil {
+			b, err = io.ReadAll(os.Stdin)
+		}
 	case strings.HasPrefix(arg, "@"):
-		b, err = os.ReadFile(strings.TrimPrefix(arg, "@"))
+		if err = mayRead(strings.TrimPrefix(arg, "@")); err == nil {
+			b, err = os.ReadFile(strings.TrimPrefix(arg, "@"))
+		}
 	default:
 		return []byte(arg)
 	}

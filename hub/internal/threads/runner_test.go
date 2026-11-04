@@ -642,7 +642,7 @@ func TestBackgroundTaskTurnsFoldIntoOneReply(t *testing.T) {
 		t.Fatal(held)
 	}
 	// The pending task is on the thread while the turn runs (turn_tasks).
-	if len(th.TurnTasks) != 1 || th.TurnTasks[0] != (TurnTask{ID: "b1", Type: "local_bash", Description: "Walk the phone chat"}) {
+	if k := th.TurnTasks; len(k) != 1 || k[0].StartedAt == nil || (TurnTask{ID: k[0].ID, Type: k[0].Type, Description: k[0].Description}) != (TurnTask{ID: "b1", Type: "local_bash", Description: "Walk the phone chat"}) {
 		t.Fatalf("turn tasks %+v", th.TurnTasks)
 	}
 	// The task notifies, the CLI re-enters, another wait, another prose

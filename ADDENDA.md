@@ -1097,3 +1097,32 @@ Entry format:
 - For: everyone
 - Fix: Without `session_user`, a session runs as the owner's account and can do anything it can, the hub token and the decider hash included. SETUP.md and CLAUDE.md now say so, and setup offers the separate user once (step 10) instead of only when asked.
 - How: same merge as add-0008. By hand: `SETUP.md`, `CLAUDE.md`.
+
+## add-0141 · 2026-11-04 · Hardening: session bodies, lifectl file reads, free ls flags, job exec types
+- For: everyone
+- Fix: a set of narrower checks, each with a test:
+  - A session's request body with a second JSON value after the object is refused, so it cannot carry a forged author past the stamp.
+  - `lifectl`'s `@file` and stdin never read `ops/secrets/` or the database, whatever the path or link; under `data/` only `data/tmp` and `data/people` are read.
+  - A free `ls` refuses `-L`, `-H` and any `--option`, so it cannot follow a link out of its roots at run time.
+  - A scheduled job's findings carry only the exec types its `ops/schedule.json` entry lists in `exec_types` (default none); an unlisted one becomes a plain card that says so, and the job's prompt offers only the listed types.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. A job of yours that returns shell or claude findings needs `"exec_types": ["shell"]` (or `"claude"`) on its schedule.json entry. By hand: `hub/internal/server/sessionlimits.go`, `hub/cmd/lifectl/main.go`, `hub/internal/actions/actions.go`, `hub/internal/sched/sched.go`, and their tests.
+
+## add-0142 · 2026-11-04 · README and SETUP say when no session can approve itself
+- For: everyone
+- Fix: "No session can approve itself" holds only with sessions run as a separate user. README's gate bullet and SETUP's decider step now say so, matching CLAUDE.md's gate line.
+- How: same merge as add-0008. By hand: `README.md`, `SETUP.md`.
+
+## add-0143 · 2026-11-04 · Background helpers show on the session
+- For: everyone
+- Fix: A session's background shell jobs and subagents were invisible until the turn ended. Each now shows as a row on that session's card in Sessions and under the chat's working line: its kind, what it is doing, how long it has run, and its newest output line. When the output counts done/total (13/42, 45%), the row draws a progress bar. Tap a row in the chat to open its log: a shell job's newest lines or a subagent's tool calls, re-read while the session works. The hub stores nothing new; it stamps when it first saw each task and reads the rest live from the CLI's own files. New read-only route `GET /api/v1/threads/{id}/tasks/{task}/output`.
+- How: same merge as add-0008, then `make check`, `ops/hub.sh restart` and `make ship`. By hand: `hub/internal/threads/tasklog.go` (new), `threads.go`, `runner.go`, `hub/internal/server/routes.go`, `threads.go`, `shared/api.md`, `web/ui.js`, `web/views/threads.js`, `web/app.css`, the app's `Format.swift`, `Models.swift`, `HubClient.swift`, `ThreadDetail.swift`, `ThreadRows.swift`, `ops/flows/helpers.txt`, and their tests.
+
+## add-0144 · 2026-11-04 · The desktop chat box keeps up with a long draft
+- For: everyone with the desktop app
+- Fix: On the Mac the chat box grows to nearly half the window before it scrolls, and it no longer re-measures a long draft on every redraw, which made drag-selecting up a long draft stall or jump. The button bar under the text has its own solid ground, so a selected draft scrolled up no longer shows through it, and in a short window the box takes the space it is given and scrolls inside. "Coming up" reopens on the next five wakes, and a long wake uses the row's width.
+- How: same merge as add-0008, then `make mac`. By hand: `app/Life/Sources/ComposerField.swift`, `NewThreadSheet.swift`, `ThreadDetail.swift`.
+
+## add-0145 · 2026-11-04 · Headless Chrome starts as the session user
+- For: everyone with session_user
+- Fix: Run as the separate session user, headless Chrome died at start (no home folder) or hung on a keychain that user does not have, so `make web-preview`, `make web-smoke` and `make browse` failed from a session. `ops/chrome.sh` gives Chrome a throwaway home and a mock keychain; browse.js does the same and prints Chrome's own error when it never answers.
+- How: same merge as add-0008. By hand: `ops/chrome.sh` (new), `ops/web-smoke.sh`, `ops/browse.js`.

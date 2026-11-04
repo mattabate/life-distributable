@@ -3,10 +3,50 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+// A job runs as the owner with `lifectl ask:*`: an @file or stdin must never
+// carry a secret or the database onto a card.
+func TestMayReadRefusesSecretsAndData(t *testing.T) {
+	old := lifeRoot
+	defer func() { lifeRoot = old }()
+	lifeRoot = t.TempDir()
+	for _, d := range []string{"ops/secrets", "data/tmp", "data/people", "docs"} {
+		os.MkdirAll(filepath.Join(lifeRoot, d), 0o755)
+	}
+	put := func(rel string) string {
+		p := filepath.Join(lifeRoot, rel)
+		os.WriteFile(p, []byte("x"), 0o600)
+		return p
+	}
+	tok, db := put("ops/secrets/hub.token"), put("data/life.db")
+	link := filepath.Join(lifeRoot, "data/tmp/look.md")
+	os.Symlink(tok, link)
+	for p, ok := range map[string]bool{
+		tok: false, db: false, link: false,
+		filepath.Join(lifeRoot, "data/tmp/../../ops/secrets/hub.token"): false,
+		put("data/other.json"):   false,
+		put("data/tmp/draft.md"): true,
+		put("data/people/a.md"):  true,
+		put("docs/x.md"):         true,
+	} {
+		if err := mayRead(p); (err == nil) != ok {
+			t.Errorf("%s: %v, want ok=%v", p, err, ok)
+		}
+	}
+	f, _ := os.Open(tok)
+	defer f.Close()
+	stdin := os.Stdin
+	defer func() { os.Stdin = stdin }()
+	os.Stdin = f
+	if mayRead("") == nil {
+		t.Error("stdin from the token accepted")
+	}
+}
 
 // Every top-level command in main's switch appears in the usage text, so
 // `lifectl` with no arguments lists the whole tool (review 2026-09-26: the

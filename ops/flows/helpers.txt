@@ -1,0 +1,14 @@
+# Console: a session's background helpers (shell jobs, subagents) on its
+# Sessions card and under the chat's working line, one opened to its log.
+# Samples are painted into the first session, so it needs no helper
+# actually running.
+#   make browse FLOW=ops/flows/helpers.txt
+goto #/sessions
+wait 1500
+eval location.hash = document.querySelector('.card.sess a.sess-t').getAttribute('href')
+wait 3000
+eval window.SAMPLE = [{ id: 'b1', type: 'local_bash', description: 'Rerun the import for the remaining rows', started_at: new Date(Date.now() - 74 * 60000).toISOString(), doing: 'row 212: imported', done: 0, total: 0 }, { id: 'b2', type: 'local_bash', description: 'Fetch the files for the next batch', started_at: new Date(Date.now() - 6 * 60000).toISOString(), doing: 'files  30%|###       | 13/42 [00:41<01:30]', done: 13, total: 42 }, { id: 'a1', type: 'local_agent', description: 'Review the diff', started_at: new Date(Date.now() - 3 * 60000).toISOString(), doing: 'Read hub/internal/threads/tasklog.go' }]
+eval document.querySelector('.card.sess.on, .card.sess').insertAdjacentHTML('beforeend', `<div class="sess-tasks">${SAMPLE.map(k => taskRowHTML(k)).join('')}</div>`)
+eval chatState.running = true; chatState.thread.turn_tasks = SAMPLE; taskState.open.b1 = true; taskState.logs.b1 = { ok: true, cut: false, all: false, lines: ['row 210: imported', 'row 211: imported', 'row 212: imported'] }; document.getElementById('run-working').hidden = false; paintTasks(); document.getElementById('run-tasks').scrollIntoView({ block: 'center' })
+wait 400
+shot helpers

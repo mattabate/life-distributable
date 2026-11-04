@@ -112,7 +112,13 @@ struct ComposerField: UIViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, uiView v: UITextView, context: Context) -> CGSize? {
         let font = v.font ?? UIFont.preferredFont(forTextStyle: .body)
         let line = ceil(font.lineHeight)
+        #if targetEnvironment(macCatalyst)
+        // Up to nearly half the window before it scrolls, as desktop chat
+        // apps do: most drafts never scroll inside the box at all.
+        let maxH = max(line * CGFloat(maxLines), floor((v.window?.bounds.height ?? 0) * 0.45 / line) * line)
+        #else
         let maxH = line * CGFloat(maxLines)
+        #endif
         // SwiftUI sizes an HStack by probing each child at width 0 (how small
         // can you get?) and width ∞ (how big do you want to be?). Answering
         // both with a concrete width made the box inflexible: the stack could
@@ -129,12 +135,29 @@ struct ComposerField: UIViewRepresentable {
         // its full 12 lines at the fourth (the owner 2026-09-30).
         let perLine = max(60, Int(layoutWidth / (font.pointSize * 0.35)))
         let height: CGFloat
-        if v.text.count > maxLines * perLine {
+        let key = Coordinator.Fit(text: v.text, width: layoutWidth, maxH: maxH, font: font.pointSize)
+        if let (k, h) = context.coordinator.fit, k == key {
+            // The same draft at the same width: the last answer. SwiftUI asks
+            // on every redraw of the composer's row, and measuring a long
+            // draft again under a drag-select made the selection's scroll
+            // stall and lurch.
+            height = h
+        } else if v.text.count > Int(maxH / line) * perLine {
             height = maxH
         } else {
             let fit = v.sizeThatFits(CGSize(width: layoutWidth, height: .greatestFiniteMagnitude)).height
             height = min(max(fit, line), maxH)
         }
+        context.coordinator.fit = (key, height)
+        #if targetEnvironment(macCatalyst)
+        // Never taller than the room the page offers (a short window): the
+        // box takes what it is given and scrolls inside, rather than
+        // overflowing into the button bar under it.
+        if let h = proposal.height, h.isFinite, h >= line, h < height {
+            let width = proposed.flatMap { $0.isFinite ? $0 : nil } ?? layoutWidth
+            return CGSize(width: width, height: floor(h))
+        }
+        #endif
         #if targetEnvironment(macCatalyst)
         // Always a scroll view on the Mac: flipping it on and off inside a
         // layout pass made scrolling and drag-selecting a full box crawl
@@ -151,6 +174,9 @@ struct ComposerField: UIViewRepresentable {
     @MainActor final class Coordinator: NSObject, UITextViewDelegate {
         var parent: ComposerField
         let placeholderLabel = UILabel()
+        /// The last measurement and what it was of (sizeThatFits).
+        struct Fit: Equatable { var text: String; var width: CGFloat; var maxH: CGFloat; var font: CGFloat }
+        var fit: (Fit, CGFloat)?
         init(_ parent: ComposerField) { self.parent = parent }
 
         func textViewDidChange(_ v: UITextView) {

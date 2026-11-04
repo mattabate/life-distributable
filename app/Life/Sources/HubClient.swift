@@ -451,6 +451,11 @@ final class HubClient {
         let t = task.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? task
         return try await request("GET", "/api/v1/threads/\(id)/tasks/\(t)/events?limit=500" + (since > 0 ? "&since=\(since)" : ""))
     }
+    /// A shell helper's newest output lines; throws when there is no file.
+    func taskOutput(_ id: String, task: String) async throws -> TaskOutput {
+        let t = task.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? task
+        return try await request("GET", "/api/v1/threads/\(id)/tasks/\(t)/output")
+    }
     nonisolated static let threadsPath = "/api/v1/threads"
     nonisolated static func messagesPath(_ id: String) -> String { "/api/v1/threads/\(id)/messages?limit=200" }
     /// The board this app asks for: `mobile` on the phone,

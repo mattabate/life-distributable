@@ -66,6 +66,11 @@ func lsInRoots(roots []string, cmd, dir string) bool {
 	for _, a := range args[1:] {
 		if !strings.HasPrefix(a, "-") {
 			paths = append(paths, a)
+		} else if strings.HasPrefix(a, "--") || strings.ContainsAny(a, "LH") {
+			// Only the named paths are resolved here: -L (with -R) follows a
+			// link a session left in data/tmp to anywhere at run time, and a
+			// GNU ls on PATH takes the same as --dereference.
+			return false
 		}
 	}
 	if len(paths) == 0 {

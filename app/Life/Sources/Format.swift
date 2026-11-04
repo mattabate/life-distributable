@@ -380,6 +380,35 @@ func toolChain(_ evs: [ThreadEvent], tasks: [TurnTask]?) -> ToolChain {
 /// "1 subagent running", "3 subagents running" (the console's helpersWords).
 func helpersWords(_ n: Int) -> String { n == 0 ? "" : "\(n) subagent\(n == 1 ? "" : "s") running" }
 
+/// One background helper's log as last read: a shell job's output lines or a
+/// subagent's calls; `cut` when the hub read only the file's tail.
+struct TaskLog: Equatable {
+    var ok = true
+    var cut = false
+    var all = false
+    var lines: [String] = []
+}
+
+/// A helper's kind word, the console's taskKind: "shell", "subagent".
+func taskKind(_ k: TurnTask) -> String {
+    switch k.type ?? "" {
+    case "local_bash": return "shell"
+    case "local_agent": return "subagent"
+    case let t: return t.hasPrefix("local_") ? String(t.dropFirst(6)) : (t.isEmpty ? "helper" : t)
+    }
+}
+/// "3m", "1h 05m" since it started (the console's taskAge); "" unknown.
+func taskAge(_ k: TurnTask, now: Date = Date()) -> String {
+    guard let s = k.started_at else { return "" }
+    let m = max(0, Int(now.timeIntervalSince(s) / 60))
+    return m < 60 ? "\(m)m" : "\(m / 60)h " + String(format: "%02d", m % 60) + "m"
+}
+/// "3/10" or "45%", "" with no count (the console's taskCount).
+func taskCount(_ k: TurnTask) -> String {
+    guard let t = k.total, t > 0 else { return "" }
+    return t == 100 ? "\(k.done ?? 0)%" : "\(k.done ?? 0)/\(t)"
+}
+
 extension Thread {
     /// The helpers the hub lists on its own, before any chain is loaded.
     var taskHelpers: Int { (turn_tasks ?? []).filter { $0.type == "local_agent" }.count }

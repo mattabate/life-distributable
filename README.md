@@ -183,7 +183,10 @@ Your data lives on your Mac. The hub listens only on your private
   storage only ever sees noise. The nightly key can't delete anything.
 - **The gate.** Anything that spends money, deletes, contacts a person,
   shares data or pushes code needs your approval plus a decider code that
-  only you hold. No session can approve itself. A session can commit locally
+  only you hold. With sessions run as a separate user (SETUP.md, optional),
+  no session can approve itself; without it a session runs as your account
+  and could reach the code's hash, so the gate is a rule it follows, not a
+  wall. A session can commit locally
   without asking; that commit stays on your Mac until a push is approved.
 
 ## Updates and addenda

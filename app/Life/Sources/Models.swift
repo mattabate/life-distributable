@@ -471,6 +471,18 @@ struct TurnTask: Codable, Hashable {
     var type: String?
     var subagent_type: String?
     var description: String?
+    /// When the hub first saw it, its newest line or call, and a done/total
+    /// read off that output (total 100 = a percent).
+    var started_at: Date?
+    var doing: String?
+    var done: Int?
+    var total: Int?
+}
+
+/// GET /threads/{id}/tasks/{task}/output: a shell helper's newest lines.
+struct TaskOutput: Codable, Hashable {
+    var lines: [String]?
+    var cut: Bool?
 }
 
 /// One step of a run as the hub stored it (GET /threads/{id}/events): a tool

@@ -214,6 +214,17 @@ func (s *Server) threadTaskEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, evs)
 }
 
+// threadTaskOutput: a background shell's log, its newest 64 KB as lines
+// (threads.TaskOutput); 404 when the session has no such log.
+func (s *Server) threadTaskOutput(w http.ResponseWriter, r *http.Request) {
+	lines, cut, err := s.thr.TaskOutput(r.PathValue("id"), r.PathValue("task"))
+	if err != nil {
+		jsonErr(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"lines": lines, "cut": cut})
+}
+
 // threadSteps: how many steps sit under each message of the chat, counted in
 // SQL. The headline of a run block comes from here, so it is right however
 // many events the client happens to hold.
