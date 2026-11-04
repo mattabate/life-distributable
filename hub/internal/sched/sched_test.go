@@ -343,6 +343,44 @@ func TestJobCallsWithItsOwnToken(t *testing.T) {
 	}
 }
 
+// A wake the budget guard refused is not the job's last run: the gate and an
+// every@ base count from the newest run that started (#125).
+func TestLastRunPassesOverSkippedWakes(t *testing.T) {
+	s, _, _ := setup(t, `{"jobs":[{"name":"j","project":"life","when":"every@1h","prompt":"p","gate":"asks"}]}`)
+	var seen time.Time
+	s.Gate = func(gate string, last time.Time) bool { seen = last; return true }
+	s.Allow = func(kind, id string) (bool, string) { return false, "budget paused" }
+	if st, _ := s.Fire("j", "p-1"); st != "skipped" {
+		t.Fatal(st)
+	}
+	if !s.lastRun("j").IsZero() {
+		t.Fatalf("a skipped wake counted as a run: %v", s.lastRun("j"))
+	}
+	s.db.Exec(`INSERT INTO runs (job, started_at, finished_at, ok) VALUES ('j','2026-11-04T10:00:00Z','2026-11-04T10:05:00Z',1)`)
+	s.db.Exec(`INSERT INTO runs (job, started_at, finished_at, ok, error) VALUES ('j','2026-11-04T11:00:00Z','2026-11-04T11:00:00Z',0,'skipped by the hub: budget paused')`)
+	s.Held("j")
+	if want := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC); !seen.Equal(want) {
+		t.Fatalf("gate saw %v, want the 10:00 run", seen)
+	}
+}
+
+// Table is read by the HTTP handlers while a reload replaces it (#124): run
+// under -race this catches an unlocked read.
+func TestTableReadDuringReload(t *testing.T) {
+	s, _, _ := setup(t, `{"jobs":[{"name":"j","project":"life","when":"manual","prompt":"p"}]}`)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			s.Reload()
+		}
+	}()
+	for i := 0; i < 50; i++ {
+		_ = len(s.Table().Jobs)
+	}
+	<-done
+}
+
 // Fire is the clock's entry: held (gate shut) writes nothing so the next tick
 // asks again; skipped (budget) records a skipped run carrying the wake's id;
 // started runs the job with the wake's id on its run row.

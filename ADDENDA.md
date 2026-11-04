@@ -1126,3 +1126,13 @@ Entry format:
 - For: everyone with session_user
 - Fix: Run as the separate session user, headless Chrome died at start (no home folder) or hung on a keychain that user does not have, so `make web-preview`, `make web-smoke` and `make browse` failed from a session. `ops/chrome.sh` gives Chrome a throwaway home and a mock keychain; browse.js does the same and prints Chrome's own error when it never answers.
 - How: same merge as add-0008. By hand: `ops/chrome.sh` (new), `ops/web-smoke.sh`, `ops/browse.js`.
+
+## add-0146 · 2026-11-04 · The scheduler's table is read under its lock
+- For: everyone
+- Fix: `Scheduler.Table()` read the job table without the lock `Reload()` replaces it under, so an HTTP handler reading it during a reload was a data race (#124). Thanks [@fivestar488](https://github.com/mattabate/life-distributable/issues/124).
+- How: same merge as add-0008. By hand: `sched/sched.go`, `sched/sched_test.go`.
+
+## add-0147 · 2026-11-04 · A wake the budget refused is not a run
+- For: everyone
+- Fix: A wake the budget guard refused writes a run row that says "skipped by the hub", and the scheduler counted it as the job's last run: an asks-gated job then saw no new evidence since the skip and stayed shut, and an every@ job counted its next wake from the skip. The last run is now the newest one that started (#125). Thanks [@fivestar488](https://github.com/mattabate/life-distributable/issues/125).
+- How: same merge as add-0008. By hand: `sched/sched.go`, `sched/sched_test.go`.

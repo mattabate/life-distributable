@@ -346,7 +346,7 @@ func (s *Scheduler) Fire(name, promptID string) (state, why string) {
 		if ok, why := s.Allow("job", name); !ok {
 			log.Printf("sched: %s skipped: %s", name, why)
 			fin := store.TS(s.Now())
-			s.db.Exec(`INSERT INTO runs (job, started_at, finished_at, ok, error, prompt_id) VALUES (?,?,?,0,?,?)`, name, fin, fin, "skipped by the hub: "+why, promptID)
+			s.db.Exec(`INSERT INTO runs (job, started_at, finished_at, ok, error, prompt_id) VALUES (?,?,?,0,?,?)`, name, fin, fin, skippedByHub+why, promptID)
 			return "skipped", why
 		}
 	}
@@ -444,7 +444,13 @@ func jobTimeout(j JobSpec) time.Duration {
 	return 20 * time.Minute
 }
 
-func (s *Scheduler) Table() Table { return s.table }
+// Table holds the lock Reload replaces the table under: the HTTP handlers
+// read it from their own goroutines (#124).
+func (s *Scheduler) Table() Table {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.table
+}
 
 // SetActions breaks the construction cycle (queue notifies via scheduler).
 func (s *Scheduler) SetActions(q *actions.Queue) { s.acts = q }
@@ -478,9 +484,16 @@ func parseWhen(w string) (kind, arg string, err error) {
 	return kind, arg, nil
 }
 
+// skippedByHub starts the error of a wake the budget guard refused: no run
+// happened, so lastRun passes over it.
+const skippedByHub = "skipped by the hub: "
+
+// lastRun is the job's newest run that actually started. A wake the budget
+// guard refused looked at nothing, so counting it shut the asks gate on
+// evidence the verifier never saw, and moved an every@ base (#125).
 func (s *Scheduler) lastRun(job string) time.Time {
 	var t string
-	s.db.QueryRow(`SELECT started_at FROM runs WHERE job=? ORDER BY started_at DESC LIMIT 1`, job).Scan(&t)
+	s.db.QueryRow(`SELECT started_at FROM runs WHERE job=? AND COALESCE(error,'') NOT LIKE ? ORDER BY started_at DESC LIMIT 1`, job, skippedByHub+"%").Scan(&t)
 	ts, _ := time.Parse(time.RFC3339Nano, t)
 	return ts
 }
