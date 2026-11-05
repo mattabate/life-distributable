@@ -1,11 +1,14 @@
 // life hub — laptop console: the Calendar page drawn as a real calendar.
 'use strict';
 // ================= calendar: the grid =================
-// A real calendar UI in the style of Google Calendar: drag things to change
-// their time, with a place for the anytime tasks.
+// 2026-08-31, holding a Google Calendar week beside our agenda:
+// "I like the calendar, but I want to experiment with an experimental
+// calendar, like a real calendar UI, to mimic Google Calendar… I also want to
+// be able to drag things around to change their time… But then there should
+// be a way of seeing the anytime tasks."
 //
 // So the page is a real week grid; a click opens `calEntryHTML`, the agenda's
-// own row (full text, the owner's step composer, Done · Won't do · Reopen).
+// own row (full text, his step's composer, Done · Won't do · Reopen).
 //
 // What is actually draggable, and why the rest is not: a `cal:` row is an
 // item, and moving it is `PATCH /calendar/{id} {day,at}` — one row, one date.
@@ -15,51 +18,68 @@
 // A `job` row lives in ops/schedule.json, which has no API, and an
 // `action`/`rec`/`ask` row has no date of its own to move.
 
-// ONE MODE: the week. Day, Month, Schedule and Just mine are gone; the lanes'
-// ticks in the rail are the only filter.
+// ONE MODE: the week (2026-09-26: "I now only want to see the calendar
+// view as the weekly view. I no longer need any of the other options. I
+// don't even need the Just Mine button"). Day, Month, Schedule and Just mine
+// were removed that day; the lanes' ticks in the rail are the only filter.
 
-// FEW COLOURS: red for the owner's tasks, grey for agent actions, purple for
-// recommendations — so "what do I have to do today" reads at a glance.
+// THREE COLOURS AND NOTHING ELSE (2026-08-31, on this week view: "there
+// are too many colors and filters. i basically just want two colors. (1) red,
+// for my tasks, (2) grey for agent actions. i guess you could use (3)
+// purple for recommendations… it needs to be easier to see identify and
+// reduce to 'what do i have to do today'").
 //
-// So every row belongs to one LANE, and the lane is both its colour
+// So every row belongs to one of three LANES, and the lane is both its colour
 // and the one checkbox that hides it:
-//   red    — THE OWNER'S: a dated step, an ask, a reminder, and an action still
-//            waiting on their approval (a pending approval is their turn, not the
+//   red    — HIS: a dated step, an ask, a reminder, and an action still
+//            waiting on his approval (a pending approval is his turn, not the
 //            agent's, so it is red on this page the way it is red on the board).
 //   blue-grey — SCHEDULED RUNS: a prompt an agent wrote to be sent to a
 //            session at a minute (an `agent` item, a one-shot prompt wake).
 //   grey   — the agents': session check-ins, jobs, and the trail of actions
 //            already decided.
 //   purple — a rec, its whole life: the minute it was filed ("Filed: …",
-//            dark), the minute it was answered ("Accepted: …" / "Declined: …",
-//            light), the day the owner asked to be asked again ("Check back: …").
-// No colour-by-goal: a palette per goal was mostly noise. A decided action is
-// grey. No tick hides the closed rows: this is a calendar, so the past always
-// shows — the past is the record, and no tick deletes it.
-// HOMEWORK is the fourth lane, light blue (e.g. a practice round from Learn).
-// A `homework` cal item is a step of THE OWNER'S — the hub fires it as
-// a physical ask, nags it, stacks it in Overdue, makes them close it with
-// words — so `owner` marks both lanes. What differs is what the step is FOR: a
-// red step unblocks an agent, a blue one makes the owner smarter.
-// SCHEDULED RUNS is the fifth lane, its own shade of grey with its own
-// checkbox: prompts sent at a set time by an agent, not by the owner. A
+//            dark), the minute he answered ("Accepted: …" / "Declined: …",
+//            light), the day he asked to be asked again ("Check back: …").
+// Gone with the six calendars: colour-by-goal and the eight goal colours, and
+// the per-goal checkboxes — that palette was most of what he was reading
+// through. Gone too is the separate "Decided actions" calendar: a decided
+// action is grey. Gone since 2026-09-11 is the "Done & decided" tick that hid
+// the closed rows: "this is a calendar, so I should always see what happens
+// in the past" — the past is the record, and no tick deletes it.
+// HOMEWORK is the fourth lane (2026-09-11: the perfect-pitch round from
+// Learn drew red as one of his tasks, and "I would actually like that to be
+// called Homework, maybe it's light blue… it should still appear and
+// everything"). A `homework` cal item is a step of HIS — the hub fires it as
+// a physical ask, nags it, stacks it in Overdue, makes him close it with
+// words — so `his` marks both lanes and "Just mine" keeps both. What differs
+// is what the step is FOR: a red step unblocks an agent, a blue one makes him
+// smarter ("Homework makes you smarter").
+// SCHEDULED RUNS is the fifth lane (2026-09-13, the morning the all-day
+// agent chips got their minutes: "we should separate that into a new calendar
+// or a new kind of option with coloring. Those should be called scheduled
+// runs… prompts that are sent at a specific time… sent by the agent and not
+// us… There should sort of be a checkbox… its own shade of gray"). A
 // scheduled run is a prompt an AGENT wrote to be delivered to a session at a
 // minute — an `agent` cal item, or a one-shot `lifectl prompt` wake (a `run`
 // row whose ref is `prompt:`). Blue-grey, so it reads apart from the plain
 // grey of Agent runs, which keeps the standing check-ins (`run` with a
 // `thread:` ref), the hub's jobs, decided actions and the agents' record.
 // WHICH lane a row is in is the hub's call (`lane` on every entry, calendar.go
-// `stampEntry`) — this table only says what
+// `stampEntry`, since the 2026-09-14 parity pass) — this table only says what
 // each lane looks like and is called. `CalCals.all` in CalendarGrid.swift is
 // the same six.
-// CHORES is the sixth: a dated step of the owner's that no session is behind
-// — an errand, watering the plants, a renewal. It is theirs but unblocks
-// nothing, so it reads apart from
+// CHORES is the sixth (inner design, approved 2026-09-27): a dated step of his
+// that no session is behind — the BJ's run, the plants, renew the parking. It
+// is his (Just mine keeps it) but unblocks nothing, so it reads apart from
 // the red of a step a session waits on. Orange, closer to red than to grey.
 const CAL_LANES = [
-  { key: 'mine', label: 'My tasks', color: '#d93025', owner: true },
-  { key: 'chores', label: 'Chores', color: '#e8710a', owner: true },
-  { key: 'homework', label: 'Homework', color: '#039be5', owner: true },
+  { key: 'mine', label: 'My tasks', color: '#d93025', his: true },
+  { key: 'chores', label: 'Chores', color: '#e8710a', his: true },
+  { key: 'homework', label: 'Homework', color: '#039be5', his: true },
+  // No "To read" lane: a reminder is one of My tasks whose box is the
+  // difference (2026-10-10: "To read does not need to
+  // be its own type… It should really just go under my tasks").
   { key: 'scheduled', label: 'One-off runs', color: '#78909c' },
   { key: 'agents', label: 'Recurring runs', color: '#5f6368' },
   { key: 'recs', label: 'Recs', color: '#8e24aa' },
@@ -67,68 +87,87 @@ const CAL_LANES = [
 const CAL_LANE_BY_KEY = Object.fromEntries(CAL_LANES.map(l => [l.key, l]));
 const CAL_MINE = CAL_LANE_BY_KEY.mine, CAL_HOMEWORK = CAL_LANE_BY_KEY.homework, CAL_SCHEDULED = CAL_LANE_BY_KEY.scheduled,
   CAL_AGENTS = CAL_LANE_BY_KEY.agents, CAL_RECS = CAL_LANE_BY_KEY.recs;
-// Two shades of the one purple, because a rec has a LIFE and both ends of it
-// belong on the calendar: when it was filed and when it was answered. Dark =
-// still asking. Light = answered,
+// Two shades of the one purple, because a rec has a LIFE and he wants to see
+// both ends of it (2026-09-09: "it'd be cool to see when recommendations
+// are accepted versus when they are created. Both those should go on the
+// calendar. The recommendations purple thing should maybe be dark purple for
+// given recommendations and light purple for accepted or declined. Declined
+// maybe they're crossed through"). Dark = still asking him. Light = answered,
 // and a declined one wears ✕ and the line, like every other refusal here.
 const CAL_REC_DONE = '#ce93d8';
-// The past is a RECORD, not a plan: the future is prospective events, the
-// past is a portfolio of steps done. A `did` row is one line of it —
-// a card read, a decision, a grant, an approval, a rec accepted or
+// The past is a RECORD, not a plan (2026-09-09: "in the future, the
+// calendar is prospective events, but in the past, it should really be more
+// like steps that were done… a portfolio"). A `did` row is one line of it —
+// a card he read, a decision, a grant, an approval, a rec he accepted or
 // scored, a step closed, an action the gate let through — placed at the
 // minute it happened, with the verb for what happened. Its lane is its DOER's
-// (the hub stamps it): the owner's hands red, the hub's and a session's grey.
-// No row is a session run with its time.
-// A did row's title reads as a deed: "Read: the bank feed costs $15/yr",
-// "Approved: move $500", "Accepted: try a new search engine".
-// `part` (hub): "1 of 2" steps done, the skipped part of an item with steps,
-// visible on the bar itself.
+// (the hub stamps it): his hands red, the hub's and a session's grey. No row
+// is a session run with its time: "I don't want us to put every session with
+// the time it was run on the calendar."
+// A did row's title reads as a deed: "Read: SimpleFIN is $15.99/yr",
+// "Approved: move $500", "Accepted: try Kagi".
+// `part` (hub, 2026-10-18): "1 of 2" steps done — the skipped part of an
+// item with steps, visible on the bar itself.
 const calLabel = e => (e.verb ? e.verb + ': ' : '') + (e.title || '') + (e.part ? ` (${e.part})` : '');
 
-// THREE FORMS, THREE PLACES. A deed, a plan and a rec must be visually
-// distinct, and colour alone could not carry it: when everything was a bar in
-// the same grid, a deed and a plan read the same. So the SHAPE says which of
+// THREE FORMS, THREE PLACES (2026-09-09, a day after the record landed:
+// "now there are many overlapping tasks in various areas, and they're
+// indistinguishable from calendar events for me… I can't distinguish what I
+// was doing in a bar from a previous calendar item that I had set up… this
+// analysis of my chats is different than recommendations or timed events that
+// the agent has for me to do work, unblock it, or revisit a previous task.
+// These need to be visually distinct, and ultimately, things need to be less
+// cluttered"). Colour alone could not carry it: everything was a bar in the
+// same grid, so a deed and a plan read the same. So the SHAPE says which of
 // three things a row is, and each has its own place on the page:
 //
-//   PLAN        — the grid, and only the grid. A time the owner or an agent
-//                 chose: an item, a check-in, a job, an approval waiting on
-//                 them. A closed item keeps its planned slot, ✓ and muted: its
-//                 time is still the time planned. This is what a bar means.
+//   PLAN        — the grid, and only the grid. A time HE or an agent chose:
+//                 an item, a check-in, a job, an approval waiting on him. A
+//                 closed item keeps its planned slot, ✓ and muted: its time is
+//                 still the time he planned. This is what a bar means now.
 //   RECORD      — a narrow strip down the right edge of each day, one mark per
-//                 thing that happened at the minute it happened, the owner's
-//                 marks and the agents' in their own column of the strip. No
-//                 text, no bar: "what was I doing at any given time" is a shape
-//                 you read at a glance and click to open, not slivers of prose.
+//                 thing that happened at the minute it happened, his marks and
+//                 the agents' in their own column of the strip. No text, no
+//                 bar: "what I was doing at any given time" is a shape you read
+//                 at a glance and click to open, not eleven slivers of prose.
 //   RECS        — TWO BARS in the clock per recommendation, purple: a dark one
-//                 at the minute it was filed and a light one at the minute it
-//                 was answered (declined struck). A rec is a PLAN-shaped row —
-//                 a bar at its real time, never an all-day event or a strip
-//                 mark — and only a rec with no minute (a "Check back" on its
-//                 review day) is an all-day chip.
+//                 at the minute it was filed and a light one at the minute he
+//                 answered (declined struck). They rode in a band above the
+//                 clock for two days, and read as all-day events
+//                 (2026-09-11: "recommendations are all-day things. I don't know
+//                 why that is… I wanted these to be presented in the calendar
+//                 at the actual date and time that they were created… Its
+//                 created date is always shown as a horizontal bar, not on the
+//                 side. I want a second bar later to demonstrate the fact that
+//                 it was closed"). So a rec is a PLAN-shaped row — a bar, never
+//                 a strip mark — and only a rec with no minute (a "Check back"
+//                 on its review day) is an all-day chip.
 //
 // A closed cal item is NOT a record row: its day and time are the plan's, so
-// it stays a bar. Everything else `did` (a card read, an action approved or
+// it stays a bar. Everything else `did` (a card he read, an action approved or
 // run) has no time but the moment it happened.
-const CAL_ITEM_KINDS = new Set(['owner', 'homework', 'agent', 'note']);
-// A step of THE OWNER'S: the hub's `owner` and `homework` kinds — both fire a physical
+const CAL_ITEM_KINDS = new Set([OWNER, 'homework', 'agent', 'note']);
+// A step of HIS: the hub's `owner` and `homework` kinds — both fire a physical
 // ask, both close with words, both are bold with a ○ in front.
-const calIsOwner = e => e.kind === 'owner' || e.kind === 'homework';
+const calIsHis = e => e.kind === OWNER || e.kind === 'homework';
 const calIsRec = e => e.kind === 'rec';
 const calIsRecord = e => !!e.did && !calIsRec(e) && !CAL_ITEM_KINDS.has(e.kind);
 const calIsPlan = e => !calIsRecord(e);
-// The shade a row is drawn in: its lane's colour, except a rec that has
-// been answered, which is the pale purple with dark ink. The two rec classes let
+// The shade a row is drawn in: its lane's colour, except a rec he has
+// answered, which is the pale purple with dark ink. The two rec classes let
 // the CSS give the light bar its ink and keep it at full opacity — the shade
 // IS its "closed", a faded pale purple would be a third colour.
 const calRecDone = e => calIsRec(e) && !!e.did;
-// An install ask is teal wherever it is drawn — its own kind of cell — open
-// in Anytime or as the "Installed: build N" mark in the strip. It stays in
-// the owner's lane — it is their tap — the teal is the cell's, as in the chat
+// An install ask is teal wherever it is drawn (2026-09-12: "Install app
+// build should be its own kind of cell on the calendar"), open in Anytime or
+// as the "Installed: build N" mark in the strip. It stays in HIS lane — it is
+// his tap, and "Just mine" keeps it — the teal is the cell's, as in the chat
 // (app.css --teal, the same value).
 const CAL_INSTALL = '#0d9488';
 const calIsInstall = e => e.ask_kind === 'install' && (e.kind === 'ask' || !!e.did);
-// A reminder (`note`) is dark blue: still My tasks, but akin to the chat's
-// read card.
+// A reminder (`note`) is dark blue the same way: still My tasks, but akin to
+// the chat's read card (2026-10-10: "reminders can be like a
+// dark blue or something because it's kind of akin to a read").
 const CAL_NOTE = '#1e40af';
 const calShade = e => (calRecDone(e) ? CAL_REC_DONE : calIsInstall(e) ? CAL_INSTALL
   : e.kind === 'note' ? CAL_NOTE : calColor(e));
@@ -148,12 +187,13 @@ const calHHMM = mins => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${Str
 const CAL_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // ---------- page state ----------
-// Persisted so the page comes back the way it was left; `open` (the detail
+// Persisted so the page comes back the way he left it; `open` (the detail
 // panel) and `anchor` are of the moment and are not.
-// A closed row always shows: the agenda keeps a done row on its day, ✓ and
-// muted — it should LOOK done, not disappear — and no tick hides them; a
-// saved `showClosed:false` from before is ignored.
-// `anchor` '' = the hub's today: the owner has not moved off it.
+// A closed row always shows: the agenda has always kept a done row on its
+// day, ✓ and muted (2026-08-27 — he wanted them to LOOK done, not to
+// disappear), and the "Done & decided" tick that could hide them is gone
+// (2026-09-11) — a saved `showClosed:false` from before is ignored.
+// `anchor` '' = the hub's today: he has not moved off it.
 const calState = {
   anchor: '', off: new Set(), open: '',
 };
@@ -168,7 +208,7 @@ function calStateLoad() {
   try {
     const s = JSON.parse(localStorage.getItem('calState') || '{}');
     // Absent keys keep the defaults above — an empty `{}` is a first visit,
-    // not "they unticked everything". Keys from the six-calendar era ('log',
+    // not "he unticked everything". Keys from the six-calendar era ('log',
     // 'me', 'checkins'…) are not lanes and are dropped, so an old browser
     // opens with all four lanes on rather than with a lane stuck off.
     if (Array.isArray(s.off)) calState.off = new Set(s.off.filter(k => CAL_LANES.some(l => l.key === k)));
@@ -199,8 +239,8 @@ function calFetchRange() {
 
 // ---------- filtering ----------
 // The lane is the hub's `lane` (a rec purple its whole life, homework blue
-// whoever closed it, a record its doer's, a pending approval the owner's, anything new
-// grey — docs/design/calendar.md). A row without one is grey: a new row must
+// whoever closed it, a record its doer's, a pending approval his, anything new
+// grey). A row without one is grey: a new row must
 // never dilute the red.
 const calLaneOf = e => CAL_LANE_BY_KEY[e.lane] || CAL_AGENTS;
 const calColor = e => calLaneOf(e).color;
@@ -209,10 +249,11 @@ const calColor = e => calLaneOf(e).color;
 const calClosed = e => !!e.closed;
 const calShown = e => !calState.off.has(calLaneOf(e).key);
 // A won't-do row closed BEFORE its day is a cancellation, not a skip (the
-// hub's `cancelled`). It is drawn nowhere — no bar, no popout line, no Due
-// dot, no strip mark — so the response is pruned ONCE, as it arrives, and
-// every list below it (`days`, `due`, `overdue`, `soon`, `anytime`) is already
-// clean. The row stays in the hub.
+// hub's `cancelled`, 2026-10-19: "these were not skipped, they were
+// cancelled"). It is drawn nowhere — no bar, no popout line, no Due dot, no
+// strip mark — so the response is pruned ONCE, as it arrives, and every
+// list below it (`days`, `due`, `overdue`, `soon`, `anytime`) is already
+// clean. The row stays in the hub; a Reopen from the panel still finds it.
 const calPrune = c => {
   const keep = es => (es || []).filter(e => !e.cancelled);
   return { ...c, anytime: keep(c.anytime), overdue: keep(c.overdue), due: keep(c.due), soon: keep(c.soon),
@@ -227,8 +268,8 @@ const calMovable = e => e.move || '';
 const calWhyStuck = e => e.why || '';
 
 // A repeating item's drag has two honest answers — one watering, or the
-// whole chain — so it asks Google's question: only this one, or all future
-// ones?
+// whole chain — so it asks, Google's question (2026-09-03: "for
+// recurring it should ask if its only one event or all future ones").
 // Resolves 'one' | 'future' | null (cancelled).
 function calScopeAsk(e, day, at) {
   return new Promise(res => {
@@ -257,7 +298,8 @@ async function calDrawGrid(view, cal) {
   calScrollKeep(view);
   const [from, to] = calVisible();
   // The week's name between its own arrows, over the grid it moves — never a
-  // second pair above the rail's.
+  // second pair above the rail's (2026-09-26: "the title and the arrow
+  // keys are kind of in a weird aligned spot… right above these other arrows").
   const chrome = `<div class="cal-bar">
       <button class="sm icon" onclick="calGo(-1)" title="Last week">‹</button>
       <h2 class="cal-title">${esc(calRangeLabel())}</h2>
@@ -272,31 +314,38 @@ async function calDrawGrid(view, cal) {
 
 function calRangeLabel() {
   const [a, b] = calVisible();
-  const fmt = (s, o) => localDate(s).toLocaleDateString('en-US',o);
   const sameMonth = a.slice(0, 7) === b.slice(0, 7);
   return sameMonth
-    ? `${fmt(a, { month: 'long' })} ${localDate(a).getDate()} – ${localDate(b).getDate()}, ${localDate(b).getFullYear()}`
-    : `${fmt(a, { month: 'short', day: 'numeric' })} – ${fmt(b, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    ? `${monthWord(a)} ${localDate(a).getDate()} – ${localDate(b).getDate()}, ${localDate(b).getFullYear()}`
+    : `${dayLabel(a)} – ${shortDay(b)}`;
 }
 
 // ---------- left rail: mini month, Show (3 lanes + closed), Overdue, Anytime ----------
-// "Overdue" aggregates the open tasks in the past: every open step of the
-// owner's whose moment has passed — yesterday's leftovers and earlier today —
-// straight from the hub's `overdue` list, which is the phone tray's list too.
-// The heading says what the hub calls it (a vaguer "For you" did not read as
-// the backlog it is), and every row wears the day it slipped from.
+// "Overdue" is the pile asked for on 2026-09-03 ("another heading …
+// aggregates the open tasks that are in the past"): every open step of his
+// whose moment has passed — yesterday's leftovers and earlier today — straight
+// from the hub's `overdue` list, which is the phone tray's list too. It was
+// headed "For you" for two weeks and he did not read it as the backlog it is
+// (2026-09-17, on a week with two of yesterday's steps under it: "should be a
+// section for overdue tasks"), so the heading now says what the hub calls it
+// and every row wears the day it slipped from.
 function calRailHTML(cal) {
   const counts = calDayCounts(cal);
-  // Anytime = the owner's undated to-dos (calendar items); Sessions waiting =
-  // the open asks a live session is blocked on.
+  // Anytime = his undated to-dos (calendar items); Sessions waiting = the open
+  // asks a live session is blocked on (2026-09-28: "seperate the ones
+  // that are pure calendar from the two that are active waiting sessions").
+  // Order Due, Do soon, Anytime, Sessions waiting last (2026-10-23).
   const anytime = (cal.anytime || []).filter(e => calShown(e) && e.item);
   const waiting = (cal.anytime || []).filter(e => calShown(e) && !e.item);
   const overdue = (cal.overdue || []).filter(calShown);
-  // Do soon: the owner's steps due on a LATER day (a weekly homework before
-  // its day). Each row wears its day.
+  // Do soon (2026-09-28): his steps due on a LATER day — "upcoming events
+  // like the homework should go in do soon (since not do today or in the
+  // past)". His undated to-dos moved to Anytime the same day, so Due is only
+  // today and its count is the tab's red number. Each row wears its day.
   const soon = (cal.soon || []).filter(calShown);
-  // Due: what the owner owes today that has not slipped, so its count is
-  // the tab's red number. Each row wears its day.
+  // Due (2026-09-26): what he owes that has not slipped — today's steps
+  // whose minute has come (a later one waits in Do soon, 2026-10-23). Each row
+  // wears its day.
   const due = (cal.due || []).filter(calShown);
   return `<aside class="cal-rail">
     ${calMiniHTML(counts)}
@@ -314,14 +363,14 @@ function calRailHTML(cal) {
     ${soon.length ? `<div class="cal-railsec">
       <div class="cal-railhead">Do soon <span class="cal-n">${soon.length}</span></div>
       ${soon.map(e => calRailRow(e, true)).join('')}</div>` : ''}
-    ${waiting.length ? `<div class="cal-railsec">
-      <div class="cal-railhead">Sessions waiting <span class="cal-n">${waiting.length}</span></div>
-      ${waiting.map(e => calRailRow(e)).join('')}</div>` : ''}
     <div class="cal-railsec">
       <div class="cal-railhead">Anytime <span class="cal-n">${anytime.length}</span></div>
       ${anytime.length ? anytime.map(e => calRailRow(e)).join('')
         : ''}
     </div>
+    ${waiting.length ? `<div class="cal-railsec">
+      <div class="cal-railhead">Sessions waiting <span class="cal-n">${waiting.length}</span></div>
+      ${waiting.map(e => calRailRow(e)).join('')}</div>` : ''}
   </aside>`;
 }
 
@@ -374,7 +423,7 @@ function calMiniHTML(counts) {
     cells += `<button class="${cls}" onclick="calJump('${day}')" title="${counts[day] || 0} on ${day}">${d.getDate()}</button>`;
   }
   return `<div class="cal-mini">
-    <div class="cal-minihead"><span>${localDate(calAnchor()).toLocaleDateString('en-US',{ month: 'long', year: 'numeric' })}</span></div>
+    <div class="cal-minihead"><span>${monthLong(calAnchor())}</span></div>
     <div class="cal-minidow">${CAL_DOW.map(d => `<span>${d[0]}</span>`).join('')}</div>
     <div class="cal-minigrid">${cells}</div></div>`;
 }
@@ -405,9 +454,9 @@ function calTimeGridHTML(cal, from, to) {
       <div class="num">${dd.getDate()}</div></div>`;
   }).join('');
 
-  // The days the owner is away (the hub's `away`): a bar over those columns
-  // atop the all-day band, and the columns shaded under it. Not an item: no
-  // click, no count, no drag target.
+  // The days he is away (the hub's `away`, 2026-10-24: wedding, honeymoon):
+  // a bar over those columns atop the all-day band, and the columns shaded
+  // under it. Not an item: no click, no count, no drag target.
   const away = calAwayBars(cal, days);
   const awayDay = d => away.some(a => d >= a.from && d <= a.until);
   const pin = (i, n) => away.length ? ` style="grid-row:${n};grid-column:${i + 1}"` : '';
@@ -458,14 +507,14 @@ function calAwayBars(cal, days) {
 // chips above the clock — lived here 2026-09-09 → 09-11. A rec is a bar now,
 // drawn by calBlockHTML / calChipHTML in its own shade via calShade.)
 
-// The record strip: one mark per pile, at the minute it happened, the owner's marks in
+// The record strip: one mark per pile, at the minute it happened, his marks in
 // the left half and the agents' in the right, so the two answers to "what was
 // happening then" never sit on top of each other. No words — the mark's
 // tooltip has them, and the click opens the same popout a collapsed box does.
 function calStripHTML(list) {
   if (!list.length) return '<div class="cal-strip"></div>';
   const marks = calCollapse(list).map(p => {
-    const es = p.members, lane = calLaneOf(es[0]), mine = !!lane.owner;
+    const es = p.members, lane = calLaneOf(es[0]), mine = !!lane.his;
     const top = (p.s / 60) * CAL_HOUR_H, h = Math.max(7, ((p.n - p.s) / 60) * CAL_HOUR_H - 2);
     return `<div class="cal-ev mark ${mine ? 'mine' : 'agents'}" data-id="${esc(calPileID(es))}"
       style="--c:${calShade(es[0])};top:${top}px;height:${h}px" title="${esc(calGroupTip(es))}"></div>`;
@@ -480,20 +529,25 @@ function calNowHTML() {
   return `<div class="cal-now" style="top:${(mins / 60) * CAL_HOUR_H}px"></div>`;
 }
 
-// A lane's pile collapses to ONE box instead of a row of unreadable slivers,
-// while an owner's step at the same time as an agent's sits side by side. So
-// the grouping never crosses lanes — the owner's step keeps its own box beside
-// the agents' — and it chains through near-misses too: 10:00/10:15/10:30 in
-// one lane, which used to overlap illegibly, become one box spanning the run.
-// Two members is already a group. The box's label is the first member plus
-// +N; the click opens a popout listing all of them (calGroupPanelHTML).
+// A lane's pile collapses to ONE box (2026-09-08, looking at a row of
+// six unreadable slivers: "if there are six agent events, they should really
+// somehow just be collapsed into one box… a title plus one or something like
+// that in the box… but if I have an action that's at the same time as an
+// agent action, I would want those side by side"). So the grouping never
+// crosses lanes — his step keeps its own box beside the agents' — and it
+// chains through near-misses too: 10:00/10:15/10:30 in one lane, which used
+// to overlap illegibly, become one box spanning the run. Two members is
+// already a group ("even if there were two for the agent, I would still kind
+// of want that collapsed"). The box's label is the first member plus +N; the
+// click opens a popout listing all of them (calGroupPanelHTML).
 //
-// The record collapses one level up, to the scale of a deliverable: did rows
-// chain by lane AND session, and reach two hours, not thirty minutes — so the
-// cards read and answered over an afternoon in one session become one box
-// wearing that session's title, which is the deliverable. A chain never
-// crosses lanes, so the owner's side of a session and the agent's sit side by
-// side, and each hides with its own tick.
+// The record collapses one level up (2026-09-09: "ideally, they're at a
+// larger scale. For example, 'migrate to Cloudflare from yesterday' might be
+// one of these things"): did rows chain by lane AND session, and reach two
+// hours, not thirty minutes — so the eleven cards he read and answered over
+// an afternoon in one session become one box wearing that session's title,
+// which is the deliverable. A chain never crosses lanes, so his side of a
+// session and the agent's sit side by side, and each hides with its own tick.
 const CAL_DID_REACH = 120;
 // A rec's two shades never chain into one box: a dark "filed" pile and a
 // light "answered" pile at the same hour are two different things.
@@ -501,9 +555,11 @@ const calChainKey = e => calLaneOf(e).key + (calIsRec(e) ? (e.did ? ':answered' 
 const calReach = e => (e.did && !calIsRec(e) ? CAL_DID_REACH : CAL_SLOT_MIN);
 // A rec is a MOMENT, answered or not: its pile is one slot tall and holds only
 // the recs filed (or answered) inside that slot — a later member never
-// stretches the box or the chain (answers spread over hours must not chain
-// into one tall box at the record's two-hour reach). The record proper still
-// chains — an afternoon in one session is one deliverable.
+// stretches the box or the chain (2026-09-11, on a light box spanning
+// 00:25–02:00 because seven answers over an hour and a half had chained at
+// the record's two-hour reach: "Why is it tall? This shouldn't show
+// recommendations over hours if they come at different times"). The record
+// proper still chains — his afternoon in one session is one deliverable.
 const calChains = e => !calIsRec(e);
 function calCollapse(list) {
   const evs = list.map(e => ({ e, s: calMin(e.at) })).sort((a, b) => a.s - b.s || a.e.id.localeCompare(b.e.id));
@@ -522,7 +578,7 @@ function calCollapse(list) {
 // box shows beside it — "+2" more for a pile, "3 steps" for a run of record.
 function calGroupLabel(es) {
   // A pile of answered recs is "Accepted: X +1", not "2 steps in <session>":
-  // the session form is the RECORD's (an afternoon of cards), and a rec's
+  // the session form is the RECORD's (his afternoon of cards), and a rec's
   // answer is about the rec, not the thread that filed it.
   const did = es.every(e => e.did) && !calIsRec(es[0]);
   const title = did && es[0].thread_title && es.every(e => e.thread_id === es[0].thread_id) ? es[0].thread_title : '';
@@ -546,8 +602,9 @@ function calLayout(list) {
       colsEnd[c] = it.n; it.col = c;
     }
     // A box grows rightward over every column that is empty for its whole
-    // height (a lone 09:30 under a four-wide 08:00 row fills its row):
-    // `span` columns of `cols`, never fewer than one. A brush
+    // height (2026-09-30, on a quarter-wide 09:30 under a four-wide
+    // 08:00 row: "the row should always be full if they've got an event at
+    // that time"): `span` columns of `cols`, never fewer than one. A brush
     // under CAL_TOUCH_MIN (a 09:01 pile's last minute against a 09:30 step,
     // a hairline on the clock) does not count as taken.
     for (const it of cluster) {
@@ -568,12 +625,12 @@ function calLayout(list) {
   return out;
 }
 
-// One glyph language on every row the owner reads, both surfaces (✓ +
-// strikethrough together read as both complete and not). Each mark says one
-// thing:
-//   ○              still to do — an open row of THE OWNER'S. Full colour, never
-//                  struck: time passing never closes a task; only the owner or
-//                  an agent does.
+// One glyph language on every row the owner reads, both surfaces (2026-09-03,
+// on ✓ + strikethrough together: "It looks like 'water the plants' is crossed
+// out with a check mark, so is it complete or not?" — and, of Apple Calendar,
+// "the X is for things that are not completed"). Each mark now says one thing:
+//   ○              still to do — an open row of HIS. Full colour, never struck:
+//                  time passing never closes a task; only he or an agent does.
 //   ✓              done. Muted but NOT struck — a check crossed out reads as
 //                  its own opposite.
 //   ✕ + strike     won't do / cleared. The only rows that get the line.
@@ -629,9 +686,11 @@ function calGroupBlockHTML(p) {
 }
 const calGroupTip = es => es.map(m => (m.at ? m.at + ' ' : '') + calGlyph(m) + calLabel(m)).join('\n');
 
-// A day's all-day band holds four rows at most: past four, the open ones come
-// first, three show and a fourth row says "+N more" and opens the whole day's
-// band as the pile popout.
+// A day's all-day band holds four rows at most (2026-10-10:
+// "I don't know what happens if they're six. Does it just keep going?… Or
+// does it collapse and say +5"): past four, the open ones come first, three
+// show and a fourth row says "+N more" and opens the whole day's band as
+// the pile popout. It grew without end before.
 const CAL_BAND_MAX = 4;
 function calBandHTML(es) {
   if (es.length <= CAL_BAND_MAX) return es.map(calChipHTML).join('');
@@ -643,7 +702,7 @@ function calBandHTML(es) {
 }
 
 // An all-day chip, and a month cell's row (`row`: always the lane's dot, no
-// ○ — every row a month cell draws is an open step of the owner's).
+// ○ — every row a month cell draws is an open step of his).
 function calChipHTML(e) {
   const mv = calMovable(e);
   const closed = calClosed(e);
@@ -663,7 +722,7 @@ function calPanelHTML(cal) {
   if (calState.open.startsWith('grp:')) return calGroupPanelHTML(cal);
   const e = calFind(cal, calState.open);
   if (!e) return '';
-  const long = e.day ? localDate(e.day).toLocaleDateString('en-US',{ weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
+  const long = e.day ? longDay(e.day) : '';
   const when = e.soon && !calClosed(e) ? `Anytime · added ${long}`
     : e.day ? long + (e.at ? ` · ${e.at}` : ' · all day')
     : 'No date — anytime';
@@ -678,16 +737,17 @@ function calPanelHTML(cal) {
       ${calEntryHTML(e)}
     </div></div>`;
 }
-// The popout behind a collapsed box: every
+// The popout behind a collapsed box (2026-09-08: "maybe I click on one,
+// and there's a big pop-out… it shows all six of them or something"): every
 // member on its own line, in time order. Each row is a real .cal-ev, so the
 // grid's own click wiring opens its full card in this same overlay.
 function calGroupPanelHTML(cal) {
   const es = calState.open.slice(4).split(',').map(id => calFind(cal, id)).filter(Boolean);
   if (!es.length) return '';
   const lane = calLaneOf(es[0]);
-  const when = localDate(es[0].day).toLocaleDateString('en-US',{ weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  // A run of record is named for its session: "7 steps in <session
-  // title>" — the deliverable, then the steps that made it.
+  const when = longDay(es[0].day);
+  // A run of record is named for its session: "7 steps in Migrate the movie
+  // site" — the deliverable, then the steps that made it.
   const { title, n } = calGroupLabel(es);
   const what = es.every(e => !e.at) ? `${es.length} all day`
     : n.startsWith('+') ? `${es.length} ${esc(lane.label.toLowerCase())} in one box` : `${esc(n)} in ${esc(title)}`;
@@ -740,16 +800,20 @@ function calWire(view) {
   calWireKeys();
 }
 
-// Where the owner had scrolled to. Every redraw replaces the whole pane — a
-// click on an event, the 30 s poll, a filter — and the grid would otherwise
-// jump back to its opening position each time, losing the event just
-// clicked. So the position is remembered against the range it belongs to,
-// and only a range not looked at yet gets positioned automatically.
+// Where he had scrolled to. Every redraw replaces the whole pane — a click on
+// an event, the 30 s poll, a filter — and the grid was jumping back to its
+// opening position each time (2026-08-31: "if I'm scrolled up really high
+// and then I click on something, then the whole page kind of scrolls down…
+// I want the scroll to be preserved in the background when I click on
+// stuff"). So the position is remembered against the range it belongs to, and
+// only a range he has not looked at yet gets positioned for him.
 //
-// One position per range, not one in total. A single slot only survived a
-// repaint of the SAME week: › and ‹ threw the position away and re-opened
-// the week at 9am, which reads as the page scrolling down under you. Every
-// range looked at keeps its own line here, so a round trip lands where it was.
+// One position per range, not one in total (2026-09-01, the same complaint
+// back: "clicking on an event scrolls the page down… you lose the event you
+// clicked on"). A single slot only survived a repaint of the SAME week: Month
+// and back, or › and ‹, threw the position away and re-opened the week at 9am,
+// which reads as the page scrolling down under him. Every range he has looked
+// at keeps its own line here, so a round trip lands him where he was.
 const calScrollTops = new Map();  // 'week:2026-08-30..2026-09-05' → px
 let calScrollKey = '';            // the range the grid on screen belongs to
 let calScrollApplying = false;    // true while WE are putting a position back
@@ -768,15 +832,18 @@ function calScrollRestore(view) {
   if (!sc) return;
   const key = calScrollNow();
   calScrollKey = key;
-  // The owner's own scrolling, recorded as it happens rather than only at the next
+  // His own scrolling, recorded as it happens rather than only at the next
   // redraw — nothing then depends on a repaint reaching calScrollKeep first.
   sc.addEventListener('scroll', () => {
     if (!calScrollApplying) calScrollTops.set(key, sc.scrollTop);
   }, { passive: true });
   if (calScrollTops.has(key)) { calScrollPut(sc, key, calScrollTops.get(key)); return; }
-  // A range seen for the first time opens with 12 PM in the middle of the
-  // clock. The header and band are sticky inside the scroller, so the clock
-  // seen is the height under them (`body.offsetTop`).
+  // A range he is seeing for the first time opens with 12 PM in the middle of
+  // the clock (2026-10-10: "sometimes… it opens at 12 a.
+  // That's wrong. I want 12 PM to open in the center of the vertical
+  // height"). Until then it opened on the earliest thing, else 7am. The
+  // header and band are sticky inside the scroller, so the clock he sees is
+  // the height under them (`body.offsetTop`).
   const body = view.querySelector('.cal-cols.body');
   if (!body) return;
   const stuck = body.offsetTop;
@@ -789,9 +856,9 @@ function calScrollPut(sc, key, top) {
   // Once more after the browser has laid the new grid out. A scrollTop set
   // against a scroller that has not been measured yet is silently clamped to
   // whatever height it thinks it has, and Chrome's scroll anchoring gets a
-  // vote too when a box's contents are replaced wholesale — both land a few
-  // hundred pixels from where it was, which is the bug this exists to stop.
-  // Skipped if the owner has scrolled in the meantime: their hand wins.
+  // vote too when a box's contents are replaced wholesale — both land him a
+  // few hundred pixels from where he was, which is the bug this exists to
+  // stop. Skipped if he has scrolled in the meantime: his hand wins.
   requestAnimationFrame(() => {
     if (calScrollKey === key && sc.isConnected && sc.scrollTop !== top) sc.scrollTop = top;
     calScrollApplying = false;
@@ -802,7 +869,7 @@ function calScrollPut(sc, key, top) {
   }
 }
 
-// Escape closes the panel — but not while typing in its composer, where
+// Escape closes the panel — but not while he is typing in its composer, where
 // Escape is the browser's own dismiss, not "throw my words away". Attached on
 // first draw rather than at load, so this file stays a set of pure functions
 // that the node tests can run with no DOM (test/ui.test.js).
@@ -850,8 +917,7 @@ function calWireDrag(root) {
     drag.target = calDropTarget(ev.clientX, ev.clientY);
     const g = ghost();
     if (drag.target) {
-      g.textContent = localDate(drag.target.day).toLocaleDateString('en-US',{ weekday: 'short', month: 'short', day: 'numeric' })
-        + (drag.target.at ? ' · ' + drag.target.at : ' · all day');
+      g.textContent = weekDay(drag.target.day) + (drag.target.at ? ' · ' + drag.target.at : ' · all day');
       g.style.display = 'block'; g.style.left = (ev.clientX + 14) + 'px'; g.style.top = (ev.clientY + 14) + 'px';
     } else { g.style.display = 'none'; }
   });

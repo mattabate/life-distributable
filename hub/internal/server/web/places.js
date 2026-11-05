@@ -1,16 +1,24 @@
 // life hub — laptop console: WHERE the owner is, in words and in file paths.
 //
-// The "+ New session" button already photographs the page it was pressed on
+// The "+ New session" button already photographs the page he pressed it on
 // (views/threads.js `snapPage`). A picture is not searchable: the session that
-// opens gets pixels and has to guess which file draws them. So every snap carries this
+// opens gets pixels and has to guess which file draws them (2026-08-29:
+// "i also want this injected into the prompt, the link or the place in the
+// code that im looking at. that way its also in language tokens and not only
+// picture with no hard location infromation"). So every snap now carries this
 // block of text too — the route, the URL, the heading on screen, and the two
 // source files that draw it, console and phone.
 //
-// This table is also the surface-parity table: `parity_test.go` reads it
-// instead of keeping a second copy in Go, so a page can never name one file
-// here and another there. Rules for editing it:
+// The table is PLACES (ui.js), one `registerPlace('<key>', { … })` row per
+// page, written in the page's own view file beside `views.<key>` — so a
+// private module brings its row with it and this file names no page
+// (distributable v4). It is also the surface-parity table: `parity_test.go`
+// reads those rows instead of keeping a second copy in Go, so a page can never
+// name one file here and another there. Rules for a row:
 //   - one row per console page, keyed exactly as `views.<key>` in views/*.js
 //   - `view`  the file that registers it, relative to web/
+//   - `tab`   the nav tab a tab-less page lights (Goals, Spend, a source:
+//             Configuration's blocks since 2026-10-06), else its own key
 //   - `phone` the SwiftUI file in app/Life/Sources that shows the same thing,
 //             named `<Screen>.swift` (the struct is the file name)
 //   - `phone: ''` means console-only, and then `why` says why out loud
@@ -18,32 +26,8 @@
 //             drawn by two ('views/calgrid.js', 'CalendarGrid.swift' — the
 //             suffix picks the root); parity_test.go checks each one exists
 //   - `deep`  sub-routes worth naming: `at` = how many segments the hash has
-//             (`sessions/<id>` = 2), most specific first
+//             (`sources/<id>/<sub>` = 3), most specific first
 'use strict';
-
-const PLACES = {
-  // Sessions is also Your turn: the page that was `asks`
-  // here (`#/asks`, ThreadsView's `.yourTurn`) is deleted on both surfaces,
-  // and its stack is this page's first group.
-  sessions: { label: 'Sessions', view: 'views/threads.js', phone: 'ThreadsView.swift', deep: [
-    { at: 2, label: 'one session', phone: 'ThreadDetail.swift' },
-  ] },
-  recs: { label: 'Recs', view: 'views/recs.js', phone: 'RecsView.swift' },
-  // Two files a side since 08-31: `calendar.js` registers the page and draws
-  // the Schedule mode, `calgrid.js` draws Day/Week/Month — and a snap of the
-  // grid must name the file that actually drew it. (The phone's CalendarGrid
-  // has Day only: a week of columns was unreadable at 390pt.)
-  calendar: { label: 'Calendar', view: 'views/calendar.js', phone: 'CalendarView.swift',
-    also: ['views/calgrid.js', 'CalendarGrid.swift'] },
-  // The fourth tab: the plan and its limits, the goals, the data sources.
-  // Spend and Goals are pages behind it (app.js lights the tab for them).
-  config: { label: 'Configuration', view: 'views/config.js', phone: 'ConfigView.swift' },
-  spend: { label: 'Spend', view: 'views/spend.js', phone: 'SpendView.swift' },
-  goals: { label: 'Goals', view: 'views/goals.js', phone: 'GoalsView.swift' },
-  sources: { label: 'Source', view: 'views/sources.js', phone: 'SourceDetail.swift' },
-  runs: { label: 'Job run', view: 'views/runs.js', phone: '',
-    why: 'console only: the raw transcript of one scheduled job run, opened from a hub log line; what a run finds reaches the phone as an ask or a card' },
-};
 
 const VIEW_ROOT = 'hub/internal/server/web/';
 const APP_ROOT = 'app/Life/Sources/';
@@ -64,8 +48,9 @@ function placeNow(hash) {
   // root it hangs off, so a row never has to repeat the path.
   for (const f of p.also || []) files.push((f.endsWith('.swift') ? APP_ROOT : VIEW_ROOT) + f);
   if (deep && deep.phone) files.push(APP_ROOT + deep.phone);
-  // The words on the page beat any label we could write here. Dropped when it
-  // only repeats the tab's own name ("Goals · Goals" said nothing twice).
+  // The words on the page beat any label we could write here: a goal page
+  // is the goal's name, not "one goal". Dropped when it only repeats the
+  // tab's own name ("Goals · Goals" says nothing twice).
   const head = document.querySelector('#view h1, #view h2, #view .chat-head strong');
   const heading = (head ? head.textContent : '').trim().slice(0, 80);
   return {
@@ -80,8 +65,9 @@ function placeNow(hash) {
 
 // The paragraph that goes into the session's first message, above whatever
 // the owner typed. Kept to one short bullet list: it is read by an agent, but
-// the owner sees it in the thread too. The first line must match
-// consoleSnapPreamble in internal/threads/threads.go, which strips it.
+// the owner sees it in the thread too. How they got here is NOT here: every
+// console message — this one and each reply — is stamped by the hub with the
+// minute (threads/runner.go consoleStamp).
 function placeBlock(place) {
   const p = place || placeNow();
   const lines = [

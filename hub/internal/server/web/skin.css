@@ -1,16 +1,26 @@
-/* The "studio" layout — the console's look. Loaded on every page after
-   app.css (index.html; skin.js takes the emojis out) and only restyles:
-   every element, word and button the console draws is still drawn.
+/* The "studio" layout — THE console since 2026-09-28 ("I want this to
+   be the main UI… cut the web app's UI to this one and we'll continue to
+   work on it"). Loaded on every page after app.css (index.html; skin.js
+   takes the emojis out) and only restyles: every element, word and button
+   the console draws is still drawn. It began as a ?skin=studio mock; the
+   rounds below are how it got here.
 
-   The palette is app.css's own, untouched (light blue and white, waiting
-   orange, speaking green); this is layout only:
-   - the chat is a transcript, not a text thread: the owner's words a soft
-     grey block on the right, everything the session did down the left;
+   Round three (2026-09-28): the colours were never the problem — "the
+   light blue and white was right from the original, and the waiting to speak
+   orange and the speaking green" — it was "the shapes of the buttons,
+   formatting of the session cards, how the chat cells are actually displayed
+   (this one looks kinda amateur iMessage)". So the palette is app.css's own,
+   untouched, and this is layout only:
+   - the chat is a transcript, not a text thread: no bubbles, no right-hand
+     blue blocks. Every row sits on ONE text column behind an avatar gutter —
+     his words flat on the page under a name line, the session's cards boxed
+     on the same column, the run and end lines quiet between them;
    - a session card reads top-down as name, state, then its open cards;
    - buttons, pills and chips share one set of shapes (8px corners, one
      height per size), and hover is a fill, never a blue outline;
-   - the bar's tabs keep the filled blue shape.
-   Still full-width to the walls (app.css). */
+   - the bar's tabs keep the filled blue shape (an underline was tried and
+     refused in round five).
+   Still full-width to the walls (the 2026-08-29 rule in app.css). */
 :root { --col: 52px; --radius: 8px; }
 
 body { -webkit-font-smoothing: antialiased; }
@@ -20,7 +30,7 @@ button, .btn { border-radius: var(--radius); border-color: var(--line-strong); f
   box-shadow: 0 1px 0 rgba(0, 0, 0, .04); line-height: 1.3; }
 /* a picked (.on) button keeps its own fill under the pointer: this rule ties
    `.chips-row button.on` and loads later, so it painted the picked chip grey
-   behind its white words; :not() keeps it at (0,2,1) */
+   behind its white words (bug sweep 2026-10-18); :not() keeps it at (0,2,1) */
 button:hover:not(:disabled, .on) { border-color: var(--line-strong); background: var(--code); }
 button.primary, a.btn.primary { box-shadow: none; font-weight: 600; }
 button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
@@ -36,11 +46,14 @@ button.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 8
 /* ---- the bar ---- */
 #nav { height: 52px; padding: 0 16px; gap: 0 2px; }
 #nav .brand { font-size: 17px; font-weight: 750; letter-spacing: -.03em; margin-right: 20px; }
-/* the tabs stay the filled blue shape — only the corners join the one shape */
+/* the tabs stay the original filled blue shape (round five: "i much
+   prefer the bubble selector… put the blue shapes back") — only the corners
+   join the one shape */
 #nav .tabs a, #nav .navmore { border-radius: var(--radius); font-weight: 500; }
 #nav .tabs a.on, #nav .navmore.on { font-weight: 600; }
 .badge { font-size: 10.5px; line-height: 16px; min-width: 16px; padding: 0 5px; margin-left: 6px; text-align: center; border-radius: 8px; }
-#nav .navnew { padding: 6px 13px; font-size: 13.5px; font-weight: 550; border-radius: var(--radius); }
+#nav .navmic, #nav .navnew { padding: 6px 13px; font-size: 13.5px; font-weight: 550; border-radius: var(--radius); }
+#nav .navmic.on { box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent); }
 
 /* ---- the sessions column ---- */
 .pane.list { background: var(--bg); padding: 14px 12px; }
@@ -58,15 +71,24 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .sess-t.unread { font-weight: 700; }
 .sess-foot { order: 1; margin-top: 7px; gap: 5px; font-size: 12px; font-variant-numeric: tabular-nums; }
 /* the name line: a blue dot while it runs, and on a Working card (no cells)
-   when it last moved at the right */
+   when it last moved at the right (rec-e4b035dd, 2026-10-17) */
 .sess-h { order: 0; display: flex; align-items: baseline; gap: 8px; }
 .sess-h .sess-t { flex: 1; min-width: 0; }
 .sess-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); align-self: center; }
 .sess-ago { flex: none; font-variant-numeric: tabular-nums; }
-/* a session it started: a row on its card, gray unless it has a card of its own */
+/* a person's role on the right of their name, as on the phone (2026-10-22) */
+.sess-role { flex: none; white-space: nowrap; }
+/* a session it spun off: a row on its card, gray unless it has a card of its
+   own (2026-10-23: a role with two little subagents) */
 .ask.mini.quiet { --tint: var(--line); }
 .ask.mini.quiet .verb { color: var(--muted); }
 .ask.mini.sub .sess-dot { display: inline-block; margin: 0 7px 1px 0; vertical-align: middle; }
+/* the working dot after the name, so the name never moves (2026-11-05 00:34) */
+.sess-t .sess-dot { display: inline-block; margin: 0 0 2px 7px; vertical-align: middle; }
+/* a running job, first on its card and grey: in hand, not his turn (mock B, 2026-11-05) */
+.ask.mini.job { --tint: var(--line-strong); }
+.ask.mini.job .tbar { margin-top: 6px; }
+.ask.mini.job .job-doing { margin-top: 2px; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card.sess > .ask.mini, .card.sess > .more-cards { order: 3; }
 /* its open cards: rows under a hairline, a tint rail each — not boxes in a box */
 .card.sess > .ask.mini { margin: 10px -14px 0; padding: 9px 14px 9px 13px; border: 0; border-radius: 0;
@@ -82,11 +104,17 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .all-link:hover, .all-link.on { border-color: var(--line-strong); border-style: solid; background: var(--panel); }
 
 /* ---- the chat head: ONE row ----
-   Left to right on one 52px line, the same height as the nav: ←, the name,
-   its state, the model in its grey cell as on the session cards — and what
-   it cost on the right, quiet numbers against the wall. Every control one
-   30px height, the pills sized to the text beside them. */
+   2026-09-28: "this awkward top bar… looks weird cuz on two lines but
+   the pill is weird size and buttons half width center vertical height".
+   Everything stays; it now reads left to right on one 52px line, the same
+   height as the nav: ←, the name, then state and money, then the buttons —
+   every control one 30px height, the pills sized to the text beside them. */
 .chat-head { height: 52px; min-height: 0; padding: 0 var(--gutter); gap: 8px; }
+/* Round two (same night: "remove checkin… remove the archive button… it
+   might lead to some interesting ways of presenting that same information
+   minimally"): with only Stop left, the row is who on the left — name, state,
+   the model in its grey cell as on the session cards — and what it cost on
+   the right, quiet numbers against the wall. */
 .chat-head > .grow { display: flex; align-items: center; gap: 6px; margin-left: 4px; }
 .chat-head > .grow > .trunc:first-child { flex: 0 1 auto; min-width: 0; margin-right: 6px; }
 .chat-head .trunc strong { font-size: 15px; font-weight: 650; letter-spacing: -.012em; }
@@ -96,7 +124,8 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 /* the live pills are the controls: hovered, "running" reads Stop and
    "speaking" Stop speaking, in red, the same size — nothing jumps. The word
    (.w) and the act (.h) share one grid cell, each with its own mark, each in
-   the middle: Stop does not hang at the left of a pill sized for "running" */
+   the middle: Stop does not hang at the left of a pill sized for "running"
+   (2026-10-05) */
 .chat-head .pill-act { font: inherit; font-size: 11.5px; font-weight: 600; border: 0; box-shadow: none; cursor: pointer;
   display: inline-grid; align-items: center; }
 .chat-head .pill-act .w, .chat-head .pill-act .h { grid-area: 1 / 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
@@ -106,25 +135,24 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
   background: color-mix(in srgb, var(--red) 12%, var(--panel)); color: var(--red); }
 .chat-head .pill-act:hover .w, .chat-head .pill-act:focus-visible .w { visibility: hidden; }
 .chat-head .pill-act:hover .h, .chat-head .pill-act:focus-visible .h { visibility: visible; }
-/* the name alone on the left; its pills, the model and the money in one run at
-   the right; the back arrow only on a narrow window, where the list is not
-   beside it */
+/* rec-c693cb5e (2026-10-18: "the top bar is like better aligned"): the
+   name alone on the left; its pills, the model and the money in one run at
+   the right; ← only on a narrow window, where the list is not beside it */
 .chat-head > .head-id { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .chat-head .head-meta { flex: 0 1 auto; min-width: 0; margin: 0 4px 0 2px; font-size: 12.5px; line-height: 20px;
   font-variant-numeric: tabular-nums; text-align: right; }
-.chat-head > button, .chat-head > .btn { height: 30px; padding: 0 12px; align-items: center;
+.chat-head > button { height: 30px; padding: 0 12px; align-items: center;
   justify-content: center; font-size: 13px; flex: 0 0 auto; }
-.chat-head > button:not(.narrow-only), .chat-head > .btn { display: inline-flex; }
-.chat-head > a.btn:first-child, .chat-head > button.narrow-only { width: 30px; padding: 0; color: var(--muted); }
-.chat-head > a.btn:first-child:hover { color: var(--fg); }
-.chat-head input[type=text] { height: 30px; padding: 0 10px; border-radius: var(--radius); }
+.chat-head > button:not(.narrow-only) { display: inline-flex; }
+.chat-head > button.narrow-only { width: 30px; padding: 0; color: var(--muted); }
 
-/* ---- the chat: one column of rows, the open cards full ----
-   The owner's rows a soft grey with no outline, everything else white with
-   a hairline. */
+/* ---- the chat: one column of rows, the open cards full (mock B3) ----
+   His rows a soft grey with no outline, everything else white with a
+   hairline (2026-10-25: "yea b3!!! this is exactly what i wanted"). */
 .msgs { padding: 24px calc(var(--gutter) + 8px) 18px var(--gutter); background: var(--panel); }
 .hello-line { font-size: 26px; font-weight: 650; letter-spacing: -.025em; }
-/* Rows and cards span the pane, one edge: no width cap on either. */
+/* Rows and cards span the pane, one edge (2026-10-27: "why is the you
+   message bar not full width??" — an 860px cap on both, the desktop's on rows only). */
 .chat-row { background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
 .chat-row.me { background: var(--code); box-shadow: none; }
 .row-body { font-size: 15px; line-height: 1.6; }
@@ -132,6 +160,11 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .row-body a { color: var(--accent); }
 .ask .fold { border-radius: 6px; }
 .att img { border-radius: 10px; max-height: 180px; }
+/* his spoken message's tag: pink, never red — red is a card for him
+   (2026-10-18: "light pink or something like that") */
+.chat-row .note-tag { background: color-mix(in srgb, #e86b9e 14%, transparent); border-radius: 4px; padding: 1px 5px; }
+/* the router's tag (threads/shown.go): grey, it is only where it came from */
+.chat-row .note-tag.routed { background: color-mix(in srgb, var(--muted) 14%, transparent); }
 .msgs > .ask { margin: 10px 0 18px; }
 
 /* ---- the one card: white, a hairline, a tint rail, the verb as a chip ---- */
@@ -141,6 +174,8 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .ask .card-h { margin-bottom: 8px; }
 .ask .card-h .verb { font-size: 10.5px; padding: 2px 7px; border-radius: 5px;
   background: color-mix(in srgb, var(--tint) 11%, transparent); }
+.ask .say-btn { padding: 3px 9px; border-radius: 6px; font-size: 12px; }
+.ask .say-btn:hover { background: var(--code); }
 .ask .said { font-size: 15px; line-height: 1.6; margin-bottom: 8px; }
 .ask .acts { margin-top: 12px; gap: 8px; }
 .ask .acts button, .ask .acts .btn { padding: 6px 14px; font-size: 13.5px; }
@@ -154,7 +189,9 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 
 /* ---- goal tiles: emblem and name on one row ----
    The tall tile (emblem up top, name on its floor) is the phone's; at desktop
-   width it was mostly empty space. Same grid, same sizes; the tile hugs
+   width it was mostly empty (2026-09-30, circling a goal:
+   "there's a card here and then the name on the bottom … on the web …
+   there's just so much [empty space]"). Same grid, same sizes; the tile hugs
    its row. */
 .goal-tile { flex-direction: row; align-items: center; gap: 13px; min-height: 0; padding: 15px 16px; }
 .goal-tile .grow { display: flex; flex-direction: column; gap: 2px; }

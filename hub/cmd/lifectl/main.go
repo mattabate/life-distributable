@@ -223,9 +223,9 @@ func main() {
 		}
 		if len(os.Args) >= 6 && os.Args[3] == "set" {
 			switch os.Args[4] {
-			case "title", "statement", "horizon", "cadence", "status", "sources", "digest":
+			case "title", "statement", "horizon", "cadence", "status", "sources", "digest", "section":
 			default:
-				fmt.Fprintln(os.Stderr, "settable: title|statement|horizon|cadence|status|sources|digest")
+				fmt.Fprintln(os.Stderr, "settable: title|statement|horizon|cadence|status|sources|digest|section")
 				os.Exit(2)
 			}
 			c.call("PATCH", "/api/v1/goals/"+os.Args[2], map[string]string{os.Args[4]: os.Args[5]})
@@ -848,6 +848,52 @@ func main() {
 		default:
 			usage()
 		}
+	case "personas":
+		// lifectl personas   the team's roles (team mode)
+		c.call("GET", "/api/v1/personas", nil)
+	case "persona":
+		// lifectl persona new <key> --name n --role r --who w --brief text|@file [--covers c] [--lane l] [--route-lane l] [--team t]
+		// lifectl persona <key> set role|covers|who|lane|route_lane|brief|team <value|@file>
+		// The owner asks the chief of staff for a role; the chief of staff runs these.
+		need(3)
+		if os.Args[2] == "new" {
+			need(4)
+			fs := flag.NewFlagSet("persona new", flag.ExitOnError)
+			name := fs.String("name", "", "the role's session title (default: the role)")
+			role := fs.String("role", "", "title, e.g. Fitness coach")
+			who := fs.String("who", "", "one line: who this role is to the owner")
+			covers := fs.String("covers", "", "what it covers, a few words")
+			lane := fs.String("lane", "", "its lane in the team header")
+			routeLane := fs.String("route-lane", "", "what the router sends it (default: lane)")
+			brief := fs.String("brief", "", "the standing brief, text|@file|-")
+			team := fs.String("team", "", "the team group it is listed under")
+			fs.Parse(os.Args[4:])
+			body := map[string]string{"key": os.Args[3], "name": *name, "role": *role, "who": *who, "covers": *covers,
+				"lane": *lane, "route_lane": *routeLane, "team": *team, "by": actor()}
+			if *brief != "" {
+				body["brief"] = text(*brief)
+			}
+			c.call("POST", "/api/v1/personas", body)
+			return
+		}
+		if len(os.Args) >= 6 && os.Args[3] == "set" {
+			c.call("PATCH", "/api/v1/personas/"+os.Args[2], map[string]string{os.Args[4]: text(os.Args[5]), "by": actor()})
+			return
+		}
+		usage()
+	case "settings":
+		// lifectl settings                        team_mode, plain_sessions, model_cap
+		// lifectl settings set <key> <value>     (the owner's: a session is refused)
+		if len(os.Args) >= 5 && os.Args[2] == "set" {
+			var v any = os.Args[4]
+			switch os.Args[3] {
+			case "team_mode", "plain_sessions":
+				v = os.Args[4] == "true" || os.Args[4] == "on" || os.Args[4] == "yes"
+			}
+			c.call("PATCH", "/api/v1/settings", map[string]any{os.Args[3]: v})
+			return
+		}
+		c.call("GET", "/api/v1/settings", nil)
 	case "workspace":
 		// lifectl workspace [persona]                       list a role's files (all roles bare)
 		// lifectl workspace cat <persona>/<name>            print one
@@ -1280,6 +1326,9 @@ gate      propose --title t --detail d [--kind money|delete|contact|share|commit
 sessions  threads [--q words] [--archived] · thread new "prompt" [--goal g] [--schedule w] [--title t] [--project p]
           thread <id> [send text|@file|- | schedule when|off ["check-in prompt"] | goal g|off
             | model auto|judgment|build|claude-… | persona key|off | checkin | stop | archive | events]
+          personas · persona new <key> --role r --who w --brief text|@file [--name n] [--covers c] [--lane l]
+            [--route-lane l] [--team t] · persona <key> set role|covers|who|lane|route_lane|brief|team <value>
+          settings · settings set team_mode|plain_sessions true|false · settings set model_cap <model|"">
           workspace [persona] · workspace cat <persona>/<name> · workspace put <name> text|@file [--persona p]
           prompt "text" [--thread id | --new [--title t] [--goal g]] [--in 30m | --on YYYY-MM-DD [--at HH:MM]]
             [--re ask:id|action:id|rec:id|cal:id|message:id] [--outcome done|wont|approved|denied]
@@ -1300,7 +1349,7 @@ calendar  cal [from] [to]
 goals     goals · goal new "title" "statement" [--horizon h] [--cadence c] [--sources s]
           goal <id> [--full] · goal <id> digest "text|@file"
           goal <id> note "text|@file" [--author|--actor a] [--kind k]   (old form: note "text" author kind)
-          goal <id> set title|statement|horizon|cadence|status|sources|digest <value>
+          goal <id> set title|statement|horizon|cadence|status|sources|digest|section <value>
 recs      recs [open|all|deferred|accepted|declined|expired] [--domain d] [--kind k] [--goal g]
             [--due YYYY-MM-DD] [--under $] [--model id] · recs stats
           rec add "title" [--detail d] [--domain d] [--kind k] [--cost $] [--period monthly|yearly]

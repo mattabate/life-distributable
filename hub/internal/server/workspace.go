@@ -16,7 +16,7 @@ import (
 // the switch is off from the one line.
 
 func (s *Server) workspaceOn(w http.ResponseWriter) bool {
-	if !s.thr.TeamMode {
+	if !s.thr.TeamMode() {
 		jsonErr(w, 404, "team mode is off (team_mode in ops/hub.json)")
 		return false
 	}

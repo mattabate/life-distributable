@@ -31,6 +31,7 @@ func TestSessionTokenCannotActAsOwner(t *testing.T) {
 		{"POST", "/api/v1/actions/x/reopen"},
 		{"POST", "/api/v1/spend/budget/clear"},
 		{"PUT", "/api/v1/spend/model"},
+		{"PATCH", "/api/v1/settings"},
 		{"PUT", "/api/v1/usage"},
 	} {
 		if code, body := call(tok, c.method, c.path, "{}"); code != 403 {

@@ -1,5 +1,6 @@
 // Tests for views/calgrid.js — the Calendar page drawn as a real calendar
-// in the style of Google Calendar, with drag to change a time. What is
+// (2026-08-31: "a real calendar UI, to mimic Google Calendar… I also
+// want to be able to drag things around to change their time"). What is
 // actually worth pinning here is the arithmetic a grid gets wrong quietly:
 // which local day a cell is, which range a mode fetches, which rows may be
 // dragged at all, and what a drop rewrites. `ops/webcheck.sh` runs these
@@ -27,8 +28,9 @@ load('views/calendar.js');
 load('views/calgrid.js');
 
 // Read before any test mutates calState: the page opens with every lane on.
-// There is no "show closed" any more — a closed row always shows: a
-// calendar always shows what happened in the past.
+// There is no "show closed" any more — a closed row always shows
+// (2026-09-11: "this is a calendar, so I should always see what happens in
+// the past").
 const DEFAULT_OFF = [...calState.off];
 
 test('a YYYY-MM-DD is a LOCAL day, never UTC', () => {
@@ -51,7 +53,7 @@ test('the page is one week, and one fetch covers it and the rail\'s mini-month',
   assert.deepEqual(calVisible(), ['2026-08-30', '2026-09-05']);
   assert.deepEqual(calMonthGrid('2026-08-31'), ['2026-07-26', '2026-09-05']);
   assert.deepEqual(calFetchRange(), ['2026-07-26', '2026-09-05']);
-  // Day, Month, Schedule and Just mine are gone.
+  // Day, Month, Schedule and Just mine are gone (2026-09-26).
   for (const f of ['calMonthHTML', 'calScheduleHTML', 'calSetMode', 'calSetMineOnly', 'calJumpDay'])
     assert.equal(typeof globalThis[f], 'undefined', f);
 });
@@ -82,8 +84,10 @@ test('dropping a check-in rewrites the cadence; an all-day drop is refused', () 
 });
 
 test('one lane\'s pile collapses to one box; only different lanes sit side by side', () => {
-  // Six agent events at one minute collapse into one box, not six slivers; an
-  // owner's step at the same minute sits beside that box.
+  // 2026-09-08, on a row of six slivers: "if there are six agent events,
+  // they should really somehow just be collapsed into one box… but if I have
+  // an action that's at the same time as an agent action, I would want those
+  // side by side."
   const ev = (id, at, kind) => ({ id, at, title: id, kind, lane: kind === 'owner' ? 'mine' : 'agents' });
   // An overlapping run in ONE lane — 10:00/10:15/10:30 chain through the
   // 30-minute block — is one group spanning first to last.
@@ -93,12 +97,13 @@ test('one lane\'s pile collapses to one box; only different lanes sit side by si
   assert.equal(runs[0].s, 10 * 60);
   assert.equal(runs[0].n, 10 * 60 + 30 + CAL_SLOT_MIN);
   assert.equal(runs[0].cols, 1);            // one box, full width
-  // The owner's step at the same minute keeps its own box beside the agents' pile.
+  // His step at the same minute keeps its own box beside the agents' pile.
   const mixed = calLayout([ev('a1', '10:00', 'run'), ev('a2', '10:00', 'run'), ev('m1', '10:00', 'owner')]);
   assert.equal(mixed.length, 2);
   assert.deepEqual(mixed.map(p => p.cols), [2, 2]);
   assert.notEqual(mixed[0].col, mixed[1].col);
-  // Two members already collapse; clear of each other they don't.
+  // Two members already collapse ("even if there were two for the agent, I
+  // would still kind of want that collapsed"); clear of each other they don't.
   assert.equal(calLayout([ev('r1', '19:30', 'run'), ev('r2', '19:45', 'run')]).length, 1);
   const clear = calLayout([ev('r1', '19:30', 'run'), ev('r2', '21:00', 'run')]);
   assert.equal(clear.length, 2);
@@ -107,12 +112,12 @@ test('one lane\'s pile collapses to one box; only different lanes sit side by si
 });
 
 test('a box fills every column that is empty beside it', () => {
-  // A quarter-wide 09:30 under a four-wide 08:00 row: the row should always
-  // be full when something is on at that time.
+  // 2026-09-30, on a quarter-wide 09:30 under a four-wide 08:00 row:
+  // "the row should always be full if they've got an event at that time".
   const ev = (id, at, kind, lane) => ({ id, at, title: id, kind, lane: lane || (kind === 'owner' ? 'mine' : 'agents') });
-  // Three lanes at 10:00 make three columns; the owner's 10:20 step chains the
-  // first column to 10:50, so the 10:35 run lands in the second and the third
-  // is empty beside it: two of three columns, not one.
+  // Three lanes at 10:00 make three columns; his 10:20 step chains the first
+  // column to 10:50, so the 10:35 run lands in the second and the third is
+  // empty beside it: two of three columns, not one.
   const laid = calLayout([ev('a', '10:00', 'owner'), ev('b', '10:00', 'chore', 'chores'), ev('c', '10:00', 'homework', 'homework'),
     ev('d', '10:20', 'owner'), ev('e', '10:35', 'run')]);
   const by = Object.fromEntries(laid.map(p => [p.e.id, p]));
@@ -125,16 +130,17 @@ test('a box fills every column that is empty beside it', () => {
   assert.match(calBlockHTML(by.e.e, by.e), /left:calc\(33\.33\d*% \+ 1px\);width:calc\(66\.66\d*% - 3px\)/);
   assert.match(calBlockHTML(by.b.e, by.b), /width:calc\(33\.33\d*% - 3px\)/);
   // A box never grows over a column that is taken for any part of its height.
-  // (a 08:00/08:20/08:40 pile reaches 09:10; the owner's 08:45 step covers
-  // only its bottom, and that is enough to keep it one column wide.)
+  // (a 08:00/08:20/08:40 pile reaches 09:10; his 08:45 step covers only its
+  // bottom, and that is enough to keep it one column wide.)
   const tall = calLayout([ev('r1', '08:00', 'run'), ev('r2', '08:20', 'run'), ev('r3', '08:40', 'run'), ev('m', '08:45', 'owner')]);
-  const pile = tall.find(p => p.members.length === 3), step = tall.find(p => p.e.id === 'm');
+  const pile = tall.find(p => p.members.length === 3), his = tall.find(p => p.e.id === 'm');
   assert.equal(pile.n, 9 * 60 + 10);
   assert.equal(pile.span, 1);
-  assert.equal(step.col, 1);
-  assert.equal(step.span, 1);
-  // A brush of a minute is not a stack: a 09:01 step reaches 09:31, and the
-  // 09:30 run beside it still takes the whole row.
+  assert.equal(his.col, 1);
+  assert.equal(his.span, 1);
+  // A brush of a minute is not a stack: his 09:01 step reaches 09:31, and the
+  // 09:30 run beside it still takes the whole row (the Sunday that stayed a
+  // quarter wide, 2026-09-30).
   const brush = calLayout([ev('x', '09:00', 'run'), ev('y', '09:01', 'owner'), ev('z', '09:30', 'run')]);
   const z = brush.find(p => p.e.id === 'z');
   assert.equal(z.col, 0);
@@ -192,28 +198,6 @@ test('the all-day band holds four; a fifth collapses to "+N more" opening the wh
   assert.match(grid, /min-height:92px/);
 });
 
-test('a reminder is dark blue and has no chips: the box and one Send', () => {
-  assert.equal(calColor({ kind: 'note', lane: 'mine' }), '#d93025');
-  assert.equal(calShade({ kind: 'note', lane: 'mine' }), CAL_NOTE);
-  const note = { id: 'cal-n1', ref: 'cal:cal-n1', item: true, kind: 'note', lane: 'mine', state: 'scheduled', mark: 'todo', title: 'Window closes',
-    detail: 'Nothing to buy before today.', thread_id: 't-1' };
-  const nh = calEntryHTML(note, {});
-  assert.match(nh, /<span class="tick">○<\/span>Window closes/);
-  assert.match(nh, /composerSend\('cal:cal-n1'\)[^>]*>Send</);
-  assert.match(nh, /placeholder="Anything to add \(optional\)"/);
-  assert.match(calChipHTML({ ...note, day: '2026-10-10' }), new RegExp('--c:' + CAL_NOTE));
-  // No chip, no strip, no button but Send: never Respond / Read, Did it / Skip.
-  assert.doesNotMatch(nh, /reply-strip|composerPickOutcome|>Respond<|>Read<|>Did it<|>Skip<|resolveCal\('cal-n1','done'\)/);
-  // Send over the empty box is the read card's second press: the box's card
-  // is `done` and asks "Send without" first (composer.js confirmEmpty).
-  const nst = composerState('cal:cal-n1');
-  assert.equal(nst.re.outcome, 'done');
-  assert.equal(nst.re.confirmEmpty, true);
-  assert.equal(nst.re.bare, true);
-  // Closed, it is the plain row with Reopen.
-  assert.match(calEntryHTML({ ...note, state: 'done', closed: true, mark: 'done' }, {}), /Reopen/);
-});
-
 test('a block carries what the drop needs, and an immovable row says why', () => {
   const e = {
     id: 'cal-9f51', ref: 'cal:cal-9f51', kind: 'owner', state: 'scheduled',
@@ -225,7 +209,7 @@ test('a block carries what the drop needs, and an immovable row says why', () =>
   assert.match(b, /data-move="item"/);
   assert.match(b, /data-day="2026-09-03"/);
   assert.match(b, /data-at="19:30"/);
-  assert.match(b, /--c:#d93025/);           // the owner's own step: red, whatever its goal
+  assert.match(b, /--c:#d93025/);           // his own step: red, whatever its goal
   // A row that cannot move says so on hover instead of dragging and failing.
   const job = { id: 'job:x:1', ref: 'job:x', kind: 'job', state: 'scheduled', day: '2026-09-03', at: '09:00', title: 'statement parse',
     lane: 'agents', why: 'A job\'s cadence lives in ops/schedule.json — no API moves it.' };
@@ -233,7 +217,7 @@ test('a block carries what the drop needs, and an immovable row says why', () =>
   assert.doesNotMatch(c, /data-move/);
   assert.match(c, /ops\/schedule\.json/);
   // Closed chips read closed, the way the agenda row does — and the line is
-  // won't-do's alone (✓ + strikethrough reads as its own
+  // won't-do's alone (2026-09-03: ✓ + strikethrough read as its own
   // opposite): done keeps its ✓ with no `wont` class, dismissed gets both.
   const doneChip = calChipHTML({ ...job, state: 'done', closed: true, mark: 'done', title: 'x' });
   assert.match(doneChip, /✓/);
@@ -241,41 +225,49 @@ test('a block carries what the drop needs, and an immovable row says why', () =>
   const wontChip = calChipHTML({ ...job, state: 'dismissed', closed: true, mark: 'wont', title: 'x' });
   assert.match(wontChip, /✕/);
   assert.match(wontChip, /closed wont/);
-  // An open step of the owner's wears ○ — still to do, however long past its minute —
+  // An open step of HIS wears ○ — still to do, however long past its minute —
   // on the block and the chip both; the agents' rows never do.
   assert.match(b, /○ Drink the juice/);
   assert.doesNotMatch(c, /○/);
 });
 
-// Red for the owner's tasks, grey for agent actions, purple for
-// recommendations — and no goal colouring. A fourth, Homework (light blue):
-// a practice round from Learn, still the owner's to do — it fires, nags and
-// closes like a task. A fifth, Scheduled runs (its own grey, its own
-// checkbox): the prompts agents write to be sent at a minute.
+// 2026-08-31: "i basically just want two colors. (1) red, for my
+// tasks, (2) grey for agent actions. i guess you could use (3) purple for
+// recommendations." Three lanes, three colours, and the goal colouring gone.
+// Then a fourth (2026-09-11): the perfect-pitch round from Learn was red
+// among his tasks — "I would actually like that to be called Homework, maybe
+// it's light blue". Still his to do: it fires, nags and closes like a task.
+// And a fifth (2026-09-13): the prompts agents write to be sent at a
+// minute — "Those should be called scheduled runs… sent by the agent and not
+// us… There should sort of be a checkbox… its own shade of gray."
 // The answers the hub stamps (store/close.go TickOutcomes / StepOutcomes).
 const tick = [{ value: 'done', label: 'Did it' }, { value: 'wont', label: 'Skip' }, { value: '', label: 'Send' }];
 const step = [{ value: 'done', label: 'Done' }, { value: 'wont', label: "Won't do" }, { value: '', label: 'Reply' }];
 test('five lanes, five colours, and nothing else', () => {
   assert.equal(CAL_SCHEDULED.color, '#78909c');
-  assert.ok(!CAL_SCHEDULED.owner && !calIsOwner({ kind: 'agent' }));
+  assert.ok(!CAL_SCHEDULED.his && !calIsHis({ kind: 'agent' }));
   assert.match(calRailHTML({ days: [] }), /One-off runs/);
   assert.equal(CAL_HOMEWORK.color, '#039be5');
-  assert.ok(CAL_MINE.owner && CAL_HOMEWORK.owner && !CAL_AGENTS.owner && !CAL_RECS.owner);
-  assert.ok(calIsOwner({ kind: 'homework' }) && calIsOwner({ kind: 'owner' }) && !calIsOwner({ kind: 'agent' }));
-  // It is a plan row (a bar), never a strip mark, and wears the owner's ○ / bold.
+  assert.ok(CAL_MINE.his && CAL_HOMEWORK.his && !CAL_AGENTS.his && !CAL_RECS.his);
+  assert.ok(calIsHis({ kind: 'homework' }) && calIsHis({ kind: 'owner' }) && !calIsHis({ kind: 'agent' }));
+  // It is a plan row (a bar), never a strip mark, and wears his ○ / bold.
   assert.equal(calIsPlan({ kind: 'homework', did: true, state: 'done' }), true);
   assert.equal(calGlyph({ kind: 'homework', state: 'scheduled', lane: 'homework', mark: 'todo' }), '○ ');
   const hw = { id: 'cal-hw', ref: 'cal:cal-hw', kind: 'homework', state: 'scheduled', day: '2026-09-12', title: 'Perfect pitch: one round',
     lane: 'homework', item: true, mark: 'todo', move: 'item', kind_label: 'homework', outcomes: tick };
   assert.match(calEntryHTML(hw, {}), /<span class="tick">○<\/span><strong>Perfect pitch: one round<\/strong>/);
-  // Homework gets the Recs box: Did it · Skip · Send in
-  // its footer, Did it twice over an empty box closes it with no session,
-  // words start one. No small "talk" button beside it any more.
+  // Homework gets the Recs box (2026-09-26): Did it · Skip · Send —
+  // since the web catch-up (2026-10-11) as chips over the words, the lit one
+  // sent by the box's one Send; words start a session. No small "talk"
+  // button beside it any more.
   const hwCell = calEntryHTML(hw, {});
   assert.match(hwCell, /data-c="cal:cal-hw"/);
-  assert.match(hwCell, /composerSend\('cal:cal-hw','done'\)[^>]*>Did it</);
-  assert.match(hwCell, /composerSend\('cal:cal-hw','wont'\)[^>]*>Skip</);
-  assert.match(hwCell, /composerSend\('cal:cal-hw',''\)[^>]*>Send</);
+  // Since 10-16 each chip leads with the desktop's icon (✓ ✕ bubble).
+  const ic = '[^>]*><span class="ic">.*?<\\/span>';
+  assert.match(hwCell, new RegExp(`composerPickOutcome\\('cal:cal-hw','done',0\\)${ic}Did it<`));
+  assert.match(hwCell, new RegExp(`composerPickOutcome\\('cal:cal-hw','wont',0\\)${ic}Skip<`));
+  assert.match(hwCell, new RegExp(`composerPickOutcome\\('cal:cal-hw','',0\\)${ic}Send<`));
+  assert.match(hwCell, /composerSend\('cal:cal-hw'\)[^>]*>Send</);
   assert.doesNotMatch(hwCell, />talk</);
   assert.doesNotMatch(hwCell, /resolveCal\('cal-hw','done'\)/);
   const task = { ...hw, id: 'cal-t', ref: 'cal:cal-t', kind: 'owner', lane: 'mine', kind_label: 'your step', outcomes: step };
@@ -283,13 +275,14 @@ test('five lanes, five colours, and nothing else', () => {
   assert.doesNotMatch(calEntryHTML(task, {}), /resolveCal\('cal-t','done'\)/);
   assert.match(calEntryHTML(task, {}), /data-c="cal:cal-t"/);
   // A chore no session is behind (the plants, hub `tick`) gets the tick box.
-  assert.match(calEntryHTML({ ...task, tick: true, due: 'on', outcomes: tick }, {}), /composerSend\('cal:cal-t','done'\)[^>]*>Did it</);
+  assert.match(calEntryHTML({ ...task, tick: true, due: 'on', outcomes: tick }, {}), new RegExp(`composerPickOutcome\\('cal:cal-t','done',0\\)${ic}Did it<`));
   assert.doesNotMatch(calEntryHTML(task, {}), />Did it</);
   assert.match(calRailHTML({ days: [] }), /Homework/);
-  // An install ask is the chat's teal cell on the calendar too, its own kind
-  // of cell: one Install
+  // An install ask is the chat's teal cell on the calendar too
+  // (2026-09-12: "Install app build should be its own kind of cell on the
+  // calendar… i wanted like install or approve install button"): one Install
   // button carrying the OTA link, Won't install as the out, never Done; the
-  // link line leaves the detail. Still the owner's lane (Just mine keeps it), teal
+  // link line leaves the detail. Still HIS lane (Just mine keeps it), teal
   // only in the shade — and so is the record it leaves once tapped.
   const inst = { id: 'ask-9', ref: 'ask:ask-9', ask_id: 'ask-9', kind: 'ask', ask_kind: 'install', state: 'open', day: '',
     title: 'Install app build 881 (tap the link)', detail: 'Teal on the calendar.\n[Install](https://hub.test/ota/tok/install.html)',
@@ -322,19 +315,46 @@ test('five lanes, five colours, and nothing else', () => {
   assert.match(calEntryHTML({ ...inst, ask_kind: 'physical' }, {}), /resolveAskGlobal\('ask-9','done'\)[^>]*>Done</);
   assert.deepEqual(CAL_LANES.map(l => l.key), ['mine', 'chores', 'homework', 'scheduled', 'agents', 'recs']);
   assert.deepEqual(CAL_LANES.map(l => l.color), ['#d93025', '#e8710a', '#039be5', '#78909c', '#5f6368', '#8e24aa']);
+  // A reminder is one of My tasks (no "To read" lane, 2026-10-10):
+  // the ordinary ○ row with homework's box and NO chips — the hub sends it
+  // no outcomes; the box and its one Send are the whole answer
+  // (2026-10-26: "what this really should have is nothing. No read or
+  // respond"). Its lane stays red, its shade is dark blue ("akin to a read").
+  assert.equal(calColor({ kind: 'note', lane: 'mine' }), '#d93025');
+  assert.equal(calShade({ kind: 'note', lane: 'mine' }), CAL_NOTE);
+  const note = { id: 'cal-n1', ref: 'cal:cal-n1', item: true, kind: 'note', lane: 'mine', state: 'scheduled', mark: 'todo', title: 'GLD window closes',
+    detail: 'No GLD buys before today.', thread_id: 't-1' };
+  const nh = calEntryHTML(note, {});
+  assert.match(nh, /<span class="tick">○<\/span>GLD window closes/);
+  assert.match(nh, /id="c-cal-cal-n1-send"[^>]*>Send</);
+  assert.match(nh, /placeholder="Anything to add \(optional\)"/);
+  assert.match(calChipHTML({ ...note, day: '2026-10-10' }), new RegExp('--c:' + CAL_NOTE));
+  // No chip, no strip, no button but Send: never Respond / Read, Did it / Skip.
+  assert.doesNotMatch(nh, /class="ask read"|reply-strip|composerPickOutcome|>Respond<|>Read<|>Did it<|>Skip<|resolveCal\('cal-n1','done'\)/);
+  // Send over the empty box is the read card's second press: the box's card
+  // is `done` and asks "Send without" first (composer.js confirmEmpty).
+  const nst = composerState('cal:cal-n1');
+  assert.equal(nst.re.outcome, 'done');
+  assert.equal(nst.re.confirmEmpty, true);
+  assert.equal(nst.re.bare, true);
+  // Closed, it is the plain row with Reopen.
+  assert.match(calEntryHTML({ ...note, state: 'done', closed: true, mark: 'done' }, {}), /Reopen/);
   assert.equal(calColor({ kind: 'owner', goal_id: 'make-more-money', lane: 'mine' }), '#d93025');
-  // A chore (the hub's lane: a dated step no session is behind) is orange, the owner's.
+  // A chore (the hub's lane: a dated step no session is behind) is orange, his.
   assert.equal(calColor({ kind: 'owner', lane: 'chores' }), '#e8710a');
-  assert.ok(calLaneOf({ lane: 'chores' }).owner);
+  assert.ok(calLaneOf({ lane: 'chores' }).his);
   calState.off = new Set(['chores']);
   assert.equal(calShown({ kind: 'owner', lane: 'chores' }), false);
   assert.equal(calShown({ kind: 'owner', lane: 'mine' }), true);
   calState.off = new Set();
 });
 
-// Ahead of now the calendar is the plan; behind it, the record of steps done —
-// reads, approvals, recs accepted — by the owner or by agents, each side
-// hideable on its own.
+// 2026-09-09: "in the future, the calendar is prospective events, but in
+// the past, it should really be more like steps that were done… it showed
+// where, for example, I click to see that I read things, or that I approve
+// certain actions, or that I just fulfilled recommendations or accepted
+// them… Sometimes I only want to see what I'm doing, and sometimes I only
+// want to see what the agent's doing."
 test('a did row is a record: its doer\'s lane, closed, and named for its deed', () => {
   // The hub stamps a record's lane (its doer's) and closed; the row carries
   // the why a drag reads.
@@ -369,8 +389,8 @@ test('a did row is a record: its doer\'s lane, closed, and named for its deed', 
 });
 
 test('a session\'s run of record collapses into one box named for the session', () => {
-  // A record reads at the scale of the work: one session's run of steps is
-  // one box.
+  // 2026-09-09: "ideally, they're at a larger scale. For example,
+  // 'migrate to Cloudflare from yesterday' might be one of these things."
   const did = (id, at, thread, actor) => ({
     id: 'did:ask:' + id, ref: 'ask:' + id, kind: 'ask', state: 'done', day: '2026-09-08', at,
     title: 't ' + id, did: true, verb: 'Read', actor: actor || 'owner', thread_id: thread,
@@ -385,7 +405,7 @@ test('a session\'s run of record collapses into one box named for the session', 
   assert.deepEqual(run[0].members.map(m => m.id), ['did:ask:a', 'did:ask:b', 'did:ask:c']);
   assert.equal(run[0].n, 16 * 60 + CAL_SLOT_MIN);   // the box ends at the last step, not two hours on
   // …but never across sessions, and never across lanes: the agent's side of
-  // the same session is its own box beside the owner's.
+  // the same session is its own box beside his.
   const two = calLayout([did('a', '13:00', 'th1'), did('b', '13:10', 'th2')]);
   assert.equal(two.length, 2);
   const lanes = calLayout([did('a', '13:00', 'th1'), did('b', '13:10', 'th1', 'auto')]);
@@ -418,28 +438,32 @@ test('a session\'s run of record collapses into one box named for the session', 
   assert.match(calBlockHTML(plain[0].e, plain[0]), /\+1/);
 });
 
-// With the record on the grid, done steps and planned items looked alike.
-// They need to be visually distinct, and less cluttered.
+// 2026-09-09, a day after the record shipped: "now there are many
+// overlapping tasks in various areas, and they're indistinguishable from
+// calendar events for me… I can't distinguish what I was doing in a bar from a
+// previous calendar item that I had set up… These need to be visually
+// distinct, and ultimately, things need to be less cluttered."
 test('three forms, three places: bars are the plan, the record is a strip, a rec is a bar at its minute', () => {
   calState.off = new Set(); calState.anchor = '2026-09-08';
   const plan = { id: 'cal:1', ref: 'cal:1', kind: 'owner', state: 'scheduled', day: '2026-09-08', at: '13:00', title: 'Book a dentist', lane: 'mine' };
   const done = { ...plan, id: 'cal:2', ref: 'cal:2', state: 'done', did: true, verb: 'Did', actor: 'owner', at: '09:00', title: 'Water the plants', closed: true };
   const read = { id: 'did:ask:a', ref: 'ask:a', kind: 'ask', state: 'done', day: '2026-09-08', at: '00:20',
-    title: 'The bank feed is $15.99/yr', did: true, verb: 'Read', actor: 'owner', thread_id: 'th1', thread_title: 'Statements', lane: 'mine', closed: true };
+    title: 'SimpleFIN is $15.99/yr', did: true, verb: 'Read', actor: 'owner', thread_id: 'th1', thread_title: 'Statements', lane: 'mine', closed: true };
   const ran = { ...read, id: 'did:ask:b', at: '00:40', actor: 'auto', verb: 'Ran', lane: 'agents' };
   const filed = { id: 'filed:rec:r1', ref: 'rec:r1', kind: 'rec', state: 'proposed', day: '2026-09-08', at: '02:40', title: 'Try Kagi', verb: 'Filed', lane: 'recs' };
   const html = calTimeGridHTML({ days: [{ day: '2026-09-08', entries: [plan, done, read, ran, filed] }] }, '2026-09-08', '2026-09-08');
   // The plan — open AND closed — is what a bar means. A closed item keeps its
-  // planned slot: its time is the time chosen, not the minute it was ticked.
+  // planned slot: its time is the time he chose, not the minute he ticked it.
   assert.match(html, /class="cal-ev block[^"]*"[^>]*data-id="cal:1"/);
   assert.match(html, /class="cal-ev block[^"]*closed[^"]*"[^>]*data-id="cal:2"/);
-  // The record is not a bar at all: two marks in the strip, the owner's and the
+  // The record is not a bar at all: two marks in the strip, his and the
   // agent's in their own halves of it, at the minute each happened.
   assert.doesNotMatch(html, /block[^>]*data-id="did:ask:/);
   assert.match(html, /class="cal-ev mark mine" data-id="did:ask:a"\n\s*style="--c:#d93025;top:14\.66[0-9]*px/);  // 00:20 of a 44px hour
   assert.match(html, /class="cal-ev mark agents"[^>]*data-id="did:ask:b"/);
   assert.match(html, /class="cal-plan inset"/);
-  // A rec is a BAR in the clock at the minute it was filed,
+  // A rec is a BAR in the clock at the minute it was filed (2026-09-11:
+  // "Its created date is always shown as a horizontal bar, not on the side"),
   // never a strip mark and never a band above the clock.
   assert.match(html, /class="cal-ev block rec"[^>]*data-id="filed:rec:r1"[^>]*\n\s*style="--c:#8e24aa;top:117\.33[0-9]*px/);  // 02:40 of a 44px hour
   assert.doesNotMatch(html, /mark[^>]*data-id="filed:rec:r1"/);
@@ -453,8 +477,10 @@ test('three forms, three places: bars are the plan, the record is a strip, a rec
   assert.doesNotMatch(bare, /cal-strip/);
 });
 
-// A rec is on the calendar twice: dark purple when filed, light purple when
-// accepted or declined, and struck through when declined.
+// 2026-09-09: "it'd be cool to see when recommendations are accepted
+// versus when they are created. Both those should go on the calendar… dark
+// purple for given recommendations and light purple for accepted or declined.
+// Declined maybe they're crossed through."
 test('a rec wears its life: dark filed, light decided, struck declined — two bars, never one box', () => {
   calState.off = new Set();
   const rec = (id, extra) => ({ id, ref: 'rec:r', kind: 'rec', day: '2026-09-08', at: '02:40', title: 'Try Kagi', lane: 'recs', ...extra });
@@ -469,8 +495,10 @@ test('a rec wears its life: dark filed, light decided, struck declined — two b
   assert.match(calBlockHTML(no, one(no)), /✕ Declined: Try Kagi/);
   // The month cell's chip says the same in the same shade.
   assert.match(calChipHTML(ok), new RegExp('chip closed rec decided"[^>]*--c:' + CAL_REC_DONE));
-  // The FILED bar carries the rec's current status, so an answered rec never
-  // looks open on the calendar: still dark — it is
+  // The FILED bar carries the rec's current status (2026-09-12, on two
+  // dark "Filed:" bars for recs he had already answered: "open look recs on
+  // the calendar that dont appear under recs… is that because i nixed them?
+  // if so we should have them displayed as crossed out"): still dark — it is
   // the minute it was filed — but faded with ✓ once accepted, ✕ + struck once
   // declined or expired. Only an unanswered rec's filed bar is full colour.
   const filedYes = rec('filed:rec:r', { state: 'accepted', verb: 'Filed', closed: true, mark: 'done' });
@@ -492,7 +520,9 @@ test('a rec wears its life: dark filed, light decided, struck declined — two b
   assert.ok(laid.every(p => p.cols === 2 && p.members.length === 1));
   // A rec is a moment: seven answers over an hour and a half are NOT one box
   // from 00:25 to 02:00 (the record's two-hour chain) — only the ones inside
-  // one slot pile, and the pile stays one slot tall. 00:25/00:26/00:40 share the 00:25 slot, 01:10/01:15
+  // one slot pile, and the pile stays one slot tall (2026-09-11: "Why is
+  // it tall? This shouldn't show recommendations over hours if they come at
+  // different times"). 00:25/00:26/00:40 share the 00:25 slot, 01:10/01:15
   // the 01:10 one, 01:50/02:00 the 01:50 one: three piles, each 30 min.
   const answers = ['00:25', '00:26', '00:40', '01:10', '01:15', '01:50', '02:00']
     .map((at, i) => ({ ...ok, id: 'did:rec:r' + i, at }));
@@ -505,7 +535,7 @@ test('a rec wears its life: dark filed, light decided, struck declined — two b
   assert.equal(filedTwice.length, 2);
   assert.ok(filedTwice.every(p => p.n - p.s === CAL_SLOT_MIN));
   // Both ends are on the calendar on their own days, and both hide with the
-  // recs tick — never with the owner's own lane.
+  // recs tick — never with his own lane.
   assert.equal(calLaneOf(ok).key, 'recs');
   calState.off = new Set(['recs']);
   assert.equal(calShown(ok), false);
@@ -534,7 +564,7 @@ test('the rail hides by lane only — closed is a look, never a filter', () => {
   assert.equal(calShown({ ...e, state: 'done', closed: true }), true);
   assert.equal(calShown({ ...e, state: 'dismissed', closed: true }), true);
   // An agent's cal item is a SCHEDULED run: its own tick hides it, the Agent
-  // runs tick does not.
+  // runs tick does not (2026-09-13: "a checkbox for scheduled jobs").
   const checkIn = { ...e, kind: 'run', ref: 'thread:t1', lane: 'agents' };
   calState.off = new Set(['scheduled']);
   assert.equal(calShown(e), false);
@@ -549,7 +579,7 @@ test('the rail hides by lane only — closed is a look, never a filter', () => {
   assert.equal(calShown({ ...e, kind: 'owner', lane: 'mine' }), true);
   // The "Decided actions" calendar is gone: a decided action is just closed,
   // ✓ and muted on its day — and the "Done & decided" tick that could hide
-  // it went the same way. A stale saved value is ignored.
+  // it went the same way (2026-09-11). A stale saved value is ignored.
   const act = st => ({ id: 'a', ref: 'action:a', kind: 'action', state: st, lane: st === 'proposed' ? 'mine' : 'agents', closed: st !== 'proposed' });
   calState.off = new Set();
   assert.equal(calShown(act('approved')), true);
@@ -570,8 +600,9 @@ test('the detail panel is the agenda row itself, not a second card', () => {
   calState.off = new Set();
   calState.open = 'cal-1a2b3c4d';
   const html = calPanelHTML({ days: [{ day: '2026-09-03', entries: [e] }] });
-  // Acting on a calendar item needs its full text and its reply box, so the
-  // panel carries calEntryHTML's composer verbatim.
+  // "If I'm going to do something on the calendar, I need to be able to
+  // see the full text. This thing where I can click in here is really very
+  // useful" — so the panel carries calEntryHTML's composer verbatim.
   assert.match(html, /<div class="card cal">/);
   assert.match(html, /composerSend\('cal:cal-1a2b3c4d'\)/);
   assert.match(html, /· 19:30/);
@@ -595,7 +626,7 @@ test('a browser that remembers the six calendars opens with all five lanes on', 
   assert.deepEqual([...calState.off], []);
   assert.equal(calState.goalsOff, undefined);   // the goal filter is gone entirely
   assert.equal(calState.colorBy, undefined);
-  // And a lane you really did untick survives the round trip.
+  // And a lane he really did untick survives the round trip.
   calState.off = new Set(['recs']); calStateSave(); calState.off = new Set();
   calStateLoad();
   assert.deepEqual([...calState.off], ['recs']);
@@ -627,10 +658,11 @@ test('the rail trays: Overdue rows wear their day, Do soon its added day, Anytim
   assert.equal(calFind({ soon: [todo] }, 'quartet'), todo);
 });
 
-// The hub stamps `cancelled` on a won't-do row closed before its day; the page
-// drops it from every list once, as the response arrives, so no bar, popout
-// line, Due dot or strip mark can draw it. A skip on the day (no stamp) stays
-// the struck row.
+// 2026-10-19: "these were not skipped, they were cancelled… a skipped
+// thing is something I didn't do on the day." The hub stamps `cancelled` on a
+// won't-do row closed before its day; the page drops it from every list once,
+// as the response arrives, so no bar, popout line, Due dot or strip mark can
+// draw it. A skip on the day (no stamp) stays the struck row.
 test('a row cancelled before its day is pruned from every list once', () => {
   const gone = { id: 'cal-x', ref: 'cal:cal-x', kind: 'owner', day: '2026-10-21', title: 'Movies', state: 'dismissed', lane: 'mine', closed: true, mark: 'wont', cancelled: true };
   const skip = { id: 'cal-y', ref: 'cal:cal-y', kind: 'owner', day: '2026-10-19', title: 'Haircut', state: 'dismissed', lane: 'mine', closed: true, mark: 'wont' };

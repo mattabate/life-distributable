@@ -2,8 +2,9 @@
 'use strict';
 // ================= calendar =================
 // The page lists the agenda and closes items; it does not CREATE them. Every
-// dated thing is put here by a session (`lifectl cal add`) — items are added
-// by agents, never by hand — so the New-item form that used to sit at the top is gone (the
+// dated thing is put here by a session (`lifectl cal add`) — 2026-08-28:
+// "Calendar items are only going to be added by agents and not me manually
+// ever" — so the New-item form that used to sit at the top is gone (the
 // POST /calendar route stays for lifectl). Two things it lists are not items
 // and cannot be resolved as one: `run:` / `job:` rows are a thread's or job's
 // next check-in projected forward, and `ask:` rows are open asks with no
@@ -38,19 +39,38 @@ async function drawCalendar(view, rest) {
   setRedraw(draw, view);
 }
 views.calendar = { draw: drawCalendar, redraw: () => (route.redraw ? pageRedraw() : render()) };
+registerTab({ key: 'calendar', label: 'Calendar', order: 30, badge: 'calendar' });
+// Two files a side since 08-31: `calendar.js` registers the page and draws
+// the Schedule mode, `calgrid.js` draws Day/Week/Month — and a snap of the
+// grid must name the file that actually drew it. (The phone's CalendarGrid
+// has Day only: a week of columns was unreadable at 390pt.)
+registerPlace('calendar', { label: 'Calendar', view: 'views/calendar.js', phone: 'CalendarView.swift',
+  also: ['views/calgrid.js', 'CalendarGrid.swift'] });
 // (The page fetched /goals until 2026-08-31, to colour the grid by goal. That
 // colouring is gone — three colours, and only three — so the request is too.)
 
 // One agenda row. Closed rows look closed, the same way the phone's
-// `CalEntryRow` draws them, in the one glyph language of calgrid.js
-// `calGlyph` (✓ + strikethrough read as its own opposite): **done** = ✓,
-// muted, NOT struck — the record of what the owner got through stays on its
-// day; **dismissed** = ✕ and the title struck through (cleared, not
-// happening); **the owner's open rows** = ○ and full weight, however long ago their minute
+// `CalEntryRow` draws them (2026-08-27, console screenshot: "both of
+// these are already completed… right now it makes it look like these are
+// still open"), in the one glyph language of calgrid.js `calGlyph`
+// (2026-09-03 — ✓ + strikethrough read as its own opposite): **done** = ✓,
+// muted, NOT struck — the record of what he got through stays on its day;
+// **dismissed** = ✕ and the title struck through (cleared, not happening);
+// **open rows of his** = ○ and full weight, however long ago their minute
 // was. Open `owner` steps alone are bold, as on the phone. Top-level so the
 // test file can render it without a browser. `opts.dated`: the row is drawn
 // away from its day (the Overdue tray), so the meta line says the day too —
 // "Tue 16 20:00" (`calWhenShort`, the phone's `calWhenShort`).
+// The session inside a `claude:thread:<id>` actor, '' for the owner / hub / a job.
+const calActorID = i => String(i.actor || '').startsWith('claude:thread:') ? i.actor.slice(14) : '';
+// "by …": a session as a link named for it (its id when the hub knows no
+// title), anyone else as the word they are.
+function calActorHTML(i) {
+  if (!i.actor) return '';
+  const id = calActorID(i);
+  return id ? `<a href="#/sessions/${esc(id)}">${esc(i.actor_title || id)}</a>` : esc(i.actor);
+}
+
 function calEntryHTML(i, opts) {
   const dated = !!(opts && opts.dated);
   const isItem = !!i.item;
@@ -67,18 +87,23 @@ function calEntryHTML(i, opts) {
   const proposed = i.kind === 'action' && i.state === 'proposed';
   const actID = proposed ? esc(String(i.ref || '').replace(/^action:/, '') || i.id) : '';
   const actArg = proposed && i.thread_id ? `{id:'${actID}',thread_id:'${esc(i.thread_id)}',title:'${esc(String(i.title || '').replace(/'/g, '’'))}'}` : '';
-  // The owner's own task closes like a rec — with words, from a box under the
-  // row (calStepBox) — so the buttons are not here for it. A closed item keeps
-  // Reopen: the undo a stray tap needs. Agent items and asks keep the plain
-  // pair. Homework is a COMPLETION, not a conversation: one tick, no words —
+  // His own task closes like a rec — with words, from a box under the row
+  // (calStepBox) — so the buttons are not here for it. A closed item keeps
+  // Reopen: the undo a stray tap needs (2026-08-29: "there's no way to
+  // get it back"). Agent items and asks keep the plain pair. Homework is a
+  // COMPLETION, not a conversation (2026-09-12: "I need some way of
+  // marking these completed as I do… 'I did this'"): one tick, no words —
   // and the hub ticks it itself when the evidence lands (a full pitch round).
   // The hub's `tick` says which: no session waits on it (homework, a chore
-  // that needs no agent behind it). A reminder (`note`) takes the same box
-  // with no chips at all: the box and its one Send.
+  // like the plants — 2026-09-26: "it doesn't need an agent behind it").
+  // A reminder (`note`) takes the same box with no chips at all
+  // (2026-10-26 00:43: "what this really should have is nothing. No read or
+  // respond. The only thing I can do is send a message to it").
   const homework = isItem && (i.tick || i.kind === 'homework' || i.kind === 'note');
-  const ownerStep = isItem && i.kind === 'owner' && !homework;
-  // An install ask is the same teal cell here as in the chat — its own kind
-  // of cell with an Install button, not Done:
+  const hisStep = isItem && i.kind === OWNER && !homework;
+  // An install ask is the same teal cell here as in the chat
+  // (2026-09-12: "Install app build should be its own kind of cell on the
+  // calendar… i wanted like install or approve install button" — not Done):
   // title, description, one Install button carrying the OTA link, and
   // Won't install as the small out. It sits in Anytime while open; the tap
   // closes it and the record row ("Installed: build N") takes its place at
@@ -92,15 +117,16 @@ function calEntryHTML(i, opts) {
     // The row's decisive `outcomes` (Approve · Deny); Reply is the session's.
     : proposed ? (i.outcomes || []).filter(o => o.value).map((o, n) => `<button class="sm${n ? '' : ' primary'}" onclick="${actArg
         ? `openApprove(${actArg},'${esc(o.value)}')` : `decideAction('${actID}',${o.value === 'approved'})`}">${esc(o.label)}</button>`).join('\n                  ')
-    : ownerStep || homework ? ''
+    : hisStep || homework ? ''
     : isItem ? `<button class="sm" onclick="resolveCal('${esc(i.id)}','done')">Done</button>
                 <button class="sm" onclick="resolveCal('${esc(i.id)}','dismissed')">Dismiss</button>`
     : install ? (macInstall ? `<button class="sm install" onclick="macInstall('${esc(i.ask_id)}')" title="Build it if it isn't already, then restart the desktop app on it; the card closes itself">Install</button>`
                   : installLink ? `<a class="btn sm install" href="${esc(installLink)}" target="_blank" title="Open the install page — the phone reports the new build and the card closes itself">Install</a>`
                   : `<button class="sm primary" onclick="openRespond('${esc(i.ask_id)}')">Respond</button>`)
                 + `<button class="sm" onclick="resolveAskGlobal('${esc(i.ask_id)}','dismissed')" title="Skip this build">Won't install</button>`
-    // An ask answers from its session's chat bar, armed on the card —
-    // Respond, the chat card's own button, first.
+    // An ask answers from its session's chat bar, armed on the card
+    // (2026-10-05, 23:40, on a Sessions-waiting row: "there isn't any sort of
+    // bar to respond") — Respond, the chat card's own button, first.
     : i.ask_id ? `${i.thread_id ? `<button class="sm primary" onclick="openRespond('${esc(i.ask_id)}')" title="Open its session with the chat bar replying to this card">Respond</button>
                   ` : ''}<button class="sm" onclick="resolveAskGlobal('${esc(i.ask_id)}','done')">Done</button>
                   <button class="sm" onclick="resolveAskGlobal('${esc(i.ask_id)}','dismissed')">Dismiss</button>`
@@ -111,22 +137,30 @@ function calEntryHTML(i, opts) {
     : i.kind === 'rec' ? 'Check back: ' + mdInline(i.title) : mdInline(i.title);
   const title = done ? `<span class="tick">✓</span>${text}`
     : closed ? `<span class="tick">✕</span><s>${text}</s>`
-    : (calLaneOf(i).owner ? '<span class="tick">○</span>' : '')
-      + (calIsOwner(i) ? `<strong>${text}</strong>` : text);
+    : (calLaneOf(i).his ? '<span class="tick">○</span>' : '')
+      + (calIsHis(i) ? `<strong>${text}</strong>` : text);
   const href = refHref(i.ref, i.thread_id);
   // What the row's session is doing RIGHT NOW rides beside its link — the
   // board's own running / speaking / waiting-to-speak pills, stamped by the
-  // hub as `live` — so the step just answered from says its session is
-  // on it instead of falling silent. The page redraws every
+  // hub as `live` — so the step he just answered from says its session is
+  // on it instead of falling silent (2026-09-26: "I just submitted to
+  // the session, but it doesn't say running. It is running… there's no way
+  // of telling that the cell is actually working"). The page redraws every
   // 30 s and right after a send, so the pill comes and goes with the turn.
   const live = livePillsHTML(i.live);
   const link = (href && i.kind === 'rec' ? `<a href="${href}">open rec</a>`
     : href && i.kind === 'action' ? `<a href="${href}">${i.thread_id ? 'open in session' : 'open'}</a>`
     : href && i.did ? `<a href="${href}">open</a>`
-    : i.thread_id ? `<a href="#/sessions/${esc(i.thread_id)}">open session</a>` : '') + (live ? ' ' + live : '');
-  // A record says whose hands and which session: "by <actor> · <session
-  // title>" — the portfolio line under the deed.
-  const record = i.did ? `${i.actor ? 'by ' + esc(i.actor) : ''}${i.thread_title ? (i.actor ? ' · ' : '') + `<a href="#/sessions/${esc(i.thread_id)}">${esc(i.thread_title)}</a>` : ''} ` : '';
+    // Lands on the item's own card in the chat, not the chat's foot (the
+    // desktop's open session): a fired step IS its card (ask_id = its id).
+    : i.thread_id ? `<a href="#/sessions/${esc(i.thread_id)}${i.ask_id ? '/' + esc(i.ask_id) : ''}">open session</a>` : '') + (live ? ' ' + live : '');
+  // A record says whose hands and which session: "by owner · Migrate the
+  // site" — the portfolio line under the deed. A session that did it
+  // is a link with its name (hub `actor_title`), never a bare id: the way
+  // back into a closed chat from its step (2026-10-09: "why isn't there
+  // a button to click into its session? even though it's closed?").
+  const by = calActorHTML(i);
+  const record = i.did ? `${by ? 'by ' + by : ''}${i.thread_title && i.thread_id !== calActorID(i) ? (by ? ' · ' : '') + `<a href="#/sessions/${esc(i.thread_id)}">${esc(i.thread_title)}</a>` : ''} ` : '';
   const detail = install ? askDetailShown(i.detail) : i.detail;
   // An open to-do never says a time as if it were due then: "added Sep 20".
   const when = i.soon && !closed ? calAdded(i) : dated ? calWhenShort(i) : i.at;
@@ -138,66 +172,79 @@ function calEntryHTML(i, opts) {
       ${record}${i.repeat ? esc(i.repeat) + ' · ' : ''}${i.goal_id ? `<a href="#/goals/${esc(i.goal_id)}">${esc(i.goal_id)}</a>` : ''}
       ${link}
       <div class="grow"></div>${acts}
-    </div>${!closed && ownerStep ? calStepBox(i) : !closed && homework ? calHomeworkBox(i) : ''}</div>`;
+    </div>${!closed && hisStep ? calStepBox(i) : !closed && homework ? calHomeworkBox(i) : ''}</div>`;
 }
 
-// Homework is the reverse of the owner's own step: usually a tick, sometimes a
-// talk — tick it with no session, or start one about it, both effortless. So
-// it gets the Recs
+// Homework is the reverse of his own step: usually a tick, sometimes a talk
+// (2026-09-26: "I should just be able to approve it without starting a
+// session, but similarly, I should be able to start a session about it if I
+// want, and the UI needs to be like screamingly easy"). So it gets the Recs
 // box: Did it / Skip pressed over an empty box turn into "Send with no note"
 // and the second press closes it on the hub — no session wakes. Words go to
 // a session with the item's name as its title, the hub framing the step
 // (calendar.go header: title, day, goal, detail) above them; Send with words
-// and no pick leaves the item open. The buttons
+// and no pick leaves the item open. Replaced a small "talk" button left of the
+// pair that opened an empty session ("I hate the talk button"). The buttons
 // are the row's own `outcomes` (store.TickOutcomes: Did it · Skip · Send).
 // A reminder (`note`) wears the same box with NO chips: the hub sends it no
-// outcomes, and Send is its one answer. It is the chat read card's shape
-// (`bare`, `confirmEmpty`): Send over an empty box asks "Are you sure? Send
-// without" and the second press closes it as read with no session; words go
-// to its session and close it as read too, as answering a read card in the
-// chat does.
+// outcomes, and Send is its one answer (2026-10-26 00:43, on the
+// desktop popover: "what this really should have is nothing. No read or
+// respond. The only thing I can do is send a message to it… if I double
+// click send, maybe it just marks it as read or closed, and if I include any
+// notes, it marks it as respond"). So it is the chat read card's shape
+// (threads.js: `bare`, `confirmEmpty`): Send over an empty box asks "Are you
+// sure? Send without" and the second press closes it as read with no
+// session; words go to its session and close it as read too, as answering a
+// read card in the chat does. Before: Respond · Read chips (2026-10-10 → 10-26;
+// a blue "To read" card of its own lived 00:19–00:35 on 10-10).
 function calHomeworkBox(i) {
   const tick = ((i.outcomes || []).find(o => o.value === 'done') || {}).label || 'Did it';
   const note = i.kind === 'note';
   // A reminder's words close it as read: Send is read.
   const outcome = p => note ? 'done' : p.outcome;
+  // Chips over the box and one Send, the desktop's panel since 2026-10-08
+  // (CalendarView MacRespond): light Did it / Skip and Send closes it with
+  // no session; words go to its session. A reminder: the box and Send alone.
   return replyBox(calKey(i.id), {
     ref: 'cal', id: i.id, title: i.title || '',
     ...(note ? { bare: true, confirmEmpty: true, outcome: 'done' } : {}),
   }, {
-    outcomes: i.outcomes,
-    emptyMsg: `Type something first — or press ${tick} twice to just tick it.`,
-    // Words for a box Send can take empty.
+    outcomes: i.outcomes, chips: true,
+    emptyMsg: `Type something first — or light ${tick} and Send to just tick it.`,
+    // The desktop's words for a box Send can take empty (RespondModel.placeholder).
     placeholder: note ? 'Anything to add (optional)'
-      : `How did it go? Words start a session about it — or just press ${tick}.`,
+      : `How did it go? Words start a session about it — or light ${tick} and Send.`,
     redraw: () => pageRedraw(),
     after: async () => { await pageRedraw(); refreshBadges(); },
     send: p => postReply(p, {
       close: async (p, words) => {
         if (words) return undefined;
-        await post(`/calendar/${i.id}/resolve`, { outcome: p.outcome || 'done', by: 'owner' });
+        await post(`/calendar/${i.id}/resolve`, { outcome: p.outcome || 'done', by: OWNER });
         return p.outcome === 'wont' ? 'skipped' : note ? 'read' : 'done';
       },
       prompt: p => ({
         target: i.thread_id ? 'new-or:' + i.thread_id : 'new', title: i.title || '',
         in_reply_to: calKey(i.id), ...(outcome(p) ? { outcome: outcome(p) } : {}),
       }),
-      sent: p => (note ? 'read — ' : p.outcome === 'done' ? 'done — ': p.outcome === 'wont' ? 'skipped — ' : '')
+      sent: p => (note ? 'read — ' : p.outcome === 'done' ? 'done — ' : p.outcome === 'wont' ? 'skipped — ' : '')
         + (i.thread_id ? 'your words went to its session' : 'a session is starting about it'),
     }),
   });
 }
 
-// Closing one of the owner's own steps is a message, not a button: a stray
-// tap must not mark it done, so it needs words. The box is THE composer
-// (composer.js) — the same one the chat and the Recs page draw, with no
-// duplicate code. Which means a calendar answer carries everything a chat
-// message does: a pasted screenshot, Attach, drop, which session hears it,
-// and when.
+// Closing one of the owner's own steps is a message, not a button
+// (2026-08-29, after a stray tap marked an errand done: "when you mark it
+// done… you have to respond to it… if it doesn't have a message, you
+// shouldn't be allowed to send it"). The box is THE composer (composer.js) —
+// the same one the chat and the Recs page draw, because "recs and calendar
+// should have very similar UIs for sending back things… you should not have
+// as much duplicate code" (2026-08-29). Which means a calendar answer
+// now carries everything a chat message does: a pasted screenshot (the thing
+// he asked for), Attach, drop, which session hears it, and when.
 //
 // Send posts ONE prompt at `cal:<id>` — the road the phone's Respond sheet
 // already takes. With done|wont the hub claims the item as it queues the
-// prompt (threads.Queue → Manager.ClaimCal), so the step closes and the words
+// prompt (threads.Queue → Manager.ClaimCal), so the step closes and his words
 // arrive as its answer; with no chip lit the step stays open and the words
 // just go. Nothing here writes the row itself.
 // The chips are the row's own `outcomes` (store.StepOutcomes: Done · Won't
@@ -208,8 +255,9 @@ const CAL_STEP_MEANS = {
   '': 'the step stays open — your words go to the session that put it here',
 };
 const calKey = id => 'cal:' + id;
-// A to-do no session is behind (soon, no thread) closes on the hub with the
-// words on the row; nothing is woken to hear them.
+// A to-do no session is behind (soon, no thread) closes on the hub with his
+// words on the row; nothing is woken to hear them (2026-09-21: "It
+// doesn't need to be tied to a session").
 const CAL_TODO_MEANS = {
   done: 'the to-do closes as done, with your words on it',
   wont: "the to-do closes as won't do, with your words on it",
@@ -219,14 +267,15 @@ const calLoneTodo = i => !!i.soon && !i.thread_id;
 // The outcomes ride on `re` as chips here, not as footer buttons: a step
 // never closes silently, so the pick is lit first and the words sent after.
 // No route: answering a step always means now, to the session that put it
-// here — same as the phone's Respond sheet.
+// here (2026-09-06: responding to a card "should always mean now and in
+// this session") — same as the phone's Respond sheet.
 function calStepBox(i) {
   const lone = calLoneTodo(i);
   return replyBox(calKey(i.id), {
     ref: 'cal', id: i.id, title: i.title || '',
     outcomes: i.outcomes || [], means: lone ? CAL_TODO_MEANS : CAL_STEP_MEANS,
   }, {
-    // Done and Won't do both close it, and the owner's step never closes silently.
+    // Done and Won't do both close it, and a step of his never closes silently.
     requireWords: true,
     placeholder: st => st.re && st.re.outcome
       ? 'What happened? Done and Won\'t do close it with your words.'
@@ -237,7 +286,7 @@ function calStepBox(i) {
     send: p => postReply(p, {
       close: async p => {
         if (!lone || !p.outcome) return undefined;
-        await post(`/calendar/${i.id}/resolve`, { outcome: p.outcome, by: 'owner', note: p.text });
+        await post(`/calendar/${i.id}/resolve`, { outcome: p.outcome, by: OWNER, note: p.text });
         return p.outcome === 'done' ? 'done' : "won't do";
       },
       // `new-or:` so a session that has since ended does not swallow the answer.
@@ -252,13 +301,13 @@ function calStepBox(i) {
   });
 }
 
-// Every open step of the owner's on the page gets the composer's wiring: the draft it
+// Every open step of his on the page gets the composer's wiring: the draft it
 // keeps across the 30 s redraw, ⌘↵, the file input and the drop zone.
 function wireCalNotes(root) {
   for (const el of root.querySelectorAll('[data-c]')) wireComposer(el.dataset.c);
 }
 // The kind pill takes its lane's own colour, so a row says the same thing in
-// the agenda that its chip says on the grid: red = the owner's, grey = the agents',
+// the agenda that its chip says on the grid: red = his, grey = the agents',
 // purple = a rec (calgrid.js, CAL_LANES). Inline rather than a pill class
 // because the classes are named for the board's palette, not this one —
 // `.pill.purple` is the accent BLUE, which would have quietly made a rec the
@@ -269,13 +318,15 @@ const calPillStyle = i => {
 };
 // Where a row opens: refHref (ui.js) — one table for every ref on the console.
 
-// An item's steps: one line each under the title, in the calendar's one glyph
+// An item's steps (2026-10-18: "I only skipped part of my morning
+// routine"): one line each under the title, in the calendar's one glyph
 // language, with its own Did it · Skip; a closed one keeps Undo. The item
 // closes itself when the last one does (hub, calendar/steps.go). Shared with
 // the chat card (ui.js askCard), so both draw the same rows.
-// `stage` (the chat card): Did it · Skip · Reply arm the composer instead,
-// and nothing moves until Send. stage.armed(n) is that step's pick on the
-// bar, undefined if none.
+// `stage` (the chat card): Did it · Skip · Reply arm the composer instead —
+// nothing moves until Send (2026-10-23: "it's like send message to do…
+// I don't like the idea that it explicitly ticks stuff off before I hit
+// send"). stage.armed(n) is that step's pick on the bar, undefined if none.
 function calStepsHTML(i, stage) {
   const steps = i.steps || [];
   if (!steps.length) return '';
@@ -297,11 +348,11 @@ function calStepsHTML(i, stage) {
 }
 
 async function closeCalStep(id, n, outcome) {
-  return act(() => post(`/calendar/${id}/steps/${n}`, { outcome, by: 'owner' }), 'step ' + n + ' ' + outcome,
+  return act(() => post(`/calendar/${id}/steps/${n}`, { outcome, by: OWNER }), 'step ' + n + ' ' + outcome,
     async () => { await pageRedraw(); refreshBadges(); });
 }
 
 async function resolveCal(id, state) {
-  return act(() => post(`/calendar/${id}/resolve`, { state, by: 'owner' }), 'item ' + state,
+  return act(() => post(`/calendar/${id}/resolve`, { state, by: OWNER }), 'item ' + state,
     async () => { await pageRedraw(); refreshBadges(); });
 }

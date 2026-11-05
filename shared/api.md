@@ -132,6 +132,8 @@ Same body back. The value is stamped into `threads.model_class` at CREATE and ne
 that thread: a conversation keeps its model for life, so the prompt cache survives (no switching in the
 middle of a chat). Flipping it
 steers the next new session only; running and existing sessions are untouched.
+400 on a model above `model_cap` (`PATCH /api/v1/settings`); on GET those rungs read `open: false`,
+`why: "above the model cap (<family>)"`.
 
 ### GET /api/v1/spend/budget
 The day's spend guards (2026-08-26, `ops/hub.json model_policy`; both numbers are the owner's knobs).
@@ -262,7 +264,7 @@ is cleared by the next success; `errors` counts failed runs since boot. A task
 never overlaps itself: still running when due → skipped, due again on the
 first tick after it finishes. Both Settings screens print the table.
 
-Goal: `{id (slug of title), created_at, updated_at, title, statement, horizon: month|quarter|year|ongoing, cadence: daily|weekly|monthly, status: active|paused|done, sources, last_reviewed_at?, note_count, digest?, digest_at?, emblem: {symbol: health|money|agent|market|audience|learn|art|goal, hue: 0..359}}`
+Goal: `{id (slug of title), created_at, updated_at, title, statement, horizon: month|quarter|year|ongoing, cadence: daily|weekly|monthly, status: active|paused|done, sources, last_reviewed_at?, note_count, digest?, digest_at?, section? (the group the owner files it under, "" = none), emblem: {symbol: health|money|agent|market|audience|learn|art|goal, hue: 0..359}}`
 
 `emblem` is the goal's face on a page (so a card is never blank): derived from the goal's name on every
 read (`goals.EmblemFor`), never stored or editable. Both surfaces draw the same
@@ -286,8 +288,9 @@ Body Goal fields (title required) → 201 Goal. 400 on duplicate slug.
 → Goal.
 
 ### PATCH /api/v1/goals/{id}
-Body `{field: value}` for title|statement|horizon|cadence|status|sources|digest → Goal.
-Setting `digest` stamps `digest_at`.
+Body `{field: value}` for title|statement|horizon|cadence|status|sources|digest|section → Goal.
+Setting `digest` stamps `digest_at`. `section` names the group a page lists the goal under
+(`lifectl goal <id> set section "Health"`; `""` ungroups it); goals sharing a section are one group.
 
 ### GET /api/v1/goals/{id}/notes
 Query `limit`, `since=digest` (only decision/context/intent notes newer than the goal's `digest_at` — what the digest does not know yet). → `[Note]` newest first. Note = `{id, goal_id, created_at, author, kind, text, by, thread_id?}`: `by` is who wrote it in words — the session's title for a `claude:thread:<id>` author (`thread_id` set when that session still exists, so a page links it), "You" for `owner`, else the author minus its `claude:` prefix. Both surfaces print `by` and the date and never `author` or `kind` (the kind is a session's filing word, not the reader's).
@@ -316,6 +319,12 @@ JSON body `{thread_id?, secs}` → `{speaking:[key…]}`. The phone's Play butto
 ### POST /api/v1/voice/hush
 `{card}` → 204. Drops that card's queued spoken line and leaves the card open: dismissing the audio is not dismissing the card. An ask whose line is queued carries `waiting_to_speak: true`; its Play button reads "Waiting to speak", and a double tap sends this.
 
+### GET /api/v1/mic
+→ `{on, warm, since?, device?, thread_id?, box?, origin_ms?, text, volatile, segments, seq, status?, stopping?, error?}` — the console's microphone (`server/mic.go`). `text` is the finals of the current take joined, `volatile` the tail still changing (memory only, never stored), `seq` bumps on every change so the console can redraw its box only when something moved; `status` says what the helper is doing (loading the model, permission, listening, stopping); `stopping` = off but the take is still finalizing (a tap right after a phrase: the last final lands within the second, and the console keeps following its box until this is false). `warm` = a helper is standing by with the speech model loaded and the input CLOSED, so the next switch-on is instant; the hub keeps one warm from boot and after every take. A take that hears nothing for 5 minutes switches itself off and says so in `error`.
+
+### POST /api/v1/mic
+JSON body `{on, thread_id?, box?, origin_ms?, send?: {page}}` → the same view (+ `sent`, the new session's id, when an off started one) (503 with `error` when the helper cannot start). `on: true` runs `ops/bin/mic` (`ops/mic.swift`, Apple's on-device SpeechAnalyzer, nothing leaves the Mac) and every FINAL phrase lands as a `console/speech` observation — payload `{text, started, ended, words:[[t0_ms, t1_ms, word]…], device, thread_id?, box?}`, `ts` = the phrase's start, `uniq_key speech:<start ms>` (`lifectl obs speech --source console` reads them). `on: false` closes the helper's stdin; it keeps hearing 0.6 s for the word in flight, finalizes (the tail lands as a last phrase; a tail it could not finalize is kept as text too) and exits, and the response is the whole take. Only the owner switches it on (the Mic button on the console's bar, a box's own Mic button, or a lone tap of the Option key while the console has focus); the hub never does on its own — the warm helper opens no input until the owner's "go" — except to put the switch back after a restart: `data/mic.on` holds the thread while the mic is on and goes at off, and a hub that boots and finds it switches on again. Already on + `on: true` = the same take continues, and a different `thread_id` moves it: the rows from then on carry that session (the console sends it as the caret moves between boxes; empty = no box, rows only). `box` = the console composer the words go to (rows carry it; empty = none); `origin_ms` = the tap on, kept in `data/mic.on` and in the view so a restart never moves it. `on: false` with `send: {page}` (the console adds it on a tap off on a page other than Sessions) starts ONE new session with the take's phrases that went into no box (no `thread_id`, no `box`) and the page; nothing to send = no session; a second off finds nothing past the last send. Only that POST sends — a restart, the idle switch-off or a dying helper never do. `ops/hub.json` `mic_input`: `default` (the macOS default input) or `builtin` (the Mac's own microphone).
+
 ### GET /api/v1/observations/counts
 → `[{source, kind, n, first, last}]` — what data the hub has.
 
@@ -342,14 +351,29 @@ Each owner message or scheduled check-in resumes the same Claude Code conversati
 
 ### GET /api/v1/threads
 Query `archived=1` to include archived; `q=<words>` keeps only the sessions whose title, goal, standing prompt, last message or cards (any ask the session ever raised) carry every word (case-insensitive) — `lifectl threads --q <word>`, how an agent finds the session with experience in a task before `lifectl relay`. Newest **message** first — the `ts` of the last message on the thread, whoever wrote it (the owner, the agent, a calendar item, the hub), so the list reads as the order things were said; `updated_at` is NOT the sort key (ask closures, status flips and cost settlements bump it too), and only a thread with no message yet falls back to it. Both surfaces keep this order as given. `last_message` is a preview here (a few lines, "…"-ended); `GET /threads/{id}` carries the whole text.
-Query `persona=1` (team mode): only the sessions that play a role, in role order, each carrying `persona` (the role's key) and `role` (its words, "Executive assistant"); `[]` when team mode is off. Both surfaces draw them as the people grid at the foot of the Sessions list.
+Query `persona=1` (team mode): only the sessions that play a role, in role order, each carrying `persona` (the role's key) and `role` (its words, "Chief of staff"); `[]` when team mode is off. Both surfaces draw them as the people grid at the foot of the Sessions list.
 
 ### POST /api/v1/threads
 Body `{prompt, title?, project?=life, goal_id?, schedule?, schedule_prompt?, attachments?: [blob_ref], via?}` → 201 Thread (status running). `prompt` may be empty if `attachments` is not (title becomes "Photo <date>"). 400 on an unknown blob ref. `via: "console"` (the web console sends it) makes the session's copy of the message end with a one-line stamp — the time and the `ops/py.sh trail.py at HH:MM` / `motion --at HH:MM` commands that read the console's own log (`console/trail`, `console/motion` observations) for that minute; the log itself is never put in the prompt. `via: "app"` is the phone and the desktop app. Any other value is stored as "".
-**Routing (team mode):** a plain message from a surface (`via` set, no `title`, `goal_id` or `schedule`, project `life`) goes past the router first: a local model (Ollama, `qwen3:8b`) or the cloud's small model reads the roles and the live sessions and may hand the message to the session that owns that work, which then answers in its own chat. The reply is that session, with `routed: true`; a message nothing owns is a new session as before (`routed: false`). lifectl's `thread new` and scheduled sessions are never routed.
+**Routing (team mode):** a plain message from a surface (`via` set, no `title`, `goal_id` or `schedule`, project `life`) goes past the router first: a local model (Ollama, `qwen3:8b`) or the cloud's small model reads the roles and the live sessions and may hand the message to the session that owns that work, which then answers in its own chat. The reply is that session, with `routed: true`. A message no other role owns goes to the chief of staff (`staff`, else an older install's `assistant`), also `routed: true`; only with `plain_sessions: true` (`PATCH /api/v1/settings`) does it start a plain new session instead (`routed: false`), as it does with team mode off. lifectl's `thread new` and scheduled sessions are never routed.
 
 ### POST /api/v1/route
 Team mode. Body `{prompt, model?}` → `{thread_id, why}`: where the router would send this message, without sending it (`thread_id` "" = a new session). `model` tries another Ollama model. 404 when team mode is off.
+
+### GET /api/v1/settings
+→ `{team_mode, plain_sessions, model_cap, models}`: the owner's switches kept in `ops/hub.json`. `team_mode` (default true): sessions take standing roles and the router hands each new message to one. `plain_sessions` (default false): with team mode on, a message no role owns still goes to the chief of staff; true lets the owner start a plain session too. `model_cap` (`""` = none): the best model the ladder may start a session on, one of `models` (the ladder, best first); the picker never starts above it.
+
+### PATCH /api/v1/settings
+Body: any of `{team_mode: bool, plain_sessions: bool, model_cap: string}`; any other key is a 400, as is a `model_cap` off the ladder. Writes those keys into `ops/hub.json` (every other key kept in place) and applies them at once, no restart: turning team mode on makes the calendar session and starts the router. → the GET shape. Owner only: 403 to a session token.
+
+### GET /api/v1/personas
+Team mode. → `[Persona]` in role order, Persona = `{key, role, covers, who, lane, route_lane, brief, team, builtin, session}`: the built-in roles (`staff`, the chief of staff; `assistant` where an older install has it) and every role added since, each at its newest words; `session` is the id of the session playing it ("" = none yet), `team` the group the owner lists it under. 404 when team mode is off.
+
+### POST /api/v1/personas
+Team mode. Body `{key, role, who, brief, name?, covers?, lane?, route_lane?, team?}` → 201 Persona, with its session made (title `name`, else `role`). `key`: 2-24 lowercase letters, digits or `-`, not taken. The owner asks the chief of staff for a role, and the chief of staff runs `lifectl persona new`: only the owner's token or the chief of staff's session may call this (403 to any other session). Append-only: a role is a `persona_defs` row.
+
+### PATCH /api/v1/personas/{key}
+Team mode. Body `{field: value}` for role|covers|who|lane|route_lane|brief|team → Persona; a built-in role may be rewritten too. Written as a new `persona_defs` row, so the old words stay. Same callers as POST; 400 on an unknown key or field, or on emptying role, who or brief.
 
 ### GET /api/v1/threads/{id}
 ### PATCH /api/v1/threads/{id}

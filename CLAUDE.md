@@ -44,7 +44,7 @@ one endpoint's contract.
    derived. A migration appends to its package's `Schema`, never edits one.
 5. **Surface parity, on the owner's surfaces.** Every console page has a
    phone screen with the same API, numbers and words, or says why not in
-   `web/places.js`; `parity_test.go` fails on an unpaired page. But a change
+   its `registerPlace` row (the view file's own); `parity_test.go` fails on an unpaired page. But a change
    the owner asks for is built for the apps they chose at setup (`surfaces`
    in `ops/hub.json`: phone, desktop, web; the session preamble names
    them) and shipped there; an app they did not pick waits until they ask
@@ -74,20 +74,33 @@ the recipe is in `hub/CLAUDE.md`, read it when that is the task.
 
 ## Team mode
 
-Optional, off by default (`team_mode` in `ops/hub.json`;
-`ops/py.sh setup.py hub --team yes|no --force`, which keeps the other keys). On, some sessions take a standing
-role: a `personas` row in `hub/internal/threads/persona.go` (Role, Covers,
-Who, Lane, Brief), a lane in `routeLanes` (`route.go`), and
-`lifectl thread <id> persona <key>` to give a session the role. The router
-(a local Ollama model, else the cloud's small one) sends each new message
-from the app or console to the role whose lane it is, or starts a session as
-before; `POST /api/v1/route` is the dry run. A role's own files live in
-`data/people/<key>/` (`lifectl workspace`); only that session or the owner
-writes them. One role ships, the executive assistant who owns the calendar
-session. Adding a role is those three steps; every brief is written for this
-owner, never copied from anyone's. It was offered once at setup; if the
-owner said no, you may offer it once more after two weeks, in the same words
-(SETUP.md step 10), and never again after that.
+On by default (`team_mode` in `ops/hub.json`; a hub.json without the key
+is on too). Some sessions take a standing role. One role ships, the
+**chief of staff** (`staff`, `hub/internal/threads/persona.go`): it owns the
+calendar session until the owner gives the calendar to another role, and it
+is the catch-all. The router (a local Ollama model, else the cloud's small
+one) sends each new message from the app or console to the role whose lane
+it is; a message no other role owns goes to the chief of staff.
+`POST /api/v1/route` is the dry run. An older install's executive assistant
+(`assistant`) keeps working and is the catch-all where there is no chief of
+staff.
+
+New roles are made by asking the chief of staff, never a form: it runs
+`lifectl persona new <key> --role … --who … --brief @file` (a
+`persona_defs` row and the role's session), and `lifectl persona <key> set
+<field> <value>` rewrites one, a built-in too (`team` names the group a
+role is listed under). `lifectl personas` lists them. Only the owner and
+the chief of staff may write roles. Every brief is written for this owner,
+never copied from anyone's. A role's own files live in `data/people/<key>/`
+(`lifectl workspace`); only that session or the owner writes them.
+
+The owner's switches (`GET/PATCH /api/v1/settings`, `lifectl settings`,
+applied without a restart): `team_mode` (off: no roles, no router);
+`plain_sessions` (default false: every new message goes to a role; true:
+the owner may also start sessions with no role); `model_cap` (the best
+model the ladder may start a session on; the ladder itself is
+`model_ladder`, fable, then opus, then sonnet). Goals are grouped by a
+`section` the owner names (`lifectl goal <id> set section "…"`).
 
 ## Giving back
 

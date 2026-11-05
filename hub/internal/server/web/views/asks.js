@@ -4,8 +4,9 @@
 //
 // NOT A PAGE any more. Until 2026-09-02 this file also registered `views.asks`
 // — the Your turn page, one stack of every approval and ask bundled by
-// session. It went because Your turn is already shown at the top of
-// Sessions. Everything it did is now done by two things it was always
+// session. It was deleted: "I think I've decided that we don't need the Your
+// Turn page anymore… I don't think we need it since Your Turn is shown at the
+// top of Sessions." Everything it did is now done by two things it was always
 // duplicating — the Sessions list's own "Your turn" group (views/threads.js
 // `drawList`), which names each session, counts its cards, prints the card's
 // title AND its description, and links straight to it; and the cards
@@ -20,8 +21,8 @@
 // this browser remembers it (app.js `decider`, sent on every request). The
 // code is NOT cleared before asking (2026-08-30): it used to be, so
 // dismissing the box threw away a code that worked and asked again on the
-// next approval. Only a code the owner actually retypes replaces the stored
-// one.
+// next approval — half of why the code got copied back and forth. Only a code
+// actually retyped replaces the stored one.
 async function withDecider(send) {
   try {
     return await send();
@@ -31,9 +32,20 @@ async function withDecider(send) {
       ? 'That decider code is WRONG — the hub refused it. Fix it here (ops/decider-set.sh printed it):'
       : 'Decider code (ops/decider-set.sh printed it; the phone has it in Settings):', decider.get());
     if (!code) throw e;
+    // A refused code is never saved over the stored one (the phone's rule):
+    // the hub checks it first, and a wrong one leaves the old code in place.
+    const c = await deciderCheck(code).catch(() => null);
+    if (!c || !c.ok) { toast('The hub refused that code. Nothing was saved.'); throw e; }
     decider.set(code);
     return await send();
   }
+}
+
+// GET /decider with a candidate code instead of the stored one.
+function deciderCheck(code) {
+  const h = {};
+  if (code) h['X-Life-Decider'] = code.trim().toUpperCase();
+  return api('/decider', { headers: h });
 }
 
 // A proposal with no session behind it (a scheduled job's) has no composer to
@@ -72,16 +84,17 @@ async function macInstall(id) {
 
 // ================= Respond (prompts engine phase 3, 2026-08-27) =================
 // One control for the one act. A response to a card has three parts and used
-// to be three buttons that could each only do one of them: an OUTCOME (their
-// claim — the card leaves the board the moment they say it, even when the words
+// to be three buttons that could each only do one of them: an OUTCOME (his
+// claim — the card leaves the board the moment he says it, even when the words
 // are aimed at tomorrow morning), WORDS, and a DESTINATION (which session, and
 // when). It posts ONE `prompts` row; the reference travels as data
 // (`in_reply_to`), so the agent is never handed a sentence the hub composed and
-// then re-read to work out what they meant.
+// then re-read to work out what he meant.
 //
-// It is answered FROM THE SESSION, in the ordinary composer. The first cut
-// was a <dialog> with its own text box — too thin, it covered the new-session
-// bar, and it could not send figures. So Respond arms the
+// It is answered FROM THE SESSION, in the ordinary composer (2026-08-28). The
+// first cut was a <dialog> with its own text box: "I hate the respond to
+// action item UI… too thin, it obscures the new sessions thing… it doesn't
+// let me send messages in the normal way with figures." So Respond arms the
 // session's composer (views/threads.js armReply): on a card inside the chat
 // it arms it in place; on the Your-turn stack it opens the session at that
 // card with the composer armed. The composer's Attach / paste / drop, send-to
@@ -100,7 +113,7 @@ async function openRespond(id, outcome) {
 }
 
 // An error card is not work the owner does — it is a run that wants starting
-// again. One line, and the only button that means anything.
+// again (2026-08-24). One line, and the only button that means anything.
 async function retryAsk(id) {
   return act(() => post(`/asks/${id}/retry`), 'restarted', () => { render(); refreshBadges(); });
 }

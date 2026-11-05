@@ -1,20 +1,30 @@
 package server
 
 import (
+	"io/fs"
 	"net/http"
 	"strings"
 
 	"life/hub/internal/usage"
 )
 
-// ConsolePages counts the console's tabs, for the heartbeat's "pages": it
-// grows when the owner's agent adds a page for a goal.
+// ConsolePages counts the console's tabs, for the heartbeat's "pages": each
+// view file registers its own tab (`registerTab({`, web/ui.js), so it grows
+// when the owner's agent adds a page for a goal.
 func ConsolePages() int {
-	b, err := webFS.ReadFile("web/index.html")
+	files, err := fs.Glob(webFS, "web/views/*.js")
 	if err != nil {
 		return 0
 	}
-	return strings.Count(string(b), `data-tab="`)
+	n := 0
+	for _, f := range files {
+		b, err := webFS.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		n += strings.Count(string(b), "\nregisterTab({")
+	}
+	return n
 }
 
 type usageState struct {

@@ -25,6 +25,7 @@ var ownerOnlyRoutes = map[string]bool{
 	"POST /api/v1/actions/{id}/reopen":   true,
 	"POST /api/v1/spend/budget/clear":    true,
 	"PUT /api/v1/spend/model":            true,
+	"PATCH /api/v1/settings":             true,
 	"PUT /api/v1/usage":                  true,
 	"POST /api/v1/threads/{id}/messages": true,
 	"POST /api/v1/devices":               true,

@@ -99,6 +99,50 @@ type Picker struct {
 
 	mu     sync.Mutex
 	closed map[string]time.Time // model → when it was seen exhausted
+	// limit: the owner's model cap (config model_cap, SetCap): no pick starts
+	// above it. "" or a model off the ladder = the top rung.
+	limit string
+}
+
+// SetCap makes model the best rung any pick may start on ("" = the top).
+// A model the ladder does not list is refused.
+func (p *Picker) SetCap(model string) error {
+	model = Current(model)
+	if model != "" && p.rung(model) < 0 {
+		return fmt.Errorf("model cap %q is not on the ladder (%s)", model, strings.Join(p.Ladder, ", "))
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.limit = model
+	return nil
+}
+
+// Cap: the model cap, "" for none (the top rung).
+func (p *Picker) Cap() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.limit
+}
+
+// CapIndex: the ladder index of the cap, 0 for none.
+func (p *Picker) CapIndex() int {
+	if i := p.rung(p.Cap()); i > 0 {
+		return i
+	}
+	return 0
+}
+
+// rung: model's index on the ladder, -1 when it is not on it.
+func (p *Picker) rung(model string) int {
+	if model == "" {
+		return -1
+	}
+	for i, m := range p.Ladder {
+		if m == model {
+			return i
+		}
+	}
+	return -1
 }
 
 func (p *Picker) usages() []Usage {
@@ -237,6 +281,9 @@ func (p *Picker) ExplainFrom(ctx context.Context, now time.Time, start string) (
 			return start, "" // not on the ladder: an explicit id means what it says
 		}
 	}
+	if c := p.CapIndex(); from < c {
+		from = c // the owner's cap: nothing starts above it
+	}
 	model := p.pickFrom(ctx, now, from)
 	if len(p.Ladder) == 0 || model == p.Ladder[from] {
 		return model, ""
@@ -308,6 +355,9 @@ func (p *Picker) pickFrom(ctx context.Context, now time.Time, from int) string {
 				}
 			}
 		}
+	}
+	if c := p.CapIndex(); from < c {
+		from = c // the owner's cap: nothing starts above it
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()

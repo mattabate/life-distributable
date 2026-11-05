@@ -12,7 +12,8 @@ console in `web/`) · `internal/store` (SQLite + the migrator) ·
 `flow.go`, what happens around a decision) · `internal/attention` (the board:
 ONE "your turn" for both surfaces) · `internal/deliver` (the one way a hub
 event reaches a session) · `internal/workspace` (a role's own files, team
-mode; `threads/persona.go` + `route.go` are the roles and the router).
+mode; `threads/persona.go` + `route.go` are the roles and the router,
+`server/settings.go` the owner's live switches).
 
 ## Recipe: add an endpoint
 1. Add one line to the table in `server/routes.go` (`open: true` only for
@@ -61,13 +62,14 @@ meals.
 4. **Only if the owner asks for a page**: `GET /api/v1/fitness/summary`
    (contract + test + `make generate` for its fixture), then
    - console: `hub/internal/server/web/views/fitness.js` registering
-     `views.fitness`, a nav entry in `web/index.html` (the heartbeat's
-     `pages` count follows it), a test in `web/test/`;
+     `views.fitness` and its tab (`registerTab({ key: 'fitness', label:
+     'Fitness', order: 85 })`; the heartbeat's `pages` count follows it), a
+     `<script>` line in `web/index.html`, a test in `web/test/`;
    - phone: `app/Life/Sources/FitnessView.swift` + its model in
      `Models.swift` + a `MoreDest` case in `RootView.swift` (the row
      under **More**, after Configuration) and a `MacTopBar.pages` entry,
      and a decode test against the fixture;
-   - `web/places.js`: `fitness: { label: 'Fitness', view: 'views/fitness.js', phone: 'FitnessView.swift' }`.
+   - in `views/fitness.js` too: `registerPlace('fitness', { label: 'Fitness', view: 'views/fitness.js', phone: 'FitnessView.swift' });`.
 5. `make check`, screenshots of both surfaces (look at them), commit,
    `ops/hub.sh restart`, `make ship`.
 

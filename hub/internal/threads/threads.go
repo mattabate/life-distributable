@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -157,6 +158,16 @@ CREATE INDEX IF NOT EXISTS thread_events_thread ON thread_events(thread_id, id);
 	// their count bg_tasks: an async Agent helper's end is no event, so the
 	// surfaces' "N subagents running" reads it from here.
 	`ALTER TABLE thread_runs ADD COLUMN bg_list TEXT NOT NULL DEFAULT ''`,
+	// persona_defs: the roles the owner's agent added (persona.go), append-only:
+	// the newest row per key is the role as it stands; a built-in key's row
+	// overrides the shipped text field by field (an empty field keeps it).
+	// team: the owner's name for the group the role sits in ("" = none).
+	`CREATE TABLE IF NOT EXISTS persona_defs (
+	id INTEGER PRIMARY KEY, key TEXT NOT NULL, role TEXT NOT NULL DEFAULT '',
+	covers TEXT NOT NULL DEFAULT '', who TEXT NOT NULL DEFAULT '', lane TEXT NOT NULL DEFAULT '',
+	route_lane TEXT NOT NULL DEFAULT '', brief TEXT NOT NULL DEFAULT '', team TEXT NOT NULL DEFAULT '',
+	by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS persona_defs_key ON persona_defs(key, id);`,
 }
 
 // ModelCost: one model's share of a chat's bill. Model is the CLI's model id,
@@ -331,12 +342,18 @@ type Manager struct {
 	// desktop, web). The preamble names them so a session builds a change
 	// for those and leaves the rest until asked. Empty reads as all three.
 	Surfaces []string
-	// TeamMode mirrors config team_mode: when on, sessions may play roles
-	// (Persona), a new message from the app is routed to the role whose lane
-	// holds it (route.go), and each role has a workspace. Off (the default),
-	// every one of those is bypassed: a new message is a new session,
-	// Personas() is empty and a persona cannot be set.
-	TeamMode bool
+	// team mirrors config team_mode (TeamMode, SetTeamMode): when on,
+	// sessions may play roles (Persona), a new message from the app is routed
+	// to the role whose lane holds it (route.go), and each role has a
+	// workspace. Off, every one of those is bypassed: a new message is a new
+	// session, Personas() is empty and a persona cannot be set. plain mirrors
+	// config plain_sessions (PlainSessions). Atomic: the settings route flips
+	// them while sessions run.
+	team, plain atomic.Bool
+	// WarmRouter: StartTeam keeps the local router warm (WarmLocal,
+	// once per process). main sets it; tests leave it off.
+	WarmRouter bool
+	warmOnce   sync.Once
 	// Workspace counts a role's files (workspace.Store.Count), so the peers
 	// header can say a role has notes worth reading. nil = never mentioned.
 	Workspace func(key string) int
@@ -735,12 +752,13 @@ func (m *Manager) CreateIdle(id, title, project string) (Thread, error) {
 		return Thread{}, fmt.Errorf("unknown project %q", project)
 	}
 	now := time.Now()
-	// In team mode the calendar's home session is the executive assistant:
-	// the role that owns the owner's calendar, so every step with no session
-	// of its own fires with someone who knows the schedule.
+	// In team mode the calendar's home session is the chief of staff: the
+	// role that owns the owner's calendar until another takes it, so every
+	// step with no session of its own fires with someone who knows the
+	// schedule.
 	persona := ""
-	if m.TeamMode && id == StepThread {
-		persona = PersonaAssistant
+	if m.TeamMode() && id == StepThread {
+		persona = PersonaStaff
 	}
 	_, err := m.db.Exec(`INSERT INTO threads (id,created_at,updated_at,title,project,status,schedule,schedule_prompt,persona,title_auto) VALUES (?,?,?,?,?,'done','','',?,0)`,
 		id, ts(now), ts(now), title, project, persona)
@@ -1202,8 +1220,8 @@ func (m *Manager) systemPreamble(t Thread) string {
 	if t.Schedule != "" {
 		sched = "This thread has a schedule (" + t.Schedule + "): you are woken with a check-in prompt on that cadence, with full memory of this conversation.\n"
 	}
-	if m.TeamMode {
-		sched += "Team mode is on: some sessions play a named role (the people at the foot of the Sessions list); a message that belongs to a role's lane goes to that session with `lifectl relay <id> \"…\"`, and a role's own files are `lifectl workspace <role>`.\n"
+	if m.TeamMode() {
+		sched += "Team mode is on: some sessions play a named role (the people at the foot of the Sessions list; `lifectl personas` lists them); a message that belongs to a role's lane goes to that session with `lifectl relay <id> \"…\"`, and a role's own files are `lifectl workspace <role>`. A new role is the chief of staff's to make with the owner (`lifectl persona new`): relay the owner's wish there.\n"
 	}
 	if m.RunAs.User != "" {
 		sched += "You run as a separate user in a clone of the hub repo of your own (branch th-" + t.ID + "): commit there, then `bash ops/land.sh` puts it on main through the hub and prints how it ended; `make ship WHY=\"fixes ...\"` and `make mac WHY=\"fixes ...\"` build from main the same way, so land first. The main checkout, ops/secrets and the database are read-only to you.\n"
@@ -1251,7 +1269,7 @@ const turnCols = `CASE WHEN t.status='running' THEN (SELECT COUNT(*) FROM thread
 	CASE WHEN t.status='running' THEN (SELECT MAX(COALESCE((SELECT MAX(e.ts) FROM thread_events e WHERE e.thread_id=r.thread_id
 		AND e.run_id=(CASE WHEN r.turns<=1 THEN r.id ELSE r.id||'-t'||r.turns END) AND e.kind='tool_use'), r.last_output))
 		FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL AND r.busy=1) END,
-	CASE WHEN t.status='running' THEN (SELECT r.bg_list FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL AND r.bg_tasks>0 ORDER BY r.rowid DESC LIMIT 1) END`
+	(SELECT r.bg_list FROM thread_runs r WHERE r.thread_id=t.id AND r.finished_at IS NULL AND r.bg_tasks>0 ORDER BY r.rowid DESC LIMIT 1)`
 
 // tokCols: settled tokens plus what the turn in flight has burned so far, so
 // a running session's number climbs while it works instead of jumping when it
@@ -1877,14 +1895,14 @@ func (m *Manager) Update(id string, patch map[string]string) (Thread, error) {
 			t.Title = v
 			m.db.Exec(`UPDATE threads SET title_auto=0 WHERE id=?`, id) // manual rename pins it
 		case "persona":
-			if !m.TeamMode {
-				return t, errors.New("team mode is off: set team_mode in ops/hub.json (`ops/py.sh setup.py hub --team yes --force`), restart the hub, then try again")
+			if !m.TeamMode() {
+				return t, errTeamOff
 			}
 			if v == "off" {
 				v = ""
 			}
-			if v != "" && !IsPersona(v) {
-				return t, fmt.Errorf("persona must be off or one of %s", strings.Join(personaNames(), "|"))
+			if v != "" && !m.IsPersona(v) {
+				return t, fmt.Errorf("persona must be off or one of %s", strings.Join(m.personaNames(), "|"))
 			}
 			t.Persona = v
 		case "schedule":
@@ -2021,7 +2039,10 @@ func scan(r scanner) (Thread, error) {
 		&t.TurnTools, &t.TurnCostUSD, &turnAt, &bgList); err != nil {
 		return t, err
 	}
-	if t.Status == "running" && bgList.String != "" {
+	// A session's background tasks outlive its turn: a reply can go out with
+	// helpers still working, and the thread reads idle while they do. They
+	// are listed until the CLI says they are done or the process exits.
+	if bgList.String != "" {
 		json.Unmarshal([]byte(bgList.String), &t.TurnTasks)
 	}
 	if t.Status == "running" && turnAt.Valid {

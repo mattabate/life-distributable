@@ -1,8 +1,13 @@
 'use strict';
 // ---- one tooltip, for every plot on this console ----
 //
-// Tooltips should look good and fit their plot: each chart chooses what to
-// show. Two separate faults this fixes. STYLE: every mark carried the browser's own `title=`, so
+// 2026-08-31, looking at a chart's column: "the tool tips on all plots
+// suck. can you make better more informative tool tips for our plotting — just
+// universally on all pages. i mean stylistically, but also all tool tips should
+// fit their plot… like choose what to display in tool tips on plots depending
+// on plot."
+//
+// Two separate faults. STYLE: every mark carried the browser's own `title=`, so
 // the tooltip was an OS box in an OS font, half a second late, placed wherever
 // the OS liked, and immune to this stylesheet — it did not go dark with the
 // page and it could not hold a colour key. CONTENT: it was one flat sentence
@@ -47,7 +52,7 @@ function tipNode() {
 
 /// spec: {title, sub, rows: [{c, v, k, t, on, dim}], defs: [{k, v}], lines: [string], foot}
 ///   c   the series colour (a CSS colour or var(--sN)); omitted = no key
-///   v   the value, bold — the thing the reader came for
+///   v   the value, bold — the thing he came for
 ///   k   the series/category name, muted
 ///   t   a trailing note pushed to the right edge (a share, a count)
 ///   on  this row is the one under the pointer
@@ -64,11 +69,23 @@ function tipHTML(s) {
   </div>`).join('');
   const lines = (s.lines || []).filter(Boolean).map(l => `<div${/^vs\b/i.test(l) ? ' class="vs"' : ''}>${esc(l)}</div>`).join('');
   // `defs`: a term and its note, two columns — a list of caveats reads as a
-  // glossary, not a wall of wrapped sentences.
+  // glossary, not a wall of wrapped sentences (2026-09-25: "chunky and
+  // rough and wraps the text").
   const defs = (s.defs || []).filter(Boolean).map(d => `<b>${esc(d.k)}</b><span>${esc(d.v)}</span>`).join('');
+  // `tiles`: figures side by side, each in its own box; `sums`: one row of
+  // figures over a hairline under them. The P&L month's card is the shape
+  // (2026-10-11: "make it look more like an equation… 3
+  // numbers side by side… little callout boxes, then net and to date on the
+  // bottom in one row").
+  const tiles = (s.tiles || []).filter(Boolean).map(t => `<div class="tip-tile"${t.c ? ` style="--ink:${esc(t.c)}"` : ''}>
+    <span>${esc(t.k || '')}</span><b>${esc(t.v)}</b></div>`).join('');
+  const sums = (s.sums || []).filter(Boolean).map(t => `<div${t.on ? ' class="on"' : ''}>
+    <span>${esc(t.k || '')}</span><b${t.c ? ` style="color:${esc(t.c)}"` : ''}>${esc(t.v)}</b></div>`).join('');
   return `${s.title ? `<div class="tip-h">${esc(s.title)}</div>` : ''}
     ${s.sub ? `<div class="tip-s">${esc(s.sub)}</div>` : ''}
     ${rows ? `<div class="tip-rows">${rows}</div>` : ''}
+    ${tiles ? `<div class="tip-tiles">${tiles}</div>` : ''}
+    ${sums ? `<div class="tip-sums">${sums}</div>` : ''}
     ${defs ? `<div class="tip-defs">${defs}</div>` : ''}
     ${lines ? `<div class="tip-lines">${lines}</div>` : ''}
     ${s.foot ? `<div class="tip-f">${esc(s.foot)}</div>` : ''}`;

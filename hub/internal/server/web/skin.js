@@ -1,12 +1,14 @@
-// The studio layout (skin.css header), part two: no emojis, on every page.
+// The studio layout (skin.css header), part two: NO EMOJIS
+// (2026-09-28, "remove the emojis!"). On every page since the studio became
+// the console ("let's just cut the web app's UI to this one").
 //
 // The marks are baked into the shared renderers (ui.js askCard marks,
 // threads.js reply lines, attachments), so rather than fork them this strips
 // the UI's own emojis from every text node the page draws, as it draws them.
 // Nothing is lost: what a mark said (read / approval / rec) is the card's
-// tint rail in the skin. Only this fixed set goes — an emoji in something the
-// owner or a session wrote is left alone — and the typographic marks
-// (✓ ✕ ⌘ ↩ ✻) stay, they are state, not decoration.
+// tint rail in the skin. Only this fixed set goes — an emoji in something he
+// or a session wrote is left alone — and the typographic marks (✓ ✕ ⌘ ↩ ✻)
+// stay, they are state, not decoration.
 (() => {
   const UI = /(?:🔵|🔴|💡|📲|📅|📎|⏰|💬|⏳|⚠︎|⚠|⚙️?)\s?/gu;
   const clean = root => {

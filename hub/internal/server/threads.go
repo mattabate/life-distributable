@@ -28,9 +28,13 @@ type threadOut struct {
 	Role string `json:"role,omitempty"`
 }
 
-func newThreadOut(t threads.Thread, model string) threadOut {
+func (s *Server) newThreadOut(t threads.Thread, model string) threadOut {
+	role := ""
+	if t.Persona != "" {
+		role = s.thr.RoleOf(t.Persona)
+	}
 	return threadOut{Thread: t, Model: model, ModelLabel: threads.ModelLabel(model),
-		ScheduleLabel: threads.ScheduleLabel(t.Schedule), Pill: threads.StatusPill(t.Status), Role: threads.RoleOf(t.Persona)}
+		ScheduleLabel: threads.ScheduleLabel(t.Schedule), Pill: threads.StatusPill(t.Status), Role: role}
 }
 
 func (s *Server) listThreads(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +53,7 @@ func (s *Server) listThreads(w http.ResponseWriter, r *http.Request) {
 	models := s.thr.Models()
 	out := make([]threadOut, len(ts))
 	for i, t := range ts {
-		out[i] = newThreadOut(t, models[t.ID])
+		out[i] = s.newThreadOut(t, models[t.ID])
 	}
 	writeJSON(w, 200, out)
 }
@@ -83,7 +87,7 @@ func (s *Server) createThread(w http.ResponseWriter, r *http.Request) {
 	// title, goal or schedule chosen) goes past the router first, which may
 	// hand it to the session that owns that work. lifectl's new sessions and
 	// scheduled ones are never routed.
-	if s.thr.TeamMode && via(in.Via) != "" && in.Title == "" && in.GoalID == "" && in.Schedule == "" && in.Project == "life" {
+	if s.thr.TeamMode() && via(in.Via) != "" && in.Title == "" && in.GoalID == "" && in.Schedule == "" && in.Project == "life" {
 		t, routed, err := s.thr.CreateRouted(in.Prompt, in.Attachments, via(in.Via))
 		if err != nil {
 			jsonErr(w, 400, err.Error())
@@ -120,7 +124,7 @@ func (s *Server) routeDry(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "need {prompt}")
 		return
 	}
-	if !s.thr.TeamMode {
+	if !s.thr.TeamMode() {
 		jsonErr(w, 404, "team mode is off (team_mode in ops/hub.json)")
 		return
 	}
@@ -134,7 +138,7 @@ func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 404, "no such thread")
 		return
 	}
-	writeJSON(w, 200, newThreadOut(t, s.thr.LiveModel(t.ID)))
+	writeJSON(w, 200, s.newThreadOut(t, s.thr.LiveModel(t.ID)))
 }
 
 func (s *Server) patchThread(w http.ResponseWriter, r *http.Request) {

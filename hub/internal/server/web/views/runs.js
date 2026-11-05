@@ -2,17 +2,19 @@
 'use strict';
 // ================= runs =================
 // A scheduled job (ops/schedule.json) has no session, so a proposal it made
-// had nothing to open on — the phone card had no chevron at all. This is the
-// nearest thing to the chat where the approval was suggested: what the job
-// said (the prose before its JSON envelope), its digest summary, every
-// finding it filed (gated ones became the proposals) and what it said only
-// the owner can do.
+// had nothing to open on — the phone card had no chevron at all
+// (2026-08-26: "I want these to click into the chat where the approval was
+// suggested"). This is the nearest thing to that chat: what the job said
+// (the prose before its JSON envelope), its digest summary, every finding it
+// filed (gated ones became the proposals) and what it said only the owner can do.
 // Reached from an action card's "Open the run" (ui.js actionHTML) — no nav
 // tab, no list: `lifectl runs` is the list.
 views.runs = {
   draw: (view, rest) => runDetail(view, rest[0]),
   redraw: () => render(),
 };
+registerPlace('runs', { label: 'Job run', view: 'views/runs.js', phone: '',
+  why: 'console only: the raw transcript of one scheduled job run, opened from a hub log line; what a run finds reaches the phone as an ask or a card' });
 
 async function runDetail(view, id) {
   if (!id) { view.innerHTML = `<div class="pane wide">${emptyHTML('Which run? A proposal card links here.')}</div>`; return; }

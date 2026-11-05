@@ -207,6 +207,13 @@ over Tailscale, which only their own devices can join.
    2. Open that full printed address in a browser on this Mac (and, if they
       chose `web`, on each other computer on Tailscale). The console loads
       and remembers them for a year.
+9. **The console's mic** (macOS 26 only; skip otherwise). `make build` made
+   `ops/bin/mic`, which turns speech into text on this Mac; nothing leaves
+   it. Tell them: "Click **Mic** at the top of the console (or tap Option
+   alone) and say a few words. The first time, macOS asks for the
+   microphone: click **Allow**. Click **Mic** again to stop." If they
+   clicked Don't Allow: **System Settings → Privacy & Security → Microphone**,
+   switch it on, then `ops/hub.sh restart`.
 
 **Verify:** `ops/hub.sh status` shows `state = running` and `ok`; the owner
 says the console shows **Sessions**. Tell them this is the first
@@ -363,18 +370,16 @@ It takes one message.
    personal details. It describes the step and what went wrong.
 4. **Tell them how to pass it on.** One sentence: a friend installs it by
    pasting the one sentence from the README into Claude Code on their Mac.
-5. **Team mode, once.** Ask, in these words: *"There is an optional team
-   mode: some sessions take a standing role (the first one is an executive
-   assistant who owns your calendar), a router sends each new message to
-   the role that owns it, and each role keeps its own files. It can give
-   you a head start in some directions, but owners who start with less
-   generally have a better long-term experience. It is off; want it on?"*
-   Default is no, and no is the better answer today. If they say yes:
-   `ops/py.sh setup.py hub --team yes --force` (it changes only
-   `team_mode` and keeps the rest of `ops/hub.json`, the push key
-   included), `ops/hub.sh restart`, then
-   `lifectl thread calendar persona assistant`. Whatever they answer, do
-   not ask again for two weeks (CLAUDE.md, "Team mode").
+5. **Team mode: tell them it is on.** Say, in these words: *"Your hub runs
+   as a team. Your first session is a chief of staff: it owns your
+   calendar, takes any message no one else owns, and adds new roles when
+   you ask it for one (say \"I'd like a fitness coach\"). Each new message
+   goes to the role that owns it. If you would rather start plain sessions
+   too, or turn the team off, ask me: it is one switch."* Nothing to run: a new `ops/hub.json` has `"team_mode": true`. Off:
+   `lifectl settings set team_mode false` (or `ops/py.sh setup.py hub
+   --team no --force`, which changes only `team_mode` and keeps the rest,
+   the push key included). Plain sessions as well as roles:
+   `lifectl settings set plain_sessions true`. Both apply without a restart.
 6. **Separate user, once.** Ask, in these words: *"Right now a session
    runs as you, so it can do anything your Mac account can, the hub token
    and the decider code's hash included. There is an optional step that

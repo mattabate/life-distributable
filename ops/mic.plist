@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.life.mic</string>
+	<key>CFBundleName</key>
+	<string>Life Mic</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Life listens only while you have switched the mic on from the console, and turns your words into text on this Mac. Nothing leaves the tailnet.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Life turns your words into text on this Mac, on the device, never through a server.</string>
+</dict>
+</plist>

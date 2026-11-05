@@ -37,7 +37,9 @@ CREATE INDEX IF NOT EXISTS goal_notes_goal ON goal_notes(goal_id, id);`,
 	// wake, in a context that is re-read on every turn) to learn where things
 	// stand, so what is learned is copied into flat prose and stale text wiped.
 	`ALTER TABLE goals ADD COLUMN digest TEXT NOT NULL DEFAULT ''`,
-	`ALTER TABLE goals ADD COLUMN digest_at TEXT`}
+	`ALTER TABLE goals ADD COLUMN digest_at TEXT`,
+	// The group a goal is listed under, named by the owner ("" = ungrouped).
+	`ALTER TABLE goals ADD COLUMN section TEXT NOT NULL DEFAULT ''`}
 
 type Goal struct {
 	ID             string     `json:"id"`
@@ -53,6 +55,7 @@ type Goal struct {
 	NoteCount      int        `json:"note_count"`
 	Digest         string     `json:"digest,omitempty"`
 	DigestAt       *time.Time `json:"digest_at,omitempty"`
+	Section        string     `json:"section,omitempty"`
 	// The goal's face on a page: a symbol and a hue both surfaces draw the
 	// same way, so a goal card is never blank. Derived from the name on every read, never stored, so a
 	// session that creates or renames a goal never has to pick one.
@@ -245,13 +248,15 @@ func (s *Store) Update(id string, patch map[string]string) (Goal, error) {
 		case "digest":
 			g.Digest = v
 			digest = true
+		case "section":
+			g.Section = strings.TrimSpace(v)
 		default:
 			return Goal{}, fmt.Errorf("cannot update %q", k)
 		}
 	}
 	now := time.Now().UTC()
-	_, err = s.db.Exec(`UPDATE goals SET title=?,statement=?,horizon=?,cadence=?,status=?,sources=?,updated_at=? WHERE id=?`,
-		g.Title, g.Statement, g.Horizon, g.Cadence, g.Status, g.Sources, ts(now), id)
+	_, err = s.db.Exec(`UPDATE goals SET title=?,statement=?,horizon=?,cadence=?,status=?,sources=?,section=?,updated_at=? WHERE id=?`,
+		g.Title, g.Statement, g.Horizon, g.Cadence, g.Status, g.Sources, g.Section, ts(now), id)
 	if err != nil {
 		return Goal{}, err
 	}
@@ -267,14 +272,14 @@ func (s *Store) Update(id string, patch map[string]string) (Goal, error) {
 
 func (s *Store) Get(id string) (Goal, error) {
 	return scan(s.db.QueryRow(`SELECT g.id,g.created_at,g.updated_at,g.title,g.statement,g.horizon,g.cadence,g.status,g.sources,g.last_reviewed_at,
-		(SELECT COUNT(*) FROM goal_notes n WHERE n.goal_id=g.id),g.digest,g.digest_at FROM goals g WHERE g.id=?`, id))
+		(SELECT COUNT(*) FROM goal_notes n WHERE n.goal_id=g.id),g.digest,g.digest_at,g.section FROM goals g WHERE g.id=?`, id))
 }
 
 func (s *Store) List(status string) ([]Goal, error) {
 	// The list deliberately omits the digest: `lifectl goals` is the first call
 	// of every session and must stay small. Digests are read one goal at a time.
 	q := `SELECT g.id,g.created_at,g.updated_at,g.title,g.statement,g.horizon,g.cadence,g.status,g.sources,g.last_reviewed_at,
-		(SELECT COUNT(*) FROM goal_notes n WHERE n.goal_id=g.id),'',NULL FROM goals g `
+		(SELECT COUNT(*) FROM goal_notes n WHERE n.goal_id=g.id),'',NULL,g.section FROM goals g `
 	var args []any
 	if status != "" {
 		q += `WHERE g.status=? `
@@ -379,7 +384,7 @@ func scan(r scanner) (Goal, error) {
 	var g Goal
 	var c, u string
 	var lr, da sql.NullString
-	if err := r.Scan(&g.ID, &c, &u, &g.Title, &g.Statement, &g.Horizon, &g.Cadence, &g.Status, &g.Sources, &lr, &g.NoteCount, &g.Digest, &da); err != nil {
+	if err := r.Scan(&g.ID, &c, &u, &g.Title, &g.Statement, &g.Horizon, &g.Cadence, &g.Status, &g.Sources, &lr, &g.NoteCount, &g.Digest, &da, &g.Section); err != nil {
 		return Goal{}, err
 	}
 	g.CreatedAt, _ = time.Parse(time.RFC3339Nano, c)

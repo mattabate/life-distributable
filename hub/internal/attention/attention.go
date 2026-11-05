@@ -145,7 +145,8 @@ type Heading struct {
 // CARDS OR NOT: a session with runs going beneath it is filed under Working,
 // so the owner does not message it mid-work, and a sub-session's card does
 // not pull its running parent under Your turn. It wears "running", or
-// "N running" for a chain.
+// "N running" for a chain. So does a session whose helpers are still working
+// after its reply went out.
 func Live(ths []threads.Thread) map[string]int {
 	parent := map[string]string{}
 	for _, t := range ths {
@@ -153,7 +154,7 @@ func Live(ths []threads.Thread) map[string]int {
 	}
 	live := map[string]int{}
 	for _, t := range ths {
-		if t.Status != "running" {
+		if t.Status != "running" && len(t.TurnTasks) == 0 {
 			continue
 		}
 		live[t.ID]++

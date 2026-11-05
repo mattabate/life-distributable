@@ -2,10 +2,17 @@
 
 # life
 
-**An AI personal assistant with editable apps on iPhone, Mac and web.**
+**A small company of AI agents you keep in view, on iPhone, Mac and web.**
 
-*life* is a self-hosted AI assistant built on [Claude Code][claude-code].
+*life* is a self-hosted team of AI agents built on [Claude Code][claude-code].
 It will help you meet your goals, whatever they are.
+
+Think of it as a small company that works for you. A chief of staff runs
+the day and hires the rest of the team as you need them: a coach, a trip
+planner, whoever your goals call for. You manage all of them from one
+screen. Every agent has a cell that shows what it is doing right now, what
+it is waiting on you for, and how far along its running jobs are, so you
+can steer a dozen agents at a glance instead of watching a dozen chats.
 
 Your Mac (a Mac mini, or a laptop that stays on) runs the agents. It
 connects to your iPhone over a private [Tailscale](https://tailscale.com)
@@ -48,7 +55,7 @@ in [ADDENDA.md](ADDENDA.md), and your agent brings each one to you.
 
 <p align="center"><img src="docs/img/sessions.png" alt="The life desktop app: the Sessions board with four cards waiting on the owner, an approval to buy $500 of VTI on Thursday, a honeymoon decision, an app build to install and today's tweet to pick, a Gmail expense scan the agent is running, and a new session ready to start" width="900"></p>
 
-**Configuration.** What it is connected to, what it may spend, and what you are working toward: the Claude plan and how much of each limit is left, the model new sessions start on, your goals, and every data source under the goal it serves.
+**Configuration.** What it is connected to, what it may spend, and who is on the team: the Claude plan and how much of each limit is left, the order of models new sessions start on and the best one they may use, your team grouped the way you named it, your goals, your devices, and every data source under the goal it serves.
 
 <p align="center"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: a Powered by card with the Claude Max 20x plan, $728 spent this month, 60% of the 5 hour limit, 86% of the 7 day limit and 79% of the Fable limit left, and the model picker; a Goals card with seven goals; and data sources grouped under the goals Grow my audience, Make more money, Build agent and Make me healthier, most sources first, each goal on its own row in its colour, every source with its logo, row count and last sync" width="900"></p>
 
@@ -76,9 +83,17 @@ you have to babysit. You don't need to be technical. You need:
 
 ## What it does
 
-- **Runs sessions for every part of your life.** Long-running Claude Code
-  sessions, one per project, habit or question. They keep full memory and
-  keep working while you sleep.
+- **A team, not a chat window.** Each agent is a long-running Claude Code
+  session with a standing role. It keeps full memory and keeps working while
+  you sleep. Say what you want and it goes to the agent whose job it is;
+  anything nobody owns goes to the chief of staff.
+- **You stay in control of the whole team.** New roles come from asking the
+  chief of staff, never a form. Name the sections your team and goals are
+  grouped under the same way. Two switches in Configuration turn the roles
+  off or let you start plain sessions too.
+- **Talk to it.** Tap Option on the Mac, or the Mic button, and speak; your
+  words land in the box you're in. Speech is turned into text on the Mac
+  itself.
 - **Puts a card on your phone when it needs you.** One clear thing to do,
   decide or read. Everything else it handles itself.
 - **Asks before anything that matters.** Money, deleting, contacting

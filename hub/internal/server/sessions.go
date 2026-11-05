@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -190,10 +191,13 @@ func (s *Server) modelSetting(ctx context.Context) map[string]any {
 				}
 			}
 		}
-		for _, m := range choices {
+		capAt := s.picker.CapIndex()
+		for i, m := range choices {
 			got, why := s.picker.ExplainFrom(ctx, now, m)
 			r := modelRung{Model: m, Open: got == m}
-			if !r.Open {
+			if i < capAt {
+				r.Open, r.Why = false, "above the model cap ("+spend.Family(s.picker.Cap())+")"
+			} else if !r.Open {
 				r.Why, _, _ = strings.Cut(why, "; ") // its own bucket, not the ones below it
 			} else if floor != "" && s.picker.NotAbove(m, floor) != m {
 				r.Open, r.Why = false, capWhy
@@ -230,6 +234,10 @@ func (s *Server) setSpendModel(w http.ResponseWriter, r *http.Request) {
 		}
 		if !ok {
 			jsonErr(w, 400, "default_model must be one of "+strings.Join(s.modelChoices(), ", "))
+			return
+		}
+		if s.picker != nil && slices.Index(s.picker.Ladder, in.DefaultModel) < s.picker.CapIndex() {
+			jsonErr(w, 400, "default_model is above the model cap "+s.picker.Cap()+" (PATCH /api/v1/settings model_cap)")
 			return
 		}
 	}

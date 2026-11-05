@@ -23,12 +23,12 @@ import (
 // exception is fine; staying silent about it is what turns into a missing
 // page six weeks later.
 //
-// The pairs are NOT written here: they are read out of web/places.js, the
-// table the console itself uses to tell a new session where the owner was standing
-// (route, URL, source files) when they hit "+ New session".
-// One table, so a page cannot name FinanceView.swift to the agent and
-// SpendView.swift to this test. A row with an empty phone file is
-// console-only and carries its why there.
+// The pairs are NOT written here: they are read out of the places rows, the
+// table the console itself uses to tell a new session where the owner was
+// standing (route, URL, source files) when they hit "+ New session".
+// One table, so a page cannot name one screen to the agent and another to
+// this test. A row with an empty phone file is console-only and carries its
+// why there.
 type surfacePair struct {
 	page   string // views.<page>, in hub/internal/server/web/views/*.js
 	screen string // the SwiftUI screen showing the same thing
@@ -36,26 +36,43 @@ type surfacePair struct {
 	view   string // web/<view>, the file that registers views.<page>
 }
 
-const placesFile = "web/places.js"
+// The rows are `registerPlace(…)` calls, each in its page's own view file
+// (a module brings its own row), so the table is every views/*.js read
+// together.
+const placesFiles = "web/views/*.js"
 
-// placeRow: `  spend: { label: 'Spend', view: 'views/spend.js', phone: 'SpendView.swift'`
-var placeRow = regexp.MustCompile(`(?m)^  ([a-z]+): \{ label: '([^']*)', view: '([^']*)', phone: '([^']*)'`)
+// placeRow: `registerPlace('spend', { label: 'Spend', view: 'views/spend.js', phone: 'SpendView.swift'`
+var placeRow = regexp.MustCompile(`(?m)^registerPlace\('([a-z]+)', \{ label: '([^']*)', view: '([^']*)', phone: '([^']*)'`)
 
-// deepRow: `    { at: 3, label: 'one session', phone: 'ThreadDetailView.swift' },`
-var deepRow = regexp.MustCompile(`(?m)^    \{ at: \d+, label: '[^']*', phone: '([^']*)' \},`)
+// deepRow: `  { at: 2, label: 'one session', phone: 'ThreadDetail.swift' },`
+var deepRow = regexp.MustCompile(`(?m)^\s+\{ at: \d+, label: '[^']*', phone: '([^']*)' \},`)
 
-// alsoRow: `    also: ['views/calgrid.js', 'CalendarGrid.swift'] },` — every
+// alsoRow: `  also: ['views/calgrid.js', 'CalendarGrid.swift'] });` — every
 // file a page names beside its own two, whichever side it is on.
 var alsoRow = regexp.MustCompile(`also: \[([^\]]*)\]`)
 
+func placesSrc(t *testing.T) string {
+	t.Helper()
+	files, err := filepath.Glob(placesFiles)
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no view files at %s: %v", placesFiles, err)
+	}
+	var b strings.Builder
+	for _, f := range files {
+		s, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		b.Write(s)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 func alsoFiles(t *testing.T) []string {
 	t.Helper()
-	b, err := os.ReadFile(placesFile)
-	if err != nil {
-		t.Fatalf("read %s: %v", placesFile, err)
-	}
 	var out []string
-	for _, m := range alsoRow.FindAllStringSubmatch(string(b), -1) {
+	for _, m := range alsoRow.FindAllStringSubmatch(placesSrc(t), -1) {
 		for _, f := range regexp.MustCompile(`'([^']+)'`).FindAllStringSubmatch(m[1], -1) {
 			out = append(out, f[1])
 		}
@@ -65,25 +82,21 @@ func alsoFiles(t *testing.T) []string {
 
 func places(t *testing.T) (pairs []surfacePair, only map[string]string, deep []string) {
 	t.Helper()
-	b, err := os.ReadFile(placesFile)
-	if err != nil {
-		t.Fatalf("read %s: %v", placesFile, err)
-	}
-	src := string(b)
+	src := placesSrc(t)
 	rows := placeRow.FindAllStringSubmatch(src, -1)
-	if len(rows) < 6 { // v0: Sessions, Recs, Calendar, Configuration + its Spend, Goals, Source pages (+ console-only rows)
-		t.Fatalf("only %d rows parsed out of %s — the table's shape has drifted from placeRow", len(rows), placesFile)
+	if len(rows) < 6 { // Sessions, Recs, Calendar, Configuration + its Spend, Goals, Source pages (+ console-only rows)
+		t.Fatalf("only %d rows parsed out of %s — the table's shape has drifted from placeRow", len(rows), placesFiles)
 	}
 	only = map[string]string{}
 	for _, m := range rows {
 		page, label, view, phone := m[1], m[2], m[3], m[4]
 		if label == "" {
-			t.Errorf("places.js: %q has no label", page)
+			t.Errorf("places: %q has no label", page)
 		}
 		if phone == "" {
-			why := regexp.MustCompile(`(?s)` + page + `: \{ label:.*?why: '([^']*)'`).FindStringSubmatch(src)
+			why := regexp.MustCompile(`(?s)registerPlace\('` + page + `', \{ label:.*?why: '([^']*)'`).FindStringSubmatch(src)
 			if why == nil {
-				t.Errorf("places.js: %q has no phone screen and no `why` — a console-only page says so out loud (docs/design/conventions.md rule 11)", page)
+				t.Errorf("places: %q has no phone screen and no `why` — a console-only page says so out loud (CLAUDE.md, Conventions 5)", page)
 				continue
 			}
 			only[page] = why[1]
@@ -175,8 +188,8 @@ func TestEverySurfacePageExistsOnBothSurfaces(t *testing.T) {
 		}
 		t.Errorf("console page %q (%s) has no phone screen.\n"+
 			"Information on the web must be on the phone too. Either build the\n"+
-			"screen and add its row to web/places.js, or give that row `phone: ''` and a `why`\n"+
-			"saying it is console-only (docs/design/conventions.md rule 11).", page, file)
+			"screen and add its registerPlace row beside views.<page>, or give that row `phone: ''` and a `why`\n"+
+			"saying it is console-only (CLAUDE.md, Conventions 5).", page, file)
 	}
 
 	// 2. The screen each pair names really is there — and so does the console
@@ -232,7 +245,7 @@ func TestEverySurfacePageExistsOnBothSurfaces(t *testing.T) {
 		}
 		t.Errorf("phone screen %s has no console page.\n"+
 			"Build the views/<page>.js half and add it to surfacePairs, or add %q to phoneOnly\n"+
-			"with the reason (docs/design/conventions.md rule 11).", s, s)
+			"with the reason (CLAUDE.md, Conventions 5).", s, s)
 	}
 
 	// 4. An exception without a reason is not an exception.

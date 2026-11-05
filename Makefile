@@ -15,6 +15,7 @@ test:
 	cd hub && gofmt -l . | (! grep .) && go vet ./... && go test -timeout 180s ./...
 
 build:
+	@$(MAKE) --no-print-directory ops/bin/mic || echo "mic: skipped (needs the macOS 26 SDK); the console's Mic stays off"
 	cd hub && go build -o ../ops/bin/hub ./cmd/hub && go build -o ../ops/bin/lifectl ./cmd/lifectl
 	$(call sign,ops/bin/hub,com.life.hub)
 
@@ -26,6 +27,16 @@ SIGN_ID ?= $(shell security find-identity -v -p codesigning 2>/dev/null | grep -
 define sign
 $(if $(and $(SIGN_ID),$(TEAM_ID)),codesign --force --sign "$(SIGN_ID)" --identifier $(2) --requirements '=designated => identifier "$(2)" and anchor apple generic and certificate leaf[subject.OU] = "$(TEAM_ID)"' $(1),codesign --force --sign - --identifier $(2) $(1))
 endef
+
+# The hub listens through this one when the owner switches the console's mic
+# on (server/mic.go): on-device SpeechAnalyzer, one JSON line per result,
+# stopped by closing its stdin. The Microphone usage string rides inside the
+# binary. Needs macOS 26; on an older SDK `build` skips it and the hub
+# answers the Mic with "no mic helper".
+ops/bin/mic: ops/mic.swift ops/mic.plist
+	@mkdir -p $(@D)
+	swiftc -O -o $@ $< -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker ops/mic.plist
+	$(call sign,$@,com.life.mic)
 
 # Syntax-check the laptop console's JS. Deliberately NOT part of `check`: the
 # hub is one static binary with no node toolchain and the gate must not grow a

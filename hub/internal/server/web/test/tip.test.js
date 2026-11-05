@@ -1,8 +1,10 @@
 // Tests for tip.js — the one tooltip every plot on the console draws into.
 // `ops/webcheck.sh` runs these (node --test); they are not part of `make check`
-// (no JS lane in the gate). Nothing here is real data.
+// (no JS lane in the gate, DESIGN.md). Nothing here is personal data.
 //
-// What these pin is the CONTRACT the eight charts
+// Written 2026-08-31, when the native `title=` boxes were replaced ("the
+// tool tips on all plots suck … make better more informative tool tips …
+// universally on all pages"). What these pin is the CONTRACT the eight charts
 // share: a card that escapes what it is handed, prints the value before the
 // name, keys a series by colour, survives the trip through an HTML attribute,
 // and never leaves the window.

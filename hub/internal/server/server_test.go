@@ -60,10 +60,11 @@ func newTestDB(t *testing.T) (*Server, *store.DB) {
 	th.Run = func(string, ...string) ([]byte, error) { return nil, nil }
 	// Team mode on, with no router: the role routes answer, a new message
 	// is still a new session.
-	th.TeamMode = true
+	th.SetTeamMode(true)
+	th.SetPlainSessions(true) // a message no role claims stays a new session
 	th.Pick, th.Local = nil, nil
 	s := New(cfg, "secret", q, sc, gs, ob, th)
-	s.WS = &workspace.Store{Dir: filepath.Join(t.TempDir(), "people"), Role: th.PersonaOf, Known: threads.IsPersona}
+	s.WS = &workspace.Store{Dir: filepath.Join(t.TempDir(), "people"), Role: th.PersonaOf, Known: th.IsPersona}
 	th.Workspace = s.WS.Count
 	s.Runs, _ = syncruns.New(db)
 	rc, _ := recs.New(db)
@@ -99,8 +100,8 @@ func TestFreshSchema(t *testing.T) {
 		}
 		return strings.Join(names, " ")
 	}
-	wantTables := "action_events actions ask_events asks away budget_days cal_events cal_items devices goal_notes goals item_events item_step_events item_step_plans item_steps items observations prompts rec_events recs runs schema_migrations settings sync_runs thread_events thread_messages thread_runs threads voice_queue"
-	wantIndices := "action_events_action actions_state asks_state asks_thread away_days cal_events_item cal_items_day goal_notes_goal item_events_item item_step_events_step item_step_plans_item item_steps_item items_ask items_day items_src items_thread obs_ingested_at obs_source_kind_ts obs_supersedes obs_uniq prompts_due prompts_target rec_events_rec recs_review recs_status runs_job sync_runs_name thread_events_thread thread_messages_run thread_messages_thread thread_runs_thread"
+	wantTables := "action_events actions ask_events asks away budget_days cal_events cal_items devices goal_notes goals item_events item_step_events item_step_plans item_steps items observations persona_defs prompts rec_events recs runs schema_migrations settings sync_runs thread_events thread_messages thread_runs threads voice_queue"
+	wantIndices := "action_events_action actions_state asks_state asks_thread away_days cal_events_item cal_items_day goal_notes_goal item_events_item item_step_events_step item_step_plans_item item_steps_item items_ask items_day items_src items_thread obs_ingested_at obs_source_kind_ts obs_supersedes obs_uniq persona_defs_key prompts_due prompts_target rec_events_rec recs_review recs_status runs_job sync_runs_name thread_events_thread thread_messages_run thread_messages_thread thread_runs_thread"
 	if got := inventory("table"); got != wantTables {
 		t.Errorf("tables:\n got %s\nwant %s", got, wantTables)
 	}

@@ -73,6 +73,11 @@ type Config struct {
 	// OwnerName is what the agent calls the person it works for (session
 	// preamble, cards). Empty = "the owner".
 	OwnerName string `json:"owner_name"`
+	// MicInput picks the console microphone's input (ops/mic.swift):
+	// "default" = whatever macOS has as the default input (AirPods when in
+	// - their mic drops the music to headset quality), "builtin" = the
+	// Mac's own microphone. Empty = default.
+	MicInput string `json:"mic_input"`
 	// ModelLadder: models for sessions, best first; a run moves down a rung
 	// when the rung's plan bucket is full. Empty = spend.DefaultLadder.
 	ModelLadder []string `json:"model_ladder"`
@@ -122,12 +127,20 @@ type Config struct {
 	// Surfaces: the setup answer to "which apps?" (phone, desktop, web);
 	// empty = all three. `setup.py show` reads it to list what is left.
 	Surfaces []string `json:"surfaces"`
-	// TeamMode: the opt-in layer where long-lived sessions play named roles
+	// TeamMode: the layer where long-lived sessions play named roles
 	// (threads.Persona), a new message from the app is routed to the role
 	// that owns it, and each role keeps its own files (internal/workspace).
-	// Off by default: one plain session per message. `ops/py.sh setup.py hub
-	// --team yes` writes it; a restart applies it.
+	// On unless hub.json says "team_mode": false (a hub.json without the key
+	// gets the default). PATCH /api/v1/settings flips it without a restart.
 	TeamMode bool `json:"team_mode"`
+	// PlainSessions: with team mode on, may a new message from the app or
+	// console start a session with no role? False (the default) sends a
+	// message no role claims to the chief of staff.
+	PlainSessions bool `json:"plain_sessions"`
+	// ModelCap: the best model sessions may start on, one of ModelLadder (or
+	// spend.DefaultLadder). Empty = the top of the ladder. The ladder below
+	// the cap still steps down as buckets fill.
+	ModelCap string `json:"model_cap"`
 	// TimeZone is the household's wall clock, an IANA name such as
 	// "America/Los_Angeles": every "today", day boundary and HH:MM schedule
 	// in the hub and lifectl. Empty = the Mac's own zone (#55).
@@ -171,7 +184,7 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{TmuxPrefix: "life", SessionTokens: true}
+	c := &Config{TmuxPrefix: "life", SessionTokens: true, TeamMode: true}
 	if err := json.Unmarshal(b, c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}

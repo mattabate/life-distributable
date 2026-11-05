@@ -1,9 +1,9 @@
 // life hub — laptop console.
 //
 // Same hub, same REST API, same objects as the iOS app (shared/api.md). This
-// exists because the work the sessions ask the owner for — make an API key, run
-// an OAuth flow, hand over a CSV — is laptop work, and bouncing to the phone to
-// read the ask and reply is friction.
+// exists because the work the sessions ask the owner for — make an API key, run an
+// OAuth flow, hand over a CSV — is laptop work, and bouncing to the phone to
+// read the ask and reply was the friction (2026-08-23).
 //
 // No build step and no framework on purpose: the hub is one static binary
 // with no node toolchain, and `make check` should not grow a JS lane. Auth is
@@ -16,9 +16,10 @@
 'use strict';
 
 // ---------- api ----------
-// The decider code: the second credential Approve/Deny needs. It lives in this
-// browser only — never on the hub's disk, where every session can read — so
-// the hub can tell the owner's own click apart from a session holding the same token. `ops/decider-set.sh`
+// The decider code: the second credential Approve/Deny needs (security review
+// 2026-08-27, rec-d30ebdcf). It lives in this browser only — never on the
+// hub's disk, where every session can read — so the hub can tell the owner's own
+// click apart from a session holding the same token. `ops/decider-set.sh`
 // prints it; withDecider() (views/asks.js) asks for it the first time the hub
 // refuses — on an approval sent from the composer or a job proposal's card.
 const decider = {
@@ -59,16 +60,18 @@ async function api(path, opts = {}) {
   return j;
 }
 // ---------- the console notices it has been rebuilt ----------
-// This page is a hash router: #/goals → #/goals/<id> is a
+// This page is a hash router: #/money → #/money/statement:basic_capital/… is a
 // fragment change, never a document load. A tab left open across a `make check
 // && ops/hub.sh restart` therefore keeps running yesterday's JS forever, and
 // the symptom is a feature that is provably live on the hub and provably
-// absent on the owner's screen.
+// absent on the owner's screen — 2026-08-31: "i started a chat yestreday about
+// putting tooltips on every single plot, I went back today, and now there are
+// no tooltips on anything." The tooltips were fine. The tab was old.
 //
 // Every hub response stamps `X-Hub-Build` (a hash of the console files in the
 // running binary, server.go). The first one is this page's own build; a later
 // one that differs means the files under it changed, so the page reloads. The
-// route is in the URL fragment, so they land back on exactly what they were
+// route is in the URL fragment, so he lands back on exactly what he was
 // reading. A restart breaks the parked /changes request, and the retry after
 // it reads the new build, so the wait is a few seconds.
 let hubBuild = null;
@@ -78,7 +81,7 @@ function seenBuild(b) {
   if (b === hubBuild) return;
   // `hubBuild` is deliberately left at the OLD value, so a reload held back
   // below is retried by the next poll rather than lost.
-  // Never eat something the owner is in the middle of writing: a composer with text
+  // Never eat something he is in the middle of writing: a composer with text
   // in it holds the reload back, and the next poll tries again.
   const el = document.activeElement;
   if (el && /^(TEXTAREA|INPUT)$/.test(el.tagName) && el.value) return;
@@ -90,7 +93,7 @@ const get = p => api(p);
 const post = (p, b) => api(p, { method: 'POST', body: b === undefined ? undefined : JSON.stringify(b) });
 const patch = (p, b) => api(p, { method: 'PATCH', body: JSON.stringify(b) });
 const put = (p, b) => api(p, { method: 'PUT', body: JSON.stringify(b) });
-// The hub's wall clock for easternFields (ui.js); the browser's zone until it answers.
+// The hub's wall clock for easternFields (ui.js); New York until it answers.
 get('/status').then(s => { if (s && s.time_zone) hubZone = s.time_zone; }).catch(() => {});
 
 // ---------- live: one change feed instead of a timer per page ----------
@@ -115,8 +118,8 @@ async function liveRefresh() {
   } finally { live.busy = false; }
 }
 
-// Repaint the open page, unless that would eat something the owner is doing: a
-// drag on the calendar grid, or a form field they are typing in (a page that keeps
+// Repaint the open page, unless that would eat something he is doing: a drag
+// on the calendar grid, or a form field he is typing in (a page that keeps
 // its own drafts says `typing`). A heavy page asks for `every` ms between
 // repaints; the change that arrives early is picked up when that runs out.
 async function pageLive() {
@@ -153,7 +156,7 @@ function busyForm(view) {
 // as a change (the chat drew before it; a change in between is inside it).
 // The day turning is a change too: a page left open overnight (the calendar's
 // today, Overdue) redrew only when the hub moved, so a quiet night kept
-// yesterday's day on screen.
+// yesterday's day on screen (2026-10-28).
 async function longPoll({ query = '', alive, onChange, backoff, baseline = false }) {
   if (HEADLESS) return;
   let since = '', fails = 0, day = todayYMD();
@@ -195,30 +198,33 @@ document.addEventListener('visibilitychange', () => {
 // redraw }` at load (ui.js declares `views`). draw(view, rest) fills #view for
 // `#/<name>/<rest…>`; redraw repaints the page in place after a write.
 async function render() {
-  // The console lands on Sessions, which IS the Your turn page: its first
-  // group is what needs the owner, with the card's own description under each
-  // session. There is no separate #/asks page, so an old bookmark or an unknown hash lands here too.
+  // The console lands on Sessions, which since 2026-09-02 IS the Your turn
+  // page: its first group is what needs him, with the card's own description
+  // under each session. The separate #/asks page is gone ("I don't
+  // think we need it since Your Turn is shown at the top of Sessions"), so an
+  // old bookmark or an unknown hash lands here too.
   const hash = location.hash.replace(/^#\/?/, '') || 'sessions';
   const [name, ...rest] = hash.split('/');
   // `#/open/<id>` is an address, not a page: it is swapped for where the
   // thing lives, so Back never lands on it.
   if (name === 'open') { location.replace(await openRef(rest[0] || '')); return; }
-  // The sources are cards on Configuration; a bare #/sources is that page.
+  // The Sources list became Configuration's cards (2026-10-06); a source's own
+  // page is still #/sources/<g>/<s>, and it lights the Configuration tab.
   if (name === 'sources' && !rest.filter(Boolean).length) { location.replace('#/config'); return; }
   const page = views[name] || views.sessions;
-  // Goals, Spend and a source's page live behind the Configuration tab, so
-  // it stays lit while the owner is on any of them.
-  const tab = ['sources', 'goals', 'spend'].includes(name) ? 'config' : views[name] ? name : 'sessions';
+  // A page without a tab lights the one its places row names (Goals, Spend
+  // and a source are Configuration's blocks since 2026-10-06).
+  const tab = PLACES[name]?.tab || (views[name] ? name : 'sessions');
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
-  // The page the owner is on may be behind the fold — More takes its name; and the
+  // The page he is on may be behind the fold — More takes its name; and the
   // menu closes, this being the click that opened it landing.
   const navmenu = document.getElementById('navmenu');
   if (navmenu) navmenu.hidden = true;
   navFit();
   // Nothing a page left behind survives the route change. Its hooks go, and
-  // #view itself is swapped for a fresh node: a draw from the page just left
-  // that is still awaiting the hub then paints into a detached element,
-  // never over the page on screen now (a slow Spend over a quick Sessions).
+  // #view itself is swapped for a fresh node: a draw from the page he just
+  // left that is still awaiting the hub then paints into a detached element,
+  // never over the page he is on now (a slow Money over a quick Sessions).
   route.gen++;
   setRedraw(null);
   for (const f of onLeave) f();
@@ -258,12 +264,14 @@ async function openRef(id) {
 
 // ---------- what "your turn" means ----------
 // ONE definition, and it is not in this file any more: the hub's board
-// (internal/attention, GET /board?surface=web) decides what is the owner's
-// turn, how it bundles by session, what each bundle opens on and what the
-// three ovals say. The nav badge and the sessions list both read
+// (internal/attention, GET /board?surface=web) decides what is the owner's turn,
+// how it bundles by session, what each bundle opens on and what the three
+// ovals say. The nav badge and the sessions list both read
 // the same response, and the phone reads the same package with
 // surface=mobile — so the console and the app can never print different
-// numbers for the same thing. The console rule the hub applies: EVERY active
+// numbers for the same thing (2026-08-24: "on the sessions page there's
+// one notification, but there are two Your Turn messages… the page says six…
+// the app only says one"). The console rule the hub applies: EVERY active
 // ask + EVERY proposed action, nothing held back, nothing filtered by run
 // state — this is where a running session gets steered. Since 2026-08-28 the
 // phone holds nothing back either, and since 2026-09-23 the two boards are
@@ -272,7 +280,7 @@ async function openRef(id) {
 // `board` is the last response, kept so the draw functions that run in the
 // same tick as a refresh can share it instead of asking twice.
 let board = null;
-const EMPTY_BOARD = { surface: 'web', count: 0, working: 0, calendar: [], sessions: [], for_you: {}, reads: {}, installs: {}, first: {}, badges: { your_turn: 0, calendar: 0, recs: 0 } };
+const EMPTY_BOARD = { surface: 'web', count: 0, working: 0, calendar: [], sessions: [], for_you: {}, reads: {}, installs: {}, first: {}, badges: { your_turn: 0 } };
 async function loadBoard() {
   const b = await get('/board?surface=web');
   board = { ...EMPTY_BOARD, ...(b || {}) };
@@ -286,15 +294,21 @@ async function loadBoard() {
 async function refreshBadges() {
   try {
     const b = await loadBoard();
-    // Sessions wears the your-turn oval: it is the one tab that shows it.
-    setBadge('sessions', b.badges.your_turn);
-    // Recs get the same red oval as the other two, on the console only. It is
-    // a COUNT, not a notification: open recs are undecided items the owner can
-    // see sitting there when they look at the window, and nothing here pushes.
+    // Each tab wears the board count it registered (registerTab `badge`).
+    // Sessions WEARS the your-turn oval (2026-09-02: "right now there's
+    // a 2 in a circle. Let's put that on the Sessions page also"). It carried
+    // no number from 2026-08-26 only because Your turn had its own tab and
+    // two identical ovals side by side said nothing twice — that tab is gone,
+    // so the one count comes back to the one tab that shows it.
+    // Recs get the same red oval as the other two, on the console only
+    // (2026-08-25: "there are 9 recommendations… whatever the Sessions and Your
+    // Turn have, because they both have a number of action items also"). It is
+    // a COUNT, not a notification: open recs are undecided items he can see
+    // sitting there when he looks at the window, and nothing here pushes.
     // Deliberately kept out of document.title, which is the push channel.
-    setBadge('recs', b.badges.recs);
-    // Calendar: fired items whose day has come and nothing has closed since.
-    setBadge('calendar', b.badges.calendar);
+    // Calendar: fired items whose day has come and nothing has closed since
+    // (2026-08-25: Calendar wanted "those same kind of tags").
+    for (const t of TABS) if (t.badge) setBadge(t.key, b.badges[t.badge]);
     document.title = b.badges.your_turn ? `(${b.badges.your_turn}) life` : 'life';
     return b;
   } catch { return null; }
@@ -306,24 +320,38 @@ function setBadge(tab, n) {
   el.classList.toggle('show', !!n);
 }
 
-// The nav order is the order in index.html and NOTHING reorders it: Sessions,
-// Recs, Calendar, Configuration. A badge
-// colours a tab; it never moves one, so every tab is always where it was. The
-// phone's tab bar and its More list are the same list in the same order with
-// the same labels (RootView.swift `MoreDest`), so a change here is a change
-// there.
+// The nav order is the tabs' registered `order` and NOTHING reorders it:
+// Sessions, Recs, Calendar, then any goal page, then Configuration (Sources
+// until 2026-10-06, when Goals and Spend folded into it too; Your turn went
+// 2026-09-02). A badge
+// colours a tab; it never moves one (2026-08-27: "I don't think we need
+// any more sliding. That was a vestigial kind of old plan where the things
+// with notifications weren't always in view. Now they should always be in
+// view"). The phone's tab bar and its More list are the same list in the same
+// order with the same labels (RootView.swift `MoreDest`; 2026-08-27: "the
+// Web's menu is in the exact same order and has the exact same options as the
+// one that's on the phone"), so a change here is a change there.
+// The bar is built once at load from what registered (ui.js registerTab), so
+// a page whose script index.html does not list has no tab (distributable v4).
+document.getElementById('navtabs')?.insertAdjacentHTML('beforeend', TABS.slice()
+  .sort((a, b) => a.order - b.order)
+  .map(t => `<a href="#/${t.key}" data-tab="${t.key}">${esc(t.label)}${t.badge ? ` <span class="badge" id="badge-${t.key}"></span>` : ''}</a>`)
+  .join(''));
 
 // ---------- the bar fits its window ----------
-// One row, always. Wide: every tab. Narrow: the
+// One row, always (2026-09-25: the wrapped bar "goes onto 2 lines… I'd
+// prefer the UI improve here"). Wide: every tab, as before ("on a wide screen
+// I really do want to be able to see all of the options"). Narrow: the
 // buttons lose their long words first (.tight), then the LAST tabs fold into
-// a More menu — the phone's bar, which keeps Sessions · Recs · Calendar and
-// puts the rest behind More. Which tabs fold is
+// a More menu — the phone's bar, which keeps Sessions · Recs · Calendar ·
+// Money and puts the rest behind More ("I like that"). Which tabs fold is
 // measured, not a breakpoint: whatever no longer fits, from the right, so
 // the order on both sides of the fold stays index.html's. Sessions never
-// folds. When the open page is behind the fold, More wears its name and
-// the accent, so the bar always says where you are; the folded tabs' red ovals
+// folds. When the page he is on is behind the fold, More wears its name and
+// the accent, so the bar always says where he is; the folded tabs' red ovals
 // add up on More. Re-measured on resize and whenever anything on the bar
-// changes width (a badge appearing, the button reading "Snapping…") — a ResizeObserver, coalesced to one pass a
+// changes width (a badge appearing, the mic reading "● Listening", the
+// button reading "Snapping…") — a ResizeObserver, coalesced to one pass a
 // frame so its own moves never feed back into it.
 const navTabs = [...document.querySelectorAll('#navtabs a')];
 function navFit() {
@@ -374,7 +402,7 @@ function navRefit() {
 window.addEventListener('resize', navRefit);
 if (typeof ResizeObserver === 'function') {
   const ro = new ResizeObserver(navRefit);
-  ['nav', 'navnew', 'navmore'].forEach(id => { const el = document.getElementById(id); if (el) ro.observe(el); });
+  ['nav', 'navmic', 'navnew', 'navmore'].forEach(id => { const el = document.getElementById(id); if (el) ro.observe(el); });
   navTabs.forEach(a => ro.observe(a));
 }
 

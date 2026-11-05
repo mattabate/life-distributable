@@ -2,37 +2,52 @@
 // views.sessions — see ui.js for the shared pieces and app.js for the router.
 'use strict';
 // ================= sessions =================
-// #/sessions/<thread>/<ask-id> opens the thread AT that ask. Clicking a card
-// used to drop the reader at the bottom of a hundred-message chat with
-// nothing saying which card was their turn.
+// #/sessions/<thread>/<ask-id> opens the thread AT that ask. 2026-08-24:
+// "I don't know where this 'Your Turn' message points to… when you click the
+// 'Your Turn' button, it should open directly to that message." Clicking a
+// card used to drop him at the bottom of a hundred-message chat with nothing
+// saying which card was his turn.
 async function drawSessions(view, rest) {
-  // NO SESSION OPEN = THE EMPTY CHAT, never a blank "nothing" page.
-  // `#/sessions` draws the list and, beside it, a chat with nothing in it yet
-  // and the composer ready: clicking Sessions from Spend means you can start
-  // typing.
+  // NO SESSION OPEN = THE EMPTY CHAT (2026-09-17: "when you land on the
+  // sessions page, there is nothing… I kind of prefer that there is no
+  // nothing page and that there is only the chat interface"). `#/sessions`
+  // draws the list and, beside it, a chat with nothing in it yet and the
+  // composer ready: clicking Sessions from Money means he can start typing.
   // The `#/sessions/new` route went with the "Pick a session" pane; an old
   // link to it lands here.
-  // `#/sessions/all` is not a session: it is every session, ended ones
-  // included, drawn in the chat's pane (drawAllSessions) — where Recent went.
-  const all = rest[0] === 'all';
-  const id = rest[0] === 'new' || all ? '' : (rest[0] || '');
+  // A module's own page in the chat pane (`#/sessions/<page>`) comes from
+  // its hook, so this file works without that module
+  // (distributable v4). The
+  // `#/sessions/all` page (every session, ended ones included — where Recent
+  // went, 2026-09-20) is gone since 2026-10-24 (00:42: "all
+  // sessions is no longer native… you don't need any button for getting
+  // back to those sessions"); an old link to it lands here. The sessions
+  // themselves stay in the hub (`GET /threads`), for analysis.
+  const id = rest[0] === 'new' || rest[0] === 'all' ? '' : (rest[0] || '');
   const focus = rest[1] || '';
   view.innerHTML = `
-    <div class="pane list ${id || all ? 'hide-narrow' : ''}" id="list"></div>
-    <div class="pane chat ${id || all ? '' : 'hide-narrow'}" id="chat"></div>`;
-  await Promise.all([drawList(all ? ALL : id), id ? openThread(id, focus) : all ? drawAllSessions() : newSession()]);
+    <div class="pane list ${id ? 'hide-narrow' : ''}" id="list"></div>
+    <div class="pane chat ${id ? '' : 'hide-narrow'}" id="chat"></div>`;
+  await Promise.all([drawList(id), id ? openThread(id, focus) : newSession()]);
   // The root change feed (app.js) repaints the list with the board it just
   // loaded; the open chat has its own thread-scoped feed (watchThread). The
-  // composer holds a draft, so the list refreshes even while the owner types.
+  // composer holds a draft, so the list refreshes even while he types.
   const wake = id ? () => { watchThread(id); refreshThread(id).catch(() => {}); } : null;
-  setRedraw(() => drawList(all ? ALL : id, true), view, { typing: true, wake });
+  setRedraw(() => drawList(side, true), view, { typing: true, wake });
   if (id) watchThread(id);
 }
 views.sessions = { draw: drawSessions, redraw: () => render() };
+registerTab({ key: 'sessions', label: 'Sessions', order: 10, badge: 'your_turn' });
+// Sessions is also Your turn since 2026-09-02: the page that was `asks`
+// (`#/asks`, ThreadsView's `.yourTurn`) is deleted on both surfaces, and its
+// stack is this page's first group.
+registerPlace('sessions', { label: 'Sessions', view: 'views/threads.js', phone: 'ThreadsView.swift', deep: [
+  { at: 2, label: 'one session', phone: 'ThreadDetail.swift' },
+] });
 
 // Scroll the focused ask into view and flash it once. Runs after the chat is
 // in the DOM; only on the first draw, so a poll five seconds later does not
-// yank the reader back to it while they read something else.
+// yank him back to it while he is reading something else.
 function focusAsk(askID) {
   if (!askID) return false;
   const el = document.getElementById('ask-card-' + askID);
@@ -45,13 +60,15 @@ function focusAsk(askID) {
   return true;
 }
 
-// HOLD THE CARD WHERE IT LANDED while the chat settles. The card is centred
-// the moment the chat is drawn, but the screenshots and run blocks above it
-// fill in over the next few hundred ms and push it down — in a long chat,
-// off the bottom. So for a few seconds every frame puts the card back at the
-// height it was centred at, re-finding it by id (a redraw replaces the node).
-// The owner's own wheel, touch, key or click on the chat lets go at once: it
-// never fights them.
+// HOLD THE CARD WHERE IT LANDED while the chat settles (2026-09-28:
+// "sometimes the session opens in like a random height where you cant see
+// that card"). The card is centred the moment the chat is drawn, but the
+// screenshots in his bubbles and the run blocks above it fill in over the
+// next few hundred ms — measured: the chat grew 2157 → 2615 px within 100 ms
+// and the card slid 146 px down; in a longer chat, off the bottom. So for a
+// few seconds every frame puts the card back at the height it was centred
+// at, re-finding it by id (a redraw replaces the node). His own wheel, touch,
+// key or click on the chat lets go at once: it never fights him.
 function pinCard(elID) {
   const box = document.getElementById('msgs'), el = document.getElementById(elID);
   if (!box || !el) return;
@@ -78,41 +95,55 @@ async function drawList(activeID, reuse) {
   // sessions list. Its "Your turn" group is the sessions these belong to, and
   // every card prints its own share, so N cards visibly adding up to the
   // badge is the whole point. `reuse`: the live loop loaded the board a
-  // moment ago, so it is not asked for twice.
+  // moment ago, so it is not asked for twice. Only the live sessions are
+  // read (`live=1`: working, or a card open for him — the board's rule); the
+  // whole list is All sessions' own read (2026-10-06: 589 sessions, 475 KB,
+  // on every refresh was what made the page feel slow).
   const gen = route.gen;
   listSide = activeID;
-  // `team`: the sessions with a role (team mode; `[]` when it is off, so the
-  // grid under All sessions is not drawn).
   const [threads, b, team] = await Promise.all([
-    get('/threads'), reuse && board ? board : loadBoard().catch(() => board || EMPTY_BOARD),
+    get('/threads?live=1&surface=web'), reuse && board ? board : loadBoard().catch(() => board || EMPTY_BOARD),
     get('/threads?persona=1').catch(() => []),
   ]);
   const list = document.getElementById('list');
   if (!list || gen !== route.gen) return;
   const by = id => b.for_you[id] || 0;
+  // A PERSON is a session with a role (persona=1 rows; `role` rides every
+  // row of hers). Only people are rows on this list (2026-10-24
+  // 00:20: "all of the text should be personified… they should live under
+  // people"); any other session is a row only while it is waiting on him —
+  // under Your turn, as an accident (00:42: "if by some insane accident one
+  // of those sessions gets a message and is waiting, then sure, you should
+  // put it back here. But I'd consider that to be an accident").
+  const person = t => !!(t.persona || t.role);
+  const shown = (t, key) => person(t) || key === 'your_turn';
   // The nav oval hangs off Sessions now — this page IS Your turn (2026-09-02).
   setBadge('sessions', b.count);
   // The open chat's head moves with the same board its row does.
   if (chatState.id) paintChatPills((threads || []).find(t => t.id === chatState.id));
-  // A card is the session's NAME, what it needs from the owner, what it is
-  // doing and which model it runs on — never the last reply. A dead turn's
-  // error still shows: that is a fact about the session, not a description.
-  // Tokens stay off the card (they are inside the session; the card shows
-  // dollars).
+  // A card is the session's NAME, what it needs from him, what it is doing
+  // and which model it runs on — never the last reply (2026-08-28: "the
+  // description is not helping. If there's a to-do item, that's helpful, and
+  // then maybe the model"). A dead turn's error still shows: that is a fact
+  // about the session, not a description. Tokens stay off the card (they are
+  // inside the session; the card shows dollars — 2026-08-25).
   const bundles = {};
   for (const x of b.sessions || []) bundles[x.id] = x;
-  // A SESSION ANOTHER ONE STARTED IS A ROW INSIDE THAT ONE'S CARD: a thread
-  // whose `parent_id` is filed on this list is a cell on its parent's card,
-  // like an open card: its title, its state, its own card's tint and verb
-  // when it has one, three rows and then "and N more".
-  // The hub's `home` names the card: the top of the chain, so a run started
-  // by a run started by a session is a cell on that session's card.
+  // A SESSION ANOTHER ONE SPUN OFF IS A ROW INSIDE THAT ONE'S CARD
+  // (2026-10-23 01:23: one role running, with two little subagents; 01:34, of the first cut's indented cards: "I prefer
+  // something… more like this… the parent and then 2 of these… collapsing
+  // after 5 or 3"): a row whose `parent_id` is filed on this list is a cell
+  // on its parent's card, like an open card — its title, its state, its own
+  // card's tint and verb when it has one — three, then "and N more". The
+  // hub's `home` names the card: the top of the chain, so a run started by a
+  // run started by a role is a cell on that role's card (2026-10-27).
   const home = b.home || {};
   const nested = t => !!home[t.id];
   const kids = {};
   for (const t of threads) if (nested(t) && sectionOf(b, t)) (kids[home[t.id]] ||= []).push(t);
   const subCell = k => {
-    const c = sessionCards(bundles[k.id])[0];
+    const cs = sessionCards(bundles[k.id], speakingOn(b, k.id));
+    const c = cs.find(x => x.speaking) || cs[0];
     const href = `#/sessions/${encodeURIComponent(k.id)}${b.first[k.id] ? '/' + encodeURIComponent(b.first[k.id]) : ''}`;
     const live = k.status === 'running';
     return `<a class="ask mini sub ${c ? c.tint : 'quiet'}" href="${href}">
@@ -129,107 +160,134 @@ async function drawList(activeID, reuse) {
     `<h3>${label}${count ? ` <span class="muted">· ${count}</span>` : ''}</h3>` + list.map(t => card(t)).join('');
   const card = t => {
       const n = by(t.id);
-      // EVERY OPEN CARD IS ITS OWN CELL: the board's bundle for this
+      // EVERY OPEN CARD IS ITS OWN CELL (2026-09-20: "when there are two
+      // to-dos for me and they're bundled into the same section… keeping a
+      // disconnect would kind of confuse me"): the board's bundle for this
       // session, drawn one cell per card. The one-card todo/detail below is
       // only the fallback for a board that counts cards it did not bundle.
-      // A ROW DRAWS TWO, THEN SAYS HOW MANY MORE. The to-dos are the
-      // owner's dated steps — the
+      // A ROW DRAWS TWO, THEN SAYS HOW MANY MORE (later that day, of a
+      // session with one read and five to-dos that showed one cell: "should
+      // show up to two things I'm supposed to do in a session. After that, it
+      // should say 'and more'"). The to-dos were his dated steps — the
       // calendar's, uncounted — so the bundle carries them now (`steps`) and
       // the row stands for what the chat draws (board `open`).
-      const cards = sessionCards(bundles[t.id]);
-      const open = Math.max((b.open || {})[t.id] || 0, cards.length);
-      const more = open - Math.min(cards.length, ROW_CARDS);
-      const shown = moreOpen.has(t.id) ? cards.length : ROW_CARDS;
+      // WHAT IS RUNNING LEADS THE ROW, GREY (2026-11-05 00:43, mock
+      // B: "have a running be the highest priority… maybe it should be grey"
+      // — it is in hand, not his turn): every job and helper is a cell, then
+      // his cards newest first, two drawn in all (jobCells).
+      const live = t.status === 'running' || ((b.pills || {})[t.id] || []).some(p => p.tone === 'running');
+      const jobs = jobCells(t);
+      const cards = jobs.concat(sessionCards(bundles[t.id], speakingOn(b, t.id)));
+      const open = Math.max(((b.open || {})[t.id] || 0) + jobs.length, cards.length);
+      const drawn = rowCards(cards, moreOpen.has(t.id));
+      const more = open - Math.min(cards.length, rowCards(cards, false).length);
       // The todo line's colour is the first cards pill's: blue to read, teal
-      // to install, red when something is blocked on the owner. A session
-      // wears one pill per class (red, blue, teal in that order — an install
-      // is called out separately) and the hub names the row's card in
+      // to install, red when something is blocked on him. A session wears one
+      // pill per class (red, blue, teal in that order — 2026-09-17: an
+      // install "called out separately") and the hub names the row's card in
       // the same order, so the first coloured pill is the todo's own class.
       const cardsPill = ((b.pills || {})[t.id] || []).find(p => TODO_COLOR[p.tone]);
       const tone = TODO_COLOR[cardsPill ? cardsPill.tone : 'needs'];
       const todo = n && !cards.length ? (b.todo || {})[t.id] || '' : '';
       // …and what the card actually SAYS, under it. The Your turn page is
-      // gone and this is the one thing it had that a session row did not.
-      // The hub caps it at 400 chars; .wrap3 cuts
+      // gone and this is the one thing it had that a session row did not
+      // (2026-09-02: "it's not obvious to me what I get inside the Your
+      // Turn things outside of a bigger description… perhaps you truncate
+      // after a couple of lines"). The hub caps it at 400 chars; .wrap3 cuts
       // it at three lines, so a long ask never pushes the next card off
       // screen. mdPreview is the same flattening a reply preview gets: the
       // ask's "- " bullets become "• " clauses on one running line.
       const detail = todo ? mdPreview((b.detail || {})[t.id] || '') : '';
       return sessionCardHTML(t, {
         active: t.id === activeID,
-        live: ((b.pills || {})[t.id] || []).some(p => p.tone === 'running'),
+        live,
         // Land on the card (approval or ask), not at the foot of the chat:
         // the board's `first` — the approval card, else the first ask.
         first: b.first[t.id] || '',
-        cells: cards.slice(0, shown).map(c => miniCardHTML(t.id, c)).join('')
-          + (cards.length > ROW_CARDS ? `<a class="small muted more-cards" href="#" onclick="event.preventDefault();toggleMoreCards('${esc(t.id)}')">${shown > ROW_CARDS ? 'Show less' : `and ${more} more`}</a>`
+        cells: drawn.map(c => miniCardHTML(t.id, c)).join('')
+          + (cards.length > rowCards(cards, false).length ? `<a class="small muted more-cards" href="#" onclick="event.preventDefault();toggleMoreCards('${esc(t.id)}')">${moreOpen.has(t.id) ? 'Show less' : `and ${more} more`}</a>`
             : cards.length && more > 0 ? `<a class="small muted more-cards" href="#/sessions/${encodeURIComponent(t.id)}">and ${more} more</a>` : '')
           + (todo ? `<div class="small wrap2" style="margin-top:6px;color:var(--${tone})">→ ${mdInline(todo, false)}</div>` : '')
           + (detail ? `<div class="small muted wrap3" style="margin-top:2px">${detail}</div>` : '')
           + subCells(t),
         // The cells and the blue dot say what the count and RUNNING pills
-        // did; only the live audio pills stay (speaking, waiting).
-        pills: audioPills(b, t),
+        // did; only the live audio ones stay (rec-e4b035dd, 2026-10-17).
+        // A cell already reading "speaking" is the one mark (the desktop's
+        // `voiced`, 2026-10-25).
+        pills: audioPills(b, t, cards.some(c => c.speaking)),
       });
   };
-  // A SESSION ON THIS LIST IS WORKING OR WAITING ON THE OWNER — Your turn or Working
+  // A SESSION ON THIS LIST IS WORKING OR WAITING ON HIM — Your turn or Working
   // — and the hub files it (board `section`) and words each heading (board
   // `headings`: "3 in 2 sessions · 1 working"). The phone draws the same
   // list, so the ladder (running → Working; any card open → Your turn, reads
-  // and installs mixed in — no separate To read heading)
+  // and installs mixed in — no separate To read heading, 2026-09-17)
   // lives once, in internal/attention, not here and in ThreadsView.swift.
-  // Everything that ended is behind the one line at the foot — the phone's
-  // "All sessions" row, in its words; no Recent group.
-  // No "+ New session" button in this column — it is on the toolbar, on
-  // every page.
+  // ONLY PEOPLE ARE ROWS under them (2026-10-24 00:20, of "Torus
+  // crossword grid" and "Higher leverage growth" as rows: the list is "ONLY
+  // the persona sessions… nothing else as a top-level row"); a session that
+  // is not a person shows only while it waits on him (`shown`). Every other
+  // session — the topic chats from before people-only routing (10-22), a
+  // scheduled job, an ended one — has NO row and no page: the "All sessions
+  // · 850" line and the Legacy box that stood in for it one evening went
+  // 2026-10-24 00:42 ("the footer that says 850 sessions goes… you don't
+  // need any button for getting back to those sessions"). No "+ New session"
+  // button in this column — it is on the toolbar, on every page
+  // (2026-08-26). A module's own link is the last row, always a whole one,
+  // drawn by that module when it is loaded.
+  const people = (team || []).filter(person);
+  // WHO IS TALKING, by name (2026-10-28 20:01, of a role's card
+  // speaking under "and 1 more": he must always see which agent it is): the
+  // person whose session, or a run homed on them, is in his ears.
+  const voicedBy = id => speakingOn(b, id) || threads.some(k => home[k.id] === id && speakingOn(b, k.id));
   paint(list, `
     ${(b.headings || NO_HEADINGS).map(h => {
-      const rows = threads.filter(t => sectionOf(b, t) === h.key && !nested(t));
+      const rows = threads.filter(t => sectionOf(b, t) === h.key && !nested(t) && shown(t, h.key));
       return group(h.label, h.show ? rows.slice(0, h.show) : rows, rows.length ? h.count : 0);
     }).join('')}
-    ${threads.length ? `<a class="all-link${activeID === ALL ? ' on' : ''}" href="#/sessions/all"><span>All sessions</span><span class="muted">${threads.length}</span></a>`
-      : emptyHTML('No sessions yet.')}
-    ${(team || []).length ? `<div class="foot-links team">${team.map(t =>
-      `<a class="all-link person${t.id === activeID ? ' on' : ''}" href="#/sessions/${encodeURIComponent(t.id)}"><span><strong>${esc(t.title)}</strong><span class="muted">${esc(t.role || '')}</span></span><span class="count">${by(t.id)}</span></a>`).join('')}</div>` : ''}`);
+    <h3>Sessions</h3>
+    ${people.length ? `<div class="foot-links team">${people.map(t => `<a class="all-link person${t.id === activeID ? ' on' : ''}" href="#/sessions/${encodeURIComponent(t.id)}"><span><strong>${esc(t.title)}${voicedBy(t.id) ? '<span class="dot pulse speak-dot" title="speaking"></span>' : ''}</strong>${t.role ? `<span class="muted">${esc(t.role)}</span>` : ''}</span>${by(t.id) ? `<span class="count">${by(t.id)}</span>` : ''}</a>`).join('')}</div>` : ''}
+    ${(b.threads_total || threads.length) ? '' : emptyHTML('No sessions yet.')}`);
 }
 
 // The heading a session is filed under: the board's word for it, else (a
 // session newer than the last board) running → Working; anything else has no
-// heading and is only under All sessions.
+// heading and no row.
 const NO_HEADINGS = [{ key: 'working', label: 'Working', count: '' }];
 const sectionOf = (b, t) => (b.section || {})[t.id] || (t.status === 'running' ? 'working' : '');
-const ALL = ' all'; // drawList's activeID while #/sessions/all is open (no thread id has a space)
 
-// ONE SESSION'S CARD on the list: whole titles, and the cards and what they
-// mean readable without clicking into the chat. The NAME has the card's full width and
+// ONE SESSION'S CARD on the list (2026-09-20: "I don't want
+// truncated titles… see the cards and what they mean from the sessions page
+// without clicking into the chat"). The NAME has the card's full width and
 // wraps — the pills that shared its line and cut it to "Generated puzzle c…"
 // are in the foot now, beside the model and the dollars. Between the two sit
 // the session's open cards, EACH ITS OWN CELL (miniCardHTML) in the chat
-// card's own tint — red blocked on the owner, blue to read, teal to install — so
+// card's own tint — red blocked on him, blue to read, teal to install — so
 // two things waiting read as two things, each opening the chat AT that card.
 // The box is a <div> because a link cannot hold links; a click anywhere on it
 // that is not one of them opens the session at its first card.
 //
-// THE NAME AND THE ONE THING IT NEEDS FROM THE OWNER: no model, dollars or
-// tool-call row, since the chat's head carries those. A Your turn card is the
-// name over its first cell ("and N more" under it); a Working card is one
-// line, a blue dot, the name and when it last moved. Only the live audio pills
-// stay (speaking, waiting): the fact a cell cannot carry.
+// THE NAME AND THE ONE THING IT NEEDS FROM HIM (rec-e4b035dd,
+// 2026-10-17 on the mock: "that works for me… it declutters the design"):
+// no model, dollars or tool-call row — the chat's head carries those. A Your
+// turn card is the name over its first cell ("and N more" under it); a
+// Working card is one line, a blue dot, the name and when it last moved. Only
+// the live audio pills stay (speaking, waiting): the fact a cell cannot carry.
 function sessionCardHTML(t, o) {
   // The blue dot is the board's "running" pill, which a chain top wears for
-  // the runs under it (attention.Live), so a session whose helpers or child
-  // runs are at work reads as active before a message is sent to it.
+  // the runs under it (attention.Live, 2026-10-27 22:18: "something I
+  // can visualize… to know that [a role] is active, so I don't send a message
+  // to [it] when [it's] doing work").
   const live = t.status === 'running' || !!o.live;
   const failed = !live && t.last_message_kind === 'error' && !isPauseText(t.last_message);
   const href = `#/sessions/${encodeURIComponent(t.id)}${o.first ? '/' + encodeURIComponent(o.first) : ''}`;
   const bare = !o.cells;
   return `
     <div class="card click sess${bare ? ' sess-line' : ''}${o.active ? ' on' : ''}" onclick="if(!event.target.closest('a'))location.hash='${href}'">
-      <div class="sess-h">${live ? '<span class="sess-dot"></span>' : ''}<a class="sess-t${t.unread > 0 ? ' unread' : ''}" href="${href}">${mdInline(t.title || t.id, false)}</a>${bare ? `<span class="small muted sess-ago">${ago(t.last_message_at || t.updated_at)}</span>` : ''}</div>
+      <div class="sess-h"><a class="sess-t${t.unread > 0 ? ' unread' : ''}" href="${href}">${mdInline(t.title || t.id, false)}${live ? '<span class="sess-dot"></span>' : ''}</a>${t.role ? `<span class="small muted sess-role">${esc(t.role)}</span>` : ''}${bare ? `<span class="small muted sess-ago">${ago(t.last_message_at || t.updated_at)}</span>` : ''}</div>
       ${o.pills ? `<div class="small sess-foot">${o.pills}</div>` : ''}
       ${failed ? `<div class="small wrap2 err mt6">${failedPreview(t.last_message)}</div>` : ''}
       ${o.cells || ''}
-      ${live && (t.turn_tasks || []).length ? `<div class="sess-tasks">${t.turn_tasks.map(k => taskRowHTML(k)).join('')}</div>` : ''}
     </div>`;
 }
 
@@ -237,13 +295,18 @@ function sessionCardHTML(t, o) {
 // stopped on them), then its asks as the hub sorted them. Each is the chat
 // card's tint and mark (askHTML / actionHTML in ui.js), so the cell here and
 // the card in the chat read as one object.
-function sessionCards(bundle) {
+// THE CARD IN HIS EARS reads "speaking" in green (the desktop's
+// SessionCell.cells): the ask the hub marks, else — a replay holds the
+// session's floor, not the card's — its first card with a line.
+function sessionCards(bundle, floor) {
   if (!bundle) return [];
   const acts = (bundle.actions || []).map(a => ({ id: a.id, title: a.title, tint: '', mark: '🔴', verb: 'approve' }));
-  // …then the owner's dated steps that sit in this chat (`steps`, the
-  // calendar's). An answered ask is never here: the board drops it.
+  const voiced = ((bundle.asks || []).find(a => a.speaking) || (floor ? (bundle.asks || []).find(a => a.said) : null) || {}).id;
+  // …then his dated steps that sit in this chat (`steps`, the calendar's).
+  // An ask he has answered is never here: the board drops it (2026-09-20).
   const asks = (bundle.asks || []).concat(bundle.steps || []).map(a => {
     const k = a.kind, paused = k === 'error' && !!a.resumes_at;
+    if (voiced && a.id === voiced) return { id: a.id, title: a.title, verb: 'speaking', tint: 'speaking', mark: '<span class="dot pulse"></span>', speaking: true };
     return {
       id: a.id, title: a.title, verb: a.verb || 'for you',
       tint: k === 'read' ? 'read' : k === 'install' ? 'install' : paused ? 'paused' : k === 'error' ? 'err-card' : '',
@@ -253,13 +316,23 @@ function sessionCards(bundle) {
   return acts.concat(asks);
 }
 // How many of a session's open cards its row draws; the rest is "and N more"
-// (two, like the desktop's `rowCards`).
+// (two, 2026-10-28 20:01: "I thought we sort of decided" — one since
+// rec-e4b035dd hid a role's speaking card; the desktop's `deskCards`).
+// The card in his ears is never folded: it draws past the cap (rowCards).
 const ROW_CARDS = 2;
-// …and how many of its sub-sessions, the rest "and N more".
+function rowCards(cards, open) {
+  if (open) return cards;
+  const head = cards.slice(0, ROW_CARDS);
+  const voiced = cards.slice(ROW_CARDS).find(c => c.speaking);
+  return voiced ? head.concat(voiced) : head;
+}
+// …and how many of its sub-sessions, the rest "and N more" (2026-10-23:
+// "collapsing after 5 or 3"; the desktop's `deskSubs`).
 const SUB_CELLS = 3;
-// "AND N MORE" OPENS THE REST IN PLACE: the row's older cards drop in under
-// the newest one, each its own cell; "Show less" folds them. Kept per session
-// across the list's repaints.
+// "AND N MORE" OPENS THE REST IN PLACE (2026-10-18 00:43: "could be
+// able to expand to get to the previous action items… clicking on and one
+// more"): the row's older cards drop in under the newest one, each its own
+// cell; "Show less" folds them. Kept per session across the list's repaints.
 const moreOpen = new Set();
 let listSide = '';
 function toggleMoreCards(id) {
@@ -268,85 +341,46 @@ function toggleMoreCards(id) {
 }
 
 // One open card as a cell on its session's card: the chat's `.ask` box, small.
-// The title is whole and alone - no words under it; the chat holds the rest.
+// The title is whole and alone — no words under it (2026-10-10
+// 15:14, of the cells without their descriptions: "I'm totally cool to move
+// to the new system"); the chat holds the rest.
 function miniCardHTML(threadID, c) {
+  if (c.job) return `<a class="ask mini quiet job" href="#/sessions/${encodeURIComponent(threadID)}">
+      <div class="t"><span class="verb">running</span>${mdInline(c.title, false)}</div>${taskBarHTML(c.job)}${jobFootHTML(c.job)}</a>`;
   return `<a class="ask mini ${c.tint}" href="#/sessions/${encodeURIComponent(threadID)}/${encodeURIComponent(c.id)}">
       <div class="t"><span class="verb">${esc(c.verb)}</span>${c.mark} ${mdInline(c.title, false)}</div></a>`;
 }
-// …and its SPEAKING pill, the one live fact a cell cannot carry.
-const audioPills = (b, t) => livePillsHTML(((b.pills || {})[t.id] || []).filter(p => p.tone === 'speaking' || p.tone === 'waiting'));
-
-// ---- All sessions (#/sessions/all) ----
-// Where Recent went, for finding something done previously: every session,
-// newest first, and a box that narrows it by name as you type. It draws in
-// the chat's pane, so the list of what is waiting stays beside it. A TABLE,
-// fifty rows at a time (a grid of hundreds of cards looked bad, and twenty
-// was too few to find anything by eye): one line per session — name, state,
-// model, when, dollars — and the shared pager.
-let allQuery = '';
-const allPager = makePager('sessions', 50);
-async function drawAllSessions() {
-  const gen = route.gen;
-  const [threads, b] = await Promise.all([get('/threads'), board || loadBoard().catch(() => EMPTY_BOARD)]);
-  const view = document.getElementById('chat');
-  if (!view || gen !== route.gen) return;
-  chatState.id = null;
-  view.innerHTML = `
-    <div class="chat-head">
-      <button class="sm narrow-only" onclick="showList()">←</button>
-      <div class="grow" style="min-width:0"><strong>All sessions</strong> <span class="muted">· ${threads.length}</span></div>
-      <input type="text" id="all-q" placeholder="Find a session…" value="${esc(allQuery)}" style="max-width:280px" autocomplete="off">
-    </div>
-    <div class="msgs"><div class="card all-table" id="all-table"></div></div>`;
-  const paintAll = allPager.paint = () => {
-    const el = document.getElementById('all-table');
-    if (!el) return;
-    const words = allQuery.toLowerCase().split(/\s+/).filter(Boolean);
-    const rows = threads.filter(t => words.every(w => (t.title || t.id).toLowerCase().includes(w)));
-    const shown = allPager.rows(rows);
-    el.innerHTML = !rows.length ? emptyHTML('No session by that name.') : `
-      <table>
-        <thead><tr><th>Session</th><th></th><th>Model</th><th>Last</th><th class="n">Cost</th></tr></thead>
-        <tbody>${shown.map(t => {
-          const first = (b.first || {})[t.id] || '';
-          const href = `#/sessions/${encodeURIComponent(t.id)}${first ? '/' + encodeURIComponent(first) : ''}`;
-          return `<tr onclick="location.hash='${href}'">
-            <td class="all-t"><a href="${href}"${t.unread > 0 ? ' class="unread"' : ''}>${mdInline(t.title || t.id, false)}</a>${t.schedule ? `<span class="small muted"> · ${esc(t.schedule_label || cadenceWords(t.schedule))}</span>` : ''}</td>
-            <td class="all-p">${sessionPills(b, t)}</td>
-            <td class="small muted">${esc(t.model_label || modelShort(t.model || ''))}</td>
-            <td class="small muted">${ago(t.last_message_at || t.updated_at)}</td>
-            <td class="n small">${t.cost_usd ? usd(t.cost_usd) : ''}</td></tr>`;
-        }).join('')}</tbody>
-      </table>
-      ${allPager.html(rows.length, shown.length)}`;
-  };
-  const q = document.getElementById('all-q');
-  // A new search starts from the first fifty again.
-  q.oninput = () => { allQuery = q.value; allPager.reset(); paintAll(); };
-  allPager.reset();
-  paintAll();
-  q.focus();
+// A session's running jobs as row cells (mock B, 2026-11-05): the actions
+// the hub runs for it and its helpers, reply sent or not.
+const jobCells = t => liveTasks(t).map(k => ({ id: 'job:' + (k.id || k.description), title: k.description || 'helper', job: k }));
+// Its newest line and how long it has run, one muted line.
+function jobFootHTML(k) {
+  const words = [k.doing, taskAge(k)].filter(Boolean).join(' · ');
+  return words ? `<div class="small muted job-doing">${esc(words)}</div>` : '';
 }
+// …and its SPEAKING pill, the one live fact a cell cannot carry (2026-09-25).
+const speakingOn = (b, id) => ((b.pills || {})[id] || []).some(p => p.tone === 'speaking');
+const audioPills = (b, t, voiced) => livePillsHTML(((b.pills || {})[t.id] || []).filter(p => (p.tone === 'speaking' && !voiced) || p.tone === 'waiting'));
 
-// The capsules a session card wears, in the hub's order and words (board
-// `pills`, else the thread's own `pill`): "running" + "2 for you", "1 to read"
-// + "1 to install", "done". The tone is the pill's class; `idle` has none.
+// (The All sessions page — `#/sessions/all`, every session as a table of
+// fifty, a find box, 2026-09-20 to 2026-10-24 — is gone: drawSessions.)
+
+// A session's capsules, in the hub's order and words (board `pills`, else the
+// thread's own `pill`): "running" + "2 for you", "1 to read" + "1 to
+// install", "done". The tone is the pill's class; `idle` has none.
 const TODO_COLOR = { needs: 'red', read: 'accent', install: 'teal' };
 const PILL_CLASS = { needs: 'needs', read: 'read', install: 'install', running: 'running', done: 'done', waiting: 'waiting' };
-// The pills that move on their own — running, speaking, waiting to speak —
-// are LIVE_PILL in ui.js (shared with the calendar's rows since 2026-09-26).
-// The hub marks the session for as long as the line takes to say; the list
-// repaints as it starts and ends.
-function sessionPills(b, t) {
-  const pills = (b && b.pills || {})[t.id] || (t.pill ? [t.pill] : null);
-  if (!pills) return statusPill(t.status);
-  return pills.map(p => LIVE_PILL[p.tone] ? LIVE_PILL[p.tone](p.word)
-    : pill(p.word, PILL_CLASS[p.tone])).join('');
-}
 
-// The open chat's head: the same pills, but the live ones are the controls.
-// Hovered, "running" reads Stop and stops the turn; "speaking" / "waiting to
-// speak" read Stop speaking and hush the line — the card stays (headHush).
+// The open chat's head: the same pills, but the live ones are the controls
+// (2026-09-28, once Check in and Archive left the head: "maybe if you
+// scroll over running it should change to stop? and if you scroll over
+// speaking you can make it stop speaking"). Hovered, "running" reads Stop
+// and stops the turn; "speaking" / "waiting to speak" read Stop too and
+// hush the line — the card stays (headHush); the tooltip says Stop speaking.
+// The pill is sized by the wider of its word and its hover word, so the hover
+// word is never longer than the word: with "Stop speaking" under it, a
+// resting "speaking" sat in a pill twice its size (2026-09-30, "speaking
+// cell too wide on top bar when clicking into session").
 const HEAD_ACT = {
   running: ['Stop', "threadAct('stop')", 'Stop'],
   speaking: ['Stop', 'headHush()', 'Stop speaking'],
@@ -363,13 +397,18 @@ function headPills(b, t) {
     return `<button class="pill ${p.tone} pill-act" onclick="${act[1]}" title="${esc(act[2])}"><span class="w">${dot}${esc(p.word)}</span><span class="h"><span class="dot"></span>${esc(act[0])}</span></button>`;
   }).join('');
 }
-// Stop what this session is saying: the hub's "speaking" mark ends, and every
-// open card of it whose line is still queued is hushed (POST /voice/hush).
-// Nothing is dismissed.
+// Stop what this session is saying: a replay playing in any console window
+// (sayHush + the one-voice broadcast, and the hub's "speaking" mark ended),
+// and every open card of it that has a line — hushed on the hub, which cuts
+// the Mac's voice mid-line and drops a queued one (POST /voice/hush). Cards
+// already heard are unaffected; nothing is dismissed.
 function headHush() {
   const id = chatState.id;
+  if (typeof sayHush === 'function') sayHush();
+  if (typeof winSend === 'function') winSend('say', {});
   post('/voice', { thread_id: id, secs: 0 }).catch(() => {});
-  for (const card of chatState.waitingCards || []) post('/voice/hush', { card }).catch(() => {});
+  const cards = new Set([...document.querySelectorAll('#msgs .ask .say-btn[data-ref]')].map(e => e.dataset.ref));
+  for (const card of cards) post('/voice/hush', { card }).catch(() => {});
   toast('stopped speaking');
   setTimeout(() => refreshThread(id, true).catch(() => {}), 1200);
 }
@@ -379,10 +418,12 @@ function headHush() {
 // a card or a status change, so the head is repainted IN PLACE by every
 // refresh: the chat's own (refreshThread, whose full redraw is gated on the
 // structure changing) and the list's (drawList, which holds the board the
-// live loop just loaded, while the chat's `board` may be a beat older).
-// Otherwise the head keeps the pills of its last full redraw — "waiting to
-// speak" stuck in the head for as long as the chat stays open, while its row
-// on the left has long gone quiet.
+// live loop just loaded, while the chat's `board` may be a beat older). Until
+// 2026-09-26 the head kept the pills of its last full redraw: a card said at
+// 01:04 read "waiting to speak · running" in the head for as long as the
+// chat stayed open, while its row on the left had long gone quiet (
+// "that waiting to speak stuck there even after the recording had stopped
+// playing and the word speaking had went away from the tab on the left").
 // A change of those pills also rereads the chat, so a card's own "Waiting to
 // speak" moves with its row (refreshThread's askKey carries the mark).
 function paintChatPills(t) {
@@ -411,41 +452,53 @@ function watchThread(id) {
     backoff: () => { const el = document.getElementById('chat'); return el && el.dataset.status === 'running' ? 3000 : 15000; },
     // The first answer is the baseline, and a change that landed between
     // the opening draw and it is already inside it — so it refreshes too.
-    // Without that, a turn that ended ~1 s after the chat opened kept
-    // "starting…" and a Stop button forever, and Stop said "thread is not
-    // running".
+    // Until 2026-09-26 it didn't: a turn that ended ~1 s after he opened it
+    // kept "starting…" and a Stop button forever, and Stop said "thread is
+    // not running" ("im trying to kill this thread and its not working").
     baseline: true,
   });
 }
 
 // A cadence in words: "weekly@Mon 09:00" → "weekly Mon 09:00".
 function cadenceWords(s) { return (s || '').replace('@', ' '); }
+// A standing wake is ONE pill, its period and its next minute
+// (2026-10-23, circling "weekly Wed 09:30" beside "next Wed 9:30 AM": "2
+// bubbles that kind of were redundant"): "weekly · next Wed 9:30 AM". The
+// phone's cadenceNext (Format.swift) says the same.
+function cadenceNext(s, next) { return (s || '').split('@')[0] + ' · next ' + next; }
 
-// A new session takes files too: the phone can start a thread from a photo,
-// so the laptop — where the screenshot usually is — has to as well. Same lane
-// as the chat composer: upload as observations first, pass the blob refs.
-// The page the open composer belongs to (places.js), or null when the owner
-// did not come here from a page. Read again by createSession(), which puts it in words
+// A new session takes files too (2026-08-23: "i cant include an image
+// with new sessions"): the phone can start a thread from a photo, so the
+// laptop — where the screenshot usually is — has to as well. Same lane as the
+// chat composer: upload as observations first, pass the blob refs.
+// The page the open composer belongs to (places.js), or null when he did not
+// come here from a page. Read again by createSession(), which puts it in words
 // at the top of the first message.
 let newPlace = null;
-// What the empty transcript says: a plain greeting, not the route, hash and
-// files that draw the page (placeBlock() in words). The place still goes with
-// the message (createSession); the transcript just does not print it. Same
-// two lines on the phone (NewThreadSheet.swift).
+// What the empty transcript says (2026-09-17: the old line — the route,
+// the hash and the files that draw the page, i.e. placeBlock() in words —
+// "isn't really appealing… I don't really understand it. Can literally say
+// something like 'Ready when you are.'"). The place still goes with the
+// message (createSession); the transcript just no longer prints it. Same two
+// lines on the phone (NewThreadSheet.swift).
 const HELLO = 'Ready when you are.';
 const PLACE_RIDES_ALONG = 'The page you came from goes with your message.';
-// A NEW SESSION IS AN EMPTY CHAT. Same head, same transcript pane, same
+// A NEW SESSION IS AN EMPTY CHAT (2026-09-17: "the new session page can
+// just sort of be equal to a new chat page… I'm never going to add the link
+// to the goal myself. I'm never going to add a checkback time by myself. I'm
+// just going to say it in the prompt"). Same head, same transcript pane, same
 // composer box as an open session — the transcript just has nothing in it
-// yet. The goal and the cadence are the session's to infer from the owner's
-// words (goals are inferred by the agent, follow-through is the agent's
-// call), so there are no selects asking for them.
-// It is also what `#/sessions` shows with no session open (drawSessions) —
-// the one chat surface, empty until the owner types.
+// yet. The goal and the cadence are the session's to infer from his words
+// (DESIGN.md: "Goals are inferred by the agent… follow-through is the
+// agent's call"), so the two selects that asked him for them are gone.
+// Since 2026-09-17 it is also what `#/sessions` shows with no session open
+// (drawSessions) — the one chat surface, empty until he types.
 async function newSession() {
   const gen = route.gen;
   const view = document.getElementById('chat');
   if (!view || gen !== route.gen) return;
   chatState.id = null;
+  newSending = 0;
   composerReset('new');
   clearDraft('new');
   // Only a press of "+ New session" carries a place; landing on #/sessions any
@@ -453,6 +506,7 @@ async function newSession() {
   // not inherit the last one. That press is also the one time a narrow
   // window swaps the list for the chat — the same swap opening a session does.
   newPlace = pendingPlace; pendingPlace = null;
+  newAbout = pendingAbout; pendingAbout = null;
   if (newPlace) {
     const list = document.getElementById('list');
     if (list) list.classList.add('hide-narrow');
@@ -462,14 +516,15 @@ async function newSession() {
     <div class="chat-head">
       <button class="sm narrow-only" onclick="showList()">←</button>
       <div class="grow" style="min-width:0">
-        <div class="trunc"><strong>New session</strong></div>
+        <div class="trunc"><strong>${newPlace ? 'Session from this screen' : 'New session'}</strong></div>
         <div class="small muted trunc" id="new-start" hidden></div>
       </div>
     </div>
     <div class="msgs" id="msgs">
       <div class="hello">
         <div class="hello-line">${HELLO}</div>
-        ${newPlace ? `<div class="small muted">${PLACE_RIDES_ALONG}</div>` : ''}
+        ${newAbout ? aboutTagHTML(newAbout) : newPlace ? `<div class="small muted">${PLACE_RIDES_ALONG}</div>` : ''}
+        <div class="working small muted" id="new-sending" hidden></div>
       </div>
     </div>
     <div class="composer-wrap">${composerHTML('new', newComposerSpec())}</div>`;
@@ -477,14 +532,15 @@ async function newSession() {
   wireDrop(document.getElementById('msgs'), 'new');
   const box = document.getElementById('c-new-draft');
   if (box) box.focus();
-  // A picture of the page the button was pressed on, taken before the router
-  // replaced it. Uploaded in the background: typing can go on while it lands.
+  // A picture of the page he pressed the button on, taken before the router
+  // replaced it. Uploaded in the background: he can type while it lands.
   if (pendingShot) {
     const p = pendingShot; pendingShot = null;
     p.then(f => { if (f && document.getElementById('c-new-draft')) uploadFiles([f], 'new'); });
   }
   // "Starts on <model>" comes from /spend/quota, which reads every transcript
-  // and, right after a hub restart, can take 5–25 s — the pane looked hung.
+  // and, right after a hub restart, took 6.6 s and then 23.5 s (2026-09-25,
+  // "it took like a long time and just kind of hung here silently").
   // This pane used to wait on it before drawing anything — the box, the
   // hello, the snap's upload. Nothing waits on it now: the line lands when
   // the answer does, or never.
@@ -505,10 +561,18 @@ function showList() {
 }
 
 // The empty chat's box: no card to answer, no route (there is no "this
-// session" yet, and "later" is a thing said in the message), one Send.
+// session" yet, and "later" is a thing he says in the message), one Send.
 function newComposerSpec() {
   return {
-    placeholder: () => 'What do you want done?',
+    // The phone's NewThreadSheet words: with something attached the words
+    // are optional, and say what is attached.
+    placeholder: () => {
+      if (newAbout) return 'What about this? (or just send)';
+      const cs = drafts.new || [];
+      if (!cs.length) return 'What do you want done?';
+      if (newPlace) return 'About this screen (optional)';
+      return cs.some(c => c.url) ? 'About these photos (optional)' : 'What to do with it? (optional)';
+    },
     targets: [], when: false,
     sendLabel: 'Start session',
     send: createSession,
@@ -516,8 +580,8 @@ function newComposerSpec() {
 }
 
 // ---- new session from anywhere ----
-// The toolbar button, on every route. It does what the phone's in-app snap
-// does: whatever the owner is looking at goes with the message,
+// The toolbar button, on every route (2026-08-26). It does what the
+// phone's in-app snap does: whatever he is looking at goes with the message,
 // so "this number is wrong" needs no explaining of which number.
 let pendingShot = null, pendingPlace = null;
 async function startSessionHere() {
@@ -526,9 +590,9 @@ async function startSessionHere() {
   // bar hides (app.css .tight), and it has to come back whole.
   const label = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.textContent = 'Snapping…'; }
-  // Where the owner is, in words, read at the same instant as the picture and
-  // sent as TEXT above their message (places.js): a screenshot alone made the
-  // session guess which file drew the thing in question.
+  // Where he is, in words, read at the same instant as the picture and sent
+  // as TEXT above his message (places.js): a screenshot alone made the session
+  // guess which file drew the thing he is annoyed about (2026-08-29).
   // Independent of the snap on purpose — the picture is best-effort, this is
   // four lines that always land.
   pendingPlace = placeNow();
@@ -550,7 +614,7 @@ async function startSessionHere() {
 // pictures are refetched as data URLs), and the result is rasterised on a
 // canvas at 2×. Best effort by design — a session that starts without the
 // picture is still a session, so every failure path returns null.
-async function snapPage() {
+async function snapPage(crop) {
   // Named for the page being photographed, read now — by the time the canvas
   // has the pixels the router has already moved on to the composer.
   const route = (location.hash.replace(/^#\/?/, '') || 'sessions').replace(/[^a-z0-9]+/gi, '-');
@@ -560,7 +624,7 @@ async function snapPage() {
   clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
 
   // Scroll offsets do not survive a clone: a list scrolled halfway down would
-  // photograph from its top, which is not what is on screen. Pair the two
+  // photograph from its top, which is not what he is looking at. Pair the two
   // trees (same order, both static) and slide each scrolled box's contents.
   const orig = document.documentElement.querySelectorAll('*');
   const copies = clone.querySelectorAll('*');
@@ -581,7 +645,8 @@ async function snapPage() {
     let top = -o.scrollTop;
     // The copy never lays out exactly like the page, and `-scrollTop` adds up
     // every difference above the fold: a long chat sat 60,000px down came out
-    // as an EMPTY pane, its last bubbles a screen above the frame. So a block box drops the rows that are off screen and is
+    // as an EMPTY pane, its last bubbles a screen above the frame
+    // (2026-09-20). So a block box drops the rows that are off screen and is
     // placed by its first visible row, measured on the live page — nothing
     // above the frame is left to drift, and the SVG is a fraction of the size.
     const kids = [...o.children], ckids = [...c.children];
@@ -655,21 +720,56 @@ async function snapPage() {
   ctx.fillStyle = getComputedStyle(document.body).backgroundColor || '#fff';
   ctx.fillRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0, w, h);
-  const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+  let out = canvas;
+  if (crop) {
+    // One component (Chat about this): its box with a little air, as the
+    // desktop's cropOfScreen does, so the card's own edges show.
+    const x = Math.max(0, crop.left - 10), y = Math.max(0, crop.top - 10);
+    const cw = Math.min(w, crop.right + 10) - x, ch = Math.min(h, crop.bottom + 10) - y;
+    if (cw <= 16 || ch <= 16) return null;
+    out = document.createElement('canvas');
+    out.width = cw * scale; out.height = ch * scale;
+    out.getContext('2d').drawImage(canvas, x * scale, y * scale, cw * scale, ch * scale, 0, 0, cw * scale, ch * scale);
+  }
+  const blob = await new Promise(res => out.toBlob(res, 'image/png'));
   if (!blob) return null;
-  return new File([blob], `console-${route}.png`, { type: 'image/png' });
+  return new File([blob], `console-${route}${crop ? '-component' : ''}.png`, { type: 'image/png' });
 }
 
 // The composer's `send` for the empty chat (composer.js checked the words,
 // the pictures and that every upload landed). The route, the URL and the
-// files that draw it go in ABOVE what the owner typed, so the session can grep
-// for the thing in the picture instead of guessing. Then the chat IS that
-// session: the router opens it, and the message is its first bubble.
+// files that draw it go in ABOVE what he typed, so the session can grep for
+// the thing in the picture instead of guessing. Then the chat IS that
+// session: the router opens it, and his message is its first bubble.
+// newSending = a first message on its way to the hub (Start session), from
+// its POST: the empty chat counts "sending · N s" under the greeting until
+// the session opens. paintNewSending draws it.
+let newSending = 0;
+function newSendingSince() {
+  return newSending;
+}
+function paintNewSending() {
+  const el = document.getElementById('new-sending');
+  if (!el) return;
+  const since = newSendingSince();
+  el.hidden = !since;
+  if (since && !el.querySelector('.since')) el.innerHTML = `<span class="dot pulse"></span> sending · ${sinceHTML(since)}`;
+}
 async function createSession(p) {
-  const prompt = newPlace ? placeBlock(newPlace) + '\n\n' + p.text : p.text;
+  const prompt = newAbout ? aboutPrompt(newAbout, p.text, newPlace)
+    : newPlace ? placeBlock(newPlace) + '\n\n' + p.text : p.text;
+  newAbout = null;
+  newSending = Date.now();
+  paintNewSending();
   // via: the hub stamps the message with the minute and the trail query, so
-  // the session pulls what the owner was doing from the log (never pasted here).
-  const t = await post('/threads', { prompt, attachments: p.refs, via: 'console' });
+  // the session pulls what he was doing from the log (never pasted here).
+  let t;
+  try {
+    t = await post('/threads', { prompt, attachments: p.refs, via: 'console' });
+  } finally {
+    newSending = 0;
+    paintNewSending();
+  }
   location.hash = '#/sessions/' + encodeURIComponent(t.id);
 }
 
@@ -688,22 +788,22 @@ async function createSession(p) {
 // composer by id, and re-reading a rec from the hub for that is a round trip).
 // cards = every ask and approval of this session by ref ("ask:<id>"): a
 // reply line names an approval by it, and an armed card is redrawn from it.
-// sendingSince/sendingAfter = a message on its way INTO this chat (Send,
-// now): when it left, and the newest message id held then; the owner's
-// message landing after it ends the count.
+// sendingSince/sendingAfter = a message of his on its way INTO this chat
+// (Send, now): when it left, and the newest
+// message id held then — his message landing after it ends the count.
 // thread/running = the session as last read, so a Send can repaint the
 // working line at once; liveSince = when the turn in flight was started, for
 // its "starting · N s" until the first tool call.
-// costs = a turn's dollars by the ref of the first card it raised.
-// full = the whole conversation is drawn (the toggle, chatFullHTML); false,
+// full = the whole conversation is drawn (his toggle, chatFullHTML); false,
 // the default every time a chat opens, draws only the cards still open.
 // liveRun = the run id of the turn in flight; chain = its tool chain, loaded
-// only while open (a click on the working line's count, chainHTML).
+// only while open (his click on the working line's count, chainHTML).
 const newChain = () => ({ open: false, run: '', evs: [], first: 0, last: 0, loaded: false, all: false, busy: false, me: false, subs: {} });
 const chatState = { id: null, lastMsgID: 0, lastAsks: '', lastActs: '', lastPrompts: '', lastRecs: '', recs: [], cards: {}, actIDs: '', open: new Map(), focus: '', focusAct: undefined, send: { target: 'this', when: 'now', at: '', re: null }, sendingSince: 0, sendingAfter: 0, thread: null, running: false, liveSince: 0, liveRun: '', chain: newChain(), costs: {}, full: false };
 // Attachment drafts by box: 'chat', 'new', and one 'rec:<id>' per note box
-// on the Recs page (the rec box takes a pasted or dropped screenshot like the
-// composer).
+// on the Recs page (2026-08-28: "our normal chat sessions thing is very
+// heavily image-based… I already have this, and I want to include a
+// screenshot" — the rec box takes a paste or a drop like the composer).
 // draftThread names the session an upload is filed against, for boxes that
 // are not the chat. Both live in composer.js now — every box on the console
 // keeps its pictures the same way.
@@ -712,9 +812,9 @@ const chatState = { id: null, lastMsgID: 0, lastAsks: '', lastActs: '', lastProm
 let armedReply = null;
 
 async function openThread(id, focus) {
+  if (chatState.id !== id) chatState.about = null;
   chatState.id = id; chatState.lastMsgID = 0; chatState.lastActs = ''; chatState.open = new Map();
-  chatState.sendingSince = 0; chatState.liveSince = 0;
-  chatState.focus = focus || ''; chatState.focusAct = undefined; chatState.actIDs = ''; chatState.lastPrompts = ''; chatState.lastRecs = ''; chatState.recs = [];
+  chatState.focus = focus || ''; chatState.focusAct = undefined; chatState.actIDs = ''; chatState.lastPrompts = ''; chatState.lastRecs = '';
   chatState.lastAsks = ''; chatState.cards = {}; chatState.full = false; chatState.chain = newChain(); chatState.liveRun = '';
   // The chat's composer state IS chatState.send (composer.js keeps it across
   // the 5s redraws); a new session starts it empty.
@@ -725,7 +825,12 @@ async function openThread(id, focus) {
   armedReply = null;
   clearDraft('chat');
   const el = document.getElementById('chat');
-  el.innerHTML = `<div class="chat-head"><span class="muted">Loading…</span></div><div class="msgs" id="msgs"></div>`;
+  // The board's copy of this session's open cards stands in while the
+  // thread's own reads land (the phone's seedCards), so a card he opened the
+  // chat to answer is there at once.
+  const s = ((board && board.sessions) || []).find(x => x.id === id);
+  const seed = s ? (s.asks || []).map(chatAskHTML).join('') + (s.actions || []).map(chatActionHTML).join('') : '';
+  el.innerHTML = `<div class="chat-head"><span class="muted">Loading…</span></div><div class="msgs" id="msgs">${seed}</div>`;
   await refreshThread(id, true);
   // Opening a chat reads it, as on the phone: its title stops being bold.
   post(`/threads/${id}/read`).catch(() => {});
@@ -734,15 +839,15 @@ async function openThread(id, focus) {
 // Conversational order, not timestamp order — same rule as the app
 // (ThreadDetail.ordered): a message the owner sends mid-run is stored before that
 // run's reply but is really the next turn. Each turn (one run id) draws as one
-// piece - starter → cards → reply - and turns follow in the order they
+// piece — starter → cards → reply — and turns follow in the order they
 // STARTED (the ts of the run's earliest message), a key that never moves.
-// Keying a run by its latest message would put a turn with no
+// Keying a run by its latest message (until 2026-09-23) put a turn with no
 // reply yet above the previous turn whose reply landed a second later.
 // The starters of the turn in flight: no reply yet, and no later turn has been
 // answered. A turn that died unanswered (a plan limit) stays reply-less for
-// good, so "no reply" alone brought an old relay and limit note back every
-// time the session next worked. Same rule as the phone's inFlightStarters
-// (ThreadDetail.swift).
+// good, so "no reply" alone brought Tuesday's relay and limit note back every
+// time the session next worked (2026-10-30 13:06: "two of these are
+// from Tuesday"). Same rule as the phone's inFlightStarters (ThreadDetail.swift).
 function liveStarterMsgs(ordered) {
   const start = {}, replied = new Set();
   for (const m of ordered) {
@@ -775,23 +880,22 @@ async function refreshThread(id, first) {
     // single "next run" line with the whole queue.
     get(`/prompts?state=queued&thread=${id}`).catch(() => []),
     // The recs this session filed, each with the reply it was filed in
-    // (message_id): they are cells of the chat too.
+    // (message_id): they are cells of the chat too (2026-08-28).
     get(`/recs?status=all&thread=${id}`).catch(() => ({ recs: [] })),
   ]);
   const recs = (recPage && recPage.recs) || [];
-  chatState.recs = recs;
   const el = document.getElementById('chat');
   if (!el || chatState.id !== id || gen !== route.gen) return;
   // This session's approvals, drawn as cards in the conversation like its
   // asks (see actionHTML): pending ones with their buttons, decided and
-  // dismissed ones folded to their row. Deciding one changes its state
-  // without a new message, so it is part of "did the structure change".
+  // dismissed ones folded to their row (2026-09-30: "where is the
+  // approval cell here?"). Deciding one changes its state without a new
+  // message, so it is part of "did the structure change".
   const acts = (allActs || []).filter(a => a.thread_id === id);
   // The deep-linked card (#/sessions/<thread>/<id>) is read on its own, once
-  // per change of the list: GET /actions/{id} is the one read that carries
-  // events[] (the audit trail, inside the card) and it finds an action the
-  // list no longer has (reached from a calendar row), so the chat still shows
-  // it. A focus that is an ask id 404s here, and that is the end of it.
+  // per change of the list: it finds an action the list no longer has
+  // (reached from a calendar row), so the chat still shows it. A focus that
+  // is an ask id 404s here, and that is the end of it.
   const ids = acts.map(a => a.id).join(',');
   if (ids !== chatState.actIDs) { chatState.actIDs = ids; chatState.focusAct = undefined; }
   if (chatState.focus && chatState.focusAct === undefined) {
@@ -802,7 +906,7 @@ async function refreshThread(id, first) {
     const i = acts.findIndex(a => a.id === fa.id);
     if (i >= 0) acts[i] = fa; else acts.push(fa);
   }
-  const actKey = acts.map(a => a.id + ':' + (a.state || '')).join(',');
+  const actKey = acts.map(a => a.id + ':' + (a.state || '') + (a.waiting_to_speak ? ':w' : '') + (a.speaking ? ':s' : '')).join(',');
   chatState.cards = {};
   for (const a of (asks || [])) chatState.cards['ask:' + a.id] = a;
   for (const a of acts) chatState.cards['action:' + a.id] = a;
@@ -819,19 +923,19 @@ async function refreshThread(id, first) {
   const live = starters[starters.length - 1] || null;
   chatState.liveSince = live ? Date.parse(live.ts) : 0;
   chatState.liveRun = (live && live.run_id) || '';
-  // The owner's message landed: the "sending · N s" count is over (a Send
-  // that never lands stops counting after five minutes rather than forever).
-  if (chatState.sendingSince && (msgs.some(m => m.role === 'owner' && m.id > chatState.sendingAfter) || Date.now() - chatState.sendingSince > 300000)) {
+  // His message landed: the "sending · N s" count is over (a Send that never
+  // lands stops counting after five minutes rather than forever).
+  if (chatState.sendingSince && (msgs.some(m => m.role === OWNER && m.id > chatState.sendingAfter) || Date.now() - chatState.sendingSince > 300000)) {
     chatState.sendingSince = 0;
   }
   const promptKey = (queued || []).map(p => p.id).join(',');
   // A card raised mid-turn changes the chat without a new message: it must
   // redraw the moment the hub has it, not when the turn ends.
   // …and so does its "Waiting to speak" mark, which flips with no change of
-  // state.
-  const askKey = (asks || []).map(a => a.id + ':' + a.state + ':' + (a.message_id || 0) + (a.waiting_to_speak ? ':w' : '')).join(',');
-  chatState.waitingCards = (asks || []).filter(a => a.state === 'open' && a.waiting_to_speak).map(a => a.id);
-  // A rec changes without a message when the owner decides it (from the Recs page
+  // state (2026-09-28: the card kept "Waiting to speak" while its row said
+  // speaking, until a reload).
+  const askKey = (asks || []).map(a => a.id + ':' + a.state + ':' + (a.message_id || 0) + (a.waiting_to_speak ? ':w' : '') + (a.speaking ? ':s' : '')).join(',');
+  // A rec changes without a message when he decides it (from the Recs page
   // or this card), and moves under its reply when that lands.
   const recKey = recs.map(r => r.id + ':' + r.status + ':' + (r.message_id || 0) + ':' + (r.updated_at || '')).join(',');
   const structural = first || newest !== chatState.lastMsgID || el.dataset.status !== t.status
@@ -857,13 +961,15 @@ async function refreshThread(id, first) {
 
   const askByMsg = {}, askById = {}, tailAsks = [];
   // A dismissed card folds to one grey line where it was, with Reopen inside
-  // (dismiss means "no reply now", but a reply may still come later).
+  // (2026-09-15: dismiss is "I don't want to reply", "but sometimes I do
+  // want to reply" — it used to leave the chat entirely, 2026-08-28).
   //
   // Everything else must land SOMEWHERE. A card with no message_id — raised
   // outside a run (the hub, a calendar item, `lifectl ask add` at a terminal),
   // or raised in a turn whose reply has not landed yet — used to key
   // askByMsg[undefined] and be drawn on no screen at all, so the session read
-  // "1 TO READ" with no cell anywhere in the chat. Same order the
+  // "1 TO READ" with no cell anywhere in the chat (2026-08-28, console
+  // screenshot: "where is the 1 to read in the tool chain?"). Same order the
   // phone uses (ThreadDetail.placeAsks): its own message, else the last
   // message written before it, else the end of the chat.
   // Live = not closed (the hub's `closed`, store.AskStanding).
@@ -885,25 +991,26 @@ async function refreshThread(id, first) {
   // written before it was proposed (the turn that proposed it), or at the
   // end if it is newer than everything (the reply has not landed yet). One
   // OLDER than every loaded message is history and is not drawn unless it is
-  // still waiting on a decision (or is the focused card): the chat loads a
-  // newer window, and a decided row from days ago would hang under today's.
-  // Oldest first, as the phone does: the hub lists them newest first, so
-  // three approvals under one message drew backwards.
+  // still his to decide (same rule as the phone's placeActions): two
+  // "DONE Send to the session '…'" rows from Thursday sat under today's
+  // cards because the chat loads a newer window (2026-10-26: "what are
+  // these Thursday messages… I don't know why these are hanging down here").
+  // Oldest first, as the phone does: the hub lists them newest first
+  // (11-01 10:25: "these are presented backwards").
   const actByMsg = {}, tail = [];
   for (const a of [...acts].sort((x, y) => +new Date(x.created_at) - +new Date(y.created_at))) {
     const at = +new Date(a.created_at);
     let host = null;
     for (const m of ordered) if (+new Date(m.ts) <= at) host = m;
     if (host) (actByMsg[host.id] ||= []).push(a);
-    else if (a.state === 'proposed' || !ordered.length || a.id === chatState.focus) tail.push(a);
+    else if (a.open || !ordered.length || a.id === chatState.focus) tail.push(a);
   }
   // A rec sits under the reply that filed it — the hub names it
   // (message_id: the first reply after the rec was filed) — or at the end
   // while that reply is still being written. Every status is drawn: a
-  // decided one is the row that says what the owner chose. A rec whose reply
-  // is older than the newest loaded message (past the 200-message window)
-  // is not drawn at the tail: only one with no reply yet, or a reply newer
-  // than every loaded message, goes there.
+  // decided one is the grey line that says what he chose. One whose reply
+  // is older than the loaded messages is not drawn: it sat at the end, an
+  // "Accepted" from Oct 15 under the newest message (2026-10-24).
   const recByMsg = {}, recById = {}, tailRecs = [];
   const msgIDs = new Set(ordered.map(m => m.id));
   const newestID = Math.max(0, ...msgIDs);
@@ -912,32 +1019,38 @@ async function refreshThread(id, first) {
     if (r.message_id && msgIDs.has(r.message_id)) (recByMsg[r.message_id] ||= []).push(r);
     else if (!r.message_id || r.message_id > newestID) tailRecs.push(r);
   }
-  // A reply can land while the owner is mid-sentence; the composer keeps what
-  // they have typed in its own state (composer.js), so the redraw restores it — an
+  // A reply can land while the owner is mid-sentence; the composer keeps what he
+  // has typed in its own state (composer.js), so the redraw restores it — an
   // approval's note too, since its card arms the composer (2026-09-17).
+  chatState.title = t.title || t.id;
   chatState.costs = {};
-  // Open cards only: a chat opens on what is still the owner's to act on (the
-  // asks, approvals and recs still open) and the working line; every message
-  // row and closed card is behind "Show full chat" at the top. A message in
-  // flight stays while the session works on it. A deep link to a closed card
-  // turns the full chat on, so the card is there to land on.
-  if (focusNeedsFull(chatState.focus, askById, recById, acts)) chatState.full = true;
+  // OPEN CARDS ONLY (2026-10-26 22:48: "I only want to see the
+  // open messages for me… the opened cards are the open UI elements… these
+  // messages should only be available by toggle on… put a little button here
+  // to be like show full chat"): a chat opens on what is his to act on — the
+  // asks, approvals and recs still open, under nothing — and the working
+  // line; every message row and every closed card is behind "Show full chat"
+  // at the top (chatFullHTML). His message in flight stays while the session
+  // works on it, so a Send does not vanish into the working line. A deep
+  // link to a closed card flips the full chat on, so the card is there to
+  // land on.
+  if (focusNeedsFull(chatState.focus, askById, acts)) chatState.full = true;
   const full = chatState.full;
-  const liveIDs = new Set(full ? [] : starters.filter(m => m.role === 'owner').map(m => m.id));
+  const liveIDs = new Set(full ? [] : starters.filter(m => m.role === OWNER).map(m => m.id));
   let rows;
   if (full) {
     rows = ordered.map(m => msgHTML(m, askByMsg[m.id], actByMsg[m.id], recByMsg[m.id], askById, recById)).join('')
-      + tailAsks.map(a => chatAskHTML(a)).join('') + tail.map(a => chatActionHTML(a)).join('') + tailRecs.map(r => chatRecHTML(r)).join('');
+      + tailAsks.map(a => chatAskHTML(a)).join('') + tail.map(a => chatActionHTML(a)).join('') + tailRecs.map(recNoticeHTML).join('');
   } else {
     rows = ordered.map(m => {
       const [ka, kc, kr] = openCards(askByMsg[m.id], actByMsg[m.id], recByMsg[m.id]);
-      if (liveIDs.has(m.id)) return msgHTML(m, ka, kc, kr, askById, recById);
-      noteLeadCost(m, ka, kc, kr);
-      return ka.map(a => chatAskHTML(a)).join('') + kc.map(a => chatActionHTML(a)).join('') + kr.map(r => chatRecHTML(r)).join('');
+      if (liveIDs.has(m.id)) return msgHTML(m, ka, kc, [], askById, recById) + kr.map(recNoticeHTML).join('');
+      noteLeadCost(m, ka, kc);
+      return ka.map(a => chatAskHTML(a)).join('') + kc.map(a => chatActionHTML(a)).join('') + kr.map(recNoticeHTML).join('');
     }).join('');
     const [ta, tc, tr] = openCards(tailAsks, tail, tailRecs);
-    rows += ta.map(a => chatAskHTML(a)).join('') + tc.map(a => chatActionHTML(a)).join('') + tr.map(r => chatRecHTML(r)).join('');
-    if (!rows && !running && !chatState.sendingSince) rows = '<div class="small muted">Nothing open</div>';
+    rows += ta.map(a => chatAskHTML(a)).join('') + tc.map(a => chatActionHTML(a)).join('') + tr.map(recNoticeHTML).join('');
+    if (!rows && !running && !sendingSince()) rows = '<div class="small muted">Nothing open</div>';
   }
   el.innerHTML = `
     <div class="chat-head">
@@ -949,8 +1062,9 @@ async function refreshThread(id, first) {
         <span id="chat-pills">${headPills(board, t)}</span>${t.model ? `<span class="pill" title="${esc(t.model)}">${esc(t.model_label || modelShort(t.model))}</span>` : ''}
       </div>
       <div class="small muted trunc head-meta">${[
-        t.schedule ? esc(t.schedule_label || cadenceWords(t.schedule)) : '',
-        t.next_run_at ? 'next ' + esc(when(t.next_run_at)) : '',
+        t.schedule && t.next_run_at ? esc(cadenceNext(t.schedule, when(t.next_run_at)))
+          : t.schedule ? esc(t.schedule_label || cadenceWords(t.schedule))
+          : t.next_run_at ? 'next ' + esc(when(t.next_run_at)) : '',
         t.cost_usd ? `<span title="${costByModel(t)}">${usd(t.cost_usd)}</span>` : '',
         t.tokens ? `<span title="${t.tokens.toLocaleString('en-US')} tokens: ${(t.tokens_in || 0).toLocaleString('en-US')} in, ${(t.tokens_out || 0).toLocaleString('en-US')} out, ${(t.tokens_cache_read || 0).toLocaleString('en-US')} cache read, ${(t.tokens_cache_write || 0).toLocaleString('en-US')} cache write">${tokens(t.tokens)}</span>` : '',
       ].filter(Boolean).join(' · ')}</div>
@@ -963,15 +1077,15 @@ async function refreshThread(id, first) {
       <div class="chain small" id="run-chain" hidden></div>
     </div>
     ${queuedHTML(queued)}
-    <div class="composer-wrap">${composerHTML('chat', chatComposerSpec(running))}</div>`;
+    <div class="composer-wrap">${aboutTagHTML(chatState.about)}${composerHTML('chat', chatComposerSpec(running))}</div>`;
 
   paintWorking(running, t);
   paintChain();
   loadChain();
   loadTasks();
   const box = document.getElementById('msgs');
-  // Opening a chat places the reader on the newest message; after that the
-  // chat never scrolls for them — a redraw puts back what they were reading. `first`
+  // Opening a chat places him on the newest message; after that the chat
+  // never scrolls for him — a redraw puts back what he was reading. `first`
   // is not "opening": every card click, Stop and cancel pass it to force a
   // full redraw, and they must all stay put. Opening = nothing drawn yet.
   if (!anchor || !anchor.id) box.scrollTop = box.scrollHeight; else restoreChatAnchor(box, anchor);
@@ -982,33 +1096,46 @@ async function refreshThread(id, first) {
 
 // The one button at the top of the chat: "Show full chat" over the open cards,
 // "Open cards only" over the whole conversation. The whole chat is drawn on
-// demand, never by default.
+// demand, never by default (2026-10-26 22:48: "the user, honestly,
+// doesn't need to see any of this stuff unless they specifically [request] it
+// by clicking some sort of toggle or button").
 const chatFullHTML = full => `<button type="button" class="fold small chat-mode" onclick="toggleFullChat()">${full ? 'Open cards only' : 'Show full chat'}</button>`;
 function toggleFullChat() {
   chatState.full = !chatState.full;
   refreshThread(chatState.id, true);
 }
-// The cards still to act on, of each kind: an ask not closed, an approval
-// still open, a rec not closed.
-const openCards = (asks, acts, recs) => [(asks || []).filter(a => !a.closed), (acts || []).filter(a => a.open), (recs || []).filter(r => !r.closed)];
+// The cards still his to act on, of each kind: an ask not closed, an approval
+// still open (ui.js askHTML / actionHTML's own open rules) — and a rec not
+// closed that he has not seen, drawn as a one-line notice (recNoticeHTML).
+const openCards = (asks, acts, recs) => [(asks || []).filter(a => !a.closed), (acts || []).filter(a => a.open), (recs || []).filter(r => !r.closed && !r.seen_at)];
+// A rec in the chat is one violet line that it was filed (2026-11-04
+// 23:56: "a very small like notification to me that one was filed that I
+// should sort of be able to dismiss"). Recs are his to do any time, so the
+// card and its Accept · Decline · Reply live on the Recs page (the title
+// opens it), in the open-cards view and under "Show full chat" alike (the
+// desktop's RecNotice).
+const recNoticeHTML = r => `<div class="rec-notice" id="rec-${esc(r.id)}" data-card="${esc(r.id)}">💡 <span class="muted">Recommendation filed:</span> <a href="#/recs/${esc(r.id)}">${esc(r.title)}</a></div>`;
 // A deep link (#/sessions/<thread>/<id>) to a card the open-cards view does
-// not draw: a closed ask, a decided approval, a decided rec.
-function focusNeedsFull(focus, askById, recById, acts) {
+// not draw — a closed ask, a decided approval. A rec's links go to the Recs
+// page.
+function focusNeedsFull(focus, askById, acts) {
   if (!focus) return false;
-  const ask = (askById || {})[focus], rec = (recById || {})[focus], act = (acts || []).find(a => a.id === focus);
-  return !!((ask && ask.closed) || (rec && rec.closed) || (act && !act.open));
+  const ask = (askById || {})[focus], act = (acts || []).find(a => a.id === focus);
+  return !!((ask && ask.closed) || (act && !act.open));
 }
 
-// Where the reader is, so a redraw puts it back: a button press (Dismiss) or
-// a streaming tool call must never scroll the chat for them. Sticking to the
-// bottom whenever the reader is within 80 px of it is wrong — that is where
-// the card just answered sits. The
-// anchor is the first element with an id still on screen (msg-N, ask-card-X;
+// Where he is reading, so a redraw puts it back (2026-09-18: "when I hit
+// one of the buttons, like dismiss… the chat goes all the way to the newest
+// message… I wish it would just stay in place… We don't ever need to scroll
+// in the chat for the user. Sometimes this can even happen when tool calls
+// are running"). Before 09-18 a redraw stuck to the bottom whenever he was
+// within 80 px of it — which is where the card he just answered was. The
+// anchor is the first element with an id still on screen (msg-N, ask-card-X,
 // ids survive a redraw) and how far below the top edge it sits: a plain
 // scrollTop would drift, because a row that opens above moves everything
 // under it. No id on screen = the chat is not drawn yet (openThread's empty
-// #msgs): that is the one placement on the newest message. The working line
-// (run-working) is skipped: it is not part of the conversation.
+// #msgs): that is the one placement on the newest message. The working
+// line (run-working) is skipped: it is not part of the conversation.
 function chatAnchor(msgsEl) {
   if (!msgsEl) return null;
   const top = msgsEl.getBoundingClientRect().top;
@@ -1026,12 +1153,13 @@ function restoreChatAnchor(msgsEl, a) {
   msgsEl.scrollTop += el.getBoundingClientRect().top - msgsEl.getBoundingClientRect().top - a.offset;
 }
 
-// What an owner message answered, and the pick that rode with it: "↩ Got it ·
-// <card>". Without this line the chat showed their words alone, and the chip
-// looked like it did nothing.
+// What an owner's message answered, and the pick that rode with it: "↩ Got it ·
+// <card>". Without this line the chat showed his words alone, and the chip
+// looked like it did nothing (2026-08-27: "I type 'looks great' and say
+// 'got it,' but it doesn't seem like that goes into the prompt at all").
 // The label is the hub's (m.replies[].label, store.ReplyLabel): an ask's is
 // the card's own button word, a rec's the Recs page's — a decision made THERE
-// lands here as "↩ Accepted · <rec>" over their note, and one made on the card
+// lands here as "↩ Accepted · <rec>" over his note, and one made on the card
 // reads the same; the chat is the one record of both. One ↩ line per card the
 // message answered (m.replies, 2026-09-17).
 function replyLineHTML(m, askById, recById) {
@@ -1049,7 +1177,7 @@ function replyOneHTML(threadID, ref, label, askById, recById) {
   if (type === 'rec') {
     const r = (recById || {})[id];
     const title = r ? mdInline(r.title, false) : esc(id);
-    return `<div class="re small muted">↩ <b>${esc(label)}</b> · 💡 <a href="#/sessions/${esc(threadID)}/${esc(id)}" onclick="focusAsk('${esc(id)}');return false">${title}</a></div>`;
+    return `<div class="re small muted">↩ <b>${esc(label)}</b> · 💡 <a href="#/recs/${esc(id)}">${title}</a></div>`;
   }
   if (type === 'action') {
     // The proposal's title when the chat holds it (still open, or the
@@ -1059,9 +1187,10 @@ function replyOneHTML(threadID, ref, label, askById, recById) {
     return `<div class="re small muted">↩ <b>${esc(label)}</b> · <a href="#/sessions/${esc(threadID)}/${esc(id)}" onclick="focusAsk('${esc(id)}');return false">${title}</a></div>`;
   }
   if (type === 'cal' || type === 'step') {
-    // The step's name, not its id, so a session started from a row says
-    // what it is about. One GET per item, cached; the line fills in when it
-    // lands. A `step:<item>.<n>` is one row of that item: its own name.
+    // The step's name, not its id (2026-09-26: a session started from a
+    // row had "nothing there that tells you that that's what you're talking
+    // about"). One GET per item, cached; the line fills in when it lands. A
+    // `step:<item>.<n>` (2026-10-23) is one row of that item: its own name.
     const [item, n] = calRefItem(ref);
     const known = calTitle(ref);
     if (calItemCache[item] === undefined) {
@@ -1092,22 +1221,25 @@ function calTitle(ref) {
   return s ? s.title : '';
 }
 
-// Every message is a row (ui.js rowHTML): the owner's in grey, the rest
-// white, one line each that opens in place. A session's reply draws nothing
-// of its own: the cards the turn raised ARE the reply, and its dollars ride
-// on the first of them. A reply that still carries text is a "Reply" row. An
-// error is a red row; a session limit a paused one, its card under it saying
-// when. The phone draws the same rows (ThreadDetail).
-// A reply's dollars ride on the first card it raised (chatState.costs).
-// Returns the cards' refs.
-function noteLeadCost(m, asks, acts, recs) {
-  const cards = [...(asks || []).map(a => 'ask:' + a.id), ...(acts || []).map(a => 'action:' + a.id), ...(recs || []).map(r => 'rec:' + r.id)];
+// Every message is a row (ui.js rowHTML, mock B3 — 2026-10-25: "yea
+// b3!!! this is exactly what i wanted"): his own in grey, the rest white,
+// one line each that opens in place. A session's reply draws nothing of its
+// own: the cards the turn raised ARE the reply (2026-09-13: "anytime it
+// wants me to read something or do something, it needs to be in one of our
+// special cells"), and its dollars ride on the first of them. A reply that
+// still carries text (before 09-13) is a "Reply" row. An error is a red
+// row; a session limit a paused one, its card under it saying when. The
+// phone draws the same rows (ThreadDetail.ChatRow).
+// A reply's dollars ride on the first card it raised (chatState.costs), so
+// the turn is one row, not a reply row and a card. Returns the cards' refs.
+function noteLeadCost(m, asks, acts) {
+  const cards = [...(asks || []).map(a => 'ask:' + a.id), ...(acts || []).map(a => 'action:' + a.id)];
   if (m.role === 'claude' && m.cost_usd && cards.length) chatState.costs[cards[0]] = m.cost_usd;
   return cards;
 }
 function msgHTML(m, asks, acts, recs, askById, recById) {
-  const cards = noteLeadCost(m, asks, acts, recs);
-  const html = (asks || []).map(a => chatAskHTML(a)).join('') + (acts || []).map(a => chatActionHTML(a)).join('') + (recs || []).map(r => chatRecHTML(r)).join('');
+  const cards = noteLeadCost(m, asks, acts);
+  const html = (asks || []).map(a => chatAskHTML(a)).join('') + (acts || []).map(a => chatActionHTML(a)).join('') + (recs || []).map(recNoticeHTML).join('');
   const atts = (m.attachments || []).map(r => attachHTML(r)).join('');
   const text = m.shown ?? m.text ?? '';
   const row = (k, cls, title, body) => rowHTML({ id: 'msg-' + m.id, key: 'msg:' + m.id, opened: chatState.open.get('msg:' + m.id) === true,
@@ -1123,16 +1255,20 @@ function msgHTML(m, asks, acts, recs, askById, recById) {
   }
   if (m.role === 'claude') return (text.trim() || atts ? row('Reply', '', line, md(text)) : '') + html;
   if (m.kind === 'checkin') return row('⏰ Check-in', 'sched', line, md(text)) + html;
-  if (m.role === 'system') return row('Note', '', line, md(text)) + html;
-  // The owner's message, or one another session or the hub sent in their
-  // place: the card it answered leads the title ("↩ Got it · …"), whole in
-  // the body. With no words of its own, the title is the card it answered.
-  const a = m.author || 'owner';
-  const k = a === 'owner' ? 'You' : a === 'hub' ? 'Hub' : esc(m.author_title || 'Session');
+  // Another session's words, the hub's frame folded off (threads/shown.go,
+  // tags relay | sub): its name is the row's label, in the accent
+  // (2026-10-28 23:39: "remove this and then put a tag for the other session").
+  const from = (m.tags || []).includes('relay') || (m.tags || []).includes('sub');
+  if (m.role === 'system') return row(from ? esc(m.author_title || 'Session') : 'Note', from ? 'from' : '', line, md(text)) + html;
+  // His message, or one another session or the hub sent in his place: the
+  // card it answered leads the title ("↩ Got it · …"), whole in the body.
+  const a = m.author || OWNER;
+  const k = a === OWNER ? 'You' : a === 'hub' ? 'Hub' : esc(m.author_title || 'Session');
+  // With no words of his own, the title is the card he answered.
   const re = (m.replies || []).find(r => r.label || r.outcome) || (m.outcome ? { outcome: m.outcome, ref: m.in_reply_to } : null);
   const what = line || (re && esc(refTitle(re.ref || '', askById, recById))) || (atts ? '📎' : '');
   const title = re ? `↩ ${esc(re.label || re.outcome)}${what ? ' · ' + what : ''}` : what;
-  const foot = a === 'owner' ? '' : sentByHTML(m);
+  const foot = noteTagsHTML(m) + (a === OWNER ? '' : sentByHTML(m));
   return row(k, 'me', title, replyLineHTML(m, askById, recById) + md(text) + (foot ? `<div class="small muted">${foot}</div>` : '')) + html;
 }
 const firstLine = s => String(s || '').split('\n').find(l => l.trim()) || '';
@@ -1143,13 +1279,28 @@ function refTitle(ref, askById, recById) {
   return c ? plainText(c.title) : type === 'cal' || type === 'step' ? calTitle(ref) : '';
 }
 
-// Who wrote an owner-side row the owner did not: the hub or a session. A
-// session is a link to it. The phone draws the same words (ThreadDetail.sentBy).
+// The hub folds its notes to the session out of his message (threads/shown.go:
+// the router's "[Routed here: …]", the screenshot header) into `shown`, and
+// names each in `tags`; the chat draws his words and one small tag per note
+// (2026-10-18: "the agents should still see those parts… mainly for me to
+// have a decluttered ui"). The app's ThreadDetail.NoteTags draws the same.
+const NOTE_TAGS = {
+  routed: ['Routed', 'Started as a new session; the router sent it here'],
+};
+function noteTagsHTML(m) {
+  return (m.tags || []).filter(t => NOTE_TAGS[t]).map(t =>
+    `<span class="note-tag ${t}" title="${NOTE_TAGS[t][1]}">${NOTE_TAGS[t][0]}</span> `).join('');
+}
+
+// Who wrote a row of his that he did not (2026-09-13: "sent by me or
+// sent by system or sent by session… so that i could figure out where blue
+// messages come from"). A session is a link to it. The phone draws the same
+// words (ThreadDetail.sentBy).
 function sentByHTML(m) {
   const a = m.author || '';
   if (!a) return '';
   let who;
-  if (a === 'owner') who = 'you';
+  if (a === OWNER) who = 'you';
   else if (a === 'hub') who = 'the hub';
   else if (a.startsWith('claude:thread:')) {
     const id = a.slice('claude:thread:'.length);
@@ -1159,8 +1310,8 @@ function sentByHTML(m) {
   return `<span class="by">sent by ${who}</span>`;
 }
 
-// (attachHTML, the picture-or-file of a blob, lives in ui.js: md() draws one
-// for a line that links a hub file.)
+// (attachHTML, the picture-or-file of a blob, lives in ui.js since
+// 2026-10-10: md() draws one for a line that links a hub file.)
 
 // ---------- lightbox ----------
 // One overlay, as big as the window allows, click anywhere or Esc to close.
@@ -1182,27 +1333,38 @@ function closeImage() { document.getElementById('lightbox')?.remove(); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeImage(); });
 
 // THE working line, same on both surfaces (the phone spells it out in
-// ThreadDetail.swift; keep them in step): while a turn runs the chat ends in
-// "working · 23 tool calls · today 10:09 PM · $1.12", the clock being the
-// turn's last output, so a hung turn shows an old time. The count opens the
-// turn's tool chain under the line (chainHTML). A line left on a stopped session reads as one
-// that never finished, so it shows only while the session runs.
+// ThreadDetail.swift — keep them in step): while a turn runs the chat ends
+// in "working · 23 tool calls · today 10:09 PM · $1.12", the clock being the
+// turn's last output, so a hung turn shows an old time (2026-10-07
+// 22:12: "I really preferred it when it says tool calls, the time, the
+// date, and then the number of dollars"). The tool calls themselves are not
+// drawn any more (2026-10-25: "the ability to dive super deep into
+// their tool calls… is no longer a necessity worth keeping"). A line left on
+// a stopped session reads as one that never finished (2026-08-28).
 //
-// Before any of that, "sending · N s" from the moment a message left this
-// box until it is in the chat (with "· working" or "· starting" behind it
-// when the session is already at work), then "starting · N s" until the
-// first tool call. The seconds tick on the console's own clock (tickSince),
-// not the poll.
+// Before any of that, "sending · N s" from the moment his message left this
+// box until it is in the chat — then "starting · N s" until the first tool call
+// (2026-10-14 23:12: "sending should have a timer that times up, one, then
+// two, then three, until the user's message is sent, then it should say
+// starting for some number of seconds"). The seconds tick on the console's
+// own clock (tickSince), not the poll. A message on its way into a session
+// already at work says both on the one line, "sending · N s · working"
+// (2026-10-24 01:46 circled "6 tool calls" over "sending · 29 s").
+function sendingSince() {
+  return chatState.sendingSince || 0;
+}
+const sinceHTML = since => `<span class="since" data-since="${since}">${Math.max(0, Math.floor((Date.now() - since) / 1000))} s</span>`;
 // startingSince: where "starting · N s" counts from. A message queued while
-// the previous turn was still working is filed minutes before its turn opens;
-// counting from its ts read "starting · 548 s" the moment the previous reply
-// landed. The hub's turn_at is the turn's start until its first tool call, so
-// the later of the two.
+// the previous turn was still working (a relay, a fired step) is filed
+// minutes before its turn opens; counting from its ts read "starting · 548 s"
+// the moment the previous reply landed (2026-10-28 02:08: "it's
+// starting for 10 minutes… [it] has been hung here"). The hub's turn_at is
+// the turn's start until its first tool call, so the later of the two.
 const startingSince = t => Math.max(chatState.liveSince, (t && t.turn_at && Date.parse(t.turn_at)) || 0);
 function paintWorking(running, t) {
   const el = document.getElementById('run-working');
   if (!el) return;
-  const since = chatState.sendingSince;
+  const since = sendingSince();
   el.hidden = !running && !since;
   if (el.hidden) return;
   const dot = '<span class="dot pulse"></span> ';
@@ -1213,7 +1375,7 @@ function paintWorking(running, t) {
     // helpers the turn has running ride on the line, opened or not.
     const n = (t && t.turn_tools) || 0, c = chatState.chain;
     const helpers = chainLive(c) ? toolChain(c.evs, t && t.turn_tasks).helpers.length : taskHelpers(t);
-    const words = [n ? callsWord(n) : '', helpersWords(helpers)].filter(Boolean).join(' · ');
+    const words = [n ? `${n} tool call${n === 1 ? '' : 's'}` : '', helpersWords(helpers)].filter(Boolean).join(' · ');
     const link = words ? `<a href="#" class="chain-link${c.open ? ' on' : ''}" onclick="event.preventDefault();toggleChain()">${esc(words)}</a>` : '';
     el.innerHTML = dot + '<span>' + ['working', link, esc(turnFacts(t, false))].filter(Boolean).join(' · ') + '</span>';
   }
@@ -1221,15 +1383,17 @@ function paintWorking(running, t) {
 
 // THE TOOL CHAIN under the working line (ui.js toolChain). With no helper it
 // is the turn's calls, newest last, the ones still waiting drawn darker.
-// With helpers it is one row per worker: the session's own row ("<title> ·
-// N tool calls") and one per helper, each opening its own calls on a second
-// click; a helper opens once the hub serves its transcript
-// (/threads/{id}/tasks/{task}/events), else it stays a plain "<description>
-// · subagent" row. No dot inside the chain: the working line's is the one
-// live mark. Only the last CHAIN_ROWS calls until the reader asks for the
-// earlier ones. It lives exactly as long as the turn: when the turn ends,
-// the working line and the chain go together and the chat is its open cards
-// again.
+// With helpers it is one row per worker, each opening its own calls on a
+// second click (2026-10-27 23:11, drawn on a role's chain: "one
+// sub agent running at the top level… [the role] working, 13 tool calls as a
+// 2nd click in… click into the subagent and see its session"); a helper
+// opens once the hub serves its transcript (/threads/{id}/tasks/{task}/events).
+// No dot inside the chain: the working line's is the one live mark ("these
+// blinky dots on the 2 sides of the line"). Only the last CHAIN_ROWS calls
+// until he asks for the earlier ones. It lives exactly as long as the turn:
+// when the turn ends, the working line and the chain go together and the
+// chat is its open cards again ("I'll just deal with the cards going
+// forward").
 const CHAIN_ROWS = 12;
 function callsHTML(steps, all, total, earlierFn) {
   const calls = steps.filter(s => !s.agent);
@@ -1239,7 +1403,7 @@ function callsHTML(steps, all, total, earlierFn) {
   return more + shown.map(s => `<div class="chain-row${s.open ? ' live' : s.error ? ' err' : ''}">${esc(s.label)}</div>`).join('');
 }
 const callsWord = n => `${n} tool call${n === 1 ? '' : 's'}`;
-// o: {name, me (the session's own calls open), subs: {[task id]: {ok, open, evs}}, tasks}.
+// o: {name, me (his own calls open), subs: {[task id]: {ok, open, evs}}, tasks}.
 function chainHTML(ch, all, total, o = {}) {
   const agents = ch.steps.filter(s => s.agent).length;
   const own = callsHTML(ch.steps, all, Math.max(0, total - agents), 'chainEarlier()');
@@ -1272,10 +1436,9 @@ function paintChain() {
     { name: t && t.title, me: c.me, subs: c.subs, tasks: (t && t.turn_tasks) || [] });
 }
 // THE HELPERS UNDER THE WORKING LINE (ui.js taskRowHTML), open or not: each
-// row opens its log, a shell's newest lines (/tasks/{task}/output) or an
-// Agent helper's calls (/tasks/{task}/events), re-read on every refresh while
-// open. The newest TASK_LINES lines until the rest is asked for; never a
-// scroll box.
+// row opens its log — a shell's newest lines (/tasks/{task}/output), an Agent
+// helper's calls (/tasks/{task}/events) — re-read on every refresh while open.
+// The newest TASK_LINES lines until he asks for the rest; never a scroll box.
 const TASK_LINES = 30;
 const taskState = { id: null, open: {}, logs: {} };
 function taskLogHTML(k) {
@@ -1290,9 +1453,10 @@ function paintTasks() {
   const el = document.getElementById('run-tasks'), t = chatState.thread;
   if (!el) return;
   if (taskState.id !== chatState.id) Object.assign(taskState, { id: chatState.id, open: {}, logs: {} });
-  const tasks = (chatState.running && t && t.turn_tasks) || [];
+  // An action the hub runs has no log to open: its row is its newest line.
+  const tasks = liveTasks(t);
   el.hidden = !tasks.length;
-  el.innerHTML = tasks.map(k => taskRowHTML(k, { open: taskState.open[k.id], click: `toggleTask('${esc(k.id)}')`,
+  el.innerHTML = tasks.map(k => k.type === 'action' ? taskRowHTML(k) : taskRowHTML(k, { open: taskState.open[k.id], click: `toggleTask('${esc(k.id)}')`,
     log: taskState.open[k.id] ? taskLogHTML(k) : '' })).join('');
 }
 function toggleTask(id) {
@@ -1326,7 +1490,7 @@ function toggleChainSub(id) {
   if (s) { s.open = !s.open; paintChain(); }
 }
 // A helper's own steps, read from its transcript while the turn runs; a
-// helper the hub cannot read (a 404) stays a plain row.
+// helper the hub cannot read stays a plain row.
 async function loadSubs() {
   const c = chatState.chain, id = chatState.id, t = chatState.thread;
   for (const k of ((t && t.turn_tasks) || []).filter(k => k.type === 'local_agent' && k.id)) {
@@ -1343,9 +1507,9 @@ async function loadSubs() {
 // The turn's events, read once and then only added to (since=), the hub's
 // rule for a moving window (threads.Events).
 // The turn is the newest event's run: a turn a helper's end woke has no
-// message of its own, and an unanswered message hours back is not this
-// turn. Only a message newer than every event (a send, before its first
-// call) names the run instead.
+// message of its own, and an unanswered relay hours back is not this turn
+// (a role's -t6 drew no calls, 2026-10-27 23:16). Only a message newer than
+// every event (his send, before its first call) names the run instead.
 async function loadChain() {
   const c = chatState.chain, id = chatState.id;
   if (!c.open || !chatState.running || c.busy) { paintChain(); return; }
@@ -1388,19 +1552,19 @@ async function chainEarlier() {
   }
   paintChain();
 }
-const sinceHTML = since => `<span class="since" data-since="${since}">${Math.max(0, Math.floor((Date.now() - since) / 1000))} s</span>`;
-// Every "N s" on the page, once a second; a sending line that should have
-// gone (or come) is repainted here too.
+// Every "N s" on the page, once a second — and the two sending lines come
+// and go here too.
 function tickSince() {
   const el = document.getElementById('run-working');
-  if (el && chatState.thread && !!chatState.sendingSince !== el.textContent.includes('sending')) paintWorking(chatState.running, chatState.thread);
+  if (el && chatState.thread && !!sendingSince() !== el.textContent.includes('sending')) paintWorking(chatState.running, chatState.thread);
+  paintNewSending();
   for (const s of document.querySelectorAll('[data-since]')) {
     s.textContent = Math.max(0, Math.floor((Date.now() - +s.dataset.since) / 1000)) + ' s';
   }
 }
 if (typeof document !== 'undefined') setInterval(tickSince, 1000);
 
-// A folded card's row remembers the owner's click across the redraw (cardHTML).
+// A folded card's row remembers his click across the redraw (cardHTML).
 const chatOpened = (ref, id) => chatState.open.get(ref + ':' + id) === true;
 // The pick a card has on this chat's composer ('' = Reply), undefined when
 // none: its row draws that one filled (ui.js outcomeBtns).
@@ -1409,12 +1573,13 @@ const chatArmed = (ref, id) => { const c = composerCards('chat').find(x => x.ref
 // (msgHTML), so a card redrawn on its own keeps them.
 const chatAskHTML = a => askHTML(a, chatOpened('ask', a.id), chatArmed('ask', a.id), chatState.costs['ask:' + a.id]);
 const chatActionHTML = a => actionHTML(a, chatOpened('action', a.id), chatArmed('action', a.id), chatState.costs['action:' + a.id]);
-const chatRecHTML = r => recHTML(r, chatOpened('rec', r.id), chatArmed('rec', r.id), chatState.costs['rec:' + r.id]);
 
-// The cards' rows follow the bar: whenever the strip changes - a button armed,
-// a chip switched, a x - every card that was or is on it is redrawn in place,
-// so its filled button is the bar's pick. Only those cards: the rest are
-// untouched.
+// The cards' rows follow the bar (2026-10-11: "if I am responding to a
+// thing with a button then that option should accent or change color when
+// active, where active is equivalent to being on the bar with the selected
+// category"): whenever the strip changes — a button armed, a chip switched, a
+// × — every card that was or is on it is redrawn in place, so its filled
+// button is the bar's pick. Only those cards: the rest are untouched.
 let chatArmedWas = new Set();
 function chatPaintArmed() {
   // A step's strip repaints the card its row is on (`card`).
@@ -1422,15 +1587,16 @@ function chatPaintArmed() {
   for (const ref of new Set([...chatArmedWas, ...now])) {
     const i = ref.indexOf(':'), kind = ref.slice(0, i), id = ref.slice(i + 1);
     const el = document.getElementById('ask-card-' + id);
-    const c = kind === 'rec' ? chatState.recs.find(r => r.id === id) : chatState.cards[ref];
+    const c = chatState.cards[ref];
     if (!el || !c) continue;
-    el.outerHTML = kind === 'rec' ? chatRecHTML(c) : kind === 'action' ? chatActionHTML(c) : chatAskHTML(c);
+    el.outerHTML = kind === 'action' ? chatActionHTML(c) : chatAskHTML(c);
   }
   chatArmedWas = now;
 }
 
-// The chat head's Stop is its "running" pill, hovered (headPills); Check in
-// and Archive are not on the head.
+// The chat head's Stop is its "running" pill, hovered (headPills). Check in
+// and Archive were taken off it (2026-09-28: "remove checkin… the button its dumb…
+// you can remove the archive button tbf… they arent necessary here").
 async function threadAct(what) {
   const id = chatState.id;
   const said = { stop: 'Stopped' }[what] || what;
@@ -1442,32 +1608,40 @@ async function threadAct(what) {
 
 // ---- this session's future (prompts engine phase 3, 2026-08-27) ----
 // A session used to show one line, "next run". It can now be woken by several
-// things — the owner's answer aimed at tomorrow morning, its own check-back
-// on a step it started — so the queue is listed, with the cost said out loud, because each
+// things — the owner's answer aimed at tomorrow morning, its own check-back on a
+// step it started (2026-08-27: "the agent can also create a message that
+// responds to itself in 30 minutes and checks to see if some step has been
+// done") — so the queue is listed, with the cost said out loud, because each
 // one re-reads the whole session.
 // A standing row (one clock, 2026-08-28) is the session's check-in itself:
 // `repeat` is its cadence, its pill reads "daily 09:00" like the session card,
 // and its button says Turn off, because cancelling it IS the schedule going
 // off (the hub posts the same green "cleared" card that Settings → off does).
-// The row's words are the prompt's TITLE, not its text: a calendar wake's text is its title,
+// The row's words are the prompt's TITLE, not its text (2026-08-29: "there
+// are a lot and the ui makes it difficult"): a calendar wake's text is its title,
 // a blank line, and the whole instruction, so the row printed the title twice and
 // then a paragraph. Full text is the hover title; the words live on the item.
 //
-// The strip FOLDS, and shut is where it rests. The bar carries the
+// The strip FOLDS, and shut is where it rests (2026-08-29: "sometimes
+// there are many of these, so we should be able to collapse them. The bar
+// should say the number that are coming up and the most recent one. Like the
+// most recent time, it doesn't need to be the name"). So the bar carries the
 // count and WHEN THE NEXT ONE FIRES, and its words after that when they fit —
 // .trunc, so a long title fades into the row rather than wrapping the bar.
 // Rows are sorted by that fire time: the API hands prompts back newest-CREATED
 // first, which printed Sep 28 above Sep 19 and would have left the bar's "next"
 // disagreeing with the first row under it.
-// The fold is remembered across a live redraw AND across page loads
+// His fold is remembered across a live redraw AND across page loads
 // (localStorage) — a strip that sprang open on every redraw would be worse
 // than no fold at all.
 const promptWords = p => p.title || p.text || (p.repeat ? 'the default check-in' : '(no words)');
 const queuedIsOpen = () => localStorage.getItem('queuedOpen') === '1';
-// Open, the strip draws the NEXT FIVE and an "N more" button: two dozen wakes
-// filled the screen. The button draws the rest for this visit (queuedAll,
-// back to five on leaving the chat). The phone's ComingUpStrip folds the same
-// way. The list no longer scrolls inside itself.
+// Open, the strip draws the NEXT FIVE and a "19 more" button
+// (2026-10-21, a phone screenshot of a chat with 24 wakes out to Nov 2027
+// filling the screen: "can we limit it to next 5?"); the button draws the
+// rest for this visit (queuedAll, back to five on leaving the chat). The
+// phone's ComingUpStrip folds the same way. The list no longer scrolls inside
+// itself.
 const QUEUED_WINDOW = 5;
 let queuedAll = false;
 onLeave.push(() => { queuedAll = false; });
@@ -1483,34 +1657,33 @@ function wireQueued() {
   const q = document.getElementById('queued');
   if (q) q.addEventListener('toggle', () => localStorage.setItem('queuedOpen', q.open ? '1' : '0'));
 }
-// A wake's clock: `when`, with the year once it differs (a wake next
-// November read "Nov 5 10:30 AM" at the foot of a list that ended in March).
+// A wake's clock: the console's `when`, with the year once it differs (a
+// Nov 2027 wake read "Nov 5 10:30 AM" at the foot of a list that ended in
+// March — a screenshot, 2026-10-21).
 const wakeWhen = (iso, now) => {
   if (!iso) return 'now';
   const d = new Date(iso); now = now || new Date();
-  const t = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  if (d.toDateString() === now.toDateString()) return t;
-  const day = d.toLocaleDateString('en-US', d.getFullYear() === now.getFullYear()
-    ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
-  return day + ' ' + t;
+  return d.toDateString() === now.toDateString() ? clock(d) : dayWords(d, now) + ' ' + clock(d);
 };
 function queuedHTML(prompts) {
   const ps = (prompts || []).filter(p => p.state === 'queued')
     .sort((a, b) => (a.not_before || '').localeCompare(b.not_before || ''));
   if (!ps.length) return '';
-  const mine = p => p.author === 'owner' ? 'you' : p.author === 'hub' ? 'the hub' : 'this session';
+  const mine = p => p.author === OWNER ? 'you' : p.author === 'hub' ? 'the hub' : 'this session';
   const row = p => `<div class="row qrow">
-      ${p.repeat ? `<span class="pill done" title="standing check-in">${esc(cadenceWords(p.repeat))}</span>` : ''}
-      <span class="pill">${esc(p.repeat ? 'next ' : '')}${esc(wakeWhen(p.not_before))}</span>
+      ${p.repeat ? `<span class="pill done" title="standing check-in: ${esc(cadenceWords(p.repeat))}">${esc(cadenceNext(p.repeat, wakeWhen(p.not_before)))}</span>`
+        : `<span class="pill">${esc(wakeWhen(p.not_before))}</span>`}
       ${p.target === 'new' ? '<span class="pill">new session</span>' : ''}
       ${p.outcome ? pill(p.outcome) : ''}
       <span class="grow trunc small" title="${esc(p.text || '')}">${esc(promptWords(p))} <span class="muted">· from ${esc(mine(p))}</span></span>
       <button class="sm" onclick="cancelPrompt('${esc(p.id)}')">${p.repeat ? 'Turn off' : 'Cancel'}</button>
     </div>`;
-  // A run is drawn once. One wake = its row, no fold; several = a fold whose
-  // bar names the count and, shut, when the next one fires; open, the bar is
-  // the count alone and the rows carry the rest (app.css hides the bar's pill
-  // and words under [open]).
+  // A run is drawn ONCE (2026-10-12: "there was only one upcoming… it
+  // opened anyway and just shows that run twice… if there is only one then
+  // you shouldn't be able to click it open"). One wake = its row, no fold;
+  // several = a fold whose bar names the count and, SHUT, when the next one
+  // fires; open, the bar is the count alone and the rows carry the rest
+  // (app.css hides the bar's pill and words under [open]).
   if (ps.length === 1) return `<div class="queued one" id="queued">
     <div class="row qrow"><span class="hl small muted">Coming up</span>${row(ps[0])}</div>
   </div>`;
@@ -1533,15 +1706,17 @@ async function cancelPrompt(id) {
 
 // ---- composer: answering a card (Respond, 2026-08-28) ----
 // The box itself is composer.js — the same one the Recs page and the calendar
-// draw — every prompt box has the same full feature set. What is here is only what a CHAT's box answers
+// draw (2026-08-29: "model all of the prompt boxes in the same way with a
+// maximal set of features"). What is here is only what a CHAT's box answers
 // and where its Send posts.
 //
-// Respond used to open a <dialog> with its own thin text box: too thin, it
-// covered the new-session bar, and it could not send figures. So
+// Respond used to open a <dialog> with its own thin text box. "I hate
+// the respond to action item UI… it's too thin, it obscures the new sessions
+// thing… it doesn't let me send messages in the normal way with figures." So
 // Respond now ARMS THE COMPOSER instead: one short strip above the box names
 // the card being answered and carries its outcome chips; the words, the
 // attachments (paste, drop, Attach — they sit ABOVE the strip, so a pasted
-// screenshot never lands between the card's name and the answer), and
+// screenshot never lands between the card's name and his answer), and
 // send-to / when are the ordinary composer's. Send posts one prompt
 // referencing the card, exactly what the dialog posted. The strip lives in
 // chatState.send.re — which IS the composer's own state — so the 5 s redraw
@@ -1549,13 +1724,16 @@ async function cancelPrompt(id) {
 //
 // The chips are the HUB's words in the HUB's order (ask.outcomes, per kind,
 // decisive first and "Reply" last — store/close.go AskOutcomes), the
-// order the card's own row draws: a read card says "Read it", a decision
-// "Decided", an access ask "Granted" — never a generic "I did this" on a
-// finding that asked for nothing. A card with none (a crash) is words only.
+// order the card's own row draws (2026-09-18: "Buttons are in a
+// different order on the bar than on the card"): a read card says "Read it", a decision
+// "Decided", an access ask "Granted". 2026-08-27, shown "Just replying /
+// I did this" on a finding: "you didn't really tell me to do anything here…
+// this is really more like a read". A card with none (a crash) is words only.
 // What each pick does, in words, under the chips — the composer draws this for
 // every box, so an ask says it the same way a rec and a calendar step do. A
 // read card has one pick and no way to keep it open: it closes whether or not
-// the owner types a reply.
+// he types (2026-08-29: "replying should also close the read ask if I
+// reply directly to that cell").
 const askMeans = (outcomes, kind) => Object.fromEntries(outcomes.map(o =>
   [o.value, kind === 'read' ? 'the card closes when you send — your words go to the session'
     : o.value ? 'the card leaves your board when you send' : 'the card stays open — the agent has the ball']));
@@ -1569,22 +1747,22 @@ const replyOf = (a, outcome) => {
     ref: 'ask', id: a.id, title: a.title || '', kind: a.kind || '', outcomes, outcome: outcome === undefined ? start.value : outcome,
     label: a.kind === 'read' ? 'Replying to' : 'Answering', means: askMeans(outcomes, a.kind),
     // A read closes either way, so the strip is only the banner (no chip to
-    // pick), and an empty Send asks "Are you sure?" first.
+    // pick), and an empty Send asks "Are you sure?" first (2026-09-13).
     bare: a.kind === 'read', confirmEmpty: a.kind === 'read',
     href: `#/sessions/${a.thread_id || chatState.id}/${a.id}`, focus: 'focusAsk',
   };
 };
 
 // Arming ADDS to the strip (composerArm): a read and a rec pressed one after
-// the other are both on the bar, and one Send answers both.
+// the other are both on the bar, and one Send answers both (2026-09-17).
 function armReply(ask, outcome) {
   composerArm('chat', replyOf(ask, outcome));
   focusAsk(ask.id);
 }
 
-// One step of an item's card, staged as its own strip on the bar: Send names
-// it `step:<item>.<n>` with the pick, the hub closes it then; nothing moves
-// before.
+// One step of an item's card, staged as its own strip on the bar
+// (2026-10-23: "it's like send message to do"): Send names it `step:<item>.<n>`
+// with the pick, the hub closes it then; nothing moves before.
 function armStepReply(askID, n, outcome) {
   const a = chatState.cards['ask:' + askID];
   const s = a && (a.steps || []).find(x => x.n === n);
@@ -1597,28 +1775,15 @@ function stepReplyOf(a, s, outcome) {
   return {
     ref: 'step', id: (a.cal_id || a.id) + '.' + s.n, card: 'ask:' + a.id, title: s.title || '', kind: 'step', label: 'Step',
     outcomes, outcome: outcome || '',
-    means: { done: 'ticked off when you send', wont: 'skipped when you send', '': 'the step stays open, your words go to the session' },
+    means: { done: 'ticked off when you send', wont: 'skipped when you send', '': 'the step stays open — your words go to the session' },
     href: `#/sessions/${a.thread_id || chatState.id}/${a.id}`,
   };
 }
 
-// A rec card's three buttons arm the same composer, so a rec is answered from
-// the chat without a trip to the Recs page. The chips are the hub's
-// (rec.outcomes — the Recs page's own row, Later went 2026-09-09). Send posts
-// to /recs/{id}/decide (or /reply for words alone) with deliver=source, so the
-// hub records the decision and relays it here exactly as the Recs page would
-// — see chatSend.
-function armRecReply(id, outcome) {
-  const r = chatState.recs.find(x => x.id === id);
-  if (!r) return;
-  composerArm('chat', recReplyOf(r, outcome));
-  focusAsk(r.id);
-}
-
-// The card a rec is answered through — here and on the Recs page, one shape,
-// so both surfaces show the same chips, the same day picker and the same
-// sentence under them. `fixed` is the Recs page's copy: the box sits ON the
-// rec, so its title and × are not repeated inside it.
+// The card a rec is answered through, on the Recs page (the chat's rec cell
+// and its Accept · Decline · Reply went 2026-11-05: a rec in a chat is one
+// line that opens the page). `fixed`: the box sits ON the rec, so its title
+// and × are not repeated inside it.
 function recReplyOf(r, outcome, fixed) {
   return {
     ref: 'rec', id: r.id, title: r.title || '', kind: 'rec', label: '💡 Rec',
@@ -1630,8 +1795,9 @@ function recReplyOf(r, outcome, fixed) {
 // outcomeMeans (what each pick does when sent) lives in composer.js, which
 // draws the line and must load without this file (the calendar's boxes).
 
-// An approval card's three buttons arm the same composer, like every other
-// cell. Send posts one
+// An approval card's three buttons arm the same composer (2026-09-17:
+// "the buttons really just allow you to send a message in the box… this could
+// just fit naturally into the way that the other cells work"). Send posts one
 // prompt naming action:<id> with the pick; the hub decides the row from it
 // (an approved one starts running) and the session wakes with the frame —
 // the same row /actions/{id}/approve writes, the same decider code it needs
@@ -1667,13 +1833,13 @@ function chatComposerSpec(running) {
     placeholder: st => {
       const re = st.re;
       if (re && st.also.length) return 'One message for all of them (optional)';
-      if (re && re.ref === 'rec') return re.outcome ? 'Your note to the session (optional)' : 'Your line — it goes to the session, the rec stays open';
       if (re && re.ref === 'action') return re.outcome ? 'Your note to the session (optional)' : 'Your line — it goes to the session, the proposal stays open';
       if (re) return re.outcome ? 'Anything to add (optional)' : 'Your answer…';
       return running ? 'Steer it while it works…' : 'Message…';
     },
     // Everything typed here goes now, to this session — no "which session",
-    // no "when". A new session is + New session.
+    // no "when" (2026-09-28: "we don't need these dropdowns because
+    // they're never going to be used"). A new session is + New session.
     targets: [], when: false,
     // No `check`: the one rule a rec answer had was Later's date, and Later is
     // gone (2026-09-09). Anything else here is a prompt, which the hub queues
@@ -1687,52 +1853,43 @@ function chatComposerSpec(running) {
 
 // Three roads out of one box, by what is armed above it.
 async function chatSend(p) {
+  if (chatState.about) p = { ...p, text: aboutWrap(p.text) };
   const re = p.re;
+  // Anything going into THIS chat now counts "sending · N s" under the chat
+  // until it lands (refreshThread ends it); a send the hub refused ends it
+  // here.
+  const intoThisChat = p.when === 'now' && p.target !== 'new';
+  if (intoThisChat) {
+    chatState.sendingSince = Date.now(); chatState.sendingAfter = chatState.lastMsgID;
+    paintWorking(chatState.running, chatState.thread);
+  }
+  try {
+    await chatSendNow(p, re);
+  } catch (e) {
+    if (intoThisChat) { chatState.sendingSince = 0; paintWorking(chatState.running, chatState.thread); }
+    throw e;
+  }
+}
+
+async function chatSendNow(p, re) {
   if (re && p.also && p.also.length) {
-    // Several cards, one message: ONE prompt naming every
+    // Several cards, one message (2026-09-17): ONE prompt naming every
     // card with its pick — the hub closes each by its own rule (a read
     // closes, done/wont claims the ask, accepted/declined is written on the
     // rec's ledger row exactly as /recs/{id}/decide would) and the session
-    // gets one frame per card over the owner's words. Always now, this session.
+    // gets one frame per card over his words. Always now, this session.
     const replies = [re, ...p.also].map(r => ({ ref: r.ref + ':' + r.id, outcome: r.outcome || '' }));
     await withDecider(() => post('/prompts?via=web', { target: 'new-or:' + chatState.id, text: p.text, attachments: p.refs, replies }));
     toast(`sent — ${replies.length} cards`);
     refreshBadges();
     return;
   }
-  if (re && re.ref === 'rec') {
-    // A rec answered from its cell goes through the Recs page's own calls: the
-    // hub records the decision and relays it into this session (or a new one)
-    // as a prompt answering rec:<id>, so the chat shows the same "↩ Accepted ·
-    // <rec>" line whichever surface was used. The screenshot rides IN the
-    // decision, never as a message after it.
-    const body = composerTiming({ by: 'owner', note: p.text, deliver: p.target === 'new' ? 'new' : 'source', attachments: p.refs }, p);
-    let out;
-    if (p.outcome) {
-      body.status = p.outcome;
-      out = await post(`/recs/${re.id}/decide`, body);
-    } else {
-      out = await post(`/recs/${re.id}/reply`, body);
-    }
-    if (out && out.delivery_error) toast(out.delivery_error);
-    // The pick is accepted|declined (Later has no button any more).
-    toast(out && out.delivered === 'new' ? 'sent to a new session' : p.outcome || 'sent');
-    refreshBadges();
-    if (out && out.session_id && out.session_id !== chatState.id) location.hash = '#/sessions/' + out.session_id;
-    return;
-  }
   if (!re && p.target === 'this' && p.when === 'now') {
-    // "sending · N s" until the message is in the chat (refreshThread
-    // clears it when a newer owner message lands).
-    chatState.sendingSince = Date.now(); chatState.sendingAfter = chatState.lastMsgID;
-    paintWorking(chatState.running, chatState.thread);
-    try {
-      await post(`/threads/${chatState.id}/messages`, { text: p.text, attachments: p.refs, via: 'console' });
-    } catch (e) {
-      chatState.sendingSince = 0;
-      paintWorking(chatState.running, chatState.thread);
-      throw e;
-    }
+    await post(`/threads/${chatState.id}/messages`, { text: p.text, attachments: p.refs, via: 'console' });
+    // His own message lands in view, as on the desktop: Send is the one time
+    // the chat scrolls for him.
+    const box = document.getElementById('msgs');
+    if (box) box.scrollTop = box.scrollHeight;
     return;
   }
   // `new-or:<id>` and not the bare id: an ended session must not swallow words
@@ -1754,11 +1911,17 @@ async function chatSend(p) {
 // relayed, nobody told, then the chat redraws with the card folded or back.
 // `note` is the resolution written on an ask: the read card's white Read
 // button sends the hub's own word for its one outcome ("Read it"), so the
-// closed card says what the owner did and the hub folds it like a dismissed one.
+// closed card says what he did and the hub folds it like a dismissed one.
 async function cardMove(path, body, word) {
   return act(() => post(path, body), word, async () => { await refreshThread(chatState.id, true); refreshBadges(); });
 }
-const resolveAsk = (id, state, note) => cardMove(`/asks/${id}/resolve`, note ? { state, note } : { state }, note || 'ask ' + state);
+// The card folds at the press, like the desktop's, not after the thread's
+// seven reads come back; a refused close redraws it open again.
+const resolveAsk = (id, state, note) => {
+  const el = document.getElementById('ask-card-' + id);
+  if (el && state !== 'open') el.classList.add('closing');
+  return cardMove(`/asks/${id}/resolve`, note ? { state, note } : { state }, note || 'ask ' + state);
+};
 // cardFold: THE Dismiss (back=false) and Reopen (back=true) of every chat
 // card — one call, the endpoint per card kind in this one table (three
 // hand-written pairs until review-primitives step 7). A rec's dismiss is the
@@ -1766,14 +1929,13 @@ const resolveAsk = (id, state, note) => cardMove(`/asks/${id}/resolve`, note ? {
 const CARD_FOLD = {
   ask: (id, back) => [`/asks/${id}/resolve`, { state: back ? 'open' : 'dismissed' }, back ? 'ask open' : 'ask dismissed'],
   action: (id, back) => [`/actions/${id}/${back ? 'reopen' : 'dismiss'}?via=web`, {}, back ? 'reopened' : 'dismissed'],
-  rec: (id, back) => [`/recs/${id}/decide`, back ? { status: 'proposed' } : { status: 'expired', note: 'dismissed' }, back ? 'reopened' : 'dismissed'],
 };
 const cardFold = (ref, id, back) => cardMove(...CARD_FOLD[ref](id, back));
 
 // ---- the chat's own wiring ----
 // The box itself is wireComposer (composer.js). What is only the chat's: the
-// whole transcript is a drop zone too, and a run's <details> remember what the
-// owner opened across the 5 s redraw.
+// whole transcript is a drop zone too, and a run's <details> remember what he
+// opened across the 5 s redraw.
 function wireChat() {
   wireComposer('chat');
   wireQueued();
@@ -1782,7 +1944,7 @@ function wireChat() {
   wireDrop(msgs, 'chat');
   // <details> toggles do not bubble; capture them so an opened row stays
   // open when the chat redraws. A row is shut by default (data-def), so only
-  // a state that differs from the one rendered is remembered.
+  // an open one is remembered.
   msgs.addEventListener('toggle', e => {
     const el = e.target, k = el.dataset && el.dataset.k;
     if (!k) return;

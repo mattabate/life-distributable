@@ -24,7 +24,7 @@ import (
 )
 
 // Version is the distributable release the heartbeat reports.
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 // Defaults: PostHog US Cloud and the project's public, write-only token
 // (safe to ship: it can send events, never read them).

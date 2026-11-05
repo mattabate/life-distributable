@@ -332,11 +332,12 @@ func TestSubSessionPullsItsParent(t *testing.T) {
 	ths := []threads.Thread{{ID: "scout", Status: "idle"}, {ID: "bench", Status: "running", ParentID: "scout"},
 		{ID: "port", Status: "running"}, {ID: "team", Status: "needs_you", ParentID: "port"},
 		{ID: "top", Status: "done"}, {ID: "mid", Status: "done", ParentID: "top"}, {ID: "leaf", Status: "running", ParentID: "mid"},
-		{ID: "orphan", Status: "running", ParentID: "archived-one"}, {ID: "quiet", Status: "done", ParentID: "lone"}, {ID: "lone", Status: "idle"}}
+		{ID: "orphan", Status: "running", ParentID: "archived-one"}, {ID: "quiet", Status: "done", ParentID: "lone"}, {ID: "lone", Status: "idle"},
+		{ID: "helped", Status: "idle", TurnTasks: []threads.TurnTask{{ID: "a1", Type: "local_agent"}}}}
 	asks := []threads.Ask{{ID: "a1", ThreadID: "team", Surface: "any", State: "open", Kind: "read"}}
 	b := Build("web", asks, nil, ths)
 	want := map[string]string{"scout": "working", "bench": "working", "port": "working", "team": "your_turn",
-		"top": "working", "leaf": "working", "orphan": "working"}
+		"top": "working", "leaf": "working", "orphan": "working", "helped": "working"}
 	if len(b.Section) != len(want) {
 		t.Fatalf("section %v", b.Section)
 	}
@@ -354,7 +355,7 @@ func TestSubSessionPullsItsParent(t *testing.T) {
 			t.Fatalf("home %s: %q, want %q", id, b.Home[id], top)
 		}
 	}
-	if b.Headings[0].Count != "1 in 1 session" || b.Headings[1].Count != "6" {
+	if b.Headings[0].Count != "1 in 1 session" || b.Headings[1].Count != "7" {
 		t.Fatalf("%+v", b.Headings)
 	}
 }

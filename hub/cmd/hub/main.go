@@ -75,6 +75,11 @@ func main() {
 	// only ever steps down from there.
 	quota := spend.NewQuotaFetcher()
 	picker := spend.NewPicker(quota, cfg.ModelLadder, cfg.ModelStepDown)
+	// The owner's cap (model_cap): fable stays on the ladder, nothing starts
+	// above the best model they allow.
+	if err := picker.SetCap(cfg.ModelCap); err != nil {
+		log.Printf("model_cap: %v; no cap", err)
+	}
 	// ONE cache of the transcripts for the picker and the server, kept on disk
 	// across restarts: a cold walk of the tree was 5–34 s, twice over when
 	// each held its own, and every session that ships hub code restarts it
@@ -154,22 +159,14 @@ func main() {
 	}
 	thr.OwnerName = cfg.OwnerName
 	thr.Surfaces = cfg.Surfaces
-	thr.TeamMode = cfg.TeamMode
+	thr.SetPlainSessions(cfg.PlainSessions)
+	// The router's local model stays paged in while team mode is on (nothing
+	// when Ollama is not there: routes fall to the cloud model).
+	thr.WarmRouter = true
 	if cfg.TeamMode {
-		// The calendar's home session is the executive assistant from the
-		// day the switch goes on. On a database that predates the switch the
-		// idle row may not exist yet (the calendar makes it when a step
-		// first fires), so make it here: CreateIdle gives it the persona.
-		if _, err := thr.Get(threads.StepThread); err != nil {
-			if _, err := thr.CreateIdle(threads.StepThread, "Calendar", "life"); err != nil {
-				log.Printf("calendar thread: %v", err)
-			}
-		} else {
-			db.Exec(`UPDATE threads SET persona=? WHERE id=? AND persona='' AND status != 'archived'`, threads.PersonaAssistant, threads.StepThread)
-		}
-		// The router's local model stays paged in (nothing when Ollama is
-		// not there: routes fall to the cloud model).
-		go thr.WarmLocal()
+		// The calendar's home session is the chief of staff from the day the
+		// switch goes on (an older install's executive assistant keeps it).
+		thr.StartTeam()
 	}
 	thr.BlobPath = ob.BlobPath
 	thr.IntakePath = ob.IntakePath
@@ -385,7 +382,7 @@ func main() {
 	h.Runs = runLog
 	// Workspaces (team mode): one folder per role under data/people/, next to
 	// the blobs; a role's own session or the owner writes, every session reads.
-	h.WS = &workspace.Store{Dir: filepath.Join(filepath.Dir(cfg.BlobDir), "people"), Role: thr.PersonaOf, Known: threads.IsPersona}
+	h.WS = &workspace.Store{Dir: filepath.Join(filepath.Dir(cfg.BlobDir), "people"), Role: thr.PersonaOf, Known: thr.IsPersona}
 	if moved := h.WS.Unnest(); len(moved) > 0 {
 		log.Printf("workspace: %d file(s) lifted out of a doubled role folder: %v", len(moved), moved)
 	}

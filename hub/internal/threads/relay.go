@@ -31,7 +31,7 @@ func (m *Manager) peersHeader(self string) string {
 	// Team mode: a session with a role is listed whatever its status (done,
 	// idle or scheduled), as the one to relay its lane to.
 	roleRows := "0"
-	if m.TeamMode {
+	if m.TeamMode() {
 		roleRows = "1"
 	}
 	rows, err := m.db.Query(`SELECT t.id, t.title, t.status, COALESCE(t.goal_id,''), t.persona, t.former_titles,
@@ -46,15 +46,23 @@ func (m *Manager) peersHeader(self string) string {
 	if err != nil {
 		return ""
 	}
-	defer rows.Close()
-	var b strings.Builder
+	// Read every row before a role is looked up: the hub has one SQLite
+	// connection, so a query inside an open result set would wait forever.
+	type peer struct{ id, title, status, goal, role, former, sched, doing, card string }
+	var peers []peer
 	for rows.Next() {
-		var id, title, status, goal, role, former, sched, doing, card string
-		if rows.Scan(&id, &title, &status, &goal, &role, &former, &sched, &doing, &card) != nil {
-			continue
+		var r peer
+		if rows.Scan(&r.id, &r.title, &r.status, &r.goal, &r.role, &r.former, &r.sched, &r.doing, &r.card) == nil {
+			peers = append(peers, r)
 		}
-		p, hasRole := personas[role]
-		hasRole = hasRole && m.TeamMode
+	}
+	rows.Close()
+	team := m.TeamMode()
+	var b strings.Builder
+	for _, r := range peers {
+		id, title, status, goal, role, former, sched, doing, card := r.id, r.title, r.status, r.goal, r.role, r.former, r.sched, r.doing, r.card
+		p, hasRole := m.persona(role)
+		hasRole = hasRole && team
 		if hasRole {
 			// The name now, with any it replaced: older chat may use one.
 			title = aka(title, splitFormer(former))
@@ -91,7 +99,7 @@ func (m *Manager) peersHeader(self string) string {
 		return ""
 	}
 	head := peersHead
-	if m.TeamMode {
+	if team {
 		head = strings.TrimSuffix(head, "]") + peersTeam + "]"
 	}
 	return head + b.String() + "\n\n"

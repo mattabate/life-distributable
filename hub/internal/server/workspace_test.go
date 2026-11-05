@@ -67,7 +67,7 @@ func TestWorkspaceRoutes(t *testing.T) {
 	}
 
 	// The switch off: no roles, no workspace, no persona to set.
-	s.thr.TeamMode = false
+	s.thr.SetTeamMode(false)
 	if w := s.do(t, "GET", "/api/v1/workspace", nil); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "team mode is off") {
 		t.Fatalf("off: %d %s", w.Code, w.Body)
 	}

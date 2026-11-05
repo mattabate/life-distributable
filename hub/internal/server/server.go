@@ -117,6 +117,10 @@ type Server struct {
 	// stopping closes when the hub starts shutting down (Draining).
 	stopping chan struct{}
 	stopOnce sync.Once
+
+	// mic: the console's microphone switch and the helper behind it (mic.go).
+	mic     *micState
+	micOnce sync.Once
 }
 
 // Draining: main hands this to http.Server.RegisterOnShutdown. Parked
@@ -124,7 +128,7 @@ type Server struct {
 // deadline — which they did on every restart, so each one was a ~6 s outage
 // and a send in that window read "Failed to fetch" (2026-09-18: 19 restarts
 // in 4 h of parallel sessions shipping hub changes).
-func (s *Server) Draining() { s.stopOnce.Do(func() { close(s.stopping) }) }
+func (s *Server) Draining() { s.stopOnce.Do(func() { close(s.stopping); s.micShutdown() }) }
 
 func New(cfg *config.Config, token string, acts *actions.Queue, sch *sched.Scheduler, gs *goals.Store, os_ *obs.Store, thr *threads.Manager) *Server {
 	s := &Server{cfg: cfg, token: token, acts: acts, sch: sch, goals: gs, obs: os_, thr: thr, mux: http.NewServeMux(), usage: spend.NewCache(cfg.ClaudeProjectsDir), quota: spend.NewQuotaFetcher(), stopping: make(chan struct{})}
@@ -134,6 +138,9 @@ func New(cfg *config.Config, token string, acts *actions.Queue, sch *sched.Sched
 	if os_ != nil {
 		s.registerKinds()
 	}
+	// The mic helper warms up now (the speech model loaded, no input open);
+	// the input itself opens only on the owner's switch.
+	s.micStore()
 	return s
 }
 

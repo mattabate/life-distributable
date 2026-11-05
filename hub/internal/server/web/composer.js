@@ -1,6 +1,13 @@
 // life hub — laptop console: THE COMPOSER. One box, everywhere the owner
-// writes back to an agent. Recs, calendar steps and chat answer cards the
-// same way, so they share one box with the maximal set of features.
+// writes back to an agent.
+//
+// 2026-08-29, on the calendar's own note box: "Need the ability to copy
+// images in using the clipboard on calendar responses. Recs and calendar
+// should have very similar UIs for sending back things. Recommendations are
+// just a different flavor of message format… The way of responding to them
+// should still interact using the code the same. You should not have as much
+// duplicate code… Model all of the prompt boxes in the same way with a
+// maximal set of features."
 //
 // Before this file there were three boxes: the chat composer (pictures,
 // outcome chips, this/new session, now/later, ⌘↵), the Recs page's decide box
@@ -16,13 +23,15 @@
 //   • when: now, in an hour, tomorrow 9am, or a picked time
 //   • ⌘↵ to send, a draft that survives the 5s/30s redraws, inline errors
 //
-// A session's own chat box has no route at all: its spec passes
-// `targets: []` and `when: false`, so everything typed there goes now, to
-// that session. A new session starts only from + New session and the empty
-// Sessions box.
+// A session's own chat box has no route at all (2026-09-28: "the
+// message that goes into the box is the session that the chat is currently
+// tied to… we don't need this concept of sending messages in the future…
+// [or] starting new sessions from a session"): its spec passes `targets: []`
+// and `when: false`, so everything typed there goes now, to that session. A
+// new session starts only from + New session and the empty Sessions box.
 //
-// A second (a Recs card was five bands tall; its send button became one
-// button per answer): a spec
+// A second (2026-09-09, on a Recs card five bands tall: "instead of the
+// blue bar, we could replace the send button with [three] buttons"): a spec
 // with `actions` has no Send at all — each answer is its own button in the
 // footer band, and pressing it IS sending. That folds the outcome chips (a
 // band of their own) into the row that was already there, which is what the
@@ -44,8 +53,9 @@ function composerState(key) {
   // (Reply), and the two collided into every Reply button drawing itself as
   // the "are you sure" (seen in the first screenshot of this).
   // `re` is the card being answered; `also` the OTHER cards armed with it
-  // (a read and a rec answered together: the agent gets both, both close).
-  // One message answers them all; the first stays in
+  // (2026-09-17: "click read and accept recommendation at the same time…
+  // two things on the chat bar… the agent gets those things, and then those
+  // things are closed"). One message answers them all; the first stays in
   // `re` so every single-card reader keeps working.
   if (!st) { st = { key, text: '', re: null, also: [], target: 'this', when: 'now', at: '', err: '', arm: null, spec: null, sending: false }; composers.set(key, st); }
   return st;
@@ -61,8 +71,10 @@ const composerCards = key => { const st = composerState(key); return st.re ? [st
 
 // Arm a card WITHOUT dropping the ones already armed: a second card joins the
 // strip, the same card pressed again only changes its pick. This is how a
-// read and a rec end up on one Send: several cards from one session are
-// answered in one message, not one prompt (and one wake) each.
+// read and a rec end up on one Send (2026-09-17: "sometimes, while
+// working, the agents make four action items, and I'd like to be able to
+// respond to multiple of them with one message… right now, I have to go one
+// at a time… I'm starting excess sessions and sending excess prompts").
 function composerArm(key, re) {
   const st = composerState(key);
   const same = x => x && x.ref === re.ref && x.id === re.id;
@@ -118,14 +130,14 @@ const COMPOSER_WHEN = [['now', 'Now'], ['1h', 'In an hour'], ['tomorrow', 'Tomor
 //                 old words would come straight back.
 //   inline        true for a box inside a card (no top border, tighter)
 //   armed()       run whenever the strip changes (a card armed, a chip
-//                 switched, a x): the page redraws the cards' rows so the
-//                 filled button is the bar's pick
+//                 switched, a ×): the page redraws the cards' rows so the
+//                 filled button is the bar's pick (2026-10-11)
 function composerHTML(key, spec) {
   const st = composerState(key);
   spec = spec || {};
   st.spec = spec;
   // A box that lives on its card re-declares the same `re` on every redraw
-  // (the Calendar redraws on a timer). Keep what is lit — only a DIFFERENT
+  // (the Calendar redraws under him). Keep what he has lit — only a DIFFERENT
   // card replaces it.
   if (spec.re !== undefined) {
     const was = st.re;
@@ -149,11 +161,12 @@ function composerHTML(key, spec) {
   // Attach/where/when/Send row hangs off the bottom. Attachments moved below
   // the heading with the words they belong to — above it they pushed the card
   // being answered off the top of the box.
-  // No "⌘↵ to send · paste or drop a picture" line in the bar: it was the one flexible item in a wrapping row, so in a
-  // half-screen window (Magnet) it got squeezed to a word per line and stood six lines
+  // No "⌘↵ to send · paste or drop a picture" line in the bar any more
+  // (2026-09-24): it was the one flexible item in a wrapping row, so in a
+  // half-screen window it got squeezed to a word per line and stood six lines
   // tall beside Send. Paste and drop still work; nothing in the bar is
   // allowed to shrink below its own words now.
-  return `<div class="composer${spec.inline ? ' inline' : ''}" id="${d}" data-c="${k}">
+  return `<div class="composer${spec.inline ? ' inline' : ''}${spec.plain ? ' plain' : ''}" id="${d}" data-c="${k}">
     <div class="re-slot" id="${d}-re">${composerReHTML(key)}</div>
     <div class="composer-body">
       <div class="chips" id="${d}-chips"></div>
@@ -162,6 +175,8 @@ function composerHTML(key, spec) {
     <div class="bar">
       ${spec.attach === false ? '' : `<button class="sm" onclick="document.getElementById('${d}-file').click()">Attach</button>
       <input type="file" id="${d}-file" multiple hidden>`}
+      ${spec.mic === false || typeof micButtonHTML !== 'function' ? '' : micButtonHTML(key)}
+      ${spec.mic === false || typeof carButtonHTML !== 'function' ? '' : carButtonHTML()}
       ${route}
       <span class="small err" id="${d}-err">${esc(st.err || '')}</span>
       <span class="acts" id="${d}-acts">${composerActionsHTML(key)}</span>
@@ -170,8 +185,10 @@ function composerHTML(key, spec) {
 }
 
 // The right end of the footer band: one Send, or — with `actions` — one button
-// per answer. THE SECOND PRESS IS THE CONFIRMATION (sending with no note takes
-// two presses, like an "Are you sure?"; with a note, one): an action marked `confirmEmpty` pressed
+// per answer. THE SECOND PRESS IS THE CONFIRMATION (2026-09-09: "'sending
+// with no note' should sort of trigger a 'Send with no note' button, like an
+// 'Are you sure?' button. You have to double-click effectively to send with no
+// note, or you can send with a note"): an action marked `confirmEmpty` pressed
 // over an empty box does not send — it renames itself and waits for a second
 // press. Typing anything disarms it, because then there is a note and one
 // press is the whole gesture.
@@ -180,7 +197,8 @@ function composerActionsHTML(key) {
   const st = composerState(key), spec = st.spec || {}, d = cdom(key), k = esc(key);
   if (!spec.actions) {
     // The same second press for an armed card that closes with or without
-    // words (a read: "Are you sure?", then "Send without").
+    // words (a read, 2026-09-13: "it'll say 'Are you sure?' At which
+    // point you say yes, 'Send without'").
     if (st.arm === SEND_ARM) {
       return `<span class="small muted" style="align-self:center">Are you sure?</span>
         <button class="armed" id="${d}-send" onclick="composerSend('${k}')">Send without</button>`;
@@ -206,20 +224,35 @@ function outcomeActions(outcomes) {
   }));
 }
 
-// What each pick does when sent: the hub's own hint on each outcome, the line
-// under the chips. Here, not in threads.js: the calendar's boxes draw it with
-// no chat loaded.
-const outcomeMeans = outcomes => Object.fromEntries((outcomes || []).map(o => [o.value, o.hint || '']));
-
 // ---------- the reply box ----------
 // replyBox: THE box that lives on a card and answers it — a rec on the Recs
-// page, the owner's step and homework on the Calendar. It sits inside the card
+// page, his step and homework on the Calendar, a picked learn item (four
+// hand-copied specs until review-primitives step 7). It sits inside the card
 // (`fixed`, inline), answers now to the card's own session (no destination
 // or time select unless `o.targets` says otherwise), and `o.outcomes` — the
 // hub's words — become its footer buttons. Anything else in `o` is the
 // composer spec as is.
+//
+// `o.chips`: the desktop's shape instead (2026-10-08, the rec
+// page "resembles the normal chat bar"): the outcomes are chips over the
+// words and one Send posts the lit one. A decisive chip sends with or without
+// words; the words-only one (Reply) needs words.
+// What each pick does when sent: the hub's own hint on each outcome
+// (store/close.go), the line under the chips. Here, not in threads.js: the
+// calendar's boxes draw it with no chat loaded (calgrid.test.js).
+const outcomeMeans = outcomes => Object.fromEntries((outcomes || []).map(o => [o.value, o.hint || '']));
 function replyBox(key, re, o) {
-  const { outcomes, ...spec } = o;
+  const { outcomes, chips, ...spec } = o;
+  if (chips) {
+    // `plain`: the desktop's RespondChips over a framed RespondBar — a row of
+    // capsules, no band, then the words and the bar as one inset box (parity
+    // walk, 2026-10-16: yes).
+    return composerHTML(key, {
+      re: { title: '', fixed: true, outcome: '', ...re, outcomes: outcomes || [], means: outcomeMeans(outcomes), plain: true },
+      inline: true, plain: true, targets: [], when: false,
+      ...spec,
+    });
+  }
   return composerHTML(key, {
     re: { title: '', fixed: true, outcome: '', ...re },
     actions: outcomes ? outcomeActions(outcomes) : undefined,
@@ -255,7 +288,7 @@ function composerDisarm(key) {
 }
 
 // The strip above the words: which card this answers, its chips, and one line
-// saying what the lit chip will do on Send. A `fixed` card (the
+// saying what the lit chip will do when he presses Send. A `fixed` card (the
 // calendar row, the rec this box belongs to) draws the chips alone — its title
 // is the row six pixels above.
 // With several cards armed it is one strip per card, each with its own chips
@@ -265,27 +298,37 @@ function composerReHTML(key) {
   if (!re) return '';
   // A box whose answers are buttons in the footer has nothing left to put in a
   // strip of its own: no chip to light, and the card it answers is the thing
-  // it is drawn inside. Drawing it anyway is a redundant blue band.
+  // it is drawn inside. Drawing it anyway is the blue band that was asked away.
   if ((st.spec || {}).actions && re.fixed) return '';
   return composerCards(key).map((r, i) => composerStripHTML(key, r, i)).join('');
 }
 function composerStripHTML(key, re, i) {
   const k = esc(key);
   const outcomes = re.outcomes && re.outcomes.length ? re.outcomes : [{ value: '', label: 'Reply' }];
-  const chip = o => `<button type="button" class="sm${re.outcome === o.value ? ' primary' : ''}" onclick="composerPickOutcome('${k}','${esc(o.value)}',${i})">${esc(o.label)}</button>`;
-  const means = (re.means || {})[re.outcome || ''] || '';
+  // What a pick does is its tooltip, never a line beside the chips (the
+  // desktop draws none; no explainer text in the UI).
+  const chip = re.plain ? o => pickChipHTML(o, re.outcome === o.value, (re.means || {})[o.value] || '', `composerPickOutcome('${k}','${esc(o.value)}',${i})`) : o => `<button type="button" class="sm${re.outcome === o.value ? ' primary' : ''}" title="${esc((re.means || {})[o.value] || '')}" onclick="composerPickOutcome('${k}','${esc(o.value)}',${i})">${esc(o.label)}</button>`;
   const head = re.fixed ? '' : `<div class="row">
       <span class="small muted">${esc(re.label || 'Answering')}</span>
       <a class="trunc grow" href="${esc(re.href || '#')}" onclick="${re.focus ? `${re.focus}('${esc(re.id)}');return false` : ''}" title="${esc(re.title)}">${mdInline(re.title, false)}</a>
       <button type="button" class="x" onclick="composerDropRe('${k}',${i})" title="just a message, not an answer to this card">×</button>
     </div>`;
-  // A bare card ON its row (a reminder's box) has no strip at all: no head to
-  // show and no chips, not an empty band's padding.
+  // A bare card ON its row (a reminder's box, 2026-10-26) has no strip at
+  // all — no head to show and no chips — not an empty band's padding.
   if (re.bare) return head ? `<div class="reply-strip">${head}</div>` : '';
   return `<div class="reply-strip">${head}
-    <div class="row"><span class="chips-row">${outcomes.map(chip).join('')}</span>
-      <span class="small muted trunc">${esc(means)}</span></div>
+    <div class="row"><span class="chips-row">${outcomes.map(chip).join('')}</span></div>
   </div>`;
+}
+
+// The desktop's PickChip: a grey capsule, lit in its outcome's tint — done
+// and accepted green with a check, won't and declined grey with a cross, the
+// words-only one accent with a bubble (RespondOutcome.icon/.tint).
+const PICK_BUBBLE = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3.5 3v-3h-1.5z"/></svg>';
+function pickChipHTML(o, on, title, onclick) {
+  const [icon, tint] = o.value === 'done' || o.value === 'accepted' ? ['✓', 'green']
+    : o.value === 'wont' || o.value === 'declined' ? ['✕', 'grey'] : [PICK_BUBBLE, 'accent'];
+  return `<button type="button" class="pick ${tint}${on ? ' on' : ''}" title="${esc(title)}" onclick="${onclick}"><span class="ic">${icon}</span>${esc(o.label)}</button>`;
 }
 
 function composerPlaceholder(key) {
@@ -389,8 +432,8 @@ async function composerSend(key, action) {
   if (!spec.send) return;
   // One message in flight per box. The buttons are disabled below, but ⌘↵ in
   // the box is not a button: a second press while the hub still holds the
-  // first (21 s during another session's hub restart once sent a message
-  // twice) is dropped here.
+  // first (21 s during another session's hub restart,
+  // 2026-09-25: "it sent twice") is dropped here.
   if (st.sending) return;
   const d = cdom(key);
   const box = document.getElementById(d + '-draft');
@@ -450,6 +493,9 @@ async function composerSend(key, action) {
   };
   st.sending = true;
   busy(true);
+  // A dictation module, when one is loaded, marks what the message carries
+  // now, so what is said while the hub takes it stays in the box.
+  const mark = typeof micMark === 'function' ? micMark(key) : null;
   try {
     await spec.send(payload);
     // The box empties only when the hub took it.
@@ -461,6 +507,7 @@ async function composerSend(key, action) {
     // case the `box` above is a detached node and blanking it does nothing.
     const live = document.getElementById(d + '-draft');
     if (live) { live.value = ''; autoGrow(live); }
+    if (typeof micSent === 'function') micSent(key, mark);
     composerDrawRe(key);
     composerDrawActions(key);
     if (spec.after) await spec.after();
@@ -498,8 +545,10 @@ function wireDrop(el, which, highlight) {
   el.addEventListener('drop', e => { if (e.dataTransfer?.files?.length) uploadFiles([...e.dataTransfer.files], which); });
 }
 
-// A screenshot lives on the clipboard, not on disk, so every box takes a
-// pasted image. One document-level listener, because paste only fires
+// A screenshot lives on the clipboard, not on disk (2026-08-23: "i would
+// like to be able to copy in images from the clipboard"; 2026-08-29, of the
+// calendar's box: "need the ability to copy images in using the clipboard on
+// calendar responses"). One document-level listener, because paste only fires
 // on the focused element and no box is always it — it routes to whichever box
 // the caret is in, or to the only one on the page.
 document.addEventListener('paste', e => {
@@ -508,7 +557,7 @@ document.addEventListener('paste', e => {
   const which = pasteTarget();
   if (!which) {
     // Several boxes on screen (the Recs page, a calendar day with two open
-    // steps) and none chosen: guessing would put the screenshot on the wrong
+    // steps) and none chosen: guessing would put his screenshot on the wrong
     // one.
     if (document.querySelector('[data-c]')) toast('click the box you want it in first, then paste');
     return;
@@ -555,7 +604,7 @@ async function uploadFiles(files, which = 'chat') {
 }
 
 // Chips show the picture, not just its name — on the phone the owner sees
-// what they attached before sending it, and the console should too.
+// what they attached before sending it, and the console should too (2026-08-23).
 function drawChips(which = 'chat') {
   const el = document.getElementById(cdom(which) + '-chips');
   if (!el) return;
@@ -565,8 +614,12 @@ function drawChips(which = 'chat') {
       <span class="trunc" style="max-width:160px">${c.uploading ? '⏳ ' : ''}${esc(c.name)}</span>
       <button onclick="dropChip('${esc(which)}',${i})" title="remove">×</button>
     </span>`).join('');
+  // The placeholder can name what is attached (newComposerSpec).
+  const box = document.getElementById(cdom(which) + '-draft');
+  if (box && composerState(which).spec) box.placeholder = composerPlaceholder(which);
 }
-// A chip that only says "image PNG" can't be checked. A screenshot is attached in order to be read, so every
+// "It says image PNG, but I can't expand it, so I can't really see what it is"
+// (2026-08-26). A screenshot is attached in order to be read, so every
 // picture in a composer opens at full size.
 function peekChip(which, i) {
   const c = (drafts[which] || [])[i];

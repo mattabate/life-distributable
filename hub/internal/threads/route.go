@@ -58,14 +58,8 @@ type routeCandidate struct {
 	Short string
 	// Persona: the role's key for a session with a role, else "".
 	Persona string
-}
-
-// routeLanes: each role's lane as the short prompt's rules name it, by role
-// key: concrete words a small model can match. A lane covers questions as
-// much as changes. An owner's agent adding a role adds its lane here, next
-// to its `personas` row.
-var routeLanes = map[string]string{
-	PersonaAssistant: "anything on or about the owner's calendar, schedule or log, changing it or asking about it: add, move or cancel an appointment (a haircut, the dentist, a doctor, a meeting), a plan with someone on a day or at a time, a dated errand, a reminder; what is on the calendar, when something is set or due, when the owner last did or logged a thing and how many days it has been; a message that names a day and a time (Friday at 8, tomorrow at noon) is almost always this one's; the home (groceries, a household order or repair, the apartment) and plans with friends or family",
+	// Lane, Who: the role's RouteLane and Who ("" without a role).
+	Lane, Who string
 }
 
 // RouteLane: a role the local model may name by its key (the word
@@ -81,7 +75,10 @@ func (m *Manager) routedNote(why string) string {
 	var roster []string
 	if ps, err := m.Personas(); err == nil {
 		for _, t := range ps {
-			p := personas[t.Persona]
+			p, ok := m.persona(t.Persona)
+			if !ok || p.Role == "" {
+				continue
+			}
 			name := strings.ToLower(p.Role[:1]) + p.Role[1:]
 			if t.Title != "" && t.Title != "Calendar" {
 				name = aka(t.Title, m.formerTitles(t.ID)) + ", the " + name
@@ -109,6 +106,19 @@ func (m *Manager) CreateRouted(prompt string, attachments []string, via string) 
 			return t, true, err
 		} else {
 			log.Printf("route: %s refused the message (%v); a new session takes it", id, err)
+		}
+	}
+	// Plain sessions off: a message no role claims is the chief of staff's,
+	// who takes it or hands it on (routedNote says how).
+	if m.TeamMode() && !m.PlainSessions() {
+		if cs := m.CatchAll(); cs != "" && cs != id {
+			note := m.routedNote("no other role's lane holds it, so it is the chief of staff's to take or hand on")
+			if err := m.SendVia(cs, note+prompt, attachments, via); err == nil {
+				t, err := m.Get(cs)
+				return t, true, err
+			} else {
+				log.Printf("route: %s refused the message (%v); a new session takes it", cs, err)
+			}
 		}
 	}
 	t, err := m.CreateVia("", "life", "", prompt, "", "", attachments, via)
@@ -143,7 +153,7 @@ func (m *Manager) Route(prompt string) (string, string) { return m.RouteWith(pro
 // RouteWith is Route with another Ollama model in place of localModel (""
 // = localModel): the dry run's way to compare models without a restart.
 func (m *Manager) RouteWith(prompt, model string) (string, string) {
-	if !m.TeamMode {
+	if !m.TeamMode() {
 		return "", ""
 	}
 	local := m.Local
@@ -177,7 +187,7 @@ func (m *Manager) RouteWith(prompt, model string) (string, string) {
 		var lanes []RouteLane
 		for i, c := range cands {
 			ids[i] = c.ID
-			if routeLanes[c.Persona] != "" {
+			if c.Lane != "" {
 				lanes = append(lanes, RouteLane{c.Persona, c.ID})
 			}
 		}
@@ -293,7 +303,11 @@ func (m *Manager) routeCandidates() []routeCandidate {
 				continue
 			}
 			seen[t.ID] = true
-			out = append(out, routeCandidate{t.ID, m.routeBlock(t, kind, false), m.routeBlock(t, kind, true), t.Persona})
+			c := routeCandidate{ID: t.ID, Block: m.routeBlock(t, kind, false), Short: m.routeBlock(t, kind, true), Persona: t.Persona}
+			if p, ok := m.persona(t.Persona); ok && kind == "persona" {
+				c.Lane, c.Who = p.RouteLane, p.Who
+			}
+			out = append(out, c)
 		}
 	}
 	if ps, err := m.Personas(); err == nil {
@@ -337,7 +351,7 @@ func (m *Manager) routeBlock(t Thread, kind string, short bool) string {
 	fmt.Fprintf(&b, "## %s\n", t.ID)
 	switch kind {
 	case "persona":
-		p := personas[t.Persona]
+		p, _ := m.persona(t.Persona)
 		name := t.Title
 		if name == "" || name == "Calendar" {
 			name = "(unnamed)"
@@ -405,12 +419,12 @@ func oneLine(s string, max int) string {
 func routePrompt(msg string, cands []routeCandidate, short bool) string {
 	var b strings.Builder
 	b.WriteString("You route a message the owner just sent from the \"new session\" box of their personal assistant app. Either it starts a NEW session, or it goes to ONE existing session below that already owns that work.\n\n")
-	b.WriteString("Rules:\n- NEW is always valid and is the default: pick an existing session only when the message is clearly in its lane or continues its work (the same task, page, purchase or plan).\n- A session with a role takes ANY message in its lane, even a brand-new task (the executive assistant: anything to put on, change on or ask about the owner's calendar: appointments, errands, plans with people on a day, when they last did something).\n- The lane comes first: a session whose title or chat merely mentions the same subject (a session named after the calendar is not the calendar) never takes a message in a role's lane.\n- A live or recently stopped session takes a message that continues what it was doing.\n- A fundamentally different task, or one the owner wants kept apart, is NEW.\n\n")
+	b.WriteString("Rules:\n- NEW is always valid and is the default: pick an existing session only when the message is clearly in its lane or continues its work (the same task, page, purchase or plan).\n- A session with a role takes ANY message in its lane, even a brand-new task (the role that holds the calendar: anything to put on, change on or ask about the owner's calendar: appointments, errands, plans with people on a day, when they last did something).\n- The lane comes first: a session whose title or chat merely mentions the same subject (a session named after the calendar is not the calendar) never takes a message in a role's lane.\n- A live or recently stopped session takes a message that continues what it was doing.\n- A fundamentally different task, or one the owner wants kept apart, is NEW.\n\n")
 	if short {
 		b.WriteString("Lanes (answer the lane's key when the message is in it, whatever the sessions below say):\n")
 		for _, c := range cands {
-			if lane := routeLanes[c.Persona]; lane != "" {
-				fmt.Fprintf(&b, "- lane \"%s\" (%s, session %s): %s.\n", c.Persona, personas[c.Persona].Who, c.ID, lane)
+			if c.Lane != "" {
+				fmt.Fprintf(&b, "- lane \"%s\" (%s, session %s): %s.\n", c.Persona, c.Who, c.ID, c.Lane)
 			}
 		}
 		b.WriteString("\nAnswer as JSON: {\"about\": \"<what the message is about, under 10 words>\", \"lane\": \"<lane key>\" or \"none\", \"session\": \"<session id>\" or \"new\"}; the lane first; the session only matters when the lane is none.\n\n# Sessions\n\n")
@@ -534,11 +548,16 @@ func ollamaPickWith(model, prompt string, lanes []RouteLane, ids []string) (stri
 // (the model WAS cold, or just loaded), a failure, and the first success
 // after one.
 func (m *Manager) WarmLocal() {
-	if m.Local == nil || !m.TeamMode {
+	if m.Local == nil || !m.TeamMode() {
 		return
 	}
 	failing := false
 	for {
+		if !m.TeamMode() {
+			// Turned off since: nothing to keep warm until it is back on.
+			time.Sleep(warmEvery)
+			continue
+		}
 		took, err := ollamaWarm(localModel, routePrompt("", m.routeCandidates(), true))
 		switch {
 		case err != nil && !failing:

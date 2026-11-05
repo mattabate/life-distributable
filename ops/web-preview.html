@@ -35,11 +35,28 @@
       { id: TIDY, title: 'Tidy the weekly digest', status: 'running',
         last_message: 'Working through the dates.', last_message_at: iso(1) },
     ],
-    // Team mode's people grid: the sessions with a role (a full path with its
-    // query is matched before the query is dropped).
+    // Team mode's roles: the sessions that play one (a full path with its
+    // query is matched before the query is dropped), and the roles under
+    // their `team` label.
     '/threads?persona=1': [
-      { id: TIDY, title: 'Tidy the weekly digest', status: 'running', persona: 'assistant', role: 'Executive assistant' },
+      { id: 't-staff', title: 'Chief of staff', status: 'idle', persona: 'staff', role: 'Chief of staff' },
+      { id: TIDY, title: 'Tidy the weekly digest', status: 'running', persona: 'digest', role: 'Digest editor' },
+      { id: 't-coach', title: 'Coach', status: 'idle', persona: 'coach', role: 'Training coach' },
     ],
+    '/personas': [
+      { key: 'staff', role: 'Chief of staff', team: 'Core', builtin: true, session: 't-staff' },
+      { key: 'digest', role: 'Digest editor', team: 'Core', session: TIDY },
+      { key: 'coach', role: 'Training coach', team: 'Health', session: 't-coach' },
+      { key: 'travel', role: 'Trip planner', team: '' },
+    ],
+    '/settings': { team_mode: true, plain_sessions: false, model_cap: 'claude-opus-5-5',
+      models: ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'] },
+    '/spend/quota': { available: true, next_model: 'claude-opus-5-5',
+      plan: { name: 'Claude Max 20x', via: 'Claude Code', usd: 200, period: 'monthly', charged_on: '2026-08-20', month_usd: 412.3,
+        brand: { mark: 'A', color: '#D97757', ink: '#FFFFFF' } },
+      windows: [{ label: 'All models · 7 days', utilization: 38, tone: '', elapsed_pct: 50 },
+        { label: 'Fable · 7 days', utilization: 72, tone: 'warn', elapsed_pct: 50 },
+        { label: '5 hours', utilization: 12, tone: '' }] },
     '/asks': [
       // surface: 'web' = laptop work, so this list is the only place it is
       // anyone's turn (the phone folds it away).
@@ -163,9 +180,13 @@
     ],
     '/goals': [
       { id: 'get-stronger', title: 'Get stronger and eat better', status: 'active', horizon: 'year', cadence: 'weekly',
-        statement: 'Three workouts a week, protein at every meal.', note_count: 12, last_reviewed_at: iso(700), sources: 'fitness' },
+        statement: 'Three workouts a week, protein at every meal.', note_count: 12, last_reviewed_at: iso(700), sources: 'fitness', section: 'Health' },
+      { id: 'sleep-earlier', title: 'Sleep by eleven', status: 'active', horizon: 'ongoing', cadence: 'weekly',
+        statement: 'Lights out by 23:00 on weeknights.', note_count: 2, last_reviewed_at: iso(300), sources: '', section: 'Health' },
       { id: 'travel-more', title: 'Travel more', status: 'active', horizon: 'ongoing', cadence: 'monthly',
-        statement: 'One trip a season, planned early enough to be cheap.', note_count: 3, last_reviewed_at: iso(60), sources: '' },
+        statement: 'One trip a season, planned early enough to be cheap.', note_count: 3, last_reviewed_at: iso(60), sources: '', section: 'Life' },
+      { id: 'tidy-inbox', title: 'Keep the inbox at zero', status: 'active', horizon: 'ongoing', cadence: 'weekly',
+        statement: 'Nothing older than a week.', note_count: 0, last_reviewed_at: iso(90), sources: '' },
     ],
     '/goals/get-stronger': { id: 'get-stronger', title: 'Get stronger and eat better', status: 'active',
       horizon: 'year', cadence: 'weekly', note_count: 12, last_reviewed_at: iso(700), sources: 'fitness',
@@ -186,10 +207,13 @@
       anytime: [{ id: 'ask:ask-1a2b', day: '', kind: 'ask', state: 'scheduled', title: 'Make a weather API key', ask_id: 'ask-1a2b', thread_id: TIDY }],
       away: [{ id: 'away-0000feed', title: 'Trip', detail: 'Three days away', from: '2026-08-26', until: '2026-08-28', state: 'on' }],
     },
-    '/status': { ok: true, jobs: 2, pending_actions: 2, quiet: true },
+    '/status': { ok: true, jobs: 2, pending_actions: 2, quiet: true, uptime_s: 3 * 86400 + 4000, time_zone: 'America/New_York',
+      app_installed: true, app_profile_days_left: 5, app_profile_expires: '2026-08-28T12:00:00Z' },
   };
 
-  // /spend/summary → shared/fixtures/spend_summary.json
+  // /spend/summary → shared/fixtures/spend_summary.json; NAMED maps a route
+  // whose fixture file is named otherwise ([regexp, file stem]).
+  const NAMED = [];
   function shared(clean) {
     if (!FIXDIR) return undefined;
     try {
@@ -249,16 +273,13 @@
 <body>
 <nav id="nav">
   <div class="brand">life <span id="build">preview</span></div>
-  <div class="tabs" id="navtabs">
-    <a href="#/sessions" data-tab="sessions">Sessions <span class="badge" id="badge-sessions"></span></a>
-    <a href="#/recs" data-tab="recs">Recs <span class="badge" id="badge-recs"></span></a>
-    <a href="#/calendar" data-tab="calendar">Calendar <span class="badge" id="badge-calendar"></span></a>
-    <a href="#/config" data-tab="config">Configuration</a>
-  </div>
+  <!-- The pages draw their own tabs here (registerTab), as on the hub. -->
+  <div class="tabs" id="navtabs"></div>
   <div class="more">
     <button class="navmore" id="navmore" onclick="navMoreToggle(event)" hidden><span class="label">More</span><span class="badge" id="badge-more"></span><span class="caret">▾</span></button>
     <div class="navmenu" id="navmenu" hidden></div>
   </div>
+  <button class="navmic" id="navmic">Mic</button>
   <button class="navnew" id="navnew" onclick="startSessionHere()">+ New<span class="long"> session</span></button>
   <div id="conn" class="conn"></div>
 </nav>
@@ -268,9 +289,9 @@
 <script>
   // Drifting from index.html is this page's own failure mode: a script
   // missing here reads "Couldn't load sessions" for every chat.
-  for (const f of ['ui.js', 'tip.js', 'places.js', 'composer.js', 'views/asks.js', 'views/threads.js',
-                   'views/calgrid.js', 'views/calendar.js', 'views/spend.js', 'views/goals.js', 'views/recs.js',
-                   'views/config.js', 'views/sources.js', 'views/runs.js', 'app.js']) {
+  for (const f of ['ui.js', 'tip.js', 'windows.js', 'places.js', 'composer.js', 'mic.js', 'views/asks.js', 'views/threads.js',
+                   'views/about.js', 'views/calgrid.js', 'views/calendar.js', 'views/spend.js', 'views/goals.js',
+                   'views/recs.js', 'views/sources.js', 'views/config.js', 'views/runs.js', 'app.js']) {
     document.write(`<scr` + `ipt src="${WEB}/${f}"></scr` + `ipt>`);
   }
 </script>

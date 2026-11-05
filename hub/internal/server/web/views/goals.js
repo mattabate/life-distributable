@@ -2,39 +2,65 @@
 'use strict';
 // ================= goals =================
 // The goals are the system's long-term memory: every session writes what it
-// learned to one, and the sessions themselves create and edit them. The owner
-// reads here. The one thing they still edit by hand is the name and the
-// statement the sessions steer by, and whether the goal is active —
-// everything else (the digest, the notes, new goals, horizon, sources) is the
-// agent's.
+// learned to one, and the sessions themselves create and edit them. The owner reads
+// here. The one thing they still edit by hand is the name and the statement the
+// sessions steer by, and whether the goal is active — everything else (the
+// digest, the notes, new goals, horizon, sources) is the agent's
+// (2026-09-17: "AI is going to do all of the editing and the upkeep for me").
 //
-// The list is a grid of small tiles, the name only, each wearing the goal's
-// emblem — a symbol in the goal's own hue, both from the hub (`emblem`) so
-// the phone draws the same — with the name sitting on the tile's floor, so a
-// two-line name and a one-line name end on the same line.
+// The list is a grid of small tiles — since 2026-09-25 the name only
+// ("the subtitles on the goals page aren't really necessary … it might be
+// better if these were just smaller cards … I guess I want the name and stuff
+// like that"; "I don't need a lot of numbers or dashboards"), and since that
+// evening each tile wears the goal's emblem — a symbol in the goal's own hue,
+// both from the hub (`emblem`) so the phone draws the same ("cards
+// with nothing on them … make a more inviting UI"). On the web the emblem and
+// the name share one row and the tile hugs them (2026-09-30, circling
+// the tall tile: "there's a card here and then the name on the bottom … on
+// the web … there's just so much [empty space]"; skin.css); the phone keeps
+// the tall tile with the name on its floor ("it looks good on the phone app").
 // The statement, the note count and the status pill stay off the list; the
 // goal's own page has them.
 views.goals = {
   draw: (view, rest) => (rest[0] ? goalDetail(view, rest[0]) : goalList(view)),
   redraw: () => (route.redraw ? pageRedraw() : render()),
 };
+registerPlace('goals', { label: 'Goals', view: 'views/goals.js', phone: 'GoalsView.swift', tab: 'config' });
 
 async function goalList(view) {
   const draw = async () => {
     const goals = await get('/goals');
-    paint(view, `<div class="pane wide"><h2>Goals</h2>
-      <div class="goal-grid">${goals.map(g => {
-        const on = g.status === 'active';
-        return `<a class="goal-tile${on ? '' : ' off'}" href="#/goals/${encodeURIComponent(g.id)}" style="--h:${goalHue(g)}">
+    const tile = g => {
+      const on = g.status === 'active';
+      return `<a class="goal-tile${on ? '' : ' off'}" href="#/goals/${encodeURIComponent(g.id)}" style="--h:${goalHue(g)}">
           ${goalEmblem(g)}
           <span class="grow"><span class="name">${mdInline(g.title, false)}</span>
           ${on ? '' : `<span class="state">${esc(g.status)}</span>`}</span>
         </a>`;
-      }).join('') || emptyHTML('No goals.')}</div>
+    };
+    paint(view, `<div class="pane wide"><h2>Goals</h2>
+      ${goalGroups(goals).map(([name, gs]) => `${name ? `<h3 class="goal-group">${esc(name)}</h3>` : ''}
+        <div class="goal-grid">${gs.map(tile).join('')}</div>`).join('') || emptyHTML('No goals.')}
     </div>`);
   };
   await draw();
   setRedraw(draw, view);
+}
+
+// The hub's list split under the owner's section names (`section`), each
+// section where its first goal falls, goals in the hub's order inside it:
+// [[section, goals]…]. Goals with no section sit last under "Other" when
+// anything is grouped, under no heading when nothing is.
+function goalGroups(goals) {
+  const by = new Map();
+  for (const g of goals || []) {
+    const name = String(g.section || '').trim();
+    if (!by.has(name)) by.set(name, []);
+    by.get(name).push(g);
+  }
+  const out = [...by].filter(([name]) => name);
+  if (by.has('')) out.push([out.length ? 'Other' : '', by.get('')]);
+  return out;
 }
 
 // The symbols a goal's emblem can name (shared/api.md `emblem.symbol`), as
@@ -48,6 +74,7 @@ const GOAL_ICONS = {
   audience: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/>',
   learn: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
   art: '<path d="M12 22a10 10 0 1 1 9.2-6 3 3 0 0 1-2.8 2h-2.4a2 2 0 0 0-1.6 3.2l.4.6A1.4 1.4 0 0 1 13.7 22z"/><circle cx="7.5" cy="10.5" r="1.1"/><circle cx="12" cy="7" r="1.1"/><circle cx="16.5" cy="10.5" r="1.1"/>',
+  friends: '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01"/><path d="M15 9h.01"/>',
   goal: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
 };
 
@@ -63,8 +90,8 @@ function goalEmblem(g) {
 
 // The goal's page: the head (name, statement, the switch), the digest, then
 // the notes as one dated list — day and who wrote it down the left, the note
-// on the right, a hairline between. No kind pill: the kind is a session's
-// filing word, meaningless to the reader.
+// on the right, a hairline between. No kind pill (2026-09-25: "Evidence
+// kind. Don't know what that's about"): the kind is a session's filing word.
 // The by-line is the session's title, linked, from the hub's `by`/`thread_id`.
 async function goalDetail(view, id) {
   const draw = async () => {
@@ -87,21 +114,13 @@ async function goalDetail(view, id) {
 
       <h3>Notes</h3>
       <div class="card goal-notes">${(notes || []).map(n => `<div class="gnote">
-        <div class="gnote-by"><span class="when">${noteDay(n.created_at)}</span>${noteBy(n)}</div>
+        <div class="gnote-by"><span class="when">${dayWords(n.created_at)}</span>${noteBy(n)}</div>
         <div class="prose">${md(n.text)}</div>
       </div>`).join('') || emptyHTML('No notes yet.')}</div>
     </div>`);
   };
   await draw();
   setRedraw(draw, view);
-}
-
-// "Sep 24", with the year once it is not this one.
-function noteDay(iso) {
-  const d = new Date(iso);
-  const opts = { month: 'short', day: 'numeric' };
-  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
-  return d.toLocaleDateString('en-US', opts);
 }
 
 function noteBy(n) {
@@ -140,9 +159,9 @@ function goalEditHTML(g, v) {
 // Cancel, and a save that landed: the head panel is drawn back over the form
 // from the goal on screen BEFORE the redraw. The redraw keeps a half-typed
 // edit whenever #g-title is still in the DOM, so a bare pageRedraw() here
-// drew the form again with its own values and Cancel cancelled nothing. And
+// drew the form again with its own values — Cancel cancelled nothing. And
 // emptying the panel is not enough: paint() skips a page whose markup is what
-// it last painted, which the head panel's is.
+// it last painted, which the head panel's is (daily bug sweep 2026-10-25).
 let goalShown = null;
 function closeGoalForm() {
   const head = document.getElementById('ghead');
@@ -172,7 +191,7 @@ async function saveGoal(id) {
   if (!body.title) { toast('a goal needs a name'); return; }
   // The id is a slug of the title made when the goal was created, so a
   // rename keeps the id and every note stays attached — nothing to redirect.
-  // A failed save keeps the form open with their words (no repaint).
+  // A failed save keeps the form open with his words (no repaint).
   if (await act(() => patch(`/goals/${encodeURIComponent(id)}`, body), 'goal saved', null)) await closeGoalForm();
 }
 

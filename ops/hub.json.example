@@ -1,9 +1,11 @@
 {
-  "_comment": "ops/py.sh setup.py hub writes ops/hub.json (git-ignored) from this file. claude_bin must be an absolute path (`which claude`): launchd has no nvm PATH. cert/key files are what `tailscale cert` writes (ops/renew-cert.sh). The apns_* keys are optional (paid Apple Developer team; ops/py.sh setup.py apns); apns_bundle_id = LIFE_BUNDLE_ID in app/local.xcconfig. time_zone is the household's clock as an IANA name (America/Los_Angeles); empty = this Mac's own zone. session_tokens gives each session and scheduled job its own hub token (shared/api.md, Auth); false sends them the owner's hub token as before. session_user (empty = off) runs sessions as that macOS user, e.g. life-agent, each in its own clone (SETUP.md, Run sessions as a separate user); it needs session_tokens.",
+  "_comment": "ops/py.sh setup.py hub writes ops/hub.json (git-ignored) from this file. claude_bin must be an absolute path (`which claude`): launchd has no nvm PATH. cert/key files are what `tailscale cert` writes (ops/renew-cert.sh). The apns_* keys are optional (paid Apple Developer team; ops/py.sh setup.py apns); apns_bundle_id = LIFE_BUNDLE_ID in app/local.xcconfig. time_zone is the household's clock as an IANA name (America/Los_Angeles); empty = this Mac's own zone. session_tokens gives each session and scheduled job its own hub token (shared/api.md, Auth); false sends them the owner's hub token as before. session_user (empty = off) runs sessions as that macOS user, e.g. life-agent, each in its own clone (SETUP.md, Run sessions as a separate user); it needs session_tokens. team_mode (on by default) gives sessions standing roles under a chief of staff; plain_sessions true also lets a new message start a session with no role. model_cap (empty = none) is the best model a session may start on, one of the ladder (fable, opus, sonnet). Configuration or PATCH /api/v1/settings changes these three without a restart.",
   "owner_name": "<your first name>",
   "time_zone": "",
   "surfaces": ["phone", "desktop", "web"],
-  "team_mode": false,
+  "team_mode": true,
+  "plain_sessions": false,
+  "model_cap": "",
   "session_tokens": true,
   "session_user": "",
   "listen_addr": "<tailscale-ip>:8443",

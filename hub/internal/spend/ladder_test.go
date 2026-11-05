@@ -343,6 +343,38 @@ func TestScopedWindowCountsOnlyItsFamily(t *testing.T) {
 	}
 }
 
+// The owner's model cap: fable stays the ladder's top, but no pick starts
+// above the cap, and a cap off the ladder is refused.
+func TestModelCap(t *testing.T) {
+	p := NewPicker(nil, nil, nil)
+	ctx := context.Background()
+	if got := p.PickFrom(ctx, ""); got != "claude-fable-5-1" {
+		t.Fatalf("no cap: %q", got)
+	}
+	if err := p.SetCap("claude-opus-5-5"); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.PickFrom(ctx, ""); got != "claude-opus-5-5" {
+		t.Fatalf("capped top: %q", got)
+	}
+	if got := p.PickFrom(ctx, "claude-fable-5-1"); got != "claude-opus-5-5" {
+		t.Fatalf("capped fable start: %q", got)
+	}
+	if got := p.PickFrom(ctx, "claude-sonnet-5-5"); got != "claude-sonnet-5-5" {
+		t.Fatalf("a start under the cap: %q", got)
+	}
+	if got, _ := p.ExplainFrom(ctx, time.Now(), ""); got != "claude-opus-5-5" {
+		t.Fatalf("explain under the cap: %q", got)
+	}
+	if err := p.SetCap("claude-mythos-9"); err == nil || p.Cap() != "claude-opus-5-5" {
+		t.Fatalf("off-ladder cap: %v %q", err, p.Cap())
+	}
+	p.SetCap("")
+	if got := p.PickFrom(ctx, ""); got != "claude-fable-5-1" {
+		t.Fatalf("cap cleared: %q", got)
+	}
+}
+
 // The fable day cap reads the rung to fall to off the ladder, and clamps a
 // policy's starting rung to it.
 func TestBelowAndNotAbove(t *testing.T) {
