@@ -86,6 +86,12 @@ CREATE INDEX IF NOT EXISTS rec_events_rec ON rec_events(rec_id, id);`,
 	SELECT id,'rec',created_at,updated_at,title,detail,kind,status,goal_id,thread_id,source,prev_id,decided_at,decided_by,decision_note FROM recs ORDER BY created_at;
 INSERT INTO item_events (item_id,ts,actor,from_state,to_state,note) SELECT rec_id,ts,actor,from_state,to_state,note FROM rec_events ORDER BY id;
 UPDATE items SET ` + store.ItemStampSet + ` WHERE src='rec';`,
+	// seen_at: a chat shows an open rec as one small dismissible line until
+	// the owner marks it seen (POST /recs/{id}/seen); the rec itself waits on
+	// the Recs page. Every rec filed before the column counts as seen, so
+	// none pops back.
+	`ALTER TABLE recs ADD COLUMN seen_at TEXT NOT NULL DEFAULT ''`,
+	`UPDATE recs SET seen_at=created_at WHERE seen_at=''`,
 }
 
 // syncFromItem copies a rec's decision (its item's state and resolution) onto
@@ -155,6 +161,10 @@ type Rec struct {
 	// `claude-fable-5[1m]`), so the ledger can say whose advice worked. Empty
 	// only when the owner filed it themselves.
 	Model string `json:"model,omitempty"`
+	// SeenAt: when the owner marked its line in the chat seen ("" = not yet).
+	// Until then a chat draws an open rec as one small notice line; after,
+	// only the Recs page holds it.
+	SeenAt string `json:"seen_at,omitempty"`
 	// MessageID is where the rec sits in its session's chat: the first reply
 	// the filing session wrote after filing it (a filed rec is a cell in the
 	// chat). Not a column — resolved on
@@ -659,7 +669,7 @@ func (s *Store) Add(r Rec) (Rec, error) {
 // its ledger row (l: what it costs, what it expects, how it scored).
 const cols = `i.id,i.created_at,i.updated_at,i.title,i.detail,i.goal_id,i.thread_id,i.source,l.domain,l.kind,l.cost_cents,l.cost_period,
 	l.effort,l.confidence,l.because,l.expect,l.act_by,l.review_on,i.state,i.resolved_at,i.resolved_by,i.resolution,
-	l.outcome,l.outcome_at,l.outcome_note,i.prev_id,l.links,l.model,i.win`
+	l.outcome,l.outcome_at,l.outcome_note,i.prev_id,l.links,l.model,i.win,l.seen_at`
 
 const joined = ` FROM items i JOIN recs l ON l.id=i.id WHERE i.src='rec' AND `
 
@@ -671,7 +681,7 @@ func scanRec(sc scanner) (Rec, error) {
 	var goal, thread, decAt, decBy, outAt, prev sql.NullString
 	if err := sc.Scan(&r.ID, &cr, &up, &r.Title, &r.Detail, &goal, &thread, &r.Source, &r.Domain, &r.Kind,
 		&r.CostCents, &r.CostPeriod, &r.Effort, &r.Confidence, &r.Because, &r.Expect, &r.ActBy, &r.ReviewOn,
-		&r.Status, &decAt, &decBy, &r.DecisionNote, &r.Outcome, &outAt, &r.OutcomeNote, &prev, &r.Links, &r.Model, &r.Window); err != nil {
+		&r.Status, &decAt, &decBy, &r.DecisionNote, &r.Outcome, &outAt, &r.OutcomeNote, &prev, &r.Links, &r.Model, &r.Window, &r.SeenAt); err != nil {
 		return r, err
 	}
 	r.CreatedAt, _ = time.Parse(time.RFC3339Nano, cr)
@@ -1180,6 +1190,35 @@ func (s *Store) Score(id, outcome, by, note string) (Rec, error) {
 		stmt(`UPDATE recs SET outcome=?, outcome_at=?, outcome_note=?, updated_at=? WHERE id=?`,
 			outcome, ts(now), strings.TrimSpace(note), ts(now), id)); err != nil {
 		return r, err
+	}
+	return s.Get(id)
+}
+
+// Seen marks a rec's notice line in the chat seen: from then on only the
+// Recs page shows it. The first mark stands.
+func (s *Store) Seen(id string) (Rec, error) {
+	if _, err := s.Get(id); err != nil {
+		return Rec{}, errors.New("no such rec")
+	}
+	if _, err := s.db.Exec(`UPDATE recs SET seen_at=? WHERE id=? AND seen_at=''`, ts(s.Now()), id); err != nil {
+		return Rec{}, err
+	}
+	return s.Get(id)
+}
+
+// Home moves a rec to the session that owns its lane: its thread_id moves,
+// its source stays the filer. The owner's decision on it then lands with
+// that session.
+func (s *Store) Home(id, thread string) (Rec, error) {
+	thread = strings.TrimSpace(thread)
+	if thread == "" {
+		return Rec{}, errors.New("thread_id is required")
+	}
+	if _, err := s.Get(id); err != nil {
+		return Rec{}, errors.New("no such rec")
+	}
+	if _, err := s.db.Exec(`UPDATE items SET thread_id=?, updated_at=? WHERE id=? AND src='rec'`, thread, ts(s.Now()), id); err != nil {
+		return Rec{}, err
 	}
 	return s.Get(id)
 }

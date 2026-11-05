@@ -10,7 +10,7 @@
 // ChatRow that opens in place to its body and Reopen (every kind but an
 // install).
 //
-// AskCard, ApprovalCard and RecCard decide WHAT the buttons say and do;
+// AskCard and ApprovalCard decide WHAT the buttons say and do;
 // nothing in them draws a box, a row or a button.
 import SwiftUI
 
@@ -56,19 +56,17 @@ extension EnvironmentValues {
 }
 
 /// Which kind of card a Dismiss / Reopen moves — the console's `cardFold`
-/// table (views/threads.js), one call for all three (review-primitives
-/// step 7; each card had its own pair before).
-enum CardRef { case ask, action, rec }
+/// table (views/threads.js), one call for both (review-primitives step 7;
+/// each card had its own pair before).
+enum CardRef { case ask, action }
 
 extension HubClient {
     /// THE silent close (back = false) and its undo (back = true) of every
-    /// chat card. A rec's dismiss is the hub's `expired` with the note
-    /// "dismissed" (store.RecDismissed).
+    /// chat card.
     func cardFold(_ ref: CardRef, _ id: String, back: Bool) async throws {
         switch ref {
         case .ask: _ = try await resolveAsk(id, state: back ? "open" : "dismissed")
         case .action: _ = back ? try await reopenAction(id) : try await dismissAction(id)
-        case .rec: _ = try await decideRec(id, status: back ? "proposed" : "expired", note: back ? "" : "dismissed")
         }
     }
 }

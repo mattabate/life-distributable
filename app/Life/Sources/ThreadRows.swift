@@ -141,6 +141,18 @@ struct SessionCell: Identifiable, Hashable {
     /// session it opens, the card to land on, and whether it is running.
     var sub: Thread? = nil
     var subFirst: String? = nil
+    /// A job running for the session (a hub-run action or the turn's helper):
+    /// a grey "running" cell with its bar, the console's `jobCells`.
+    var job: TurnTask? = nil
+
+    /// The session's running jobs as cells, ahead of its cards: what is in
+    /// hand leads the row, grey, since it is not the owner's turn.
+    static func jobs(_ t: Thread) -> [SessionCell] {
+        t.liveTasks.map { k in
+            SessionCell(id: "job:" + (k.id ?? k.description ?? ""), title: k.description ?? "helper",
+                        verb: "running", tone: "quiet", step: false, job: k)
+        }
+    }
 
     var color: Color {
         switch tone { case "read": .accentColor; case "install": .teal; case "error", "quiet": .secondary; default: .red }
@@ -202,6 +214,7 @@ struct MiniCard: View {
                     Spacer(minLength: 4)
                     Text(c.verb).font(.caption2).foregroundStyle(c.color).layoutPriority(1)
                 }
+                if let k = c.job { JobProgress(k: k).padding(.leading, 18) }
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -247,13 +260,14 @@ struct WebMiniCard: View {
                         .background(c.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
                         .layoutPriority(1)
                 }
+                if let k = c.job { JobProgress(k: k).padding(.top, 3) }
             }
             .padding(.leading, 13).padding(.trailing, 14).padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
             // (A Divider in an overlay lays out vertically — it drew a line
             // down the middle of every card in build 1496.)
             .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
-            .overlay(alignment: .leading) { Rectangle().fill(c.tone == "error" ? Color.secondary.opacity(0.5) : c.tone == "quiet" ? Color.primary.opacity(0.12) : c.color).frame(width: 3) }
+            .overlay(alignment: .leading) { Rectangle().fill(c.tone == "error" ? Color.secondary.opacity(0.5) : c.job != nil ? Color.primary.opacity(0.2) : c.tone == "quiet" ? Color.primary.opacity(0.12) : c.color).frame(width: 3) }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -306,26 +320,27 @@ struct ThreadRow: View {
         self.on = on
         self.subs = subs.map { SessionCell.sub($0, board: b) }
         forYou = b.forYou[t.id] ?? 0
-        cells = b.bundleOf(t).map(SessionCell.cells) ?? []
+        let cards = b.bundleOf(t).map(SessionCell.cells) ?? []
+        // Its running jobs lead the row, inside the same two (console card()).
+        let jobs = SessionCell.jobs(t)
+        cells = jobs + cards
         let open = b.open?[t.id] ?? 0
-        openCount = max(open, cells.count)
-        more = max(0, open - min(cells.count, Self.rowCards))
-        if forYou > 0, cells.isEmpty { todo = b.todo?[t.id]; detail = b.detail?[t.id] }
-        let steps = cells.filter(\.step).count
+        openCount = max(open + jobs.count, cells.count)
+        more = max(0, openCount - min(cells.count, Self.rowCards))
+        if forYou > 0, cards.isEmpty { todo = b.todo?[t.id]; detail = b.detail?[t.id] }
+        let steps = cards.filter(\.step).count
         // …and "speaking" stays too: the one live fact a cell cannot carry
         // (which session's card is being spoken right now, or queued for it).
-        pills = forYou > 0 && cells.count - steps >= forYou ? b.pillsOf(t).filter { ["running", "speaking", "waiting"].contains($0.tone) } : b.pillsOf(t)
+        pills = forYou > 0 && cards.count - steps >= forYou ? b.pillsOf(t).filter { ["running", "speaking", "waiting"].contains($0.tone) } : b.pillsOf(t)
         first = b.first[t.id].flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// The todo line's colour is the first card pill's (fallback only).
     var tone: Color { PillChip.tone(pills) }
 
-    func open(_ card: String?) { nav.card = OpenAsk(thread: t, message: nil, card: card) }
+    func open(_ card: String?) { nav.card = OpenAsk(thread: t, message: nil, card: card.flatMap { $0.hasPrefix("job:") ? nil : $0 }) }
     func open(sub c: SessionCell) { if let k = c.sub { nav.card = OpenAsk(thread: k, message: nil, card: c.subFirst) } }
     var subsShown: ArraySlice<SessionCell> { subs.prefix(subsOpen ? subs.count : Self.subRows) }
-    /// Its turn's background helpers, while it runs (the console's sess-tasks).
-    var liveTasks: [TurnTask] { t.status == "running" ? (t.turn_tasks ?? []) : [] }
 
     var body: some View {
         #if targetEnvironment(macCatalyst)
@@ -349,13 +364,15 @@ struct ThreadRow: View {
         let more = max(0, openCount - min(cells.count, Self.rowCards))
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                // Its own turn or one under it at work (the board's running
-                // pill): the owner can see it is busy before typing.
-                if t.status == "running" || pills.contains(where: { $0.tone == "running" }) {
-                    Circle().fill(Color.accentColor).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-                }
                 Text(md(t.title)).font(.system(size: 14.5, weight: t.unread > 0 ? .bold : .semibold))
                     .foregroundStyle(.primary).multilineTextAlignment(.leading)
+                // Its own turn or one under it at work (the board's running
+                // pill): the owner can see it is busy before typing. After
+                // the name, so the name never shifts.
+                if t.status == "running" || pills.contains(where: { $0.tone == "running" }) {
+                    Circle().fill(Color.accentColor).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                        .padding(.leading, -1)
+                }
                 Spacer(minLength: 0)
                 if cells.isEmpty, subs.isEmpty, todo?.isEmpty ?? true, let d = t.last_message_at {
                     Text(shortAgo(d)).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).layoutPriority(1)
@@ -393,10 +410,7 @@ struct ThreadRow: View {
                         }.buttonStyle(.plain)
                     }
                 }
-                .padding(.top, 10).padding(.horizontal, -14).padding(.bottom, liveTasks.isEmpty ? -12 : 0)
-            }
-            if !liveTasks.isEmpty {
-                VStack(alignment: .leading, spacing: 5) { ForEach(liveTasks, id: \.self) { TaskRow(k: $0) } }.padding(.top, 8)
+                .padding(.top, 10).padding(.horizontal, -14).padding(.bottom, -12)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
@@ -453,7 +467,6 @@ struct ThreadRow: View {
                     Image(systemName: "arrow.turn.down.right").font(.caption2.weight(.semibold)).foregroundStyle(.blue)
                     Text(f.isEmpty ? "starting…" : f).font(.subheadline).foregroundStyle(.blue).monospacedDigit().lineLimit(2)
                 }
-                ForEach(liveTasks, id: \.self) { TaskRow(k: $0) }
             } else if t.last_message_kind == "error", let m = summaryLine(t.last_message) {
                 // A dead turn is a fact about the session, not a description.
                 Text(md("Error: \(m)")).font(.subheadline).foregroundStyle(.red).lineLimit(2)
@@ -487,6 +500,38 @@ struct ThreadRow: View {
                     t.activity.map { "- doing right now: \($0)" } ?? "",
                     t.last_message.map { "- last reply:\n\($0.prefix(800))" } ?? ""].filter { !$0.isEmpty }.joined(separator: "\n")))
         // No swipe actions. Clearing and stopping happen inside the chat, where the card is.
+    }
+}
+
+/// A job cell's insides under its title: the bar with its count, then what
+/// it is doing and for how long, the console's taskBarHTML + jobFootHTML.
+struct JobProgress: View {
+    let k: TurnTask
+    var body: some View {
+        #if targetEnvironment(macCatalyst)
+        let accent = Web.accent, muted = Web.muted, size: CGFloat = 12
+        #else
+        let accent = Color.accentColor, muted = Color.secondary, size: CGFloat = 12
+        #endif
+        VStack(alignment: .leading, spacing: 4) {
+            if let t = k.total, t > 0 {
+                HStack(spacing: 8) {
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(accent.opacity(0.18))
+                            Capsule().fill(accent).frame(width: g.size.width * min(1, Double(k.done ?? 0) / Double(t)))
+                        }
+                    }.frame(height: 5)
+                    Text(taskCount(k)).font(.system(size: size - 0.5)).foregroundStyle(muted).monospacedDigit()
+                }
+            }
+            TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                let words = [k.doing ?? "", taskAge(k, now: ctx.date)].filter { !$0.isEmpty }.joined(separator: " · ")
+                if !words.isEmpty {
+                    Text(words).font(.system(size: size - 0.5)).foregroundStyle(muted).lineLimit(1).truncationMode(.tail)
+                }
+            }
+        }
     }
 }
 

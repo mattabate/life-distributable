@@ -100,7 +100,8 @@ func TestLandRunsOnStandingApproval(t *testing.T) {
 	}
 	var a actions.Action
 	json.Unmarshal([]byte(body), &a)
-	if !a.Gated || a.Kind != "commit" || a.DecidedVia != "standing" || a.State == "proposed" ||
+	// Filed already approved on the standing yes: no card, nothing spoken.
+	if !a.Gated || a.Kind != "commit" || a.DecidedVia != "standing" || a.State == "proposed" || a.Said != "" ||
 		!strings.Contains(string(a.ExecPayload), "git merge --ff-only "+sha) || !strings.Contains(a.Detail, "the work") {
 		t.Fatalf("%+v", a)
 	}

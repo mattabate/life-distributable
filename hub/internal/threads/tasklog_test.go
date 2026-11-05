@@ -1,11 +1,15 @@
 package threads
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
+
+	"life/hub/internal/progress"
 )
 
 // A background shell's log is read from the CLI's task file: its lines, its
@@ -32,6 +36,50 @@ func TestShellTaskLogAndProgress(t *testing.T) {
 	m.fillTasks(&got)
 	if k := got.TurnTasks[0]; k.Doing != "files  30%|### | 3/10" || k.Done != 3 || k.Total != 10 {
 		t.Fatalf("%+v", k)
+	}
+}
+
+// An approved action the hub is running shows on the session that proposed
+// it, idle or not, with its newest step; a finished one, or another
+// session's, does not.
+func TestRunningActionsOnTheSession(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Clean up the old builds.", "", "", nil)
+	other, _ := m.Create("", "life", "", "Something else.", "", "", nil)
+	for _, r := range [][]string{
+		{"act-1", th.ID, "running", "Delete 940 old build folders"},
+		{"act-2", th.ID, "done", "Earlier job"},
+		{"act-3", other.ID, "running", "Not this session's"},
+		{"act-4", th.ID, "running", "A shell job"},
+	} {
+		if _, err := m.db.Exec(`INSERT INTO items (id,src,created_at,updated_at,title,state,thread_id,resolved_at) VALUES (?,'action','2026-11-05T05:00:00Z','2026-11-05T05:00:00Z',?,?,?,'2026-11-05T05:01:00Z')`, r[0], r[3], r[2], r[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := progress.Start(context.Background(), "act-1")
+	defer progress.End("act-1")
+	progress.Report(ctx, "280 deleted, 12 kept", 312, 940)
+	ctx4 := progress.Start(context.Background(), "act-4")
+	defer progress.End("act-4")
+	io.WriteString(progress.Lines(ctx4), "start\nposted 3/10\rposted 4/10\npart")
+	got, err := m.Get(th.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := got.RunningActions
+	if len(k) != 2 || k[0].ID != "act-1" || k[0].Type != "action" || k[0].Description != "Delete 940 old build folders" ||
+		k[0].StartedAt == nil || !k[0].StartedAt.Equal(time.Date(2026, 11, 5, 5, 1, 0, 0, time.UTC)) ||
+		k[0].Doing != "280 deleted, 12 kept" || k[0].Done != 312 || k[0].Total != 940 {
+		t.Fatalf("%+v", k)
+	}
+	if k[1].Doing != "posted 4/10" || k[1].Done != 4 || k[1].Total != 10 {
+		t.Fatalf("shell row %+v", k[1])
+	}
+	list, _ := m.List(false)
+	for _, x := range list {
+		if n := len(x.RunningActions); (x.ID == th.ID && n != 2) || (x.ID == other.ID && n != 1) {
+			t.Fatalf("list %s: %+v", x.ID, x.RunningActions)
+		}
 	}
 }
 

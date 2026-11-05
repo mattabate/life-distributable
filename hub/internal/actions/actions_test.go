@@ -86,6 +86,43 @@ func TestShellOffTheFreeListIsGated(t *testing.T) {
 	}
 }
 
+// The hub's standing routes file a gated commit already approved: no push to
+// the owner, no proposed card, and the chat's own list leaves it out once it
+// ran. The field never comes from JSON, so a session's own POST cannot
+// approve itself.
+func TestStandingFilesApprovedWithNoCard(t *testing.T) {
+	q, ex, nf := setup(t)
+	pay := json.RawMessage(`{"cmd":"git merge --ff-only abc"}`)
+	gated := true
+	a, err := q.Propose(Proposal{Kind: "commit", Gated: &gated, ThreadID: "th-1", Title: "Land 1 commit(s) on main",
+		ExecType: "shell", ExecPayload: pay, Standing: "standing approval"})
+	if err != nil || !a.Gated || a.State != "approved" || a.DecidedVia != "standing" || a.Said != "" {
+		t.Fatalf("%+v %v", a, err)
+	}
+	waitState(t, q, a.ID, "done")
+	if len(nf.msgs) != 0 || len(ex.calls) != 1 {
+		t.Fatalf("pushed %v, ran %v", nf.msgs, ex.calls)
+	}
+	if open, _ := q.Open(); len(open) != 0 {
+		t.Fatalf("on the board: %+v", open)
+	}
+	chat, _ := q.ListFor("", "th-1", 50)
+	all, _ := q.ListFor("", "", 50)
+	if len(chat) != 0 || len(all) != 1 {
+		t.Fatalf("chat %d, queue %d", len(chat), len(all))
+	}
+	var p Proposal
+	json.Unmarshal([]byte(`{"kind":"commit","title":"x","thread_id":"th-1","standing":"yes","Standing":"yes"}`), &p)
+	b, _ := q.Propose(p)
+	if b.State != "proposed" || b.DecidedVia != "" {
+		t.Fatalf("a JSON proposal approved itself: %+v", b)
+	}
+	// An ordinary card stays in the chat.
+	if chat, _ := q.ListFor("", "th-1", 50); len(chat) != 1 || chat[0].ID != b.ID {
+		t.Fatalf("chat %+v", chat)
+	}
+}
+
 // A free ls names only the checkout and the intake in-box: it runs as the
 // hub's user, so `ls -la ~/.ssh`, a bare ls with no dir (it starts in "/"), a
 // way out by .. or a link in a root are the owner's to approve.

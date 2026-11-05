@@ -146,7 +146,8 @@ type Heading struct {
 // so the owner does not message it mid-work, and a sub-session's card does
 // not pull its running parent under Your turn. It wears "running", or
 // "N running" for a chain. So does a session whose helpers are still working
-// after its reply went out.
+// after its reply went out, and one with an approved action the hub is
+// running for it.
 func Live(ths []threads.Thread) map[string]int {
 	parent := map[string]string{}
 	for _, t := range ths {
@@ -154,7 +155,7 @@ func Live(ths []threads.Thread) map[string]int {
 	}
 	live := map[string]int{}
 	for _, t := range ths {
-		if t.Status != "running" && len(t.TurnTasks) == 0 {
+		if t.Status != "running" && len(t.RunningActions) == 0 && len(t.TurnTasks) == 0 {
 			continue
 		}
 		live[t.ID]++

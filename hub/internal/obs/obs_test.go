@@ -33,6 +33,23 @@ func TestObservationsAndBlobs(t *testing.T) {
 	if _, err := s.BlobPath(ref); err != nil {
 		t.Fatal(err)
 	}
+	// An upload's filename is the ext: a quote or a path in it never reaches the ref.
+	for _, ext := range []string{`p"ng`, "png'", "a/b", "toolongext", ""} {
+		r, _, err := s.PutBlob(strings.NewReader("x"+ext), ext)
+		if err != nil || !strings.HasSuffix(r, ".bin") {
+			t.Fatalf("ext %q: ref %q, %v", ext, r, err)
+		}
+	}
+	for _, bad := range []string{
+		"sha256/2c/../../etc/passwd",
+		"sha256/2c/2cf24dba.jpg",                 // not a whole hash
+		"sha256/aa/" + ref[10:],                  // dir doesn't match the hash
+		strings.TrimSuffix(ref, ".jpg") + `.j"g`, // quote in the ext
+	} {
+		if _, err := s.BlobPath(bad); err == nil {
+			t.Fatalf("ref %q accepted", bad)
+		}
+	}
 	ts := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	o, err := s.Insert(Observation{Source: "app", Kind: "photo", TS: ts, Payload: json.RawMessage(`{"note":"lunch"}`), BlobRef: ref})
 	if err != nil || o.ID == 0 || o.SchemaVersion != 1 {

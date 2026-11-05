@@ -1782,6 +1782,57 @@ func TestRecsCarryTheirModel(t *testing.T) {
 	}
 }
 
+// A rec is a notice in the chat until the owner dismisses it, and lives with
+// the session that owns it: POST /seen stamps seen_at once, POST /home
+// re-homes it.
+func TestRecsSeenAndHome(t *testing.T) {
+	s, _ := newTestDB(t)
+	var a, b struct{ ID string }
+	json.Unmarshal(s.do(t, "POST", "/api/v1/threads", map[string]string{"prompt": "a"}).Body.Bytes(), &a)
+	json.Unmarshal(s.do(t, "POST", "/api/v1/threads", map[string]string{"prompt": "b"}).Body.Bytes(), &b)
+	var r struct {
+		ID       string
+		SeenAt   string `json:"seen_at"`
+		ThreadID string `json:"thread_id"`
+	}
+	w := s.do(t, "POST", "/api/v1/recs", map[string]any{"title": "Try a standing desk", "domain": "tools", "kind": "try",
+		"thread_id": a.ID, "source": "claude:thread:" + a.ID, "model": "claude-opus-5"})
+	if w.Code != 201 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &r)
+	if r.SeenAt != "" {
+		t.Fatal("a new rec is unseen:", r.SeenAt)
+	}
+	w = s.do(t, "POST", "/api/v1/recs/"+r.ID+"/seen", nil)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &r)
+	first := r.SeenAt
+	if first == "" {
+		t.Fatal("seen not stamped")
+	}
+	json.Unmarshal(s.do(t, "POST", "/api/v1/recs/"+r.ID+"/seen", nil).Body.Bytes(), &r)
+	if r.SeenAt != first {
+		t.Fatal("seen re-stamped:", first, r.SeenAt)
+	}
+	if w := s.do(t, "POST", "/api/v1/recs/"+r.ID+"/home", map[string]string{"thread_id": "th-nope"}); w.Code != 404 {
+		t.Fatal("unknown session:", w.Code)
+	}
+	if w := s.do(t, "POST", "/api/v1/recs/"+r.ID+"/home", map[string]string{}); w.Code != 400 {
+		t.Fatal("empty session:", w.Code)
+	}
+	w = s.do(t, "POST", "/api/v1/recs/"+r.ID+"/home", map[string]string{"thread_id": b.ID})
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &r)
+	if r.ThreadID != b.ID {
+		t.Fatal("not re-homed:", r.ThreadID)
+	}
+}
+
 // A rec card says when its session is working right now: the list and the
 // single GET carry `thread_running` while the filing thread's status is
 // `running`, and omit it otherwise — a rec the owner filed never has it.

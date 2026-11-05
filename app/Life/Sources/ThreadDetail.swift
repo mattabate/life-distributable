@@ -206,33 +206,36 @@ struct ThreadDetail: View {
 
     /// One cell of the open-cards view (`openCells`), in conversational order.
     enum OpenCell: Identifiable {
-        case message(ThreadMessage), ask(Ask, Double), action(Action, Double), rec(Rec, Double)
+        case message(ThreadMessage), ask(Ask, Double), action(Action, Double), recNotice(Rec)
         var id: String {
             switch self {
             case .message(let m): "msg:\(m.id)"
             case .ask(let a, _): a.id
             case .action(let a, _): a.id
-            case .rec(let r, _): r.id
+            case .recNotice(let r): r.id
             }
         }
     }
 
-    /// What is the owner's to act on: every ask not closed, approval still
-    /// open and rec not closed, where it sits in the conversation, plus the
-    /// message in flight. Every message row and closed card is behind "Show
+    /// What is the owner's to act on: every ask not closed and approval
+    /// still open, where it sits in the conversation, plus the message in
+    /// flight. A rec is not their turn (it can be done any time): an open one
+    /// not yet seen is a one-line RecNotice, gone once dismissed; its card is
+    /// on the Recs page. Every message row and closed card is behind "Show
     /// full chat" (the console's openCards, threads.js).
     func openCells(_ rows: [ThreadMessage]) -> [OpenCell] {
         var out: [OpenCell] = []
         let live = liveStarters
+        let notice = { (r: Rec) in !r.isClosed && (r.seen_at ?? "").isEmpty }
         for m in rows {
             if live.contains(m.id) { out.append(.message(m)) }
             for a in asksByMessage[m.id] ?? [] where !a.isClosed { out.append(.ask(a, leadCost(m, "ask:" + a.id))) }
             for a in actionsByMessage[m.id] ?? [] where a.open == true { out.append(.action(a, leadCost(m, "action:" + a.id))) }
-            for r in recsByMessage[m.id] ?? [] where !r.isClosed { out.append(.rec(r, leadCost(m, "rec:" + r.id))) }
+            for r in recsByMessage[m.id] ?? [] where notice(r) { out.append(.recNotice(r)) }
         }
         for a in tailAsks where !a.isClosed { out.append(.ask(a, 0)) }
         for a in tailActions where a.open == true { out.append(.action(a, 0)) }
-        for r in tailRecs where !r.isClosed { out.append(.rec(r, 0)) }
+        for r in tailRecs where notice(r) { out.append(.recNotice(r)) }
         return out
     }
 
@@ -398,18 +401,8 @@ struct ThreadDetail: View {
         tailRecs = tail
     }
 
-    /// One rec's cell. Each way arms the chat bar with the rec and that pick
-    /// (the console's composer does the same): the owner's note is typed where a
-    /// message is, and the decision lands in this chat as "↩ Accepted ·
-    /// <title>" over it — alongside whatever other cards are armed.
-    func recCell(_ r: Rec, cost: Double = 0) -> some View {
-        RecCard(rec: r, decide: { outcome in
-            arm(ArmedReply(kind: .rec, id: r.id, title: r.title, outcome: outcome, outcomes: r.outcomes ?? []))
-        }, reload: { await load() }, cost: cost).id(r.id)
-    }
-
     /// One proposal's cell: Approve · Deny · Reply each arm the chat bar
-    /// with the action and that pick, exactly as a rec's buttons do. Send posts one prompt naming it; the hub decides the row.
+    /// with the action and that pick. Send posts one prompt naming it; the hub decides the row.
     func approvalCell(_ a: Action, cost: Double = 0) -> some View {
         ApprovalCard(a: a, inThread: true, arm: { outcome in
             arm(ArmedReply(kind: .action, id: a.id, title: a.title, outcome: outcome, outcomes: a.outcomes ?? []))
@@ -429,8 +422,7 @@ struct ThreadDetail: View {
     /// a card.
     func leadRef(_ m: ThreadMessage) -> String? {
         if let a = asksByMessage[m.id]?.first { return "ask:" + a.id }
-        if let a = actionsByMessage[m.id]?.first { return "action:" + a.id }
-        return recsByMessage[m.id]?.first.map { "rec:" + $0.id }
+        return actionsByMessage[m.id]?.first.map { "action:" + $0.id }
     }
 
     func leadCost(_ m: ThreadMessage, _ ref: String) -> Double {
@@ -599,9 +591,10 @@ struct ThreadDetail: View {
 
     /// The turn's background helpers under the working line (the console's
     /// #run-tasks), each opening to its log: a shell job's newest output
-    /// lines, a subagent's calls.
+    /// lines, a subagent's calls. An action the hub runs has no log: its row
+    /// is its newest line, turn or not.
     @ViewBuilder var taskRows: some View {
-        let tasks: [TurnTask] = thread.turn_tasks ?? []
+        let tasks: [TurnTask] = thread.liveTasks
         if !tasks.isEmpty {
             #if targetEnvironment(macCatalyst)
             let inset: CGFloat = 13
@@ -612,7 +605,7 @@ struct ThreadDetail: View {
                 ForEach(tasks, id: \.self) { k in
                     let tid: String = k.id ?? ""
                     let open: Bool = !tid.isEmpty && taskOpen == tid
-                    TaskRow(k: k, open: open, tap: tid.isEmpty ? nil : { toggleTask(tid) }) {
+                    TaskRow(k: k, open: open, tap: tid.isEmpty || k.type == "action" ? nil : { toggleTask(tid) }) {
                         if open { taskLogView(tid) }
                     }
                 }
@@ -737,13 +730,13 @@ struct ThreadDetail: View {
                                     AskCard(a: a, goals: goals, cost: leadCost(m, "ask:" + a.id), reload: { await load() }).id(a.id)
                                 }
                                 ForEach(actionsByMessage[m.id] ?? []) { approvalCell($0, cost: leadCost(m, "action:" + $0.id)) }
-                                ForEach(recsByMessage[m.id] ?? []) { recCell($0, cost: leadCost(m, "rec:" + $0.id)) }
+                                ForEach(recsByMessage[m.id] ?? []) { RecNotice(rec: $0, reload: { await load() }) }
                             }
                             ForEach(tailAsks) { a in
                                 AskCard(a: a, goals: goals, reload: { await load() }).id(a.id)
                             }
                             ForEach(tailActions) { approvalCell($0) }
-                            ForEach(tailRecs) { recCell($0) }
+                            ForEach(tailRecs) { RecNotice(rec: $0, reload: { await load() }) }
                         } else {
                             let cells = openCells(rows)
                             ForEach(cells) { cell in
@@ -751,7 +744,7 @@ struct ThreadDetail: View {
                                 case .message(let m): messageRow(m).id(m.id)
                                 case .ask(let a, let cost): AskCard(a: a, goals: goals, cost: cost, reload: { await load() }).id(a.id)
                                 case .action(let a, let cost): approvalCell(a, cost: cost)
-                                case .rec(let r, let cost): recCell(r, cost: cost)
+                                case .recNotice(let r): RecNotice(rec: r, reload: { await load() })
                                 }
                             }
                             if cells.isEmpty, thread.status != "running", cardsLoaded {
@@ -776,6 +769,8 @@ struct ThreadDetail: View {
                                 if chainOpen, chainLoaded, !chainRun.isEmpty { chainView }
                                 taskRows
                             }
+                        } else {
+                            taskRows
                         }
                         Color.clear.frame(height: 1).id("bottom")
                     }
@@ -1156,7 +1151,6 @@ struct ThreadDetail: View {
     private var replyPlaceholder: String {
         guard let r = replies.first else { return composerPlaceholder }
         if replies.count > 1 { return "One message for all of them (optional)" }
-        if r.kind == .rec { return r.outcome.isEmpty ? "Your line — it goes to the session, the rec stays open" : "Your note to the session (optional)" }
         if r.kind == .action { return r.outcome.isEmpty ? "Your line — it goes to the session, the proposal stays open" : "Your note to the session (optional)" }
         #if targetEnvironment(macCatalyst)
         // An ask, the console's words (composer.js, the owner 2026-09-29).
@@ -1204,14 +1198,6 @@ struct ThreadDetail: View {
                                              text: t, attachments: refs,
                                              replies: armed.map { PromptReply(ref: $0.ref, outcome: $0.outcome) },
                                              decider: decider)
-                } else if let re = armed.first, re.kind == .rec {
-                    // A rec alone goes the Recs page's way: the hub records
-                    // the verdict and relays it into this session.
-                    if re.outcome.isEmpty {
-                        _ = try await hub.replyRec(re.id, note: t, deliver: "source", attachments: refs)
-                    } else {
-                        _ = try await hub.decideRec(re.id, status: re.outcome, note: t, deliver: "source", attachments: refs)
-                    }
                 } else if let re = armed.first {
                     // One prompt referencing the card, now, to this session —
                     // the hub closes the read and wakes it only for words.
@@ -1968,12 +1954,12 @@ struct FocusScroll: Equatable {
 #endif
 
 /// One card armed on the chat bar (several can be at once). `ref`
-/// is what the hub takes — "ask:<id>" / "rec:<id>" / "action:<id>" — and
-/// `outcome` the pick: a read's "done", a rec's accepted/declined, a
-/// proposal's approved/denied, or "" for words alone.
+/// is what the hub takes ("ask:<id>" / "action:<id>") and `outcome` the
+/// pick: a read's "done", a proposal's approved/denied, or "" for words
+/// alone. A rec is answered on the Recs page, never from the chat bar.
 struct ArmedReply: Identifiable, Hashable {
     /// `step`: one step of an item's card, "step:<item>.<n>".
-    enum Kind { case ask, rec, action, step }
+    enum Kind { case ask, action, step }
     let kind: Kind
     /// A step's chips, the row's own words.
     static let stepOutcomes = [AskOutcome(value: "done", label: "Did it"), AskOutcome(value: "wont", label: "Skip"), AskOutcome(value: "", label: "Reply")]
@@ -1984,7 +1970,7 @@ struct ArmedReply: Identifiable, Hashable {
     /// comes from.
     var outcomes: [AskOutcome] = []
     var ref: String {
-        switch kind { case .ask: "ask:" + id; case .rec: "rec:" + id; case .action: "action:" + id; case .step: "step:" + id }
+        switch kind { case .ask: "ask:" + id; case .action: "action:" + id; case .step: "step:" + id }
     }
     /// The banner's word for the pick: the hub's label for it — the word on
     /// the button tapped (I did this · Won't do · Decided · Accepted…).
@@ -1997,9 +1983,9 @@ struct ArmedReply: Identifiable, Hashable {
     }
     /// The banner's mark: the card's own icon and colour.
     var icon: String {
-        switch kind { case .ask, .step: "arrowshape.turn.up.left.fill"; case .rec: "lightbulb.fill"; case .action: "hand.raised.fill" }
+        switch kind { case .ask, .step: "arrowshape.turn.up.left.fill"; case .action: "hand.raised.fill" }
     }
     var tint: Color {
-        switch kind { case .ask, .step: Color.accentColor; case .rec: .purple; case .action: .red }
+        switch kind { case .ask, .step: Color.accentColor; case .action: .red }
     }
 }

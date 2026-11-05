@@ -240,10 +240,16 @@ type Thread struct {
 	TurnTools int `json:"turn_tools,omitempty"`
 	// TurnTasks: the background tasks the running turn is waiting on - Agent
 	// helpers (type local_agent) and background shells - only while running.
-	TurnTasks   []TurnTask `json:"turn_tasks,omitempty"`
-	TurnCostUSD float64    `json:"turn_cost_usd,omitempty"`
-	TurnAt      *time.Time `json:"turn_at,omitempty"`
-	NeedsYou    int        `json:"needs_you"`
+	TurnTasks []TurnTask `json:"turn_tasks,omitempty"`
+	// RunningActions: the approved actions it proposed that the hub is
+	// executing now, whatever the session's own status. TurnTask rows, type
+	// "action": id = the action's, description = its title, started_at = when
+	// it was decided, doing/done/total = its newest output line or a count its
+	// executor reports (internal/progress).
+	RunningActions []TurnTask `json:"running_actions,omitempty"`
+	TurnCostUSD    float64    `json:"turn_cost_usd,omitempty"`
+	TurnAt         *time.Time `json:"turn_at,omitempty"`
+	NeedsYou       int        `json:"needs_you"`
 	// Speaking: its card is being read aloud right now (Voice). Stamped on
 	// the list, the brief list and one thread.
 	Speaking bool `json:"speaking,omitempty"`
@@ -1313,6 +1319,7 @@ func (m *Manager) Get(id string) (Thread, error) {
 	}
 	t.CostByModel = m.costByModel(id)
 	m.fillTasks(&t)
+	t.RunningActions = m.runningActions(id)[id]
 	t.Speaking = m.Voice.Is(t.ID, time.Now())
 	t.WaitingToSpeak = m.Voice.IsWaiting(t.ID)
 	return t, nil
@@ -1426,15 +1433,17 @@ func (m *Manager) list(where string) ([]Thread, error) {
 		return nil, err
 	}
 	rows.Close() // fillTasks queries; the pool may be one connection
+	acts := m.runningActions("")
 	for i := range out {
 		m.fillTasks(&out[i])
+		out[i].RunningActions = acts[out[i].ID]
 	}
 	return out, nil
 }
 
-// ListBrief: every non-archived thread with only id, title, goal_id and status
-// set — what the board and the agenda need to name a session and know it is
-// running. List runs ~14 correlated sub-selects per row (cost in flight,
+// ListBrief: every non-archived thread with only id, title, goal_id, status
+// and running_actions set: what the board and the agenda need to name a
+// session and know it is running. List runs ~14 correlated sub-selects per row (cost in flight,
 // schedule, preview, last tool…), which the board paid on every poll only to
 // read three columns: 13 ms vs 0.35 ms on a DB of ~300 threads.
 func (m *Manager) ListBrief() ([]Thread, error) {
@@ -1454,7 +1463,17 @@ func (m *Manager) ListBrief() ([]Thread, error) {
 		t.WaitingToSpeak = m.Voice.IsWaiting(t.ID)
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close() // runningActions queries; the pool may be one connection
+	// The board files a session whose approved action is running as Working
+	// (attention.Live).
+	acts := m.runningActions("")
+	for i := range out {
+		out[i].RunningActions = acts[out[i].ID]
+	}
+	return out, nil
 }
 
 func (m *Manager) Messages(id string, limit int) ([]Message, error) {

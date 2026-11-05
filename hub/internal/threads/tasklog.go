@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"life/hub/internal/progress"
 )
 
 // A background shell's log, so a long job a session started can be found and
@@ -163,6 +165,41 @@ func (m *Manager) fillTasks(t *Thread) {
 		}
 		k.Doing, k.Done, k.Total = c.doing, c.done, c.total
 	}
+}
+
+// runningActions: the running approved actions by the session that proposed
+// them (one session's when threadID is set), as Thread.RunningActions rows.
+func (m *Manager) runningActions(threadID string) map[string][]TurnTask {
+	q := `SELECT id, thread_id, title, COALESCE(resolved_at, created_at) FROM items WHERE src='action' AND state='running' AND COALESCE(thread_id,'')<>''`
+	args := []any{}
+	if threadID != "" {
+		q += ` AND thread_id=?`
+		args = append(args, threadID)
+	}
+	rows, err := m.db.Query(q+` ORDER BY created_at`, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := map[string][]TurnTask{}
+	for rows.Next() {
+		var id, thr, title, at string
+		if rows.Scan(&id, &thr, &title, &at) != nil {
+			continue
+		}
+		k := TurnTask{ID: id, Type: "action", Description: title}
+		if x, err := time.Parse(time.RFC3339Nano, at); err == nil {
+			k.StartedAt = &x
+		}
+		if l, ok := progress.Get(id); ok {
+			k.Doing, k.Done, k.Total = ansiRe.ReplaceAllString(l.Doing, ""), l.Done, l.Total
+			if k.Total == 0 {
+				k.Done, k.Total = progressOf(k.Doing)
+			}
+		}
+		out[thr] = append(out[thr], k)
+	}
+	return out
 }
 
 func (m *Manager) readTask(threadID string, k TurnTask) taskLive {

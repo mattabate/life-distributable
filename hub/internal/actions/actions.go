@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -22,6 +23,7 @@ import (
 
 	"life/hub/internal/format"
 	"life/hub/internal/notify"
+	"life/hub/internal/progress"
 	"life/hub/internal/store"
 )
 
@@ -206,6 +208,11 @@ type Proposal struct {
 	// propose --say`, `lifectl relay --say`), exactly as an ask carries one
 	// (notify/voice.go). Empty = the hub speaks spokenApproval instead.
 	Say string `json:"say"`
+	// Standing: the hub's own routes (land, app ship) set it to the standing
+	// approval's words, and the row is filed already approved by it: no
+	// proposed moment, no "Please approve" push, no card. Never from JSON
+	// (`-`), so a session's POST /actions cannot approve its own proposal.
+	Standing string `json:"-"`
 }
 
 // Executor runs an approved action's exec. Implementations: shell, claude.
@@ -699,9 +706,13 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 	if a.Source == "" && a.ThreadID != "" {
 		a.Source = "claude:thread:" + a.ThreadID
 	}
-	if !gated {
+	standing := strings.TrimSpace(p.Standing)
+	if !gated || standing != "" {
 		a.State = "approved"
 		a.DecidedVia = "auto"
+		if standing != "" {
+			a.DecidedVia = "standing"
+		}
 		a.DecidedAt = &now
 	}
 	a.stamp()
@@ -718,10 +729,13 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 		return Action{}, err
 	}
 	q.event(a.ID, "proposed", a.Source, "")
-	if !gated {
+	switch {
+	case standing != "":
+		q.event(a.ID, "approved", "standing", standing)
+	case !gated:
 		q.event(a.ID, "approved", "auto", "ungated")
 	}
-	if gated {
+	if gated && standing == "" {
 		if q.nfy != nil {
 			// Spoken aloud: the verb first, no id to read out.
 			msg := fmt.Sprintf("Please approve: %s\n%s", a.Title, truncate(a.Detail, 300))
@@ -895,8 +909,9 @@ func (q *Queue) run(id string) {
 		q.finish(id, res, err, false)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+	ctx, cancel := context.WithTimeout(progress.Start(context.Background(), a.ID), runTimeout)
 	defer cancel()
+	defer progress.End(a.ID)
 	res, err := q.exec.Exec(ctx, a.ExecType, a.ExecPayload)
 	q.finish(id, res, err, cutOff(ctx, err))
 }
@@ -1081,6 +1096,10 @@ func (q *Queue) ListFor(state, threadID string, limit int) ([]Action, error) {
 	if threadID != "" {
 		where += " AND i.thread_id = ?"
 		args = append(args, threadID)
+		// A chat never shows the standing approval's work (a landing, a
+		// build) unless it went wrong: the session hears the result from
+		// ops/land.sh, and the full queue still lists them.
+		where += " AND NOT (COALESCE(i.resolved_by,'') = 'standing' AND i.state IN ('approved','running','done'))"
 	}
 	rows, err := q.db.Query(fmt.Sprintf(`SELECT `+cols+joined+`%s ORDER BY i.created_at DESC LIMIT %d`, where, limit), args...)
 	if err != nil {
@@ -1181,9 +1200,15 @@ var shellGrace = 10 * time.Second
 // shellGrace after bash ends. Unlike a scheduled job (sched.runGroup),
 // nothing is killed after a clean exit: an approved start script may leave
 // its daemon running.
-func runShell(c *exec.Cmd) (string, error) {
+// live (may be nil) also sees the output as it comes: the action's newest
+// line on its session (progress.Lines).
+func runShell(c *exec.Cmd, live io.Writer) (string, error) {
 	var buf bytes.Buffer
-	c.Stdout, c.Stderr = &buf, &buf
+	var out io.Writer = &buf
+	if live != nil {
+		out = io.MultiWriter(&buf, live)
+	}
+	c.Stdout, c.Stderr = out, out
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
 	c.WaitDelay = shellGrace
@@ -1220,7 +1245,11 @@ func (e DefaultExecutor) Exec(ctx context.Context, typ string, payload json.RawM
 		c := exec.CommandContext(ctx, "/bin/bash", "-lc", p.Cmd)
 		c.Dir = p.Dir
 		c.Env = shellEnv(os.Environ(), p.Dir)
-		return runShell(c)
+		if id := progress.ID(ctx); id != "" {
+			// ops/hub.sh restart waits on running actions, never on this one
+			c.Env = append(c.Env, "LIFE_ACTION="+id)
+		}
+		return runShell(c, progress.Lines(ctx))
 	case "claude":
 		var p struct {
 			Project string `json:"project"`
@@ -1245,7 +1274,7 @@ func (e DefaultExecutor) Exec(ctx context.Context, typ string, payload json.RawM
 		// timeout killed only claude, so an approved claude action stayed
 		// running as long as that child lived (the same hang sched.runGroup
 		// fixed for jobs; life-distributable#58).
-		s, err := runShell(c)
+		s, err := runShell(c, nil) // one JSON result at the end: no line to show
 		out := []byte(s)
 		if err != nil {
 			return s, err

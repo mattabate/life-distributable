@@ -412,6 +412,10 @@ func taskCount(_ k: TurnTask) -> String {
 extension Thread {
     /// The helpers the hub lists on its own, before any chain is loaded.
     var taskHelpers: Int { (turn_tasks ?? []).filter { $0.type == "local_agent" }.count }
+    /// The rows a session shows (the console's liveTasks): its turn's tasks,
+    /// which the hub keeps listing after the turn ends while its helpers still
+    /// run, then the actions the hub is running for it.
+    var liveTasks: [TurnTask] { (turn_tasks ?? []) + (running_actions ?? []) }
     func turnFacts(withCalls: Bool = true, withCost: Bool = true) -> String {
         turnFactsLine(calls: turn_tools, at: turn_at, cost: turn_cost_usd, withCalls: withCalls, withCost: withCost)
     }

@@ -93,7 +93,7 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, err.Error())
 		return
 	}
-	writeJSON(w, 201, s.standing(a))
+	writeJSON(w, 201, a)
 }
 
 // landProposal: the one action that fast-forwards main to sha. When hub/
@@ -110,23 +110,15 @@ func landProposal(thread, sha, log, stat, say, repo string, hub bool) actions.Pr
 		Title:    fmt.Sprintf("Land %d commit(s) on main", strings.Count(log, "\n")+1),
 		Detail:   log + "\n\n" + stat,
 		Say:      say,
-		ExecType: "shell", ExecPayload: payload}
+		ExecType: "shell", ExecPayload: payload, Standing: standingNote}
 }
 
-// standingNote: why a landing or an app build ran with no card.
+// standingNote: why a landing or an app build ran with no card. Each route
+// files its row with Proposal.Standing = standingNote (decided_via
+// "standing"): approved as it is filed, never a proposed card first, so
+// nothing asks the owner to approve it. Every other proposal still waits for
+// the owner.
 const standingNote = "standing approval: a local commit and an app build need no card"
-
-// standing decides a landing or an app build at once (decided_via
-// "standing"). Every other proposal still waits for the owner.
-func (s *Server) standing(a actions.Action) actions.Action {
-	if err := s.acts.DecideQuiet(a.ID, true, "standing", standingNote); err != nil {
-		return a
-	}
-	if b, err := s.acts.Get(a.ID); err == nil {
-		return b
-	}
-	return a
-}
 
 var shipThread = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
@@ -171,10 +163,10 @@ func (s *Server) appShip(w http.ResponseWriter, r *http.Request) {
 	payload, _ := json.Marshal(map[string]string{"cmd": cmd, "dir": s.cfg.Root})
 	gated := true
 	a, err := s.acts.Propose(actions.Proposal{Kind: "other", Gated: &gated, ThreadID: from, Source: "claude:thread:" + from,
-		Title: title, Detail: in.Why, ExecType: "shell", ExecPayload: payload})
+		Title: title, Detail: in.Why, ExecType: "shell", ExecPayload: payload, Standing: standingNote})
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
 	}
-	writeJSON(w, 201, s.standing(a))
+	writeJSON(w, 201, a)
 }

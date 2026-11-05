@@ -91,7 +91,14 @@ struct ComposerField: UIViewRepresentable {
         context.coordinator.parent = self
         // Only on a programmatic change (an ask prefix, clearing after send):
         // assigning identical text would reset the cursor and re-lay out.
-        if v.text != text { v.text = text }
+        // A draft the binding still holds from our own last sync is stale,
+        // not a change: the Mac's spelling fixes (a guess picked off the
+        // right-click menu, Correct Spelling Automatically) rewrite the box
+        // without textViewDidChange, and any redraw before the draft caught
+        // up put the misspelling straight back. The box's text wins and goes
+        // up to the draft.
+        let c = context.coordinator
+        if v.text == text { c.synced = text } else if text != c.synced { v.text = text; c.synced = text } else { c.pull(v) }
         let label = context.coordinator.placeholderLabel
         if label.text != placeholder { label.text = placeholder }
         if label.font != v.font { label.font = v.font }
@@ -177,12 +184,36 @@ struct ComposerField: UIViewRepresentable {
         /// The last measurement and what it was of (sizeThatFits).
         struct Fit: Equatable { var text: String; var width: CGFloat; var maxH: CGFloat; var font: CGFloat }
         var fit: (Fit, CGFloat)?
-        init(_ parent: ComposerField) { self.parent = parent }
+        /// The text box and draft last agreed on (updateUIView).
+        var synced: String
+        init(_ parent: ComposerField) { self.parent = parent; synced = parent.text }
 
         func textViewDidChange(_ v: UITextView) {
             placeholderLabel.isHidden = !v.text.isEmpty
+            synced = v.text
             if parent.text != v.text { parent.text = v.text }
             if v.isScrollEnabled { v.scrollRangeToVisible(v.selectedRange) }
+        }
+
+        /// A replacement moves the caret even when it skips the delegate's
+        /// change call: take the box's text up then, before any redraw.
+        func textViewDidChangeSelection(_ v: UITextView) {
+            if v.text != synced { pull(v) }
+        }
+
+        /// The box changed on its own: it is the draft now. Deferred, since
+        /// updateUIView may not write state mid-update; `synced` moves when
+        /// the draft arrives back, so a redraw before then still reads as
+        /// stale.
+        func pull(_ v: UITextView) {
+            let t = v.text ?? ""
+            placeholderLabel.isHidden = !t.isEmpty
+            // Only while the box still says it: a key typed in between has
+            // already gone up through textViewDidChange.
+            DispatchQueue.main.async { [weak self, weak v] in
+                guard let self, let v, v.text == t, self.parent.text != t else { return }
+                self.parent.text = t
+            }
         }
 
         func textViewDidEndEditing(_ v: UITextView) {

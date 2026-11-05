@@ -118,8 +118,10 @@ func (s *Store) PutBlob(r io.Reader, ext string) (ref string, size int64, err er
 	if size == 0 {
 		return "", 0, errors.New("empty blob")
 	}
+	// The ext is an upload's own filename (server/obs.go): letters and
+	// digits only, or a quote in a name lands in the ref.
 	ext = strings.ToLower(strings.TrimPrefix(ext, "."))
-	if ext == "" {
+	if !blobExt.MatchString(ext) {
 		ext = "bin"
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
@@ -276,8 +278,17 @@ func (s *Store) IntakePath(ref string) string {
 	return ""
 }
 
+var (
+	blobExt = regexp.MustCompile(`^[a-z0-9]{1,8}$`)
+	// The hash part is exact; the ext only refuses what could break out of
+	// a quoted ref or a path (blobs from before PutBlob checked it may carry
+	// an odd one).
+	blobRef = regexp.MustCompile(`^sha256/([0-9a-f]{2})/([0-9a-f]{64})\.[^/\\"'<>&` + "`" + `\x00-\x1f]{1,32}$`)
+)
+
 func (s *Store) BlobPath(ref string) (string, error) {
-	if !strings.HasPrefix(ref, "sha256/") || strings.Contains(ref, "..") {
+	m := blobRef.FindStringSubmatch(ref)
+	if m == nil || m[1] != m[2][:2] || strings.Contains(ref, "..") {
 		return "", errors.New("bad blob ref")
 	}
 	p := filepath.Join(s.BlobDir, filepath.FromSlash(ref))

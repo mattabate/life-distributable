@@ -1,4 +1,5 @@
-// Recommendations: list, add, stats, starter, decide, reply, score, link.
+// Recommendations: list, add, stats, starter, decide, reply, score, link,
+// seen, home.
 package server
 
 import (
@@ -378,6 +379,46 @@ func (s *Server) recsLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec, err := s.Recs.Link(r.PathValue("id"), in.Refs...)
+	if err != nil {
+		jsonErr(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, rec)
+}
+
+// recsSeen: the owner's × on a rec's notice line in a chat. The rec stays
+// open on the Recs page; the chat stops showing it.
+func (s *Server) recsSeen(w http.ResponseWriter, r *http.Request) {
+	if s.Recs == nil {
+		jsonErr(w, 503, "recs not configured")
+		return
+	}
+	rec, err := s.Recs.Seen(r.PathValue("id"))
+	if err != nil {
+		jsonErr(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, rec)
+}
+
+// recsHome: move a rec to the session that owns its lane.
+func (s *Server) recsHome(w http.ResponseWriter, r *http.Request) {
+	if s.Recs == nil {
+		jsonErr(w, 503, "recs not configured")
+		return
+	}
+	var in struct {
+		ThreadID string `json:"thread_id"`
+	}
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil || strings.TrimSpace(in.ThreadID) == "" {
+		jsonErr(w, 400, "thread_id is required")
+		return
+	}
+	if _, err := s.thr.Get(in.ThreadID); err != nil {
+		jsonErr(w, 404, "no such session")
+		return
+	}
+	rec, err := s.Recs.Home(r.PathValue("id"), in.ThreadID)
 	if err != nil {
 		jsonErr(w, 404, err.Error())
 		return

@@ -41,11 +41,17 @@ fi
 
 mkdir -p "$UPD"
 swap_alive || { nohup bash "$ROOT/ops/mac-swap.sh" >/dev/null 2>&1 & disown; }
+# The OLD app, by pid: the swap reopens the new one within a second of the
+# quit, so "is life.app running" read yes again before this loop looked, and
+# 15 s later the fallback quit the NEW app with nothing to reopen it. Only
+# that pid is ever waited on or stopped.
+OLD=$(pgrep -f "^/Applications/life.app/Contents/MacOS/life" | head -1 || true)
+gone() { ! kill -0 "$OLD" 2>/dev/null; }
 touch "$UPD/relaunch" "$UPD/apply"
-echo "▶ build $(staged) staged; asked the open app to quit and come back on it"
-for _ in $(seq 1 15); do running || { echo "✔ the app quit; the updater swaps and reopens it"; exit 0; }; sleep 1; done
-echo "▶ the app did not quit on its own; quitting it"
-osascript -e "tell application id \"$LIFE_BUNDLE_ID.mac\" to quit" >/dev/null 2>&1 || true
-for _ in $(seq 1 5); do running || { echo "✔ the app quit; the updater swaps and reopens it"; exit 0; }; sleep 1; done
-pkill -TERM -f "^/Applications/life.app/Contents/MacOS/life" || true
+echo "▶ build $(staged) staged; asked the open app (pid $OLD) to quit and come back on it"
+for _ in $(seq 1 15); do gone && { echo "✔ the app quit; the updater swaps and reopens it"; exit 0; }; sleep 1; done
+echo "▶ the app did not quit on its own; stopping pid $OLD"
+kill -TERM "$OLD" 2>/dev/null || true
+for _ in $(seq 1 5); do gone && { echo "✔ the app quit; the updater swaps and reopens it"; exit 0; }; sleep 1; done
+kill -KILL "$OLD" 2>/dev/null || true
 echo "✔ the app was stopped; the updater swaps and reopens it"

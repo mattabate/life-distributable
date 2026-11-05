@@ -1156,3 +1156,28 @@ Entry format:
 - For: everyone on macOS 26
 - Offer: Tap Option (or the Mic button) and speak; the words go into the box you're in, or to the session on screen. Speech is turned into text on the Mac by Apple's on-device recognizer, so nothing new leaves your Mac.
 - How: same merge as add-0008, then `make build` (it compiles `ops/bin/mic`; an older SDK skips it and the Mic stays off), `ops/hub.sh restart`, and grant the Microphone the first time (SETUP.md step 5.9). New: `GET/POST /api/v1/mic`, `mic_input` in `ops/hub.json`. By hand: `ops/mic.swift`, `ops/mic.plist`, `Makefile`, `hub/internal/server/mic.go`, `server.go`, `routes.go`, `hub/internal/config/config.go`, `web/mic.js`, `web/index.html`, `shared/api.md`, and their tests.
+
+## add-0152 · 2026-11-05 · Hardening: a blob ref must have the exact shape
+- For: everyone
+- Fix: `BlobPath` accepts only `sha256/<2 hex>/<64 hex>.<ext>`, where the directory matches the hash's first two characters and the ext has no quote, slash or control character; before, it checked only the `sha256/` prefix and `..`. `PutBlob` keeps an upload's ext only when it is 1 to 8 letters or digits, else it stores `.bin`.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/obs/obs.go` and `obs_test.go`.
+
+## add-0153 · 2026-11-05 · Running actions show on their session
+- For: everyone
+- Fix: An approved action the hub is running shows on the session that proposed it, as a grey running cell at the head of its row and a task row in the chat, with its newest output line and a count when it has one; the session reads as Working while it runs, turn or not (`running_actions` on a thread, new leaf package `hub/internal/progress`, the shell executor sets `LIFE_ACTION`). `ops/hub.sh restart` waits up to 31 minutes for running actions other than its own; `--now` skips the wait. On the phone and desktop, a session's helpers are listed whatever its status, as on the console.
+- How: same merge as add-0008, then `make check`, `ops/hub.sh restart` and `make ship`. By hand: `hub/internal/progress/progress.go` (new), `hub/internal/actions/actions.go`, `hub/internal/threads/tasklog.go`, `threads.go`, `hub/internal/attention/attention.go`, `ops/hub.sh`, `shared/api.md`, `app/Life/Sources/` (`Models.swift`, `Format.swift`, `ThreadRows.swift`, `ThreadDetail.swift`), and their tests.
+
+## add-0154 · 2026-11-05 · A recommendation in a chat is one line
+- For: everyone
+- Fix: A rec filed in a chat is one "Recommendation filed" line with a × until you mark it seen (`POST /api/v1/recs/{id}/seen`, new `recs.seen_at`; recs filed before the update count as seen); its card, with Accept, Decline and Reply, lives on the Recs page alone. `POST /api/v1/recs/{id}/home` moves a rec to the session that owns its area. The phone and desktop drop the chat's rec card and arming the reply bar with a rec, as the console already had.
+- How: same merge as add-0008, then `make check`, `ops/hub.sh restart` and `make ship`. By hand: `hub/internal/recs/recs.go` (two appended `Schema` statements), `hub/internal/server/recs.go`, `routes.go`, `shared/api.md`, `app/Life/Sources/` (`Models.swift`, `HubClient.swift`, `RecCard.swift`, `Card.swift`, `ThreadDetail.swift`), and their tests.
+
+## add-0155 · 2026-11-05 · Standing approvals make no card
+- For: everyone
+- Fix: A landing or an app build on the standing approval is filed approved at once: no "Please approve" push, no Approve card, and a chat's list leaves it out unless it failed.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/actions/actions.go`, `hub/internal/server/land.go`, and their tests.
+
+## add-0156 · 2026-11-05 · Two desktop fixes
+- For: everyone on the desktop app
+- Fix: The reply box keeps a spelling fix (a right-click guess or Correct Spelling Automatically); before, the next redraw put the misspelling back. `ops/mac-apply.sh` waits on and stops only the old app's process, so it no longer quits the copy it just reopened.
+- How: same merge as add-0008, then `make ship`. By hand: `app/Life/Sources/ComposerField.swift`, `ops/mac-apply.sh`.

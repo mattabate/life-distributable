@@ -2,7 +2,7 @@
 # One-command hub lifecycle.
 #   hub.sh install   build + (re)load launchd agents (hub, keepawake, renewcert)
 #   hub.sh install-backup  (re)load the nightly backup agent (after backup.sh init)
-#   hub.sh restart   rebuild + restart the hub only
+#   hub.sh restart   rebuild + restart the hub only (after running actions; --now: not)
 #   hub.sh stop      unload the hub agent
 #   hub.sh status    launchd state + healthz
 #   hub.sh logs      tail the hub log
@@ -104,7 +104,21 @@ load() { # $1 = label
 case "${1:-}" in
   install) build; mkdir -p logs; rotate; for a in com.life.hub com.life.keepawake com.life.renewcert; do load $a; done; sleep 1; "$SELF" status ;;
   install-backup) mkdir -p logs; load com.life.backup ;;
-  restart) build; rotate; launchctl kickstart -k "gui/$UID_/com.life.hub"; sleep 1; "$SELF" status ;;
+  # An approved action still running dies with the hub, and comes back
+  # "uncertain". Wait for those first, up to 31 min (the action timeout is
+  # 30), never on the action this restart runs inside (LIFE_ACTION: a land's
+  # own `make build && nohup … restart` inherits it). --now skips the wait.
+  restart) build; rotate
+           if [[ "${2:-}" != "--now" ]]; then
+             q="select count(*) from items where src='action' and state='running' and id<>'${LIFE_ACTION:-}'"
+             for i in $(seq 1 1860); do
+               n=$("$ROOT/ops/db.sh" "$q" 2>/dev/null || echo 0)
+               [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 )) || break
+               (( i % 60 == 1 )) && echo "▶ waiting on $n running action(s) before the restart"
+               sleep 1
+             done
+           fi
+           launchctl kickstart -k "gui/$UID_/com.life.hub"; sleep 1; "$SELF" status ;;
   stop)    launchctl bootout "gui/$UID_/com.life.hub" ;;
   status)  launchctl print "gui/$UID_/com.life.hub" | grep -E "state|pid" | head -3; curl -fsS --max-time 3 "https://$HOST/healthz" && echo ;;
   logs)    tail -f logs/hub.log ;;

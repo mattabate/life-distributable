@@ -55,7 +55,7 @@ func TestPreMergeRecMovesToItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Migrate("recs", Schema[:len(Schema)-1]); err != nil {
+	if _, err := db.Migrate("recs", Schema[:len(Schema)-3]); err != nil {
 		t.Fatal(err)
 	}
 	db.Exec(`INSERT INTO recs (id,created_at,updated_at,title,domain,kind,cost_cents,cost_period,status,decided_at,decided_by,decision_note,review_on,outcome,model)

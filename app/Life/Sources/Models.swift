@@ -545,6 +545,9 @@ struct Thread: Codable, Identifiable, Hashable {
     /// nil from a hub that does not send it; the tool chain then counts a
     /// launched helper for the rest of the turn (`toolChain`).
     var turn_tasks: [TurnTask]?
+    /// The approved actions it proposed that the hub is running now, turn or
+    /// not, as `type` "action" rows ("280 done").
+    var running_actions: [TurnTask]?
     var needs_you: Int
     /// The model the session runs on — its live run's, else the newest run
     /// that named one (list and single GET only; nil when it never ran with
@@ -1451,6 +1454,9 @@ struct Rec: Codable, Identifiable, Hashable {
     /// The model id of the session that filed it (`claude-opus-5`); nil when
     /// the owner filed it. Required on the hub for session-filed recs.
     var model: String?
+    /// When the owner dismissed its notice in the chat (`POST /recs/{id}/seen`);
+    /// nil = filed and not yet seen, so the chat shows the one-line notice.
+    var seen_at: String?
     /// Only on `GET /recs?thread=`: the reply that filed it (the first of the
     /// session's replies after the rec), where its cell is drawn in the chat.
     /// nil = the reply is still being written; the cell sits at the end.

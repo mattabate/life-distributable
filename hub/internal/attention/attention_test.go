@@ -381,3 +381,16 @@ func TestRunningChainIsWorking(t *testing.T) {
 		t.Fatalf("working %d", b.Working)
 	}
 }
+
+// An idle session with an approved action the hub is running is working too.
+func TestRunningActionIsWorking(t *testing.T) {
+	ths := []threads.Thread{{ID: "ops", Status: "done", RunningActions: []threads.TurnTask{{ID: "act-1", Type: "action"}}},
+		{ID: "quiet", Status: "done"}}
+	b := Build("web", nil, nil, ths)
+	if b.Section["ops"] != "working" || b.Section["quiet"] != "" {
+		t.Fatalf("section %v", b.Section)
+	}
+	if p := b.Pills["ops"]; len(p) == 0 || p[0].Word != "running" {
+		t.Fatalf("ops pills %+v", p)
+	}
+}

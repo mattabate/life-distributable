@@ -628,6 +628,8 @@ final class HubClient {
         return page.recs
     }
     func rec(_ id: String) async throws -> Rec { try await request("GET", "/api/v1/recs/\(id)") }
+    /// Dismiss a rec's "filed" notice in its chat; the rec stays open on Recs.
+    func recSeen(_ id: String) async throws -> Rec { try await request("POST", "/api/v1/recs/\(id)/seen") }
     /// The recs one session filed, every status, each with the reply it was
     /// filed in — the session's own cells. Still pull: fetched only when the
     /// chat is open, and it drives no badge.
