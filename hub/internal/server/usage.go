@@ -35,15 +35,24 @@ type usageState struct {
 	Payload   map[string]any `json:"payload"`
 }
 
-func (s *Server) usageView(h *usage.Heartbeat) usageState {
-	return usageState{On: h.On(), LastSent: h.LastSent(), InstallID: h.InstallID(), Host: h.Destination(), Payload: h.Payload()}
+func (s *Server) usageView(h *usage.Heartbeat) (usageState, error) {
+	p, err := h.Payload()
+	if err != nil {
+		return usageState{}, err
+	}
+	return usageState{On: h.On(), LastSent: h.LastSent(), InstallID: h.InstallID(), Host: h.Destination(), Payload: p}, nil
 }
 
 func (s *Server) getUsage(w http.ResponseWriter, r *http.Request) {
 	if !need(w, s.Usage != nil, "usage heartbeat not configured") {
 		return
 	}
-	writeJSON(w, 200, s.usageView(s.Usage))
+	st, err := s.usageView(s.Usage)
+	if err != nil {
+		jsonErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, st)
 }
 
 func (s *Server) setUsage(w http.ResponseWriter, r *http.Request) {
@@ -64,5 +73,10 @@ func (s *Server) setUsage(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, s.usageView(s.Usage))
+	st, err := s.usageView(s.Usage)
+	if err != nil {
+		jsonErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, st)
 }

@@ -119,5 +119,8 @@ is the owner's private copy. The copy is theirs: upstream is read-only, and
 nothing from it lands without the owner's yes.
 
 The weekly check is the read-only `addenda-check` job; how to apply an entry
-is in the header of `ADDENDA.md`. When the owner just asks to update: `git merge upstream/main`,
-conflicts resolved in favour of their own changes, then `make check`.
+is in the header of `ADDENDA.md`. No session merges upstream itself (add-0102):
+when the owner just asks to update, show them
+`git log --oneline HEAD..upstream/main` and ask them to run
+`git merge upstream/main` in Terminal; then resolve any conflicts in favour
+of their own changes and run `make check`.

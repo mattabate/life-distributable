@@ -232,7 +232,10 @@ with their login.
 
 Nightly, encrypted on this Mac before upload; Backblaze only ever sees
 ciphertext. The nightly job's key cannot delete anything, so nothing on
-this Mac can erase their backups.
+this Mac can erase their backups. It can still *hide* a file (a write
+can hide, and an overwrite replaces what restic reads as its `config` /
+`keys`), which is what the Object Lock in step 2 and the recovery note
+at the end of this section are for.
 
 1. Sign up: [backblaze.com/sign-up/cloud-storage](https://www.backblaze.com/sign-up/cloud-storage)
    → **Email**, **Password**, region **US West** (or nearest), **Sign Up**.
@@ -240,7 +243,16 @@ this Mac can erase their backups.
    - **Bucket Unique Name**: `<their-username>-life-backup` (must be globally unique; add digits if taken)
    - **Files in Bucket are**: **Private**
    - **Default Encryption**: **Disable** (restic already encrypts)
-   - **Object Lock**: **Disable**
+   - **Object Lock**: **Enable**, and set the bucket's **Default Retention**
+     to **30 days** (Backblaze offers it right after creation, under the
+     bucket's settings). Locked versions cannot be deleted — by anyone,
+     including a key that can write — until their 30 days pass, so a file
+     the nightly key hides or overwrites (restic's `config` / `keys` are
+     the ones that matter) is always still there to bring back. The trade:
+     the monthly prune can only remove versions older than the retention,
+     so storage shrinks a month behind and a prune of fresh snapshots
+     reports locked files it could not delete yet; that is expected, not
+     an error. Object Lock can only be chosen now, at creation.
    - click **Create a Bucket**.
 3. You run `ops/py.sh setup.py backup --bucket <that name>`.
 4. **Account → Application Keys → Generate New Master Application Key**
@@ -255,15 +267,27 @@ this Mac can erase their backups.
 6. **Restore test**: a backup that was never restored is a hope. It reads
    the passphrase, so it runs in its own window, not in your shell. You
    open this in the window form above:
-   `cd ops && set -a && source secrets/restic.env && T=$(mktemp -d) && restic snapshots && restic restore latest --target "$T" --include '*/life.db' && ls -laR "$T" && rm -rf "$T"`
+   `cd ops && set -a && source secrets/restic.env && T=$(mktemp -d) && restic snapshots && restic restore latest --target "$T" --include '*/life.db' && ls -laR "$T" && sqlite3 "$(find "$T" -name life.db -print -quit)" 'pragma integrity_check' && rm -rf "$T"`
    (The restored copy is a decrypted database: it goes into a fresh
-   private temporary folder and is deleted once listed.) Tell them: "Wait for the window to stop, then tell me whether the last
-   lines mention `life.db`." They only read it.
+   private temporary folder and is deleted once listed and checked.) Tell them: "Wait for the window to stop, then tell me whether the last
+   lines mention `life.db` and the integrity check says `ok`." They only read it.
 
 **Verify:** `ops/b2.sh check` prints `SAFE`; the owner reports a snapshot
-listed and a restored `life.db`. Once a month they run `ops/b2.sh prune`:
+listed and a restored `life.db` whose integrity check said `ok`. Once a month they run `ops/b2.sh prune`:
 add a monthly `--kind owner` calendar item for it
 (`lifectl cal add "Prune old backups (ops/b2.sh prune)" --on <next month> --kind owner --repeat monthly`).
+
+**If a backup file goes missing:** it is almost certainly hidden, not
+deleted — the nightly key has no delete, but a write can hide a file,
+and a hidden file vanishes from listings while its versions stay in the
+bucket. The owner signs in at backblaze.com → **B2 Cloud Storage →
+Buckets** → their bucket → **Browse Files**, turns on **Show versions**
+(the file browser's view options), and finds the file: the newest
+version is a hide marker, and deleting that one version (the owner's
+own sign-in can; the nightly key cannot) unhides the file. With Object
+Lock's retention (step 2) the real versions underneath cannot have been
+deleted in the meantime. Then run `ops/b2.sh check` and a restore test
+to prove restic can read the bucket again.
 
 ## 7. Apple team and Xcode
 
