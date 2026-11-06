@@ -359,6 +359,10 @@ func (a *APNs) Test(only string) error {
 // stamped heard when the phone reports the sound, so a hub that stops with the
 // line still queued speaks it when it comes back (queue.go).
 func (a *APNs) push(kind, title, body, thread, card string) error {
+	// Queued before the device check: a card raised with no device registered
+	// (a reinstall not yet re-registered, an Unregistered token dropped) is
+	// still a line the next hub's Resume should say (#112).
+	a.enqueue(card, thread, kind, title, body)
 	if a.deliverFn == nil {
 		toks, err := a.tokens()
 		if err != nil {
@@ -368,7 +372,6 @@ func (a *APNs) push(kind, title, body, thread, card string) error {
 			return errors.New("apns: no registered devices")
 		}
 	}
-	a.enqueue(card, thread, kind, title, body)
 	// The whole spoken line goes out, up to voiceMax (the sanity bound —
 	// sessions target ≤700; voice.go). The truncation is the emergency, never
 	// the plan.

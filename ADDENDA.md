@@ -1181,3 +1181,18 @@ Entry format:
 - For: everyone on the desktop app
 - Fix: The reply box keeps a spelling fix (a right-click guess or Correct Spelling Automatically); before, the next redraw put the misspelling back. `ops/mac-apply.sh` waits on and stops only the old app's process, so it no longer quits the copy it just reopened.
 - How: same merge as add-0008, then `make ship`. By hand: `app/Life/Sources/ComposerField.swift`, `ops/mac-apply.sh`.
+
+## add-0157 · 2026-11-06 · Scheduled jobs: stray output, the gate, a reload mid-start
+- For: everyone with scheduled jobs
+- Fix: A job's stderr is kept apart from its stdout and the result block is found past stray lines, so a CLI warning or a child's output no longer fails a paid run, drops its cost and findings or hides its denials; a run with no result block files its card by a sentinel error, not by matching text (#134). A job's gate counts from its newest run that finished ok, so a failed or restart-killed run no longer hides evidence that came in before it; cadence still counts every started run (#133). A run's tools are read under the lock when it begins and kept with it, so a reload landing as a job starts is no race (#131).
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/sched/sched.go` and its test.
+
+## add-0158 · 2026-11-06 · Spoken cards and push survive a missing phone
+- For: everyone with the phone app
+- Fix: A card raised while no phone is registered still gets its spoken-card queue row, so the next hub's resume finds it (#112). Resume marks a card re-spoken only when the push went out, so a failed one (an APNs error, no device yet) is tried again by the next hub (#110). The app posts its push token the moment the hub address and token are filled in, so a fresh install is registered without a second launch (#113).
+- How: same merge as add-0008, then `make check`, `ops/hub.sh restart` and `make ship`. By hand: `hub/internal/notify/apns.go`, `queue.go`, `app/Life/Sources/LifeApp.swift`, `Push.swift`, and their tests.
+
+## add-0159 · 2026-11-06 · Four smaller fixes
+- For: everyone
+- Fix: A chat message the database refuses to store fails the send instead of answering 200 with the words gone (#111). An observation with no zone name is stamped with the hub's own zone (hub.json `time_zone`, else the Mac's), not a fixed New York (#119). The default-model buttons on Spend and Configuration pass the model as an escaped JSON string, so a quote in a name cannot break out of the attribute (#120). `ops/hub.sh url` prints the owner's token only at a Terminal, never into a session's transcript; `ops/web-smoke.sh` builds its own URL (#129).
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/runner.go`, `hub/internal/obs/ingest.go`, `hub/internal/server/web/views/config.js`, `spend.js`, `ops/hub.sh`, `ops/web-smoke.sh`, and their tests.

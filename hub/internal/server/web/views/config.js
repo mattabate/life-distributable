@@ -46,7 +46,7 @@ function cfgModelHTML(q, m, st) {
     : (m?.options?.length ? m.options : st?.models || []).map(o => ({ model: o, open: true }));
   if (!runs && !rungs.length) return '';
   const steps = rungs.map(r => r.open
-    ? `<button class="sm ${r.model === runs ? 'on' : ''}" onclick="setDefaultModel('${esc(r.model)}')">${esc(modelShort(r.model))}</button>`
+    ? `<button class="sm ${r.model === runs ? 'on' : ''}" onclick="setDefaultModel(${esc(JSON.stringify(r.model))})">${esc(modelShort(r.model))}</button>`
     : `<button class="sm" disabled title="${esc(r.why || 'closed')}" style="text-decoration:line-through;opacity:.5">${esc(modelShort(r.model))}</button>`
   ).join('<span class="muted">›</span>');
   const auto = rungs.length ? `<span class="muted">·</span><button class="sm ${m?.explicit ? '' : 'on'}" onclick="setDefaultModel('')">auto</button>` : '';

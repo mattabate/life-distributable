@@ -2,6 +2,7 @@ package notify
 
 import (
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -94,5 +95,57 @@ func TestUnheardCardIsSpokenAgainAfterARestart(t *testing.T) {
 	hub().Resume()
 	if len(sent) != 0 {
 		t.Fatalf("a stale card was spoken: %q", sent)
+	}
+}
+
+// A resume whose push fails (a transient APNs error, a phone between a
+// reinstall and its first register) has said nothing: the row stays
+// unresumed, so the next hub tries again (#110). Its window still runs from
+// the first queueing, so a line that can never go out stops being retried
+// after resumeWindow.
+func TestFailedResumeIsTriedAgain(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent int
+	hub := func(fail bool) *APNs {
+		a := &APNs{db: db, after: func(_ time.Duration, f func()) { f() }}
+		a.deliverFn = func([]byte) error {
+			sent++
+			if fail {
+				return errors.New("apns: 503")
+			}
+			return nil
+		}
+		return a
+	}
+	if err := hub(false).PushCard("read", "line", "Hey Alex, one card.", "t-1", "ask-1"); err != nil {
+		t.Fatal(err)
+	}
+	var first string
+	db.QueryRow(`SELECT queued_at FROM voice_queue WHERE card='ask-1'`).Scan(&first)
+	sent = 0
+	hub(true).Resume()
+	if sent != 1 {
+		t.Fatalf("the failing hub tried %d pushes, want 1", sent)
+	}
+	var resumed, queuedAt string
+	db.QueryRow(`SELECT resumed_at, queued_at FROM voice_queue WHERE card='ask-1'`).Scan(&resumed, &queuedAt)
+	if resumed != "" {
+		t.Fatalf("a failed resume was stamped resumed at %s", resumed)
+	}
+	if queuedAt != first {
+		t.Fatalf("a resume moved queued_at %s -> %s; the window must run from the first queueing", first, queuedAt)
+	}
+	sent = 0
+	hub(false).Resume()
+	if sent != 1 {
+		t.Fatalf("after a failed resume the next hub sent %d, want the line again", sent)
+	}
+	sent = 0
+	hub(false).Resume()
+	if sent != 0 {
+		t.Fatalf("a delivered resume was resumed again (%d)", sent)
 	}
 }

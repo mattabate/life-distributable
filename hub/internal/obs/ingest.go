@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
+	"life/hub/internal/config"
 	"life/hub/internal/store"
 )
 
@@ -26,7 +28,7 @@ import (
 //
 // Rules every row gets here, not in its writer:
 //   - tz is an IANA name. Abbreviations ("EDT", "EST"), "UTC" and empty mean
-//     the household's zone, America/New_York; a region name the phone sends
+//     the household's zone (hub.json time_zone, else the Mac's own); a region name the phone sends
 //     ("Europe/Paris" on a trip) is kept.
 //   - blob first, then refs: a file goes to PutBlob (or POST /blobs) and the
 //     row names the ref it got back. A ref with no file behind it is refused.
@@ -142,22 +144,46 @@ func (s *Store) fire(rows []Observation) {
 	}
 }
 
-// Zone is the tz every row without a region name of its own is stamped with.
+// Zone is the tz a row without a region name of its own is stamped with
+// when the hub's clock has no region name either (no time_zone in hub.json
+// and no name found for the Mac's own zone).
 const Zone = "America/New_York"
 
 // CanonicalTZ: an IANA region name is kept; anything else — "", the
 // abbreviations time.Zone() hands back ("EDT", "EST"), "UTC", "Local" —
-// is the household's zone. Before 2026-09-26 the table held 33,993
-// America/New_York rows beside 25,928 "EDT", 6,915 "EST" and 2,682 "UTC",
-// the last mostly syncers whose timestamps happened to be in UTC.
+// is the household's zone, the hub's own clock (HouseholdTZ), so a hub in
+// another zone does not stamp its rows New York (#119). Before 2026-09-26
+// the table held 33,993 America/New_York rows beside 25,928 "EDT", 6,915
+// "EST" and 2,682 "UTC", the last mostly syncers whose timestamps happened
+// to be in UTC.
 func CanonicalTZ(tz string) string {
 	if strings.Contains(tz, "/") {
 		if _, err := time.LoadLocation(tz); err == nil {
 			return tz
 		}
 	}
+	return HouseholdTZ()
+}
+
+// HouseholdTZ is the IANA name of the hub's wall clock (store.Eastern, set
+// by main from hub.json's time_zone). With no time_zone the clock is
+// time.Local, whose name is "Local": the Mac's own zone name is looked up
+// as config.ZoneName does. Zone when no name is found.
+func HouseholdTZ() string {
+	if n := store.Eastern.String(); strings.Contains(n, "/") {
+		return n
+	}
+	if store.Eastern == time.Local {
+		if n := macZone(); n != "" {
+			return n
+		}
+	}
 	return Zone
 }
+
+// macZone: the Mac's own zone name ($TZ or the /etc/localtime link), read
+// once; "" when it has none.
+var macZone = sync.OnceValue(func() string { return (&config.Config{}).ZoneName() })
 
 func (s *Store) normalize(o Observation) (Observation, error) {
 	if o.Source == "" || o.Kind == "" {

@@ -327,6 +327,34 @@ func newStore(t *testing.T) (*Store, *store.DB) {
 	return s, db
 }
 
+// A hub on another clock (hub.json time_zone) stamps a row with no region
+// name in ITS zone, not New York; a region name the row brings is kept
+// (#119). With no time_zone the clock is time.Local and the Mac's own zone
+// name is used.
+func TestCanonicalTZFollowsTheHubClock(t *testing.T) {
+	was := store.Eastern
+	defer func() { store.Eastern = was }()
+	paris, err := time.LoadLocation("Europe/Paris")
+	if err != nil {
+		t.Skip("no tzdata")
+	}
+	store.Eastern = paris
+	for in, want := range map[string]string{"": "Europe/Paris", "EDT": "Europe/Paris", "UTC": "Europe/Paris",
+		"America/Chicago": "America/Chicago"} {
+		if got := CanonicalTZ(in); got != want {
+			t.Errorf("CanonicalTZ(%q) on a Paris hub = %q, want %q", in, got, want)
+		}
+	}
+	store.Eastern = time.Local
+	want := macZone()
+	if want == "" {
+		want = Zone
+	}
+	if got := CanonicalTZ(""); got != want {
+		t.Errorf("CanonicalTZ(\"\") on a Local clock = %q, want the Mac's zone %q", got, want)
+	}
+}
+
 // One Ingest: tz is always an IANA name, a blob_ref must name a stored blob,
 // a writer's Supersedes is kept (and hides the old row), and a registered
 // hook hears each call's NEW rows once, whichever wrapper wrote them.

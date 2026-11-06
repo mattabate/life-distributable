@@ -54,6 +54,19 @@ import UserNotifications
     func gotToken(_ data: Data) {
         let hex = data.map { String(format: "%02x", $0) }.joined()
         token = hex
+        post(hex)
+    }
+
+    /// The hub address and token were just filled in (LifeApp observes
+    /// isConfigured): on a fresh install the APNs token arrives before them
+    /// and was dropped, so the phone was not in `devices` until a second
+    /// launch (#113). Post the token we already hold.
+    func hubConfigured() {
+        guard let token else { return }
+        post(token)
+    }
+
+    private func post(_ hex: String) {
         guard let hub, hub.isConfigured else { status = "token (hub not configured)"; return }
         let env = Self.apsEnvironment()
         Task {

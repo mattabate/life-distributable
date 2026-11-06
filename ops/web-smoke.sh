@@ -31,7 +31,9 @@ if [ "${1:-}" = "preview" ]; then
   exit 0
 fi
 
-url=$(ops/hub.sh url)
+# The URL with a token, never printed: `hub.sh url` gives the owner's only
+# in a Terminal (#129).
+url="https://$(plutil -extract public_host raw -o - ops/hub.json)/?token=${LIFE_SESSION_TOKEN:-$(cat ops/secrets/hub.token)}"
 
 # `web-smoke.sh shot [thread-id] [route]` — screenshots of the LIVE hub
 # instead of assertions, so a session can look at what it changed

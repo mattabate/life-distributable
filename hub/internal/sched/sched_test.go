@@ -3,6 +3,7 @@ package sched
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -364,6 +365,26 @@ func TestLastRunPassesOverSkippedWakes(t *testing.T) {
 	}
 }
 
+// A run that failed (an API error, a hub restart mid-run) checked nothing, so
+// the gate counts from the newest run that finished ok: evidence that came in
+// before the failure still opens it. Cadence still counts the failed run
+// (#133).
+func TestGateCountsFromTheLastGoodRun(t *testing.T) {
+	s, _, _ := setup(t, `{"jobs":[{"name":"j","project":"life","when":"every@1h","prompt":"p","gate":"asks"}]}`)
+	var seen time.Time
+	s.Gate = func(gate string, last time.Time) bool { seen = last; return true }
+	s.db.Exec(`INSERT INTO runs (job, started_at, finished_at, ok) VALUES ('j','2026-11-04T09:00:00Z','2026-11-04T09:05:00Z',1)`)
+	s.db.Exec(`INSERT INTO runs (job, started_at, finished_at, ok, error) VALUES ('j','2026-11-04T10:00:00Z','2026-11-04T10:01:00Z',0,'claude error: API Error')`)
+	s.db.Exec(`INSERT INTO runs (job, started_at, finished_at, ok, error) VALUES ('j','2026-11-04T11:00:00Z','2026-11-04T11:02:00Z',0,'hub restarted mid-run')`)
+	s.Held("j")
+	if want := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC); !seen.Equal(want) {
+		t.Fatalf("gate saw %v, want the 09:00 good run", seen)
+	}
+	if want := time.Date(2026, 11, 4, 11, 0, 0, 0, time.UTC); !s.lastRun("j").Equal(want) {
+		t.Fatalf("cadence base %v, want the 11:00 attempt", s.lastRun("j"))
+	}
+}
+
 // Table is read by the HTTP handlers while a reload replaces it (#124): run
 // under -race this catches an unlocked read.
 func TestTableReadDuringReload(t *testing.T) {
@@ -377,6 +398,30 @@ func TestTableReadDuringReload(t *testing.T) {
 	}()
 	for i := 0; i < 50; i++ {
 		_ = len(s.Table().Jobs)
+	}
+	<-done
+}
+
+// A run resolves its tools while begin holds the lock, so a reload landing as
+// a job starts is no race and the run keeps the table it began with (#131).
+// Run under -race.
+func TestRunToolsReadDuringReload(t *testing.T) {
+	s, _, _ := setup(t, `{"jobs":[{"name":"j","project":"life","when":"manual","prompt":"p"}]}`)
+	s.RunClaude = func(_ context.Context, _, _ string, tools []string) (Output, error) {
+		if len(tools) == 0 {
+			t.Error("no default tools")
+		}
+		return ParseOutput(`{"summary":"ok","findings":[],"needs_you":[]}`, "")
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			s.Reload()
+		}
+	}()
+	for i := 0; i < 20; i++ {
+		s.Run("j", "test")
 	}
 	<-done
 }
@@ -583,6 +628,49 @@ func TestRunFailureIsARecordNotAPing(t *testing.T) {
 	}
 }
 
+// A stray line next to the envelope (a CLI warning, a backgrounded child's
+// echo) does not fail the run: its result, cost and denials are still read.
+// Output with no envelope at all is the no-result-block failure, which files
+// the card by its sentinel, not by matching text (#134).
+func TestStrayOutputBesideTheEnvelope(t *testing.T) {
+	env := `{"type":"result","is_error":false,"total_cost_usd":0.3,"result":"{\"summary\":\"s\",\"findings\":[],\"needs_you\":[\"n\"]}","permission_denials":[{"tool_name":"Bash","tool_input":{"command":"curl x"}}]}`
+	raw := "child: still here\n" + env + "\n{\"child\":true}\n" + stderrMark + `{"result":"a warning that looks like json"}`
+	o, err := decodeResult([]byte(raw), nil)
+	if err != nil || o.Summary != "s" || o.Cost != 0.3 || len(o.NeedsYou) != 1 {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if d := deniedOf(raw); len(d) != 1 || d[0] != "Bash: curl x" {
+		t.Fatalf("denials %q", d)
+	}
+	_, err = decodeResult([]byte("all done, no envelope"), nil)
+	if !errors.Is(err, ErrNoResultBlock) {
+		t.Fatalf("no envelope: %v", err)
+	}
+	if _, err := decodeResult([]byte("Error: spawn failed"), fmt.Errorf("exit status 1")); errors.Is(err, ErrNoResultBlock) {
+		t.Fatal("a crash is not a missing result block", err)
+	}
+
+	s, _, n := setup(t, `{"jobs":[{"name":"j","project":"life","when":"manual","prompt":"p"}]}`)
+	s.RunClaude = func(context.Context, string, string, []string) (Output, error) {
+		return decodeResult([]byte("all done, no envelope"), nil)
+	}
+	id, _ := s.Run("j", "test")
+	if want := fmt.Sprintf("ask:j: The j job ended without its result block: read run %d, its findings reached no card", id); len(n.msgs) != 1 || n.msgs[0] != want {
+		t.Fatalf("%q", n.msgs)
+	}
+}
+
+// stderr is kept apart from stdout, so a warning never lands inside the
+// envelope's bytes; the run's record still carries it after stdout.
+func TestRunGroupKeepsStderrApart(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(bin, []byte("#!/bin/sh\necho '{\"result\":\"done\"}'\necho 'warning: x' >&2\n"), 0o755)
+	out, errOut, err := runGroup(exec.CommandContext(context.Background(), bin), 200*time.Millisecond, nil)
+	if err != nil || strings.TrimSpace(string(out)) != `{"result":"done"}` || strings.TrimSpace(string(errOut)) != "warning: x" {
+		t.Fatalf("err=%v out=%q stderr=%q", err, out, errOut)
+	}
+}
+
 // A failed run exits 1 with its envelope; the reason sits after ~1 KB of
 // usage and stats. The run's error carries that reason and its cost, not
 // the first 500 raw bytes; non-JSON output is still quoted.
@@ -593,7 +681,7 @@ func TestDecodeResultReadsTheReasonOfAFailedExit(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "Can't reach the API server") || strings.Contains(err.Error(), `"x"`) || o.Cost != 0.42 {
 		t.Fatalf("cost %v err %v", o.Cost, err)
 	}
-	if strings.Contains(err.Error(), "JSON") {
+	if errors.Is(err, ErrNoResultBlock) {
 		t.Fatal("an API failure must not file the no-result-block card", err)
 	}
 	if _, err := decodeResult([]byte("Error: spawn failed"), fmt.Errorf("exit status 1")); err == nil || !strings.Contains(err.Error(), "spawn failed") {
@@ -656,7 +744,7 @@ func TestParseOutputSkipsQuotedJSONInProse(t *testing.T) {
 	if got := proseBefore(text); !strings.HasSuffix(got, "immediately.") {
 		t.Fatalf("prose: %q", got)
 	}
-	if _, err := ParseOutput("all quiet, no block", ""); err == nil || !strings.Contains(err.Error(), "JSON") {
+	if _, err := ParseOutput("all quiet, no block", ""); !errors.Is(err, ErrNoResultBlock) {
 		t.Fatal("a missing envelope must still fail with a JSON error", err)
 	}
 }
@@ -670,7 +758,7 @@ func TestRunGroupDoesNotWaitOnAnOrphanedPipe(t *testing.T) {
 	bin := filepath.Join(dir, "claude")
 	os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30 &\necho $! > "+pidf+"\necho '{\"result\":\"done\"}'\n"), 0o755)
 	start := time.Now()
-	out, err := runGroup(exec.CommandContext(context.Background(), bin), 200*time.Millisecond, nil)
+	out, _, err := runGroup(exec.CommandContext(context.Background(), bin), 200*time.Millisecond, nil)
 	if err != nil || !strings.Contains(string(out), `"result":"done"`) {
 		t.Fatalf("err=%v out=%q", err, out)
 	}
@@ -689,7 +777,7 @@ func TestRunGroupDoesNotWaitOnAnOrphanedPipe(t *testing.T) {
 	defer cancel()
 	os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30\n"), 0o755)
 	start = time.Now()
-	if _, err := runGroup(exec.CommandContext(ctx, bin), 200*time.Millisecond, nil); err == nil {
+	if _, _, err := runGroup(exec.CommandContext(ctx, bin), 200*time.Millisecond, nil); err == nil {
 		t.Fatal("a timed-out run reported no error")
 	}
 	if d := time.Since(start); d > 5*time.Second {

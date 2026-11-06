@@ -101,22 +101,27 @@ func (a *APNs) Resume() {
 	}
 	now := time.Now()
 	a.db.Exec(`DELETE FROM voice_queue WHERE queued_at < ?`, store.TS(now.Add(-7*24*time.Hour)))
-	rows, err := a.db.Query(`SELECT card, thread, kind, title, body FROM voice_queue WHERE heard_at='' AND resumed_at='' AND queued_at >= ? ORDER BY queued_at`, store.TS(now.Add(-resumeWindow)))
+	rows, err := a.db.Query(`SELECT card, thread, kind, title, body, queued_at FROM voice_queue WHERE heard_at='' AND resumed_at='' AND queued_at >= ? ORDER BY queued_at`, store.TS(now.Add(-resumeWindow)))
 	if err != nil {
 		log.Printf("voice: resume: %v", err)
 		return
 	}
-	type row struct{ card, thread, kind, title, body string }
+	type row struct{ card, thread, kind, title, body, queued string }
 	var todo []row
 	for rows.Next() {
 		var r row
-		rows.Scan(&r.card, &r.thread, &r.kind, &r.title, &r.body)
+		rows.Scan(&r.card, &r.thread, &r.kind, &r.title, &r.body, &r.queued)
 		todo = append(todo, r)
 	}
 	rows.Close()
 	n := 0
 	// resumed_at is stamped after the push: enqueue clears it, so a card
 	// raised again after one resume is resumed again if a restart cuts it.
+	// And only when the push went out: a failed one (a transient APNs error,
+	// no device registered yet) said nothing, so the next hub tries again
+	// (#110). push re-queues the row as new; its window runs from the first
+	// queueing, so a line that never goes out is let go after resumeWindow
+	// rather than retried on every restart.
 	for _, r := range todo {
 		if a.Open != nil && !a.Open(r.card) {
 			a.db.Exec(`UPDATE voice_queue SET resumed_at=? WHERE card=?`, store.TS(now), r.card)
@@ -125,8 +130,11 @@ func (a *APNs) Resume() {
 		}
 		n++
 		log.Printf("voice: %s was queued unheard when the hub stopped; speaking it again", r.card)
-		if err := a.push(r.kind, r.title, r.body, r.thread, r.card); err != nil {
-			log.Printf("voice: resume %s: %v", r.card, err)
+		err := a.push(r.kind, r.title, r.body, r.thread, r.card)
+		a.db.Exec(`UPDATE voice_queue SET queued_at=? WHERE card=?`, r.queued, r.card)
+		if err != nil {
+			log.Printf("voice: resume %s: %v; the next hub tries again", r.card, err)
+			continue
 		}
 		a.db.Exec(`UPDATE voice_queue SET resumed_at=? WHERE card=?`, store.TS(now), r.card)
 	}

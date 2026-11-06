@@ -244,6 +244,23 @@ func TestListOrderedByLastMessage(t *testing.T) {
 	}
 }
 
+// A message the database refused (disk full, locked past the busy timeout)
+// is an error to the sender, never a 200 with the words gone (#111).
+func TestRefusedMessageInsertFailsTheSend(t *testing.T) {
+	m, _, _ := setup(t)
+	th, err := m.Create("", "life", "", "A thread.", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete(t, m, th.ID, "Done.")
+	if _, err := m.db.Exec(`CREATE TRIGGER refuse_msg BEFORE INSERT ON thread_messages BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Send(th.ID, "These words must not vanish."); err == nil {
+		t.Fatal("a message the database refused answered no error")
+	}
+}
+
 func pendingOut(t *testing.T, m *Manager, threadID string) string {
 	rows, _ := m.db.Query(`SELECT out_file FROM thread_runs WHERE thread_id=? AND finished_at IS NULL`, threadID)
 	var out string

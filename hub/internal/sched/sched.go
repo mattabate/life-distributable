@@ -202,7 +202,7 @@ func (s *Scheduler) GetRun(id int64) (RunDetail, error) {
 	var env struct {
 		Result string `json:"result"`
 	}
-	if json.Unmarshal([]byte(d.Output), &env) != nil || env.Result == "" {
+	if json.Unmarshal(envelopeOf([]byte(d.Output)), &env) != nil || env.Result == "" {
 		return d, nil
 	}
 	if o, perr := ParseOutput(env.Result, ""); perr == nil {
@@ -316,7 +316,7 @@ func (s *Scheduler) Held(name string) (bool, string) {
 	if running {
 		return true, "already running"
 	}
-	if gate != "" && s.Gate != nil && !s.Gate(gate, s.lastRun(name)) {
+	if gate != "" && s.Gate != nil && !s.Gate(gate, s.lastGoodRun(name)) {
 		return true, "gate " + gate + " is shut"
 	}
 	return false, ""
@@ -498,6 +498,18 @@ func (s *Scheduler) lastRun(job string) time.Time {
 	return ts
 }
 
+// lastGoodRun is the job's newest run that finished ok: what its gate counts
+// from. A failed run (an API error, a plan limit, a hub restart mid-run)
+// checked nothing either, so counting it hid evidence that came in before it
+// (#133). Cadence still counts from lastRun, so a job that keeps failing
+// tries once per its every@, not every tick.
+func (s *Scheduler) lastGoodRun(job string) time.Time {
+	var t string
+	s.db.QueryRow(`SELECT started_at FROM runs WHERE job=? AND ok=1 ORDER BY started_at DESC LIMIT 1`, job).Scan(&t)
+	ts, _ := time.Parse(time.RFC3339Nano, t)
+	return ts
+}
+
 type Run struct {
 	ID         int64      `json:"id"`
 	Job        string     `json:"job"`
@@ -577,6 +589,7 @@ func (s *Scheduler) runWith(name, via, promptID string) (int64, error) {
 // run row it wrote instead (0 = none, e.g. the job was already running).
 type begun struct {
 	spec     JobSpec
+	tools    []string // the job's allowed_tools, else the table's default
 	dir, via string
 	id       int64
 }
@@ -603,6 +616,12 @@ func (s *Scheduler) begin(name, via, promptID string) (begun, error) {
 	}
 	s.running[name] = true
 	j := *spec
+	// The tools are resolved here, under the lock: exec runs on its own
+	// goroutine while Reload may replace s.table (#131).
+	tools := j.AllowedTools
+	if len(tools) == 0 {
+		tools = s.table.DefaultTools
+	}
 	s.mu.Unlock()
 	release := func() { s.mu.Lock(); delete(s.running, name); s.mu.Unlock() }
 
@@ -624,7 +643,7 @@ func (s *Scheduler) begin(name, via, promptID string) (begun, error) {
 		return begun{}, err
 	}
 	id, _ := res.LastInsertId()
-	return begun{spec: j, dir: dir, via: via, id: id}, nil
+	return begun{spec: j, tools: tools, dir: dir, via: via, id: id}, nil
 }
 
 // exec runs an open run to its end, closes its row and releases the job.
@@ -640,11 +659,7 @@ func (s *Scheduler) exec(b begun) (int64, error) {
 		}
 	})
 	log.Printf("sched: run %s (%s) via %s", name, spec.Project, via)
-	tools := spec.AllowedTools
-	if len(tools) == 0 {
-		tools = s.table.DefaultTools
-	}
-	out, err := s.RunClaude(ctx, dir, s.wrapPrompt(*spec)+s.deniedNote(name, id), tools)
+	out, err := s.RunClaude(ctx, dir, s.wrapPrompt(*spec)+s.deniedNote(name, id), b.tools)
 	if d := deniedOf(out.Raw); len(d) > 0 {
 		log.Printf("sched: job %s: %d tool call(s) refused by its grant: %s", name, len(d), strings.Join(d, " | "))
 	}
@@ -658,7 +673,7 @@ func (s *Scheduler) exec(b begun) (int64, error) {
 		// the run's output and nowhere else. One card says so (the same
 		// title supersedes itself while it stays open), rather than a
 		// failed run row nobody reads: a parse failure is a finding.
-		if s.Ask != nil && strings.Contains(err.Error(), "JSON") {
+		if s.Ask != nil && errors.Is(err, ErrNoResultBlock) {
 			s.Ask(name, fmt.Sprintf("The %s job ended without its result block: read run %d, its findings reached no card", name, id))
 		}
 		return id, err
@@ -783,7 +798,7 @@ func deniedOf(raw string) []string {
 			Input json.RawMessage `json:"tool_input"`
 		} `json:"permission_denials"`
 	}
-	if json.Unmarshal([]byte(raw), &env) != nil {
+	if json.Unmarshal(envelopeOf([]byte(raw)), &env) != nil {
 		return nil
 	}
 	seen := map[string]bool{}
@@ -885,7 +900,11 @@ func (s *Scheduler) runClaude(ctx context.Context, dir, prompt string, tools []s
 	}
 	c.Stdin = strings.NewReader(prompt)
 	started, _ := ctx.Value(startedKey{}).(func(int))
-	raw, err := runGroup(c, pipeGrace, started)
+	raw, errOut, err := runGroup(c, pipeGrace, started)
+	if len(bytes.TrimSpace(errOut)) > 0 {
+		// Kept on the run's record after stdout; envelopeOf reads past it.
+		raw = append(append(raw, stderrMark...), errOut...)
+	}
 	return decodeResult(raw, err)
 }
 
@@ -909,7 +928,7 @@ type startedKey struct{}
 // exited (or its timeout fired) before the hub stops reading it.
 var pipeGrace = 10 * time.Second
 
-// runGroup runs c in its own process group and returns its combined output.
+// runGroup runs c in its own process group and returns its output.
 // CombinedOutput alone waits until every holder of the pipe closes it, and a
 // tool's leftover child (a backgrounded shell) holds it after claude has
 // written its result and exited: the timeout only kills claude, so a run
@@ -918,13 +937,17 @@ var pipeGrace = 10 * time.Second
 // claude exits, and any straggler is killed then. started (nil = none) gets
 // the group's id once claude is running: the group outlives a hub restart,
 // so New kills it.
-func runGroup(c *exec.Cmd, grace time.Duration, started func(pgid int)) ([]byte, error) {
-	var buf bytes.Buffer
-	c.Stdout, c.Stderr = &buf, &buf
+//
+// stdout and stderr come back apart: the result envelope is on stdout, and a
+// CLI warning on stderr mixed into its bytes failed a paid run as "not json"
+// (#134).
+func runGroup(c *exec.Cmd, grace time.Duration, started func(pgid int)) (stdout, stderr []byte, err error) {
+	var buf, ebuf bytes.Buffer
+	c.Stdout, c.Stderr = &buf, &ebuf
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
 	c.WaitDelay = grace
-	err := c.Start()
+	err = c.Start()
 	if err == nil {
 		if started != nil {
 			started(c.Process.Pid)
@@ -937,7 +960,46 @@ func runGroup(c *exec.Cmd, grace time.Duration, started func(pgid int)) ([]byte,
 	if errors.Is(err, exec.ErrWaitDelay) {
 		err = nil // claude exited 0; only an orphan held the pipe
 	}
-	return buf.Bytes(), err
+	return buf.Bytes(), ebuf.Bytes(), err
+}
+
+// ErrNoResultBlock: the run ended without the JSON its prompt asks for (no
+// CLI envelope at all, or a result with no envelope object in it). The model
+// worked and its findings are only in the run's output, so exec files a card
+// on it; matched by errors.Is, never by the message's text (#134).
+var ErrNoResultBlock = errors.New("no result block")
+
+// stderrMark separates stdout from stderr on a run's record (runClaude).
+const stderrMark = "\n--- stderr ---\n"
+
+// envelopeOf is the CLI's result envelope in a job's output (stdout, before
+// stderrMark): the whole of it when it is one JSON document, else the last
+// line that is a JSON object with a "result" or "is_error" key (a backgrounded
+// child's line or a warning around it is passed over), else nil.
+func envelopeOf(raw []byte) []byte {
+	raw, _, _ = bytes.Cut(raw, []byte(stderrMark))
+	t := bytes.TrimSpace(raw)
+	if json.Valid(t) {
+		return t
+	}
+	lines := bytes.Split(t, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := bytes.TrimSpace(lines[i])
+		if len(l) == 0 || l[0] != '{' {
+			continue
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(l, &m) != nil {
+			continue
+		}
+		if _, ok := m["result"]; ok {
+			return l
+		}
+		if _, ok := m["is_error"]; ok {
+			return l
+		}
+	}
+	return nil
 }
 
 // decodeResult reads the CLI's one JSON result from a job's output. A run
@@ -955,11 +1017,11 @@ func decodeResult(raw []byte, runErr error) (Output, error) {
 		SessionID string  `json:"session_id"`
 		APIStatus any     `json:"api_error_status"`
 	}
-	if err := json.Unmarshal(raw, &env); err != nil {
+	if err := json.Unmarshal(envelopeOf(raw), &env); err != nil {
 		if runErr != nil {
 			return o, fmt.Errorf("claude: %v: %s", runErr, truncate(string(raw), 500))
 		}
-		return o, fmt.Errorf("claude output not json: %s", truncate(string(raw), 300))
+		return o, fmt.Errorf("%w: claude output not json: %s", ErrNoResultBlock, truncate(string(raw), 300))
 	}
 	o.Cost = env.Cost
 	if env.IsError || runErr != nil {
@@ -1011,10 +1073,10 @@ func ParseOutput(text, raw string) (Output, error) {
 	}
 	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")
 	if start < 0 || end <= start {
-		return o, fmt.Errorf("no JSON object in result: %s", truncate(text, 300))
+		return o, fmt.Errorf("%w: no JSON object in result: %s", ErrNoResultBlock, truncate(text, 300))
 	}
 	if err := json.Unmarshal([]byte(text[start:end+1]), &o); err != nil {
-		return o, fmt.Errorf("result JSON: %v: %s", err, truncate(text, 300))
+		return o, fmt.Errorf("%w: result JSON: %v: %s", ErrNoResultBlock, err, truncate(text, 300))
 	}
 	return o, nil
 }

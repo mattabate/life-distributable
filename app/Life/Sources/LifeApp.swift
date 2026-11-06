@@ -19,6 +19,9 @@ struct LifeApp: App {
                     AppDelegate.push.hub = client
                     AppDelegate.push.register()
                 }
+                .onChange(of: client.isConfigured) { _, ok in
+                    if ok { AppDelegate.push.hubConfigured() }
+                }
                 #if targetEnvironment(macCatalyst)
                 // The window's first size, then a screenshot run if one was
                 // asked for (ops/mac-screens.sh).

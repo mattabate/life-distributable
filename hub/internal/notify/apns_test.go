@@ -293,3 +293,22 @@ func TestRegisterRefusesANonHexToken(t *testing.T) {
 		t.Fatalf("stored %q, want the trimmed lower-case token", tok)
 	}
 }
+
+// A card raised while no device is registered (between a reinstall and its
+// first register, or after APNs said Unregistered) still writes its
+// voice_queue row, so the next hub's Resume has the line to say (#112).
+func TestCardRaisedUnpairedIsStillQueued(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &APNs{db: db, after: func(_ time.Duration, f func()) { f() }}
+	if err := a.PushCard("read", "line", "Hey Alex, no phone yet.", "t-1", "ask-1"); err == nil {
+		t.Fatal("a push with no registered device answered no error")
+	}
+	var body string
+	db.QueryRow(`SELECT body FROM voice_queue WHERE card='ask-1' AND heard_at='' AND resumed_at=''`).Scan(&body)
+	if body != "Hey Alex, no phone yet." {
+		t.Fatalf("queued %q, want the card's line", body)
+	}
+}

@@ -6,7 +6,7 @@
 #   hub.sh stop      unload the hub agent
 #   hub.sh status    launchd state + healthz
 #   hub.sh logs      tail the hub log
-#   hub.sh url       print the console URL with the token baked in (first visit)
+#   hub.sh url       print the console URL with the token baked in (first visit; a Terminal only)
 #   hub.sh web       open the console in the browser (sets the cookie for a year)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -124,7 +124,12 @@ case "${1:-}" in
   logs)    tail -f logs/hub.log ;;
   # A session user has only its own token (LIFE_SESSION_TOKEN): the console
   # opens as that session, so browse.js and web-smoke.sh work from its clone.
-  url)     echo "https://$HOST/?token=${LIFE_SESSION_TOKEN:-$(cat secrets/hub.token)}" ;;
+  # The owner's token only to a person at a Terminal (stdin a tty, as
+  # decider-set.sh): run from a session it put the token in the session's
+  # transcript (#129). web-smoke.sh builds its own URL.
+  url)     if [[ -n "${LIFE_SESSION_TOKEN:-}" ]]; then echo "https://$HOST/?token=$LIFE_SESSION_TOKEN"
+           elif [[ -t 0 ]]; then echo "https://$HOST/?token=$(cat secrets/hub.token)"
+           else echo "https://$HOST/"; echo "hub.sh url: the owner's token is printed only in a Terminal" >&2; exit 2; fi ;;
   web)     open "https://$HOST/?token=$(cat secrets/hub.token)" ;;
   *) sed -n '2,10p' "$0"; exit 1 ;;
 esac

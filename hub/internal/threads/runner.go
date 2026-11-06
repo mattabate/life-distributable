@@ -379,8 +379,17 @@ func (m *Manager) runRef(id, author, role, kind, text string, attachments []stri
 	}
 	attJSON, _ := json.Marshal(attachments)
 	now := time.Now()
-	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, attachments, queued, in_reply_to, outcome, replies, author, via) VALUES (?,?,?,?,?,?,1,?,?,?,?,?)`, id, ts(now), role, kind, text, string(attJSON), ref, outcome, encodeReplies(replies), author, via)
-	m.db.Exec(`UPDATE threads SET updated_at=? WHERE id=?`, ts(now), id)
+	// The request body is the only other copy of these words: a refused
+	// insert (disk full, locked past the busy timeout) fails the send, never a
+	// 200 with nothing queued (#111).
+	if _, err := m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, attachments, queued, in_reply_to, outcome, replies, author, via) VALUES (?,?,?,?,?,?,1,?,?,?,?,?)`, id, ts(now), role, kind, text, string(attJSON), ref, outcome, encodeReplies(replies), author, via); err != nil {
+		return fmt.Errorf("record message: %w", err)
+	}
+	// Recorded: a missed bump only misorders the list, and failing now would
+	// invite a resend that records the words twice.
+	if _, err := m.db.Exec(`UPDATE threads SET updated_at=? WHERE id=?`, ts(now), id); err != nil {
+		log.Printf("thread %s: updated_at: %v", id, err)
+	}
 	if role == "owner" {
 		// The owner's words through ONE card (in_reply_to) mark that ask
 		// answered; a message to the session marks none (markAnswered) and
