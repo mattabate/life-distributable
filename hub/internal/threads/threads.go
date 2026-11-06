@@ -1354,10 +1354,10 @@ func (m *Manager) costByModel(id string) []ModelCost {
 	return out
 }
 
-// Find: the sessions whose title, goal, standing prompt, last message or
-// cards mention every word of q (case-insensitive) — how an agent finds the
-// session with experience in a task before handing it over (`lifectl threads
-// --q <word>`, 2026-10-02). Empty q is List.
+// Find: the sessions whose title, goal, standing prompt, last message,
+// cards or message history mention every word of q (case-insensitive) — how an
+// agent finds the session with experience in a task before handing it over
+// (`lifectl threads --q <word>`, #115). Empty q is List.
 func (m *Manager) Find(q string, includeArchived bool) ([]Thread, error) {
 	all, err := m.List(includeArchived)
 	words := strings.Fields(strings.ToLower(q))
@@ -1374,12 +1374,27 @@ func (m *Manager) Find(q string, includeArchived bool) ([]Thread, error) {
 		}
 		rows.Close()
 	}
+	// Also check message bodies so past experience in transcripts is recalled
+	// even when last_message has moved on (#115).
+	bodyMatches := map[string]map[string]bool{}
+	for _, w := range words {
+		bodyMatches[w] = map[string]bool{}
+		if rows, err := m.db.Query(`SELECT DISTINCT thread_id FROM thread_messages WHERE LOWER(text) LIKE ?`, "%"+w+"%"); err == nil {
+			for rows.Next() {
+				var tid string
+				if rows.Scan(&tid) == nil {
+					bodyMatches[w][tid] = true
+				}
+			}
+			rows.Close()
+		}
+	}
 	out := []Thread{}
 	for _, t := range all {
 		hay := strings.ToLower(t.Title + " " + t.GoalID + " " + t.SchedulePrompt + " " + t.LastMessage + " " + cards[t.ID])
 		ok := true
 		for _, w := range words {
-			if !strings.Contains(hay, w) {
+			if !strings.Contains(hay, w) && !bodyMatches[w][t.ID] {
 				ok = false
 				break
 			}

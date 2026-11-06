@@ -1119,3 +1119,21 @@ func TestParentIsTheSessionThatStartedIt(t *testing.T) {
 		t.Fatalf("backfill gave the owner's session a parent: %q", got.ParentID)
 	}
 }
+
+// Find matches past turns in thread_messages even when last_message has moved on (#115).
+func TestFindRecallsFromPastMessages(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Gaggia Build", "", "", nil)
+	// Add an earlier turn discussing espresso
+	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text) VALUES (?,?,'claude','message','Here are the espresso notes for the machine.')`, th.ID, ts(time.Now()))
+	// Overwrite last_message with something unrelated
+	m.db.Exec(`UPDATE threads SET last_message='All done.' WHERE id=?`, th.ID)
+
+	found, err := m.Find("espresso", false)
+	if err != nil {
+		t.Fatalf("Find error: %v", err)
+	}
+	if len(found) != 1 || found[0].ID != th.ID {
+		t.Fatalf("Find(\"espresso\") = %v, want thread %s", found, th.ID)
+	}
+}
