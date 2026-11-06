@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -193,7 +195,14 @@ type QuotaFetcher struct {
 	Record func(at time.Time, ws []Window)
 	Past   func(since time.Time) []Sample
 
+	// Store keeps the last good reading on disk, so a restarted hub serves
+	// it (inside staleCeiling) while it fetches again. Without it every
+	// restart began with an empty cache, and a 429 on that first fetch had
+	// nothing to fall back on. Optional.
+	Store string
+
 	mu           sync.Mutex // guards the fields below
+	loaded       bool
 	cachedAt     time.Time
 	cachedRaw    map[string]json.RawMessage
 	cachedErr    error
@@ -229,6 +238,7 @@ func (q *QuotaFetcher) raw(ctx context.Context) (map[string]json.RawMessage, err
 // wait on Anthropic unless the hub has nothing at all to show.
 func (q *QuotaFetcher) rawAt(ctx context.Context) (map[string]json.RawMessage, time.Time, error) {
 	q.mu.Lock()
+	q.loadStored()
 	age := time.Since(q.cachedAt)
 	if age < windowTTL && (q.cachedRaw != nil || q.cachedErr != nil) {
 		defer q.mu.Unlock()
@@ -274,7 +284,53 @@ func (q *QuotaFetcher) refresh(ctx context.Context) (map[string]json.RawMessage,
 	q.failedAt = time.Time{}
 	q.cachedRaw, q.cachedErr = raw, err
 	q.cachedAt = time.Now()
+	if err == nil {
+		q.saveStored()
+	}
 	return q.cachedRaw, q.cachedAt, q.cachedErr
+}
+
+// storedReading is the on-disk form of the last good reading.
+type storedReading struct {
+	At  time.Time                  `json:"at"`
+	Raw map[string]json.RawMessage `json:"raw"`
+}
+
+// loadStored fills an empty cache, once, from Store. Caller holds q.mu.
+func (q *QuotaFetcher) loadStored() {
+	if q.loaded || q.Store == "" {
+		return
+	}
+	q.loaded = true
+	if q.cachedRaw != nil || q.cachedErr != nil {
+		return
+	}
+	b, err := os.ReadFile(q.Store)
+	if err != nil {
+		return
+	}
+	var s storedReading
+	if json.Unmarshal(b, &s) != nil || s.Raw == nil || time.Since(s.At) >= staleCeiling {
+		return
+	}
+	q.cachedRaw, q.cachedAt = s.Raw, s.At
+}
+
+// saveStored writes the cached reading to Store (temp + rename). Caller holds
+// q.mu.
+func (q *QuotaFetcher) saveStored() {
+	if q.Store == "" {
+		return
+	}
+	b, err := json.Marshal(storedReading{At: q.cachedAt, Raw: q.cachedRaw})
+	if err != nil {
+		return
+	}
+	tmp := q.Store + ".tmp"
+	if os.MkdirAll(filepath.Dir(q.Store), 0o700) != nil || os.WriteFile(tmp, b, 0o600) != nil {
+		return
+	}
+	os.Rename(tmp, q.Store)
 }
 
 // claimRecord reports whether a reading fetched at `at` is newer than the last
@@ -305,6 +361,9 @@ func (q *QuotaFetcher) fetch(ctx context.Context) (map[string]json.RawMessage, e
 	body, err := httpx.Bytes(q.Client, req, 1<<20)
 	var se *httpx.StatusError
 	if errors.As(err, &se) {
+		if se.Code == http.StatusTooManyRequests {
+			return nil, errors.New("Anthropic is rate-limiting the usage check; trying again in a minute")
+		}
 		return nil, fmt.Errorf("usage endpoint HTTP %d: %s", se.Code, truncate(se.Body, 200))
 	}
 	if err != nil {

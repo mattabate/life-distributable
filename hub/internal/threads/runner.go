@@ -497,6 +497,60 @@ func consoleStamp(sent time.Time) string {
 	return "[Sent from the web console at " + at + " " + zone + " on " + day + ". What the owner was doing there before this — pages, clicks, highlights, circles — is a log you query, not this prompt: `ops/py.sh trail.py at " + at + "` (the words, 10 minutes up to the message), `ops/py.sh trail.py motion --at " + at + "` (the mouse path, the 2 minutes before it; `--points` for every sample). The console microphone may have been on: the message holds only what they said while this box was on their screen, and everything they said on every page is `ops/py.sh trail.py said --at " + at + " --minutes 30` — read it when the message seems to start mid-thought. All take `--date " + day + "` if today has moved on.]"
 }
 
+// A message this long is a paste: it reaches the session as a file in the
+// intake in-box, read with the Read tool like a document the owner sent, and
+// the turn carries its first and last lines (the owner's own words usually
+// follow a paste) and the path.
+const (
+	pasteLines = 100
+	pasteBytes = 8000
+	pasteKeep  = 15   // lines kept from each end
+	pasteCap   = 1500 // bytes kept from each end
+)
+
+// pasteText: q.text, or for a paste its ends and the saved file's path.
+// The stored message stays whole; a save that fails sends the text whole.
+func (m *Manager) pasteText(t Thread, q queuedMsg) string {
+	text := q.text
+	lines := strings.Split(text, "\n")
+	if m.SavePaste == nil || q.kind == "checkin" || (len(lines) < pasteLines && len(text) < pasteBytes) {
+		return text
+	}
+	at := q.ts
+	if at.IsZero() {
+		at = time.Now()
+	}
+	short := t.ID
+	if len(short) > 24 {
+		short = short[:24]
+	}
+	path, err := m.SavePaste("paste "+at.Local().Format("2006-01-02 1504")+" "+strings.Trim(short, "-")+".txt", text)
+	if err != nil || path == "" {
+		if err != nil {
+			log.Printf("threads: save paste for %s: %v", t.ID, err)
+		}
+		return text
+	}
+	head, tail := lines, []string(nil)
+	if len(lines) > 2*pasteKeep {
+		head, tail = lines[:pasteKeep], lines[len(lines)-pasteKeep:]
+	}
+	h, tl := strings.Join(head, "\n"), strings.Join(tail, "\n")
+	if len(h) > pasteCap {
+		h = strings.ToValidUTF8(h[:pasteCap], "") + " …"
+	}
+	if len(tl) > pasteCap {
+		tl = "… " + strings.ToValidUTF8(tl[len(tl)-pasteCap:], "")
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[The owner's message is long (%d lines, %d characters): a paste. The WHOLE message is saved as %s: Read it in full before answering. Its start and its end, where the owner's own words usually are, follow.]\n\n", len(lines), len(text), path)
+	b.WriteString(h)
+	if tl != "" {
+		b.WriteString("\n\n[… the middle is in the file …]\n\n" + tl)
+	}
+	return b.String()
+}
+
 // prompt renders queued messages as one user turn. midTurn=true when it is
 // being steered into a turn already in flight.
 func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string, error) {
@@ -514,7 +568,7 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 		} else if q.kind == "decision" {
 			b.WriteString(decisionHeader)
 		}
-		b.WriteString(q.text)
+		b.WriteString(m.pasteText(t, q))
 		if len(q.atts) > 0 {
 			// Pictures and documents are told apart by the blob's extension
 			// (PutBlob keeps the upload's): a shared PDF is read page by page,

@@ -185,6 +185,10 @@ struct AskCard: View {
             let onBar = armedPicks["ask:" + a.id] != nil
             return [CardButton(label: "Respond", primary: onBar, suggested: !onBar) { respond(a.outcomes?.first?.value ?? "done") },
                     CardButton(label: "Read") { Task { await resolve("done", note: a.readWord) } }]
+        // An item with steps is answered a step at a time: no buttons for the
+        // whole card, it closes when the last step is done or skipped.
+        case _ where !(a.steps ?? []).isEmpty:
+            return []
         default:
             // The hub's words (Decided · Reply), each
             // arming the bar with that pick, then Dismiss — the silent close.

@@ -86,6 +86,7 @@ func main() {
 	// (dozens of times a day) — + New session sat blank on it.
 	usage := spend.NewCache(cfg.ClaudeProjectsDir)
 	usage.Store = filepath.Join(filepath.Dir(cfg.DBPath), "cache", "spend-usages.gob")
+	quota.Store = filepath.Join(filepath.Dir(cfg.DBPath), "cache", "spend-quota.json")
 	picker.Usages = usage.Usages // the weekly pace line
 	policy := cfg.ModelPolicy.Merge(spend.DefaultPolicy())
 	// The fable day cap: past its allowance of fable in one
@@ -153,6 +154,10 @@ func main() {
 	// A free ls names only the checkout and the intake in-box; any other
 	// folder is the owner's to approve (actions.lsInRoots).
 	acts.LsRoots = []string{cfg.Root, ob.IntakeDir}
+	acts.SessionTools, acts.Checkout = sch.Table().PromptTools, cfg.Root
+	if cfg.SessionUser != "" {
+		acts.CloneRoot = cfg.SessionWorktrees
+	}
 	thr, err := threads.New(db, cfg.ClaudeBin, filepath.Join(cfg.JobsDir, "threads"), cfg.TmuxPrefix, projDir, sch.Table().PromptTools, sch)
 	if err != nil {
 		log.Fatal(err)
@@ -170,6 +175,7 @@ func main() {
 	}
 	thr.BlobPath = ob.BlobPath
 	thr.IntakePath = ob.IntakePath
+	thr.SavePaste = ob.PutIntakeText
 	thr.AutoCompactWindow = cfg.AutoCompactWindow
 	if cfg.SessionTokens {
 		// Each session and job calls the hub with a token of its own, never

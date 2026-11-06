@@ -32,12 +32,14 @@ if [[ "${1:-}" == "init" ]]; then
 fi
 
 # Consistent SQLite snapshot first (WAL mode: never copy the raw file).
+# VACUUM INTO + integrity_check (ops/sqlite-snap.sh): a missing live DB, a
+# failed or a corrupt copy stops here, before restic, and the trap raises
+# the ask. A missing DB used to be skipped, so an old snapshot rode the
+# night as if fresh (#127).
 DB="$ROOT/data/life.db"
-if [[ -f "$DB" ]]; then
-  mkdir -p "$ROOT/data/snapshots"
-  # sqlite splits a dot-command's arguments on spaces itself: quote the path.
-  sqlite3 "$DB" ".backup \"$ROOT/data/snapshots/life.db\""
-fi
+mkdir -p "$ROOT/data/snapshots"
+source "$ROOT/ops/sqlite-snap.sh"
+snap "$DB" "$ROOT/data/snapshots/life.db"
 
 # A bundle of every ref of the repo rides the encrypted backup too, so a dead
 # disk never costs local commits. Restore: git clone data/mirrors/life.bundle life

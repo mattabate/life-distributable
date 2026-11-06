@@ -394,3 +394,19 @@ func TestRunningActionIsWorking(t *testing.T) {
 		t.Fatalf("ops pills %+v", p)
 	}
 }
+
+// Its own helpers alone, with a card for the owner, is Your turn: Working is
+// the agent's own turn. A running session with a helper stays Working.
+func TestHelpersOnlyWithCardIsYourTurn(t *testing.T) {
+	ths := []threads.Thread{{ID: "scout", Status: "needs_you", TurnTasks: []threads.TurnTask{{ID: "b1", Type: "local_bash"}}},
+		{ID: "busy", Status: "running", TurnTasks: []threads.TurnTask{{ID: "a1", Type: "local_agent"}}}}
+	asks := []threads.Ask{{ID: "a1", ThreadID: "scout", Surface: "any", State: "open", Kind: "read"},
+		{ID: "a2", ThreadID: "busy", Surface: "any", State: "open", Kind: "read"}}
+	b := Build("web", asks, nil, ths)
+	if b.Section["scout"] != "your_turn" || b.Section["busy"] != "working" {
+		t.Fatalf("section %v", b.Section)
+	}
+	if p := b.Pills["scout"]; len(p) == 0 || p[0].Word != "running" {
+		t.Fatalf("scout pills %+v", p)
+	}
+}

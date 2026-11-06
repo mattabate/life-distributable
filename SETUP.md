@@ -232,7 +232,10 @@ with their login.
 
 Nightly, encrypted on this Mac before upload; Backblaze only ever sees
 ciphertext. The nightly job's key cannot delete anything, so nothing on
-this Mac can erase their backups.
+this Mac can erase their backups. It can still *hide* a file (a write
+can hide, and an overwrite replaces what restic reads as its `config` /
+`keys`); the older versions stay in the bucket, and only the owner's own
+Backblaze sign-in can delete a hide marker to bring a file back.
 
 1. Sign up: [backblaze.com/sign-up/cloud-storage](https://www.backblaze.com/sign-up/cloud-storage)
    → **Email**, **Password**, region **US West** (or nearest), **Sign Up**.
@@ -255,13 +258,14 @@ this Mac can erase their backups.
 6. **Restore test**: a backup that was never restored is a hope. It reads
    the passphrase, so it runs in its own window, not in your shell. You
    open this in the window form above:
-   `cd ops && set -a && source secrets/restic.env && T=$(mktemp -d) && restic snapshots && restic restore latest --target "$T" --include '*/life.db' && ls -laR "$T" && rm -rf "$T"`
+   `cd ops && set -a && source secrets/restic.env && T=$(mktemp -d) && restic snapshots && restic restore latest --target "$T" --include '*/life.db' && ls -laR "$T"; f=$(find "$T" -name life.db -print -quit); if [ -n "$f" ]; then sqlite3 "$f" 'pragma integrity_check'; else echo "no life.db restored"; fi; rm -rf "$T"`
    (The restored copy is a decrypted database: it goes into a fresh
-   private temporary folder and is deleted once listed.) Tell them: "Wait for the window to stop, then tell me whether the last
-   lines mention `life.db`." They only read it.
+   private temporary folder and is deleted once listed and checked, even
+   when a step fails.) Tell them: "Wait for the window to stop, then tell me whether the last
+   lines mention `life.db` and the integrity check says `ok`." They only read it.
 
 **Verify:** `ops/b2.sh check` prints `SAFE`; the owner reports a snapshot
-listed and a restored `life.db`. Once a month they run `ops/b2.sh prune`:
+listed and a restored `life.db` whose integrity check said `ok`. Once a month they run `ops/b2.sh prune`:
 add a monthly `--kind owner` calendar item for it
 (`lifectl cal add "Prune old backups (ops/b2.sh prune)" --on <next month> --kind owner --repeat monthly`).
 
@@ -398,7 +402,12 @@ a second macOS user (`life-agent` here) in a clone of its own, so a session
 cannot write the main checkout, read `ops/secrets/` (the hub token, the
 decider hash) or write the database. Its commits reach main through the hub
 (`bash ops/land.sh`), and app builds run as the owner (`make ship WHY="..."`,
-`make mac WHY="..."`), both with no card. The owner types steps 1 to 4 in a
+`make mac WHY="..."`), both with no card. The separate user keeps a
+session's own tools out of `ops/secrets/` and the database; code it lands
+is trusted like code the owner merges themselves: the landing builds and
+restarts the hub as the owner, and later app builds run it, so what lands
+is reviewed (by a reviewing session, or the owner) if that matters to
+them. The owner types steps 1 to 4 in a
 Terminal; each `sudo` asks for their Mac password.
 
 1. **The user.** `sudo sysadminctl -addUser life-agent -fullName "Life sessions" -password -`

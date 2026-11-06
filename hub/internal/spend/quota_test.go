@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -228,6 +229,38 @@ func TestStaleReadingHasACeiling(t *testing.T) {
 	got := q.Quota(ctx, nil, time.Now())
 	if got.Available || got.Error == "" {
 		t.Fatalf("a 2h-old reading still shown as available: %+v", got)
+	}
+}
+
+// Right after a restart the first fetch can get a 429, and with an empty
+// cache the raw rate-limit JSON was all there was to show. A restarted hub
+// now serves the reading the last one stored, and a 429 with nothing to show
+// reads as a plain sentence.
+func TestARestartedHubServesTheStoredReading(t *testing.T) {
+	var limited atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if limited.Load() {
+			http.Error(w, `{"error":{"type":"rate_limit_error","message":"Rate limited."}}`, http.StatusTooManyRequests)
+			return
+		}
+		fmt.Fprint(w, `{"five_hour":{"utilization":10,"resets_at":"2026-08-21T14:00:00Z"}}`)
+	}))
+	defer srv.Close()
+	store := filepath.Join(t.TempDir(), "cache", "spend-quota.json")
+	newQ := func(store string) *QuotaFetcher {
+		return &QuotaFetcher{Token: func(context.Context) (string, error) { return "tok", nil }, Client: srv.Client(), URL: srv.URL, Store: store}
+	}
+	ctx := context.Background()
+	if _, err := newQ(store).raw(ctx); err != nil {
+		t.Fatal(err)
+	}
+	limited.Store(true)
+	if got := newQ(store).Quota(ctx, nil, time.Now()); !got.Available {
+		t.Fatalf("restarted hub lost the stored reading: %+v", got)
+	}
+	got := newQ("").Quota(ctx, nil, time.Now())
+	if got.Available || strings.Contains(got.Error, "rate_limit_error") || !strings.Contains(got.Error, "rate-limiting") {
+		t.Fatalf("want a plain rate-limit sentence: %q", got.Error)
 	}
 }
 

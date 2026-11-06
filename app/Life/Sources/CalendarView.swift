@@ -897,7 +897,9 @@ struct CalEntryRow: View {
                 if let d = entry.detailShown, !d.isEmpty, entry.kind != "run", entry.kind != "job" {
                     Text(md(d)).font(.caption).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
                 }
-                HStack(spacing: 6) {
+                // A row of tags wraps whole tags to a new line; an HStack
+                // squeezed each tag until it broke mid-word.
+                FlowRow(spacing: 6) {
                     // An open to-do never says a time as if it were due then.
                     if entry.soon == true && !closed { Text(calAdded(entry)) }
                     else if dated { Text(calWhenShort(entry)) }

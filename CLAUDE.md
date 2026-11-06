@@ -33,9 +33,11 @@ one endpoint's contract.
    and a `### METHOD /path` section in `shared/api.md`; a test fails if they
    drift. `make generate` rewrites `shared/fixtures/` from a synthetic DB, and
    the app's tests decode those same files, so both sides agree by test.
-2. **`make check` is the gate**: gofmt, vet, Go tests, web tests, script
-   lint, the hub build and a simulator build of the app. Nothing is done
-   until it passes.
+2. **`make check` is the gate**: gofmt, vet, Go tests, script lint, the
+   hub build and a simulator build of the app. Nothing is done until it
+   passes. The web console's tests are not in it (the console is served
+   unbuilt, and the gate has no node lane): after editing
+   `hub/internal/server/web/`, also run `make webcheck`.
 3. **One command per operation, in `ops/`.** A thing you do twice is a
    script. `python3 -c`, `sqlite3` and `curl` are not in session tool grants
    on purpose: new code goes in a script under `ops/` (`ops/py.sh x.py`),
@@ -119,5 +121,8 @@ is the owner's private copy. The copy is theirs: upstream is read-only, and
 nothing from it lands without the owner's yes.
 
 The weekly check is the read-only `addenda-check` job; how to apply an entry
-is in the header of `ADDENDA.md`. When the owner just asks to update: `git merge upstream/main`,
-conflicts resolved in favour of their own changes, then `make check`.
+is in the header of `ADDENDA.md`. No session merges upstream itself (add-0102):
+when the owner just asks to update, show them
+`git log --oneline HEAD..upstream/main` and ask them to run
+`git merge upstream/main` in Terminal; then resolve any conflicts in favour
+of their own changes and run `make check`.

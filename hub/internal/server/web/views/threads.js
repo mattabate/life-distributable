@@ -1920,6 +1920,7 @@ async function cardMove(path, body, word) {
 const resolveAsk = (id, state, note) => {
   const el = document.getElementById('ask-card-' + id);
   if (el && state !== 'open') el.classList.add('closing');
+  if (state !== 'open') composerForget('chat', 'ask', id);
   return cardMove(`/asks/${id}/resolve`, note ? { state, note } : { state }, note || 'ask ' + state);
 };
 // cardFold: THE Dismiss (back=false) and Reopen (back=true) of every chat
@@ -1930,7 +1931,10 @@ const CARD_FOLD = {
   ask: (id, back) => [`/asks/${id}/resolve`, { state: back ? 'open' : 'dismissed' }, back ? 'ask open' : 'ask dismissed'],
   action: (id, back) => [`/actions/${id}/${back ? 'reopen' : 'dismiss'}?via=web`, {}, back ? 'reopened' : 'dismissed'],
 };
-const cardFold = (ref, id, back) => cardMove(...CARD_FOLD[ref](id, back));
+const cardFold = (ref, id, back) => {
+  if (!back) composerForget('chat', ref, id);
+  return cardMove(...CARD_FOLD[ref](id, back));
+};
 
 // ---- the chat's own wiring ----
 // The box itself is wireComposer (composer.js). What is only the chat's: the

@@ -174,10 +174,23 @@ func (s *Store) PutIntake(ref, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return s.putIntake(intakeName(name, filepath.Ext(src)), data)
+}
+
+// PutIntakeText saves text pasted into a message (threads: a paste of 100+
+// lines) into IntakeDir as name, by PutIntake's rules: the session Reads it
+// from there like a file the owner sent.
+func (s *Store) PutIntakeText(name, text string) (string, error) {
+	if s.IntakeDir == "" {
+		return "", nil
+	}
+	return s.putIntake(intakeName(name, ".txt"), []byte(text))
+}
+
+func (s *Store) putIntake(name string, data []byte) (string, error) {
 	if err := os.MkdirAll(s.IntakeDir, 0o755); err != nil {
 		return "", err
 	}
-	name = intakeName(name, filepath.Ext(src))
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
 	// The whole file is written to a hidden temp beside the in-box first and

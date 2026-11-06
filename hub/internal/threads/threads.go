@@ -388,6 +388,11 @@ type Manager struct {
 	// never. The prompt tells the session so a file is worked on from there,
 	// not from a hash under blobs/.
 	IntakePath func(ref string) string
+	// SavePaste saves a long paste (pasteLines+ lines of a message) as a
+	// file in that in-box (obs.PutIntakeText) and returns its path; the
+	// prompt then carries the ends and the path, not the whole text. nil =
+	// the text goes in whole.
+	SavePaste func(name, text string) (string, error)
 	// Summarize turns a prompt into a short title (cheap model, no tools).
 	// Swappable for tests; nil disables auto-titling.
 	Summarize func(dir, prompt string) (string, error)

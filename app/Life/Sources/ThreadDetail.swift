@@ -1431,6 +1431,12 @@ struct ThreadDetail: View {
             // (the owner 2026-10-01); the board already left it out.
             let gotAsks = (try? await k)?.filter { !$0.isOtherDeviceInstall }
             if let gotAsks, gotAsks != asks || (msgsMoved && !gotAsks.isEmpty) { placeAsks(gotAsks) }
+            // A card closed under the bar (its own Read or Dismiss, or anywhere
+            // else) leaves the bar, as the console's composerForget does.
+            if let gotAsks {
+                let shut = Set(gotAsks.filter(\.isClosed).map { "ask:" + $0.id })
+                if replies.contains(where: { shut.contains($0.ref) }) { replies.removeAll { shut.contains($0.ref) } }
+            }
             // A fetch that failed keeps the cards already drawn (asks always
             // did): an approval must not leave the chat because one request
             // timed out — `?? []` read a failure as "no proposals".

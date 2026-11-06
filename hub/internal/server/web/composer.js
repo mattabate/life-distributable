@@ -370,6 +370,13 @@ function composerDropRe(key, i) {
   if (box) box.focus();
 }
 
+// A card closed by its own button (a read's Read, Dismiss) leaves the strip
+// too, else the bar keeps answering a card that is gone.
+function composerForget(key, ref, id) {
+  const i = composerCards(key).findIndex(x => x.ref === ref && x.id === id);
+  if (i >= 0) composerDropRe(key, i);
+}
+
 function composerClearRe(key) {
   const st = composerState(key);
   st.re = null; st.also = [];
@@ -403,7 +410,8 @@ function composerShowErr(key, msg) {
 
 // ---------- wiring ----------
 // Called after the box's HTML lands. Restores the draft, grows the textarea,
-// takes ⌘↵, and arms Attach / drop / the file input.
+// sends on ↵ (⇧↵ is a new line, ⌘↵ still sends, a key held by an input
+// method does not), and arms Attach / drop / the file input.
 function wireComposer(key) {
   const d = cdom(key);
   const box = document.getElementById(d + '-draft');
@@ -413,7 +421,7 @@ function wireComposer(key) {
   autoGrow(box);
   box.addEventListener('input', () => { st.text = box.value; autoGrow(box); composerDisarm(key); });
   box.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); composerSend(key); }
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); composerSend(key); }
   });
   const file = document.getElementById(d + '-file');
   if (file) file.addEventListener('change', () => { uploadFiles([...file.files], key); file.value = ''; });

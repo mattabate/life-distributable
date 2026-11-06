@@ -214,8 +214,13 @@ func (b *Board) headings(ths []threads.Thread) {
 		if len(pills) > 0 {
 			b.Pills[t.ID] = pills
 		}
+		// Only its own background work live (a shell, a subagent, an action)
+		// with its own turn over: a card waiting on the owner puts it under
+		// Your turn, its row still drawing the helpers. Working is the agent's
+		// own turn; a running sub-session still pulls its parent up.
+		helpersOnly := t.Status != "running" && len(t.RunningActions)+len(t.TurnTasks) > 0 && live[t.ID] == 1
 		switch {
-		case running:
+		case running && !(helpersOnly && n > 0):
 			b.Section[t.ID] = "working"
 			workN++
 		case n > 0:

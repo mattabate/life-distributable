@@ -1213,6 +1213,9 @@ function askHTML(a, opened, armed, cost) {
     // "when I hit the white read button… I have read this message and I
     // don't care about it").
     : read ? [respond, { label: 'Read', js: `resolveAsk('${id}','done','${esc(((a.outcomes || [])[0] || {}).label || '')}')` }]
+    // An item with steps is answered a step at a time: no buttons for the
+    // whole card, it closes when the last step is done or skipped.
+    : (a.steps || []).length ? []
     // Every other kind: the hub's words (Decided · Just
     // reply), each arming the composer with that pick, then Dismiss — the
     // silent close (2026-08-28: "once I read it, I can just dismiss it").

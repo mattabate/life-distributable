@@ -35,6 +35,8 @@ struct RecNotice: View {
         .padding(.horizontal, 12).padding(.vertical, 7)
         .background(Color.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.purple.opacity(0.25)))
+        // The cards' own inset (Card), so the line is as wide as they are.
+        .padding(.horizontal)
         .id(rec.id)
     }
 }

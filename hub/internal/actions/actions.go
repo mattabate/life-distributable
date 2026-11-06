@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -263,6 +264,14 @@ type Queue struct {
 	// LsRoots: the folders a free ls may name (lsInRoots); nil = none, so
 	// every ls is the owner's to approve.
 	LsRoots []string
+	// SessionTools: the sessions' own tool grant (schedule.json prompt_tools);
+	// Checkout: the repo the sessions run in; CloneRoot: the folder holding
+	// each session's own clone when sessions run as another user ("" = none).
+	// A gated card that names an ops/ script outside the grant and carries no
+	// command is refused (unrunnableNamed); nil SessionTools = no check.
+	SessionTools []string
+	Checkout     string
+	CloneRoot    string
 	// OnDecided fires after the owner approves/denies a gated action (main relays
 	// it into the proposing thread, or starts one). nil = no callback.
 	OnDecided func(a Action, approved bool, note string)
@@ -645,6 +654,71 @@ func dupKey(raw json.RawMessage) (string, bool) {
 	}
 }
 
+// opsCommand: an ops/ script and its plain arguments as a card's text names
+// it ("bash ops/backup.sh put <file> <dest>").
+var opsCommand = regexp.MustCompile(`(?:bash\s+)?(?:/[\w.-]+)*/?\bops/[\w.-]+\.(?:sh|py|js)(?:[ \t]+[^\s;|&<>` + "`" + `'"()]+)*`)
+
+// unrunnableNamed: the first ops/ command the text names that the sessions'
+// own tools cannot run, or "". An exec none card is carried out by the
+// session that wrote it once the owner approves; one naming a script its
+// grant does not hold dead-ends there, and the Approve runs nothing.
+func (q *Queue) unrunnableNamed(text string) string {
+	if q.SessionTools == nil {
+		return ""
+	}
+	for _, m := range opsCommand.FindAllString(text, -1) {
+		if !sessionCanRun(q.SessionTools, q.Checkout, q.CloneRoot, m) {
+			return strings.TrimSpace(m)
+		}
+	}
+	return ""
+}
+
+// sessionCanRun: cmd matches a Bash(p:*) or Bash(p) grant, as written, with
+// the checkout's path (or a session clone's) dropped, or with its "bash "
+// dropped or added.
+func sessionCanRun(tools []string, checkout, cloneRoot, cmd string) bool {
+	cmd = strings.TrimSpace(cmd)
+	forms := []string{cmd}
+	if checkout != "" {
+		forms = append(forms, strings.ReplaceAll(cmd, strings.TrimRight(checkout, "/")+"/", ""))
+	}
+	if cloneRoot != "" {
+		root := strings.TrimRight(cloneRoot, "/") + "/"
+		f := cmd
+		for {
+			i := strings.Index(f, root)
+			if i < 0 {
+				break
+			}
+			rest := f[i+len(root):]
+			j := strings.Index(rest, "/")
+			if j < 0 {
+				break
+			}
+			f = f[:i] + rest[j+1:]
+		}
+		forms = append(forms, f)
+	}
+	for _, f := range append([]string(nil), forms...) {
+		forms = append(forms, strings.TrimPrefix(f, "bash "), "bash "+strings.TrimPrefix(f, "bash "))
+	}
+	for _, t := range tools {
+		if !strings.HasPrefix(t, "Bash(") || !strings.HasSuffix(t, ")") {
+			continue
+		}
+		p := strings.TrimSuffix(strings.TrimPrefix(t, "Bash("), ")")
+		prefix := strings.HasSuffix(p, ":*")
+		p = strings.TrimSuffix(p, ":*")
+		for _, f := range forms {
+			if f == p || (prefix && strings.HasPrefix(f, p+" ")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Propose records an action. Ungated actions run immediately (async).
 func (q *Queue) Propose(p Proposal) (Action, error) {
 	if k, ok := dupKey(p.ExecPayload); ok {
@@ -691,6 +765,11 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 		json.Unmarshal(p.ExecPayload, &sp)
 		if !freeShell(q.FreeShell, sp.Cmd) || !lsInRoots(q.LsRoots, sp.Cmd, sp.Dir) {
 			gated = true
+		}
+	}
+	if gated && p.ExecType == "none" {
+		if cmd := q.unrunnableNamed(p.Title + "\n" + p.Detail); cmd != "" {
+			return Action{}, fmt.Errorf("this card names `%s`, which a session cannot run itself, and carries no command: approving an exec none card hands it back to you to carry out, so the owner's Approve would do nothing. Put the command on the card instead: --exec shell --payload '{\"cmd\":\"%s\",\"dir\":\"<the checkout>\"}', so Approve runs it", cmd, cmd)
 		}
 	}
 	// A retry of a command that already ran, or may have, is the owner's to

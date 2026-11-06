@@ -310,6 +310,9 @@ test('askHTML in the chat: bubble, id for deep links, the hub\'s words + Dismiss
   assert.doesNotMatch(h, /resolveAskGlobal|>Done<|>Open|target="_blank"|>Respond</);
   // A hub that sent no words: one Respond, the composer's default.
   assert.match(askHTML({ ...ask, outcomes: undefined }), /openRespond\('ask-1a2b3c4d'\)">Respond<[\s\S]*>Dismiss</);
+  // An item with steps is answered a step at a time: nothing for the whole card.
+  const stepped = askHTML({ ...ask, kind: 'physical', steps: [{ n: 1, title: 'Stretch', state: 'open' }] });
+  assert.doesNotMatch(stepped, /openRespond\('ask-1a2b3c4d'|cardFold\('ask','ask-1a2b3c4d'\)/);
 });
 
 // The pick on the bar is the FILLED button, and only that one; with nothing
@@ -827,6 +830,25 @@ test('composerArm: a second card joins the strip, and Send carries them all', as
   assert.equal(st.re.id, 'rec-62e5');
   assert.equal(st.also.length, 0);
   composerClearRe('chat');
+  assert.equal(st.re, null);
+  composerReset('chat');
+});
+
+// A card closed by its own button leaves the strip; the other armed cards stay.
+test('composerForget: a card closed outside the bar drops off it, the rest stay', () => {
+  composerReset('chat');
+  composerHTML('chat', { targets: [], when: false, send: () => {} });
+  const read = { ref: 'ask', id: 'ask-8d1a', title: 'Weekly plan', outcome: 'done', outcomes: [{ value: 'done', label: 'Read it' }] };
+  const dec = { ref: 'ask', id: 'ask-bbd2', title: 'Pick a date', outcome: 'done', outcomes: [{ value: 'done', label: 'Decided' }] };
+  composerArm('chat', read);
+  composerArm('chat', dec);
+  composerForget('chat', 'ask', 'ask-8d1a');
+  const st = composerState('chat');
+  assert.equal(st.re.id, 'ask-bbd2');
+  assert.equal(st.also.length, 0);
+  composerForget('chat', 'ask', 'ask-gone');
+  assert.equal(st.re.id, 'ask-bbd2');
+  composerForget('chat', 'ask', 'ask-bbd2');
   assert.equal(st.re, null);
   composerReset('chat');
 });

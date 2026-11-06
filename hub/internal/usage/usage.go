@@ -84,20 +84,31 @@ func (h *Heartbeat) now() time.Time {
 	return time.Now()
 }
 
-// Payload is exactly what a send carries (Settings shows it).
-func (h *Heartbeat) Payload() map[string]any {
+// Payload is exactly what a send carries (Settings shows it). A count that
+// cannot be read is an error, never a silent 0: a heartbeat that understates
+// an install is worse than none.
+func (h *Heartbeat) Payload() (map[string]any, error) {
 	since := store.TS(h.now().AddDate(0, 0, -7))
+	var firstErr error
 	count := func(q string, args ...any) int {
 		var n int
-		h.DB.QueryRow(q, args...).Scan(&n)
+		if err := h.DB.QueryRow(q, args...).Scan(&n); err != nil && firstErr == nil {
+			firstErr = err
+		}
 		return n
 	}
 	p := map[string]any{
 		"version":          Version,
-		"active_days":      count(`SELECT COUNT(DISTINCT substr(ts,1,10)) FROM thread_messages WHERE role='owner' AND ts>=?`, since),
 		"sessions_started": count(`SELECT COUNT(*) FROM threads WHERE created_at>=?`, since),
 		"goals":            count(`SELECT COUNT(*) FROM goals WHERE status='active'`),
 		"token_bucket":     "unknown",
+	}
+	if days, err := h.activeDays(); err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+	} else {
+		p["active_days"] = days
 	}
 	if h.Pages != nil {
 		p["pages"] = h.Pages()
@@ -114,7 +125,40 @@ func (h *Heartbeat) Payload() map[string]any {
 			p["token_bucket"] = Bucket(n)
 		}
 	}
-	return p
+	return p, firstErr
+}
+
+// activeDays counts the distinct days with an owner message in the seven
+// days ending today, on the hub's own wall clock (store.Eastern, #55). The
+// old query counted DISTINCT substr(ts,1,10), which are UTC dates, inside a
+// rolling 7x24h window: the window touches eight UTC dates, so it could
+// report 8, and an evening message, already tomorrow in UTC, landed on the
+// wrong day (#120).
+func (h *Heartbeat) activeDays() (int, error) {
+	zone := store.Eastern
+	now := h.now().In(zone)
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, zone).AddDate(0, 0, -6)
+	rows, err := h.DB.Query(`SELECT ts FROM thread_messages WHERE role='owner' AND ts>=?`, store.TS(start))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	days := map[string]bool{}
+	for rows.Next() {
+		var ts string
+		if err := rows.Scan(&ts); err != nil {
+			return 0, err
+		}
+		t, err := time.Parse(time.RFC3339Nano, ts)
+		if err != nil {
+			continue // an unreadable timestamp is not a day that can be counted
+		}
+		days[t.In(zone).Format("2006-01-02")] = true
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	return len(days), nil
 }
 
 // Bucket rounds a week's tokens to an order of magnitude.
@@ -155,7 +199,10 @@ func (h *Heartbeat) Send(ctx context.Context) (bool, error) {
 	// PostHog would otherwise turn the connection's IP into a city and keep
 	// both. `$geoip_disable` stops the lookup; the project's "Discard client
 	// IP data" setting (the maintainer's side) drops the IP itself.
-	props := h.Payload()
+	props, err := h.Payload()
+	if err != nil {
+		return false, err
+	}
 	props["$geoip_disable"] = true
 	body, _ := json.Marshal(map[string]any{
 		"api_key":     token,
