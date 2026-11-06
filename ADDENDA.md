@@ -1211,3 +1211,8 @@ Entry format:
 - For: everyone
 - Fix: The nightly backup snapshots the database with `ops/sqlite-snap.sh` (VACUUM INTO plus an integrity check), and a missing live database now fails the night instead of letting an old snapshot ride as fresh (#127). The usage heartbeat counts active days on the hub's own clock over the 7 local days ending today, and an unreadable count is refused instead of sent as 0 (#120, PR #136). SETUP's restore test checks the restored database's integrity and says when nothing was restored; the backup section names the hide/overwrite risk; the separate-user section says code a session lands is trusted like code you merge (#128). CLAUDE.md's gate line matches the Makefile, `make webcheck` after web edits (#130), and its update paragraph matches add-0102.
 - How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `ops/sqlite-snap.sh` (new), `ops/backup.sh`, `Makefile`, `hub/internal/usage/usage.go`, `hub/internal/server/usage.go`, `SETUP.md`, `CLAUDE.md`, and their tests.
+
+## add-0163 · 2026-11-06 · `lifectl obs --until` includes the named day
+- For: everyone
+- Fix: `lifectl obs --until YYYY-MM-DD` now ends the window at the next local midnight, so the named day is in it. The route's `until` is exclusive and a bare day used to become that day's own midnight, which left the whole day out (#146). Thanks [@0718lol](https://github.com/mattabate/life-distributable/issues/146).
+- How: same merge as add-0008, then `make check`. By hand: `hub/cmd/lifectl/main.go`.

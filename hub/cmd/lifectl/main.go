@@ -316,7 +316,12 @@ func main() {
 				case param != "" && i+1 < len(os.Args):
 					val := os.Args[i+1]
 					if d, err := time.ParseInLocation("2006-01-02", val, time.Local); err == nil && (param == "since" || param == "until") {
-						val = d.Format(time.RFC3339) // the day's local midnight
+						// The route's until is exclusive, so a bare until day ends at the
+						// next local midnight: the named day is in the window.
+						if param == "until" {
+							d = d.AddDate(0, 0, 1)
+						}
+						val = d.Format(time.RFC3339) // a local midnight
 					}
 					q.Set(param, val)
 					i++
