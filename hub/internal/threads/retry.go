@@ -116,7 +116,7 @@ func (m *Manager) retryTransient(r run, text string) bool {
 	m.retries[r.thread]++
 	now := time.Now()
 	m.tmux("kill-session", "-t", m.tmuxSession(r.thread, r.id))
-	m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0, cost_seen=? WHERE id=?`, ts(now), r.costSeen, r.id)
+	m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0, cost_seen=?, live_tok_in=0, live_tok_out=0, live_tok_cache_read=0, live_tok_cache_write=0, live_cost_usd=0, live_msg='', held='' WHERE id=?`, ts(now), r.costSeen, r.id)
 	turn := r.turnID()
 	if m.requeueTurn(turn) == 0 {
 		m.resumeNote(r.thread, text)

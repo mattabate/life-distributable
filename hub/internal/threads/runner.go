@@ -2104,13 +2104,21 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 		if text == "" {
 			text = "turn failed"
 		}
-		if spend.IsRungError(text) && m.relaunchBelow(r, text) {
-			r.busy = 0
-			return r
+		if spend.IsRungError(text) {
+			rCost := r
+			rCost.costSeen = env.Cost
+			if m.relaunchBelow(rCost, text) {
+				m.recordRetryCost(threadID, turn, env.Cost-r.costSeen, h.Tok)
+				r.busy = 0
+				return r
+			}
 		}
 		// A 500/529 from the API is the provider's blip, not the owner's problem:
 		// replay the turn instead of raising a card (retry.go).
-		if m.retryTransient(r, text) {
+		rCost := r
+		rCost.costSeen = env.Cost
+		if m.retryTransient(rCost, text) {
+			m.recordRetryCost(threadID, turn, env.Cost-r.costSeen, h.Tok)
 			r.busy = 0
 			return r
 		}
@@ -2304,6 +2312,20 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 	return r
 }
 
+// recordRetryCost records the cost and tokens of a turn that died and was
+// auto-retried or stepped down, so the daily budget and per-thread meters
+// stay in step with the spend envelope (#104). Caller holds m.mu.
+func (m *Manager) recordRetryCost(threadID, turn string, cost float64, tok Tokens) {
+	if cost < 0 {
+		cost = 0
+	}
+	now := time.Now()
+	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, cost_usd, tok_in, tok_out, tok_cache_read, tok_cache_write, run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		threadID, ts(now), "claude", "message", "", cost, tok.In, tok.Out, tok.CacheRead, tok.CacheWrite, turn)
+	m.db.Exec(`UPDATE threads SET updated_at=?, cost_usd=cost_usd+?, tok_in=tok_in+?, tok_out=tok_out+?, tok_cache_read=tok_cache_read+?, tok_cache_write=tok_cache_write+? WHERE id=?`,
+		ts(now), cost, tok.In, tok.Out, tok.CacheRead, tok.CacheWrite, threadID)
+}
+
 // relaunchBelow: the turn died because its rung is unusable — the model's
 // plan bucket is full, or the installed CLI does not know the model id.
 // Never stall on a limit —
@@ -2330,7 +2352,7 @@ func (m *Manager) relaunchBelow(r run, text string) bool {
 	}
 	now := time.Now()
 	m.tmux("kill-session", "-t", m.tmuxSession(r.thread, r.id))
-	m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0, cost_seen=? WHERE id=?`, ts(now), r.costSeen, r.id)
+	m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0, cost_seen=?, live_tok_in=0, live_tok_out=0, live_tok_cache_read=0, live_tok_cache_write=0, live_cost_usd=0, live_msg='', held='' WHERE id=?`, ts(now), r.costSeen, r.id)
 	// The turn's input goes back on the queue (turn ids are <run>, <run>-t2,
 	// …); with none, a resume note, or launch finds nothing and starts nothing.
 	if m.requeueTurn(r.turnID()) == 0 {

@@ -80,6 +80,9 @@ func TestLimitFallsDownLadder(t *testing.T) {
 	if th, _ = m.Get(th.ID); th.Status != "running" {
 		t.Fatalf("%+v", th)
 	}
+	if th.CostUSD != 0.01 {
+		t.Fatalf("thread cost_usd = %f, want 0.01", th.CostUSD)
+	}
 	var live int
 	m.db.QueryRow(`SELECT COUNT(*) FROM thread_runs WHERE thread_id=? AND finished_at IS NULL`, th.ID).Scan(&live)
 	if live != 1 {

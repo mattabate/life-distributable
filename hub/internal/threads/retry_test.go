@@ -231,3 +231,36 @@ func TestFailureTitleSaysTheCode(t *testing.T) {
 		t.Fatal("529 is transient")
 	}
 }
+
+// A turn that dies on a transient API error and is auto-retried still costs
+// tokens and dollars; its cost must be recorded on the thread and in
+// thread_messages so the meters stay in step (#104).
+func TestRetryTurnRecordsCost(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Do a thing.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	appendOut(t, out, `{"type":"result","subtype":"error","is_error":true,"result":"API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment.","total_cost_usd":3.00,"session_id":"sess-1","usage":{"input_tokens":100,"output_tokens":200,"cache_read_input_tokens":300,"cache_creation_input_tokens":400}}
+`)
+	m.Poll()
+	th, _ = m.Get(th.ID)
+	if th.CostUSD != 3.00 {
+		t.Fatalf("thread cost_usd = %f, want 3.00", th.CostUSD)
+	}
+	var msgCost float64
+	var role string
+	err := m.db.QueryRow(`SELECT cost_usd, role FROM thread_messages WHERE thread_id=? AND role='claude' ORDER BY id DESC LIMIT 1`, th.ID).Scan(&msgCost, &role)
+	if err != nil {
+		t.Fatalf("query thread_messages: %v", err)
+	}
+	if msgCost != 3.00 {
+		t.Fatalf("thread_messages cost_usd = %f, want 3.00", msgCost)
+	}
+	var runCostSeen float64
+	err = m.db.QueryRow(`SELECT cost_seen FROM thread_runs WHERE thread_id=? ORDER BY started_at ASC LIMIT 1`, th.ID).Scan(&runCostSeen)
+	if err != nil {
+		t.Fatalf("query thread_runs: %v", err)
+	}
+	if runCostSeen != 3.00 {
+		t.Fatalf("thread_runs cost_seen = %f, want 3.00", runCostSeen)
+	}
+}

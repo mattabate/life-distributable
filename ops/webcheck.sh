@@ -27,7 +27,7 @@ if [ -n "$node" ]; then
   # into a vm and checks the markdown, the card shapes and the ask/action cards.
   # dot is quiet on a green run; WEBCHECK_VERBOSE=1 says which assert blew.
   rep=dot; [ -n "${WEBCHECK_VERBOSE:-}" ] && rep=spec
-  "$node" --test --test-reporter="$rep" "$web/test/"
+  "$node" --test --test-reporter="$rep" "$web"/test/*.test.js
   echo "webcheck: OK (node, $n files + tests)"
   exit 0
 fi
