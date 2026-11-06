@@ -839,6 +839,20 @@ func (m *Manager) deliver(t Thread, r run) error {
 	return nil
 }
 
+// cliArgs returns the base command-line arguments for launching a session process.
+// Claude Code is the default and only built-in runtime (#117).
+func (m *Manager) cliArgs() []string {
+	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
+		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`}
+	if len(m.AllowedTools) > 0 {
+		args = append(args, "--allowedTools", strings.Join(m.AllowedTools, ","))
+	}
+	if d := m.deniedTools(); len(d) > 0 {
+		args = append(args, "--disallowedTools", strings.Join(d, ","))
+	}
+	return args
+}
+
 // launch starts a claude process for the thread with every queued message as
 // its first turn. Caller holds m.mu.
 func (m *Manager) launch(t Thread) error {
@@ -898,14 +912,7 @@ func (m *Manager) launch(t Thread) error {
 	// non-interactive, so their OAuth never completes, and the owner's data
 	// reaches a session through lifectl only), and every token off the cold
 	// prompt is time off "starting".
-	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
-		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`}
-	if len(m.AllowedTools) > 0 {
-		args = append(args, "--allowedTools", strings.Join(m.AllowedTools, ","))
-	}
-	if d := m.deniedTools(); len(d) > 0 {
-		args = append(args, "--disallowedTools", strings.Join(d, ","))
-	}
+	args := m.cliArgs()
 	// The list the process launched with, for toolsStale.
 	if err := os.WriteFile(base+".tools", []byte(strings.Join(m.AllowedTools, ",")), 0o600); err != nil {
 		return err

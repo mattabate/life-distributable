@@ -18,6 +18,18 @@ func inFile(t *testing.T, m *Manager, threadID string) string {
 	return in
 }
 
+func TestCliArgsIncludesDefaultFlagsAndPermissions(t *testing.T) {
+	m, _, _ := setup(t)
+	m.AllowedTools = []string{"Bash", "Read"}
+	args := m.cliArgs()
+	joined := strings.Join(args, " ")
+	for _, expected := range []string{"-p", "--input-format stream-json", "--output-format stream-json", "--permission-mode acceptEdits", "--allowedTools Bash,Read"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("cliArgs() missing %q: %v", expected, args)
+		}
+	}
+}
+
 func appendOut(t *testing.T, out, s string) {
 	f, err := os.OpenFile(out, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
