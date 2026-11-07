@@ -1231,3 +1231,8 @@ Entry format:
 - For: everyone
 - Fix: When the Claude login on the Mac is revoked or expired, the card reads "Claude is logged out on the Mac: log in again" and the spoken line says no session can run until you log in there and press Restart; it used to read like a passing error that would resume by itself. The session preamble also asks a long shell command to print N/total to its own output (a progress bar on its row), never to redirect into a file.
 - How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/notify/funnel.go`, `hub/internal/threads/retry.go`, `runner.go`, `threads.go`, and their tests.
+
+## add-0167 · 2026-11-07 · The usage heartbeat reports the release you run
+- For: everyone who opted in to the heartbeat
+- Fix: The heartbeat's version was a hand-set number that fell behind the releases (installs on v1.1.x reported 0.1.0). `make build` now stamps it from the release tag the checkout is on (`git describe --tags`), so it reads like v1.1.42, or v1.1.42-3-gabc1234 between tags, and `dev` outside a git checkout. `VERSION=… make build` overrides it.
+- How: same merge as add-0008, then `git fetch --tags`, `make check` and `ops/hub.sh restart`. By hand: `Makefile` (`VERSION`, the hub's `-ldflags`), `hub/internal/usage/usage.go`.
