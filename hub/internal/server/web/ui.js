@@ -239,15 +239,6 @@ const tokens = n => {
   if (n >= 1e3) return Math.round(n / 1e3) + 'k tok';
   return n + ' tok';
 };
-// Hover text for a chat's dollar figure: which model earned what. A session
-// that ran all night usually changed model when a plan bucket filled, and the
-// rates differ by 5x (2026-08-25). Only GET one thread returns the split.
-const costByModel = t => {
-  const by = t.cost_by_model || [];
-  if (!by.length) return 'total cost so far';
-  return by.map(c => `${c.model || 'default model'} ${usd(c.cost_usd)}`).join(' · ');
-};
-
 // The phone's shortAgo (Chips.swift) rounds the same way and must keep doing
 // so — it floored until 2026-09-01, so 45 hours read "2d ago" here and "1d"
 // there. Each bucket stops 30s/30m/12h short of its ceiling so a rounded value
@@ -1269,7 +1260,7 @@ function actionHTML(a, opened, armed, cost) {
   const id = esc(a.id), job = actionJob(a);
   const open = a.open, no = a.state === 'denied' || a.state === 'failed';
   const payload = a.exec_payload && a.exec_type && a.exec_type !== 'none'
-    ? `<details style="margin:6px 0"><summary class="muted">will run: ${esc(a.exec_type)}</summary>
+    ? `<details style="margin:6px 0"><summary class="muted">What it runs</summary>
        <pre class="io mono">${esc(typeof a.exec_payload === 'string' ? a.exec_payload : JSON.stringify(a.exec_payload, null, 2))}</pre></details>`
     : '';
   const arm = v => a.thread_id ? `armActionReply('${id}','${v}')` : `decideAction('${id}',${v === 'approved'})`;
@@ -1279,7 +1270,7 @@ function actionHTML(a, opened, armed, cost) {
     mark: '🔴 ',
     body: askBody(a.detail || '', 'action:' + a.id) + payload,
     said: a.said, thread: a.thread_id, waiting: open && a.waiting_to_speak, speaking: open && a.speaking,
-    meta: `${pill(a.kind, kindPill[a.kind])} ${job ? pill('⚙ ' + job + ' job') : ''} ${a.project ? esc(a.project) : ''}`,
+    meta: `${a.kind && a.kind !== 'other' ? pill(a.kind, kindPill[a.kind]) : ''} ${job ? pill('⚙ ' + job + ' job') : ''} ${a.project ? esc(a.project) : ''}`,
     at: open ? a.created_at : a.decided_at || a.created_at,
     acts, cost, folded: open ? '' : a.folded === 'dismissed' || a.state === 'dismissed' ? '✕ dismissed'
       // Cut off mid-run (the hub restarted, or a kill): neither ✓ nor ✕.

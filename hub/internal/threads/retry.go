@@ -250,6 +250,9 @@ var authRe = regexp.MustCompile(`Failed to authenticate|OAuth session expired|OA
 
 func authFailure(text string) bool { return authRe.MatchString(text) }
 
+// AuthTitle: a dead login's card. notify.Spoken says it as its own line.
+const AuthTitle = "Claude is logged out on the Mac: log in again"
+
 // ResumeAuthFailed: a turn just finished ok, so the login works again;
 // every open login-failure card restarts its session by itself, the way a
 // session limit resumes at its reset. Takes m.mu via retryAsk: call it in a

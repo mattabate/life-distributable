@@ -108,7 +108,8 @@ struct ApprovalCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8).background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
         } label: {
-            Text("will run: \(a.exec_type)").font(.caption).foregroundStyle(.secondary)
+            // Plain words, not the exec type.
+            Text("What it runs").font(.caption).foregroundStyle(.secondary)
         })
     }
 
@@ -116,7 +117,8 @@ struct ApprovalCard: View {
     /// its run) and — outside the session — the session it belongs to.
     private var metaRow: some View {
         HStack(spacing: 6) {
-            Chip(a.kind, tint: kindColor, style: .kind)
+            // "other" says nothing; a real kind (money, delete...) is a warning.
+            if a.kind != "other" { Chip(a.kind, tint: kindColor, style: .kind) }
             if !a.project.isEmpty { Text(a.project).font(.caption).foregroundStyle(.secondary) }
             if let job = a.job {
                 Button { openRun = a.run_id.map { RunRef(id: $0) } } label: {

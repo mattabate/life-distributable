@@ -73,7 +73,11 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 /* the name line: a blue dot while it runs, and on a Working card (no cells)
    when it last moved at the right (rec-e4b035dd, 2026-10-17) */
 .sess-h { order: 0; display: flex; align-items: baseline; gap: 8px; }
-.sess-h .sess-t { flex: 1; min-width: 0; }
+.sess-h .sess-t { flex: 0 1 auto; min-width: 0; }
+.sess-h .sess-gap { flex: 1; }
+/* speaking / waiting to speak by the name, like the chat head's state chip,
+   never a line of its own */
+.sess-pills { flex: none; display: flex; gap: 5px; align-self: center; font-size: 12px; }
 .sess-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); align-self: center; }
 .sess-ago { flex: none; font-variant-numeric: tabular-nums; }
 /* a person's role on the right of their name, as on the phone (2026-10-22) */
@@ -136,11 +140,10 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .chat-head .pill-act:hover .w, .chat-head .pill-act:focus-visible .w { visibility: hidden; }
 .chat-head .pill-act:hover .h, .chat-head .pill-act:focus-visible .h { visibility: visible; }
 /* rec-c693cb5e (2026-10-18: "the top bar is like better aligned"): the
-   name alone on the left; its pills, the model and the money in one run at
-   the right; ← only on a narrow window, where the list is not beside it */
+   name alone on the left; its state chip and the model chip at the right,
+   nothing else (no schedule, dollars or tokens); ← only on a narrow window,
+   where the list is not beside it */
 .chat-head > .head-id { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
-.chat-head .head-meta { flex: 0 1 auto; min-width: 0; margin: 0 4px 0 2px; font-size: 12.5px; line-height: 20px;
-  font-variant-numeric: tabular-nums; text-align: right; }
 .chat-head > button { height: 30px; padding: 0 12px; align-items: center;
   justify-content: center; font-size: 13px; flex: 0 0 auto; }
 .chat-head > button:not(.narrow-only) { display: inline-flex; }

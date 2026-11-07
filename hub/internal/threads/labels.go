@@ -25,9 +25,9 @@ func StatusPill(status string) Pill {
 		return Pill{"your turn", "needs"}
 	case "running":
 		return Pill{"running", "running"}
-	case "done", "archived":
-		return Pill{"done", "done"}
-	case "":
+	// A finished turn reads idle: a session is never over, it waits for the
+	// next message, so "done" would mislead.
+	case "done", "archived", "":
 		return Pill{"idle", "idle"}
 	}
 	return Pill{strings.ReplaceAll(status, "_", " "), "idle"}

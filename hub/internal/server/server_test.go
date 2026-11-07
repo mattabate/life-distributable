@@ -1625,6 +1625,45 @@ func TestAskWithoutRunIDTakesTheLiveRun(t *testing.T) {
 	}
 }
 
+// One topic, one card: a card that folds in this session's open ones closes
+// them as it lands; another session's card, or a closed one, refuses the
+// whole add.
+func TestAskReplacesFoldsOpenCards(t *testing.T) {
+	s := newTest(t)
+	var a, b struct{ ID string }
+	json.Unmarshal(s.do(t, "POST", "/api/v1/threads", map[string]string{"prompt": "Post the queue."}).Body.Bytes(), &a)
+	json.Unmarshal(s.do(t, "POST", "/api/v1/threads", map[string]string{"prompt": "Other work."}).Body.Bytes(), &b)
+	n := 0
+	add := func(thread string, replaces ...string) (int, string) {
+		n++ // distinct titles: a same-title card already supersedes the old one
+		w := s.do(t, "POST", "/api/v1/asks", map[string]any{"thread_id": thread, "title": "Group " + strconv.Itoa(n) + " is up", "kind": "read", "replaces": replaces})
+		var got struct{ ID string }
+		json.Unmarshal(w.Body.Bytes(), &got)
+		return w.Code, got.ID
+	}
+	_, first := add(a.ID)
+	_, second := add(a.ID)
+	_, theirs := add(b.ID)
+	if code, _ := add(a.ID, theirs); code != 400 {
+		t.Fatalf("folded another session's card: %d", code)
+	}
+	code, merged := add(a.ID, first, second)
+	if code != 201 {
+		t.Fatalf("add with replaces: %d", code)
+	}
+	for _, id := range []string{first, second} {
+		if old, _ := s.thr.GetAsk(id); old.State != "dismissed" {
+			t.Errorf("%s still %s after %s folded it in", id, old.State, merged)
+		}
+	}
+	if code, _ := add(a.ID, first); code != 400 {
+		t.Fatalf("folded a closed card again: %d", code)
+	}
+	if keep, _ := s.thr.GetAsk(theirs); keep.State != "open" {
+		t.Fatalf("the other session's card moved: %s", keep.State)
+	}
+}
+
 // The per-ask web page is gone: the chat shows the whole
 // card, so an ask carries no `url` and /a/… is not a route.
 func TestNoAskPage(t *testing.T) {

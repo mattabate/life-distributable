@@ -198,7 +198,7 @@ func TestAuthFailureResumesOnceLoginWorks(t *testing.T) {
 	os.WriteFile(out+".done", nil, 0o644)
 	m.Poll()
 	asks, _ := m.ListAsks("active", th.ID, 10)
-	if len(asks) != 1 || asks[0].Title != "Session stopped: Claude login expired · resumes once it works" {
+	if len(asks) != 1 || asks[0].Title != AuthTitle {
 		t.Fatalf("%+v", asks)
 	}
 	m.ResumeAuthFailed()

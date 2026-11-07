@@ -213,8 +213,8 @@ func TestInstallCardIsTheDevices(t *testing.T) {
 		// The session whose only card is hidden here wears "done" - the pill
 		// it would wear with no card - never the thread's own "your turn".
 		{"web", 4, 1, 1, 2, "your_turn", "your_turn", "1 to install/install", "1 to install/install", "1 to read/read 1 to install/install"},
-		{"mobile", 3, 1, 0, 2, "your_turn", "", "1 to install/install", "done/done", "1 to read/read 1 to install/install"},
-		{"desktop", 2, 0, 1, 1, "", "your_turn", "done/done", "1 to install/install", "1 to read/read"},
+		{"mobile", 3, 1, 0, 2, "your_turn", "", "1 to install/install", "idle/idle", "1 to read/read 1 to install/install"},
+		{"desktop", 2, 0, 1, 1, "", "your_turn", "idle/idle", "1 to install/install", "1 to read/read"},
 	} {
 		b := Build(tc.surface, asks, nil, ths)
 		if b.Surface != tc.surface || b.Count != tc.count || b.Badges.YourTurn != tc.count {

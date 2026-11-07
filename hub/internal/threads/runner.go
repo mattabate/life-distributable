@@ -2390,9 +2390,11 @@ func failureTitle(text string) string {
 	case spend.IsUnsupportedModelError(text):
 		return "Session stopped: the Claude CLI is too old for this model"
 	// A dead login: the card says what fixes it, and ResumeAuthFailed
-	// restarts it once any turn gets through again.
+	// restarts it once any turn gets through again. Only the owner's login
+	// fixes it, so the title says so: "resumes once it works" read as
+	// self-healing.
 	case authFailure(text):
-		return "Session stopped: Claude login expired · resumes once it works"
+		return AuthTitle
 	case strings.Contains(text, "went to sleep"):
 		return "Session interrupted: the Mac slept mid-answer"
 	case apiErrorCode(text) != "":

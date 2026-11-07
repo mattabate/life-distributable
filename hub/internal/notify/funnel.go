@@ -92,6 +92,10 @@ func Spoken(kind, class, title, thread string) string {
 			return "Hey, " + thread + " hit the session limit. It picks up on its own at " + at
 		}
 		return "Hey, " + thread + " hit the session limit."
+	case kind == "error" && strings.HasPrefix(title, "Claude is logged out"):
+		// Every session is down until the owner logs in, so it is not one
+		// session's error.
+		return "Hey, Claude is logged out on the Mac, so no session can run. Log in to Claude there, then press Restart."
 	case kind == "error":
 		return "Hey, " + thread + " stopped on an error. " + title
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"life/hub/internal/actions"
 	"life/hub/internal/threads"
 )
 
@@ -27,7 +28,6 @@ func TestSessionTokenCannotActAsOwner(t *testing.T) {
 	for _, c := range []struct{ method, path string }{
 		{"POST", "/api/v1/actions/x/approve"},
 		{"POST", "/api/v1/actions/x/deny"},
-		{"POST", "/api/v1/actions/x/dismiss"},
 		{"POST", "/api/v1/actions/x/reopen"},
 		{"POST", "/api/v1/spend/budget/clear"},
 		{"PUT", "/api/v1/spend/model"},
@@ -41,6 +41,27 @@ func TestSessionTokenCannotActAsOwner(t *testing.T) {
 	// The hub token still reaches them: a 403 here would be the limit leaking.
 	if code, body := call(s.token, "POST", "/api/v1/actions/x/dismiss", "{}"); code == 403 {
 		t.Fatalf("hub token refused: %s", body)
+	}
+
+	// A session withdraws its own open proposal, on the record as itself; not
+	// another session's, and the reopen stays the owner's.
+	gated := true
+	own, _ := s.acts.Propose(actions.Proposal{Kind: "other", Gated: &gated, ThreadID: "th-1", Source: "claude:thread:th-1", Title: "Old wording", ExecType: "none"})
+	theirs, _ := s.acts.Propose(actions.Proposal{Kind: "other", Gated: &gated, ThreadID: "th-2", Source: "claude:thread:th-2", Title: "Not mine", ExecType: "none"})
+	if code, body := call(tok, "POST", "/api/v1/actions/"+theirs.ID+"/dismiss", "{}"); code != 403 {
+		t.Errorf("dismissed another session's proposal: %d %s", code, body)
+	}
+	if code, body := call(tok, "POST", "/api/v1/actions/"+own.ID+"/dismiss?via=app", "{}"); code != 200 {
+		t.Fatalf("own dismiss: %d %s", code, body)
+	}
+	if a, _ := s.acts.Get(own.ID); a.State != "dismissed" {
+		t.Errorf("own dismiss: %+v", a)
+	}
+	if ev, _ := s.acts.Events(own.ID); len(ev) == 0 || ev[len(ev)-1].Event != "dismissed" || ev[len(ev)-1].Actor != "claude:thread:th-1" {
+		t.Errorf("own dismiss trail: %+v", ev)
+	}
+	if code, body := call(tok, "POST", "/api/v1/actions/"+own.ID+"/reopen", "{}"); code != 403 {
+		t.Errorf("session reopened: %d %s", code, body)
 	}
 
 	// Every spelling of a claim, and none at all, comes out as the session.

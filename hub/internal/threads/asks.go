@@ -743,6 +743,28 @@ func (m *Manager) WroteSince(thread string, t time.Time) bool {
 	return n > 0
 }
 
+// SiblingAnswered: a card raised in the same breath as `a` (same session and
+// run, within a few seconds) with no line of its own, which the owner has
+// answered since. Its line was folded into a's (two install cards, one
+// spoken line), so answering it means they have heard what a's line says,
+// and a's held line speaking later would be stale. A sibling with a line of
+// its own leaves a to be said in full (that case is WroteSince's).
+func (m *Manager) SiblingAnswered(a Ask) bool {
+	if a.RunID == "" {
+		return false
+	}
+	created := a.CreatedAt.UTC()
+	var n int
+	m.db.QueryRow(`SELECT COUNT(*) FROM items i WHERE i.src='ask' AND i.id<>? AND i.thread_id=? AND i.run_id=?
+		AND COALESCE(i.said,'')='' AND i.state<>'open' AND i.created_at BETWEEN ? AND ?
+		AND EXISTS (SELECT 1 FROM item_events e WHERE e.item_id=i.id AND e.actor NOT LIKE 'claude:%' AND e.ts>?)`,
+		a.ID, a.ThreadID, a.RunID, store.TS(created.Add(-siblingWindow)), store.TS(created.Add(siblingWindow)), store.TS(created)).Scan(&n)
+	return n > 0
+}
+
+// siblingWindow: how close two cards' raises are to count as one breath.
+const siblingWindow = 5 * time.Second
+
 // Row projects one ask into the shared read-model row (store.Dated, Phase 5) —
 // the ONE place an ask becomes a thing the board ranks or the agenda dates.
 // Everything the two readers decide from lives on the row: Surface (who
@@ -1200,7 +1222,7 @@ func (m *Manager) asksHeader(threadID string) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("[Open asks on this thread — things you asked the owner for. Assess EACH one against their message: close it only if what they wrote or did actually resolves it — `lifectl ask <id> done \"what happened\"` (or `dismiss` if it no longer applies). A message about something else, or a Done on a different ask, resolves nothing: leave those open — they are theirs to close. Do not re-raise an ask that is listed here.")
+	b.WriteString("[Open asks on this thread — things you asked the owner for. Assess EACH one against their message: close it only if what they wrote or did actually resolves it — `lifectl ask <id> done \"what happened\"` (or `dismiss` if it no longer applies). A message about something else, or a Done on a different ask, resolves nothing: leave those open — they are theirs to close. Do not re-raise an ask that is listed here; news on the topic of one of YOUR read cards is one card for both (`lifectl ask add … --replaces <id>`), never a second.")
 	for _, a := range as {
 		st := "open"
 		if a.State == "answered" {

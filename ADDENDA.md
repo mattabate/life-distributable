@@ -1216,3 +1216,18 @@ Entry format:
 - For: everyone
 - Fix: `lifectl obs --until YYYY-MM-DD` now ends the window at the next local midnight, so the named day is in it. The route's `until` is exclusive and a bare day used to become that day's own midnight, which left the whole day out (#146). Thanks [@0718lol](https://github.com/mattabate/life-distributable/issues/146).
 - How: same merge as add-0008, then `make check`. By hand: `hub/cmd/lifectl/main.go`.
+
+## add-0164 · 2026-11-07 · Chat header and approval cards, plainer
+- For: everyone
+- Fix: The chat header shows only the session's state and its model; the schedule, cost and token count are gone on the desktop and the console (the phone's session settings still show cost and tokens). A session whose turn has finished reads idle, never done. On the desktop, the session's name at the top of the chat shows or hides the full conversation, and the "Show full chat" and "Nothing open" lines are gone; a running task's box lines up with the messages on both edges. Approval cards say "What it runs" above the command and no longer show an "other" chip. In the console's sessions list, speaking and waiting to speak sit next to the session's name instead of on a line of their own.
+- How: same merge as add-0008, then `make webcheck`, `ops/hub.sh restart` and `make ship`. By hand: `hub/internal/threads/labels.go`, `hub/internal/server/web/ui.js`, `views/threads.js`, `skin.css`, `app/Life/Sources/ThreadDetail.swift`, `ApprovalCard.swift`, and their tests.
+
+## add-0165 · 2026-11-07 · Fewer, clearer cards
+- For: everyone
+- Fix: A session can fold its own earlier open cards into a new one (`lifectl ask add --replaces id,id`), so one topic stays one card; an id that is not an open card of that session is refused before anything is raised. A session can dismiss its own open proposal, for example after rewording it; another session's proposal stays out of reach, and approve, deny and reopen stay yours. `lifectl propose` refuses a card that would reach you with no spoken message (`--say`). A spoken line still waiting to play is dropped once you answer the silent card raised beside it, so you never hear about something you already handled.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/cmd/lifectl/main.go`, `hub/cmd/hub/main.go`, `hub/internal/server/asks.go`, `actions.go`, `sessionlimits.go`, `hub/internal/threads/asks.go`, `threads.go`, `shared/api.md`, and their tests.
+
+## add-0166 · 2026-11-07 · A logged-out Claude says so
+- For: everyone
+- Fix: When the Claude login on the Mac is revoked or expired, the card reads "Claude is logged out on the Mac: log in again" and the spoken line says no session can run until you log in there and press Restart; it used to read like a passing error that would resume by itself. The session preamble also asks a long shell command to print N/total to its own output (a progress bar on its row), never to redirect into a file.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/notify/funnel.go`, `hub/internal/threads/retry.go`, `runner.go`, `threads.go`, and their tests.
