@@ -23,8 +23,10 @@ import (
 	"life/hub/internal/store"
 )
 
-// Version is the distributable release the heartbeat reports.
-const Version = "0.2.0"
+// Version is the distributable release the heartbeat reports. `make build`
+// stamps it from the checkout's release tag (git describe), so an install
+// reports the tag it runs, e.g. v1.1.41, or v1.1.41-3-gabc1234 between tags.
+var Version = "dev"
 
 // Defaults: PostHog US Cloud and the project's public, write-only token
 // (safe to ship: it can send events, never read them).
