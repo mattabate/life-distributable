@@ -489,7 +489,9 @@ test('actionHTML: the approval card in the chat', () => {
   assert.match(chat, /<div class="card-h">🔴 <span class="verb">approve<\/span><span class="at">today [^<]*<\/span><\/div><div class="t">git commit<\/div>/);
   assert.doesNotMatch(chat, /ago</);
   assert.match(chat, /<span class="pill purple">commit<\/span>/);
-  assert.match(chat, /will run: shell/);
+  assert.match(chat, /<summary class="muted">What it runs<\/summary>/);
+  // "other" is no warning: no chip for it.
+  assert.doesNotMatch(actionHTML({ ...action, kind: 'other' }), /pill[^>]*>other</);
   assert.match(chat, /<div class="acts"><button class="sm suggested" onclick="armActionReply\('act-1a2b3c4d','approved'\)">Approve<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d','denied'\)">Deny<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('action','act-1a2b3c4d'\)">Dismiss<\/button><\/div>/);
   assert.doesNotMatch(chat, /textarea|anote|decideAction|approve\?|Open in session/);
   // Deny on the bar: Deny filled, Approve plain.

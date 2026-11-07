@@ -107,6 +107,12 @@ func main() {
 		thread := fs.String("thread", os.Getenv("LIFE_THREAD_ID"), "proposing session id (default $LIFE_THREAD_ID); the decision is sent back to it")
 		say := fs.String("say", "", "the message the headphones speak when the card lands and the card leads with (≤700 chars); none = the hub writes one")
 		fs.Parse(os.Args[2:])
+		// A card that reaches the owner carries a session's own words: the
+		// hub's stand-in reads the title back, and a title of paths and flags
+		// is a card they cannot read.
+		if *thread != "" && strings.TrimSpace(*say) == "" && (*gated || *kind != "other" || (*exec != "none" && *exec != "")) {
+			die("propose: write --say, the plain message the owner hears and the card leads with (what it does and why, no paths, flags or ids)")
+		}
 		src := "lifectl"
 		if *thread != "" {
 			src = "claude:thread:" + *thread
@@ -393,7 +399,7 @@ func main() {
 		thread := threadFlag("")
 		c.list("/api/v1/asks?" + url.Values{"state": {state}, "thread": {thread}}.Encode())
 	case "ask":
-		// lifectl ask add "title" [--detail ...] [--kind decision|access|physical|read|install|other] [--surface mobile|web|any] [--check ...] [--thread id] [--on YYYY-MM-DD [--at HH:MM]]
+		// lifectl ask add "title" [--detail ...] [--kind decision|access|physical|read|install|other] [--surface mobile|web|any] [--check ...] [--thread id] [--on YYYY-MM-DD [--at HH:MM]] [--replaces id,id]
 		// lifectl ask <id>                      show
 		// lifectl ask <id> done|dismiss|reopen ["what happened"]
 		// lifectl ask <id> surface mobile|web|any
@@ -414,9 +420,19 @@ func main() {
 			say := fs.String("say", "", "THE message (the headphones speak it and the card leads with it): stands alone, first person, the whole answer in 2-5 plain sentences, ≤700 chars; --detail then holds only the owner's steps")
 			on := fs.String("on", "", "YYYY-MM-DD: hold it off the board until that day (it becomes an ask that morning)")
 			at := fs.String("at", "", "HH:MM with --on (default 08:00)")
+			replaces := fs.String("replaces", "", "id,id: this session's open cards the new one folds in (closed as it lands)")
 			fs.Parse(os.Args[4:])
 			if *thread == "" {
 				die("ask add: --thread required outside a session")
+			}
+			var folded []string
+			for _, id := range strings.Split(*replaces, ",") {
+				if id = strings.TrimSpace(id); id != "" {
+					folded = append(folded, id)
+				}
+			}
+			if len(folded) > 0 && *on != "" {
+				die("ask add: --replaces and --on together would leave nothing on the owner's board until that day")
 			}
 			if *on != "" {
 				// Dated ask: a calendar item that mints exactly this ask on the
@@ -427,7 +443,7 @@ func main() {
 					"detail": text(*detail), "thread_id": *thread, "source": src, "ask_kind": *kind, "check_hint": *check, "surface": *surface, "say": *say})
 				return
 			}
-			c.call("POST", "/api/v1/asks", map[string]string{"thread_id": *thread, "run_id": os.Getenv("LIFE_RUN_ID"), "title": titleArg(os.Args[3]), "detail": text(*detail), "kind": *kind, "check": *check, "surface": *surface, "say": *say})
+			c.call("POST", "/api/v1/asks", map[string]any{"thread_id": *thread, "run_id": os.Getenv("LIFE_RUN_ID"), "title": titleArg(os.Args[3]), "detail": text(*detail), "kind": *kind, "check": *check, "surface": *surface, "say": *say, "replaces": folded})
 			return
 		}
 		id := os.Args[2]
@@ -1341,6 +1357,7 @@ sessions  threads [--q words] [--archived] · thread new "prompt" [--goal g] [--
 asks      asks [active|all|open|answered|done|dismissed] [--thread id]
           ask add "title" [--detail d] [--kind decision|access|physical|read|install|other]
             [--surface mobile|web|any] [--check c] [--say "…"] [--thread id] [--on YYYY-MM-DD [--at HH:MM]]
+            [--replaces id,id]   one card for one topic: closes this session's open cards it folds in
           ask <id> [done|dismiss|reopen [note] | surface mobile|web|any | kind k]
 calendar  cal [from] [to]
           cal add "title" [--on YYYY-MM-DD] [--at HH:MM] [--kind owner|homework|agent|note|waiting] [--due on|by]

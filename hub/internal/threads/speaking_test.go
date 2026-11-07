@@ -50,6 +50,40 @@ func TestWroteSince(t *testing.T) {
 	}
 }
 
+// A held line drops once the owner answers the silent sibling raised with it
+// (two install cards, one spoken line); a sibling with its own line, an
+// agent's close, or another run's card leaves it to be said.
+func TestSiblingAnswered(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Ship it.", "", "", nil)
+	first, _ := m.AddAskSaid(th.ID, "run-1", "Install on the phone", "", "install", "", "", "Hey, install build 3 on the phone and the desktop.")
+	second, _ := m.AddAskSaid(th.ID, "run-1", "Install on the desktop", "", "install", "", "", "")
+	other, _ := m.AddAskSaid(th.ID, "run-2", "Read this", "", "read", "", "", "")
+	if m.SiblingAnswered(first) {
+		t.Fatal("nothing answered yet")
+	}
+	m.ResolveAsk(other.ID, "done", "app", "")
+	if m.SiblingAnswered(first) {
+		t.Fatal("another run's card is not a sibling")
+	}
+	m.ResolveAsk(second.ID, "done", "claude:thread:"+th.ID, "")
+	if m.SiblingAnswered(first) {
+		t.Fatal("the agent's own close is not the owner's answer")
+	}
+	if _, err := m.ResolveAsk(second.ID, "open", "app", "reopened"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ResolveAsk(second.ID, "done", "app", "clicked Install"); err != nil {
+		t.Fatal(err)
+	}
+	if !m.SiblingAnswered(first) {
+		t.Fatal("the owner's Install on the silent sibling makes the shared line stale")
+	}
+	if m.SiblingAnswered(second) {
+		t.Fatal("the first card has its own line and is open: it does not silence the second")
+	}
+}
+
 // A card's own line reads "speaking" while its session is heard, and not once
 // the mark ends or a double tap hushes it.
 func TestVoiceCardSpeaking(t *testing.T) {

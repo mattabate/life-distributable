@@ -126,6 +126,20 @@ func (s *Server) moveAction(to string) http.HandlerFunc {
 		if to == "proposed" {
 			move = s.acts.Reopen
 		}
+		// A session withdraws only its own proposal, on the record as itself;
+		// another session's, or a reopen, stays the owner's.
+		if id := s.caller(r); id != "" {
+			a, err := s.acts.Get(r.PathValue("id"))
+			if err != nil {
+				jsonErr(w, 404, err.Error())
+				return
+			}
+			if to != "dismissed" || a.ThreadID != id {
+				jsonErr(w, 403, "only the owner does this: a session dismisses only its own proposal")
+				return
+			}
+			via = "claude:thread:" + id
+		}
 		a, err := move(r.PathValue("id"), via)
 		if err != nil {
 			jsonErr(w, 409, err.Error())

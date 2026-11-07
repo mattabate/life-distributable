@@ -17,11 +17,12 @@ import (
 // ownerOnlyRoutes: the owner's decisions, settings, words and devices. Each
 // would land as the owner's: an approval, a message they typed, an Install
 // click, a phone at build N. The app and the console send these; lifectl from
-// a session needs none of them.
+// a session needs none of them. Dismiss is not here: a session may withdraw
+// its OWN open proposal (moveAction checks the thread), so a reworded card
+// does not leave the old one on the owner's board. Nothing runs on a dismiss.
 var ownerOnlyRoutes = map[string]bool{
 	"POST /api/v1/actions/{id}/approve":  true,
 	"POST /api/v1/actions/{id}/deny":     true,
-	"POST /api/v1/actions/{id}/dismiss":  true,
 	"POST /api/v1/actions/{id}/reopen":   true,
 	"POST /api/v1/spend/budget/clear":    true,
 	"PUT /api/v1/spend/model":            true,

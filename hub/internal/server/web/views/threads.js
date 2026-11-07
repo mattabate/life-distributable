@@ -284,8 +284,7 @@ function sessionCardHTML(t, o) {
   const bare = !o.cells;
   return `
     <div class="card click sess${bare ? ' sess-line' : ''}${o.active ? ' on' : ''}" onclick="if(!event.target.closest('a'))location.hash='${href}'">
-      <div class="sess-h"><a class="sess-t${t.unread > 0 ? ' unread' : ''}" href="${href}">${mdInline(t.title || t.id, false)}${live ? '<span class="sess-dot"></span>' : ''}</a>${t.role ? `<span class="small muted sess-role">${esc(t.role)}</span>` : ''}${bare ? `<span class="small muted sess-ago">${ago(t.last_message_at || t.updated_at)}</span>` : ''}</div>
-      ${o.pills ? `<div class="small sess-foot">${o.pills}</div>` : ''}
+      <div class="sess-h"><a class="sess-t${t.unread > 0 ? ' unread' : ''}" href="${href}">${mdInline(t.title || t.id, false)}${live ? '<span class="sess-dot"></span>' : ''}</a>${o.pills ? `<span class="sess-pills">${o.pills}</span>` : ''}<span class="sess-gap"></span>${t.role ? `<span class="small muted sess-role">${esc(t.role)}</span>` : ''}${bare ? `<span class="small muted sess-ago">${ago(t.last_message_at || t.updated_at)}</span>` : ''}</div>
       ${failed ? `<div class="small wrap2 err mt6">${failedPreview(t.last_message)}</div>` : ''}
       ${o.cells || ''}
     </div>`;
@@ -1061,13 +1060,6 @@ async function refreshThread(id, first) {
       <div class="head-id">
         <span id="chat-pills">${headPills(board, t)}</span>${t.model ? `<span class="pill" title="${esc(t.model)}">${esc(t.model_label || modelShort(t.model))}</span>` : ''}
       </div>
-      <div class="small muted trunc head-meta">${[
-        t.schedule && t.next_run_at ? esc(cadenceNext(t.schedule, when(t.next_run_at)))
-          : t.schedule ? esc(t.schedule_label || cadenceWords(t.schedule))
-          : t.next_run_at ? 'next ' + esc(when(t.next_run_at)) : '',
-        t.cost_usd ? `<span title="${costByModel(t)}">${usd(t.cost_usd)}</span>` : '',
-        t.tokens ? `<span title="${t.tokens.toLocaleString('en-US')} tokens: ${(t.tokens_in || 0).toLocaleString('en-US')} in, ${(t.tokens_out || 0).toLocaleString('en-US')} out, ${(t.tokens_cache_read || 0).toLocaleString('en-US')} cache read, ${(t.tokens_cache_write || 0).toLocaleString('en-US')} cache write">${tokens(t.tokens)}</span>` : '',
-      ].filter(Boolean).join(' · ')}</div>
     </div>
     <div class="msgs" id="msgs">
       ${chatFullHTML(full)}

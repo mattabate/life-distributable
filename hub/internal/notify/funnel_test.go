@@ -59,6 +59,7 @@ func TestSpokenSentences(t *testing.T) {
 		{"needs_you", "chore", "Take your supplements", "Calendar", "Hey, reminder to take your supplements."},
 		{"needs_you", "chore", "IKEA run", "Calendar", "Hey, reminder to IKEA run."},
 		{"error", "", "Crashed", "Build", "Hey, Build stopped on an error. Crashed."},
+		{"error", "", "Claude is logged out on the Mac: log in again", "Build", "Hey, Claude is logged out on the Mac, so no session can run. Log in to Claude there, then press Restart."},
 		{"needs_you", "", "Pick one", "Build", "Hey, Pick one. It's for Build."},
 		{"needs_you", "", "Pick one", "", "Hey, Pick one."},
 	} {

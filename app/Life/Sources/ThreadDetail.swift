@@ -596,8 +596,10 @@ struct ThreadDetail: View {
     @ViewBuilder var taskRows: some View {
         let tasks: [TurnTask] = thread.liveTasks
         if !tasks.isEmpty {
+            // The desktop's rows are boxes: both edges on the message rows',
+            // not indented under the dot.
             #if targetEnvironment(macCatalyst)
-            let inset: CGFloat = 13
+            let inset: CGFloat = 0
             #else
             let inset: CGFloat = 26
             #endif
@@ -713,10 +715,13 @@ struct ThreadDetail: View {
                         // The one mode button at the top: Show full chat over
                         // the open cards, Open cards only over the whole
                         // conversation (the console's chatFullHTML).
+                        // The desktop has none: its head's name is the switch.
+                        if !Device.isMac {
                         Button { withAnimation { full.toggle() } } label: {
                             Label(full ? "Open cards only" : "Show full chat", systemImage: full ? "rectangle.compress.vertical" : "text.alignleft")
                                 .font(.caption).foregroundStyle(.secondary)
                         }.buttonStyle(.plain).padding(.horizontal)
+                        }
                         if full {
                             if rows.count > shown {
                                 Button { withAnimation { shown += rowWindow * 2 } } label: {
@@ -747,7 +752,7 @@ struct ThreadDetail: View {
                                 case .recNotice(let r): RecNotice(rec: r, reload: { await load() })
                                 }
                             }
-                            if cells.isEmpty, thread.status != "running", cardsLoaded {
+                            if !Device.isMac, cells.isEmpty, thread.status != "running", cardsLoaded {
                                 Text("Nothing open").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
                             }
                         }
@@ -1491,10 +1496,16 @@ extension ThreadDetail {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Back")
             }
-            Text(md(thread.title)).font(.system(size: 15, weight: .semibold)).tracking(-0.18)
-                .lineLimit(1).truncationMode(.tail)
-                .padding(.leading, pushed ? 4 : 0)
-                .layoutPriority(1)
+            // The name opens the whole conversation and closes it again.
+            Button { withAnimation { full.toggle() } } label: {
+                Text(md(thread.title)).font(.system(size: 15, weight: .semibold)).tracking(-0.18)
+                    .lineLimit(1).truncationMode(.tail)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(full ? "Open cards only" : "Full chat")
+            .padding(.leading, pushed ? 4 : 0)
+            .layoutPriority(1)
             Spacer(minLength: 12)
             HStack(spacing: 6) {
                 HStack(spacing: 4) {
@@ -1507,11 +1518,8 @@ extension ThreadDetail {
                         .padding(.horizontal, 7).frame(height: 20)
                         .background(Web.code, in: RoundedRectangle(cornerRadius: 6))
                 }
-                if !headMeta.isEmpty {
-                    Text(headMeta).font(.system(size: 12.5)).monospacedDigit().foregroundStyle(Web.muted)
-                        .lineLimit(1)
-                        .padding(.leading, 2).padding(.trailing, 4)
-                }
+                // No schedule, dollars or tokens: Coming up shows the
+                // schedule, and the state and model chips are enough here.
             }
             .fixedSize()
         }
@@ -1527,16 +1535,6 @@ extension ThreadDetail {
         if let ps = store.board?.pills?[thread.id], !ps.isEmpty { return ps }
         if let p = thread.pill { return [p] }
         return thread.status == "running" ? [Pill(word: "running", tone: "running")] : []
-    }
-
-    /// `schedule · next when · $ · tokens`, the console's head-meta.
-    var headMeta: String {
-        var parts: [String] = []
-        if !thread.schedule.isEmpty { parts.append(thread.schedule_label ?? scheduleLabel(thread.schedule)) }
-        if let n = thread.next_run_at { parts.append("next " + nextLabel(n)) }
-        if thread.cost_usd > 0 { parts.append(usd(thread.cost_usd)) }
-        if let n = thread.tokens, n > 0 { parts.append(tokens(n)) }
-        return parts.joined(separator: " · ")
     }
 
     /// What a live pill does when clicked (HEAD_ACT): Stop the turn, or hush

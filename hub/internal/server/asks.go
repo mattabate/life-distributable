@@ -31,6 +31,9 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 		Surface string `json:"surface"`
 		// Say: the sentence the push speaks instead of the title (notify/voice.go).
 		Say string `json:"say"`
+		// Replaces: this thread's open cards the new one folds in, closed as it
+		// lands, so one topic stays one card.
+		Replaces []string `json:"replaces"`
 	}
 	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
@@ -57,10 +60,22 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 	if in.RunID == "" {
 		in.RunID = s.thr.LiveRun(in.ThreadID)
 	}
+	// Checked before the card exists, so a wrong id raises nothing: only an
+	// open card on this same thread can be folded in.
+	for _, id := range in.Replaces {
+		old, err := s.thr.GetAsk(id)
+		if err != nil || old.ThreadID != in.ThreadID || (old.State != "open" && old.State != "answered") {
+			jsonErr(w, 400, "replaces: "+id+" is not an open card on this session")
+			return
+		}
+	}
 	a, err := s.thr.AddAskSaid(in.ThreadID, in.RunID, in.Title, in.Detail, in.Kind, in.Check, in.Surface, in.Say)
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
+	}
+	for _, id := range in.Replaces {
+		s.thr.ResolveAsk(id, "dismissed", s.actor(r, "agent"), "folded into "+a.ID)
 	}
 	writeJSON(w, 201, a)
 }

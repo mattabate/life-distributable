@@ -199,10 +199,10 @@ Query `via` (default `app`). Optional body `{message?}` = the owner's note to th
 Optional body `{message?}` as above, same 403. → 200 Action (denied). 409 if not in `proposed`.
 
 ### POST /api/v1/actions/{id}/dismiss
-The silent close every card has. Query `via` (default `app`). The proposal leaves the board, nothing runs, the session is not told — so no `X-Life-Decider`; the trail records `dismissed`. → 200 Action (`dismissed`). 409 if not in `proposed`. Both chats fold it to one grey line with Reopen, like a dismissed ask.
+The silent close every card has. Query `via` (default `app`). The proposal leaves the board, nothing runs, the session is not told — so no `X-Life-Decider`; the trail records `dismissed`. → 200 Action (`dismissed`). 409 if not in `proposed`. Both chats fold it to one grey line with Reopen, like a dismissed ask. A session may dismiss only its own proposal (`lifectl dismiss <id>`, e.g. after rewording it as a new one): `via` becomes `claude:thread:<id>` whatever it sent, and another session's proposal is 403.
 
 ### POST /api/v1/actions/{id}/reopen
-Undoes a dismiss: → 200 Action (`proposed` again, trail `reopened`). 409 if not `dismissed`.
+Undoes a dismiss: → 200 Action (`proposed` again, trail `reopened`). 409 if not `dismissed`. The owner's only: a session gets 403.
 
 Every Action carries `outcomes: [{value, label, hint?}]` — the buttons on its card, worded once in `store/close.go` like an ask's: `approved` Approve, `denied` Deny, and for a session's proposal `""` Reply (a job's has no session to talk to). A Rec carries the same shape (`accepted` Accept, `declined` Decline, `""` Reply). `hint` (2026-09-26) is what the pick does in a few words — the console's button tooltip and the chat bar's line under the chips — so neither client keeps its own table.
 
@@ -494,7 +494,7 @@ Body `{author?=owner, target|new, text, in_reply_to?, outcome?, replies?: [{ref,
 Query `state` (default `active` = open+answered; `all`; or one state), `thread`, `limit` (default 200). The newest `limit`, oldest first. No per-ask web page (removed 2026-09-15): the chat card shows the whole detail.
 
 ### POST /api/v1/asks
-Body `{thread_id, title, detail?, kind?=other, surface?, check?, run_id?, say?}` → 201 Ask. 400 on bad kind / unknown thread. `say` (`lifectl ask add --say`) is the sentence the push SPEAKS in place of "To read — title" (≤400 chars, else the label form goes out); it is said, never stored. `surface` omitted or unrecognised = inferred from the text. `run_id` omitted (lifectl reads it from `LIFE_RUN_ID`) = **the thread's run in flight**, so a card raised mid-turn is still cut into that turn's tool chain (`/threads/{id}/steps` segments) and linked to its reply at turn end; only a card raised while the session is idle keeps none.
+Body `{thread_id, title, detail?, kind?=other, surface?, check?, run_id?, say?, replaces?}` → 201 Ask. 400 on bad kind / unknown thread. `replaces` (`lifectl ask add --replaces id,id`) lists the same thread's open cards the new one folds in: each is closed `dismissed` with "folded into <new id>" once the new card exists; any id that is not an open card on this thread is a 400 and nothing is raised. `say` (`lifectl ask add --say`) is the sentence the push SPEAKS in place of "To read — title" (≤400 chars, else the label form goes out); it is said, never stored. `surface` omitted or unrecognised = inferred from the text. `run_id` omitted (lifectl reads it from `LIFE_RUN_ID`) = **the thread's run in flight**, so a card raised mid-turn is still cut into that turn's tool chain (`/threads/{id}/steps` segments) and linked to its reply at turn end; only a card raised while the session is idle keeps none.
 
 ### GET /api/v1/asks/{id}
 

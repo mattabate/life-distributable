@@ -418,8 +418,10 @@ func main() {
 			// agent's) wants no voice either: a line still waiting for its
 			// turn is dropped. Nor one whose session the owner has written
 			// into since it was raised (threads.WroteSince): the line is stale.
+			// Nor one whose silent sibling the owner has answered: it carried
+			// this line (threads.SiblingAnswered).
 			if k, err := thr.GetAsk(card); err == nil {
-				return k.State == "open" && !thr.WroteSince(k.ThreadID, k.CreatedAt)
+				return k.State == "open" && !thr.WroteSince(k.ThreadID, k.CreatedAt) && !thr.SiblingAnswered(k)
 			}
 			if it, err := cal.Get(card); err == nil {
 				return it.State == "fired"
