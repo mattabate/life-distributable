@@ -15,9 +15,11 @@ pylint:
 test:
 	cd hub && gofmt -l . | (! grep .) && go vet ./... && go test -timeout 180s ./...
 
+# The heartbeat's version is the release tag this checkout is on.
+VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
 build:
 	@$(MAKE) --no-print-directory ops/bin/mic || echo "mic: skipped (needs the macOS 26 SDK); the console's Mic stays off"
-	cd hub && go build -o ../ops/bin/hub ./cmd/hub && go build -o ../ops/bin/lifectl ./cmd/lifectl
+	cd hub && go build -ldflags "-X life/hub/internal/usage.Version=$(VERSION)" -o ../ops/bin/hub ./cmd/hub && go build -o ../ops/bin/lifectl ./cmd/lifectl
 	$(call sign,ops/bin/hub,com.life.hub)
 
 # Signed with your Apple Development certificate and pinned to identifier +
