@@ -60,6 +60,8 @@ You don't need to be technical.
 - **Roles.** Each agent is a long-running Claude Code session with a role, like chief of staff or CTO.  They pass tasks between one another when some part of their task requires know-how from a different part of the swarm.
 - **Cards, not chat.** By default the chat history isn't displayed. You can only see what the agent needs you to do or wants to tell you in that moment.
 
+All of this is a starting point and subject to change. The agents maintain their own code, so if you don't like how something looks or works, just ask and they can change it from one prompt.
+
 ## Example app layout
 
 ### Desktop app
@@ -90,6 +92,8 @@ You don't need to be technical.
 The screenshots are the real apps on a demo hub with made-up people and plans.
 
 ## What it costs
+
+Every cost below goes to an outside service. Nothing goes to me.
 
 | What | Cost | Needed for |
 |---|---|---|
