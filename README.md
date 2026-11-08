@@ -54,29 +54,11 @@ You don't need to be technical.
 4. Paste the sentence above and press **Return**.
 5. From here, the agent leads. Do what it says, click where it points.
 
-## What it does
+## How it works
 
-- **A team, not a chat window.** Each agent is a long-running Claude Code
-  session with a standing role. It keeps its memory and keeps working while
-  you're away. Say what you want and it goes to the agent whose job it is;
-  anything nobody owns goes to the chief of staff, who adds new roles when
-  you ask.
-- **One screen for all of them.** Every agent has a cell showing what it is
-  doing, what it is waiting on you for, and how far along its jobs are.
-- **Talk to it.** Tap Option on the Mac, or the Mic button, and speak.
-  Speech is turned into text on the Mac itself.
-- **Puts a card on your phone when it needs you.** One clear thing to do,
-  decide or read. Everything else it handles itself.
-- **Asks before anything that matters.** Money, deleting, contacting
-  people, sharing data and pushing code wait for your approval, with a code
-  only you hold.
-- **Tracks your goals.** Agents file what they learn under each goal, so
-  every goal has a living "where this stands".
-- **Recommends, with receipts.** Every suggestion goes in a ledger with its
-  evidence and the price, so you can see later whether it worked.
-- **Grows with you.** Sessions, Recs, Calendar and Configuration ship in
-  the box. A page for anything else (money, a training log, a reading list)
-  is something your agent builds when a goal needs one.
+- **Calendar.** The agents keep a calendar that stores what they need to do for you, and what you need to do for them.
+- **Roles.** Each agent is a long-running Claude Code session with a role, like chief of staff or CTO.  They pass tasks between one another when some part of their task requires know-how from a different part of the swarm.
+- **Cards, not chat.** By default the chat history isn't displayed. You can only see what the agent needs you to do or wants to tell you in that moment.
 
 ## Example app layout
 
