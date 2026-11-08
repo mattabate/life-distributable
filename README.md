@@ -13,12 +13,9 @@ iPhone app, a desktop app or a web app. Nothing is on the public internet.
 Only your devices can reach it, and you can connect as many as you like: a
 Mac mini, a laptop, a phone.
 
-The agents can change their own apps. Ask for a new page, a new data source
-or a new way of working, and they build it in your copy of the code.
-
-As you work with them, they learn about you and your goals. They make
-recommendations and take actions on your behalf, and anything that matters
-waits for your yes. The data you share is saved on your Mac.
+The agents learn about you and your goals as you work with them. They 
+maintain their own code, and can change the UI or add data sources when asked. 
+Dangerous actions, like sending emails, are safe behind a secure approval step.
 
 **Setup takes about 2 hours,** mostly waiting on Apple and the Xcode
 download. **You need** a Mac that stays on, a
@@ -26,24 +23,22 @@ download. **You need** a Mac that stays on, a
 [Apple Developer membership][apple-dev] ($99 a year, only for the iPhone and
 desktop apps).
 
-## Install: paste one sentence
+## Install with one prompt
 
-Open Claude Code on your Mac and give it this prompt.
+Open Claude Code on your Mac and paste this:
 
 ```
 Clone github.com/mattabate/life-distributable and set up my life agent. Follow its SETUP.md.
 ```
 
-The agent runs the Terminal for you. Your part is clicking where it tells
-you. You never type a command.
+The agent walks you through setup from there.
 
 ⭐ **[Star it][repo]** to get developer addenda: new features and fixes land
 in [ADDENDA.md](ADDENDA.md) every week, and your agent brings each one to you.
 
 <p align="center"><img src="docs/img/sessions.png" alt="The life desktop app: the Sessions board with four cards waiting on the owner, an approval to buy $500 of VTI on Thursday, a honeymoon decision, an app build to install and today's tweet to pick, a Gmail expense scan the agent is running, and a new session ready to start" width="900"></p>
 
-**Configuration.** Your team, your goals, your devices, what the agents may
-spend, and every data source under the goal it serves.
+**Configuration.** Your team, goals, devices, and data sources.
 
 <p align="center"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: a Powered by card with the Claude Max 20x plan, $728 spent this month, 60% of the 5 hour limit, 86% of the 7 day limit and 79% of the Fable limit left, and the model picker; a Goals card with seven goals; and data sources grouped under the goals Grow my audience, Make more money, Build agent and Make me healthier, most sources first, each goal on its own row in its colour, every source with its logo, row count and last sync" width="900"></p>
 
@@ -63,7 +58,7 @@ You don't need to be technical.
 
 - **A team, not a chat window.** Each agent is a long-running Claude Code
   session with a standing role. It keeps its memory and keeps working while
-  you sleep. Say what you want and it goes to the agent whose job it is;
+  you're away. Say what you want and it goes to the agent whose job it is;
   anything nobody owns goes to the chief of staff, who adds new roles when
   you ask.
 - **One screen for all of them.** Every agent has a cell showing what it is
