@@ -275,10 +275,9 @@ function calStepBox(i) {
     ref: 'cal', id: i.id, title: i.title || '',
     outcomes: i.outcomes || [], means: lone ? CAL_TODO_MEANS : CAL_STEP_MEANS,
   }, {
-    // Done and Won't do both close it, and a step of his never closes silently.
-    requireWords: true,
+    // Done and Won't do both close it, words optional.
     placeholder: st => st.re && st.re.outcome
-      ? 'What happened? Done and Won\'t do close it with your words.'
+      ? 'Add a note if you like. Done and Won\'t do close it.'
       : lone ? 'Your words start a session about it.'
       : 'Your words go to the session that put this here.',
     redraw: () => pageRedraw(),

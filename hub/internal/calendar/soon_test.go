@@ -1,7 +1,6 @@
 package calendar
 
 import (
-	"errors"
 	"testing"
 	"time"
 )
@@ -70,9 +69,6 @@ func TestSoonItemIsNeverOverdueAndClosesWithWords(t *testing.T) {
 	}
 
 	// The owner's words close it; no session is behind it, so none hears them.
-	if _, err := c.Resolve(it.ID, "done", "owner", ""); !errors.Is(err, ErrNoteRequired) {
-		t.Fatalf("closed without words: %v", err)
-	}
 	now = now.Add(3 * time.Hour) // 19:21 on the 30th
 	if got, err = c.Resolve(it.ID, "done", "owner", "booked, $1,800"); err != nil || got.State != "done" || got.Resolution != "booked, $1,800" || got.ResolvedBy != "owner" {
 		t.Fatalf("resolve: %+v %v", got, err)

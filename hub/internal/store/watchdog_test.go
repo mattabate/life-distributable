@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// The real bug, reproduced: hold an open cursor and issue a second query.
-// With one connection that is a permanent self-deadlock, and before the
+// The class of bug, reproduced: hold the writer's only connection and issue
+// a second write. That is a permanent self-deadlock, and before the
 // watchdog existed it took the whole hub down until someone killed it.
 func TestWatchdogCatchesNestedQueryDeadlock(t *testing.T) {
 	dir := t.TempDir()
@@ -38,17 +38,17 @@ func TestWatchdogCatchesNestedQueryDeadlock(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 
-	// Now wedge it exactly as enrichProfiles did.
-	rows, err := db.Query(`SELECT id FROM t`)
+	// Now wedge the writer: a transaction left open holds its only
+	// connection, and a write outside it waits forever. (A nested read no
+	// longer can: reads have their own pool.)
+	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
-	rows.Next() // cursor open == the only connection is checked out
+	defer tx.Rollback()
 	go func() {
 		// This is the line that deadlocks; it never returns.
-		var n int
-		_ = db.QueryRow(`SELECT COUNT(*) FROM t`).Scan(&n)
+		_, _ = db.Exec(`INSERT INTO t VALUES (3)`)
 	}()
 
 	select {
@@ -71,6 +71,60 @@ func TestWatchdogCatchesNestedQueryDeadlock(t *testing.T) {
 	}
 	if !strings.Contains(dump, "db pool wedged") || !strings.Contains(dump, "database/sql") {
 		t.Fatalf("dump missing the evidence: %.200s", dump)
+	}
+}
+
+// Reads never queue behind the writer: with a write transaction open, a read
+// still answers at once, and with the last committed state; a read with a
+// cursor open still lets another read and a write through.
+func TestReadsDoNotWaitForTheWriter(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE t (id INTEGER); INSERT INTO t VALUES (1),(2)`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`INSERT INTO t VALUES (3)`); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan int, 1)
+	go func() {
+		var n int
+		db.QueryRow(`SELECT COUNT(*) FROM t`).Scan(&n)
+		done <- n
+	}()
+	select {
+	case n := <-done:
+		if n != 2 {
+			t.Fatalf("read saw %d rows mid-transaction, want the committed 2", n)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a read waited for the writer's transaction")
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT id FROM t`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	rows.Next()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM t`).Scan(&n); err != nil || n != 3 {
+		t.Fatalf("read beside an open cursor: n=%d err=%v", n, err)
+	}
+	if _, err := db.Exec(`INSERT INTO t VALUES (4)`); err != nil {
+		t.Fatalf("write beside an open cursor: %v", err)
+	}
+	if _, err := db.Query(`INSERT INTO t VALUES (5)`); err == nil {
+		t.Fatal("a write sent through Query ran; the readers are query_only")
 	}
 }
 

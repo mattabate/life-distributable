@@ -610,7 +610,7 @@ func ollamaWarm(model, prompt string) (time.Duration, error) {
 func (m *Manager) haikuPick(prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), routeTimeout)
 	defer cancel()
-	c := exec.CommandContext(ctx, m.ClaudeBin, "-p", "--model", spend.HelperModel, "--output-format", "text", "--max-turns", "1", "--tools", "")
+	c := exec.CommandContext(ctx, m.ClaudeBin, oneShotArgs(spend.HelperModel)...)
 	c.Dir = sideDir()
 	c.Stdin = strings.NewReader(prompt)
 	out, err := c.Output()

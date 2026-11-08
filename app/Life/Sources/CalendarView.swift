@@ -1361,7 +1361,7 @@ struct CalEntrySheet: View {
             .safeAreaInset(edge: .bottom) {
                 // No inner page. Homework: Did it + Send over an empty box
                 // closes it and wakes nobody; words or a photo go to a session
-                // named for it. The owner's step closes only with words. Sent → this sheet goes.
+                // named for it. The owner's step closes with or without words. Sent → this sheet goes.
                 if let r = respond {
                     VStack(alignment: .leading, spacing: 0) {
                         // A reminder's one answer draws no chip.

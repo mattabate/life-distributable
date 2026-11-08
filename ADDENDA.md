@@ -1261,3 +1261,23 @@ Entry format:
 - For: everyone who uses the web console
 - Fix: The chat's seconds counter ticked every second on every page, and any change redrew the whole chat. The counter now runs only while the tab is visible and something is counting, and a redraw replaces only the messages that changed, so the composer keeps its focus and draft (#160, thanks [@Grolla05](https://github.com/mattabate/life-distributable/issues/160)).
 - How: same merge as add-0008, then `make webcheck` and reload the console. By hand: `hub/internal/server/web/views/threads.js`.
+
+## add-0173 · 2026-11-08 · A Dismiss answers in milliseconds
+- For: everyone
+- Fix: Reads now have their own SQLite pool, so a Dismiss or any page load no longer waits seconds behind the slowest write, and the card greys the moment you press it. `thread_events` gets an index by run, so a running session's page reads in milliseconds again. The watchdog probes the writer.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart` (the index is built once on start). By hand: `hub/internal/store/store.go`, `watchdog.go`, `hub/internal/threads/threads.go`, `web/app.css`, `web/views/threads.js`, and their tests.
+
+## add-0174 · 2026-11-08 · A rec card names who your answer goes to
+- For: everyone with team mode on
+- Fix: A rec a role filed shows that role's name where the kind chip was, and the box says who your answer goes to: "Reply to <role>", or "Note to <role> (optional)" after a pick, with Send reading Accept, Decline or "Send to <role>". Recs carry `thread_title` for this. With team mode off, or a rec from a session with no role, the card looks as before. Web, phone and desktop.
+- How: same merge as add-0008, then `make check`, `ops/hub.sh restart` and `make ship` / `make mac` for the apps you use. By hand: `hub/internal/recs/recs.go`, `hub/internal/server/recs.go`, `web/views/recs.js`, `composer.js`, `skin.css`, `app/Life/Sources/Models.swift`, `RecsView.swift`, `RespondSheet.swift`, `shared/api.md`, fixtures.
+
+## add-0175 · 2026-11-08 · Fewer cards for the owner
+- For: everyone
+- Fix: Dismiss on one of your calendar steps closes it silently; I did this and Won't do close it with a note only if you add one; Reply keeps it open. A waiting check that finds nothing new moves itself a week out quietly instead of raising a Nudge / Wait 7 days / Drop card. With team mode on, a read card raised beside the same session's other open read cards comes back with a note naming them so the session folds instead of stacking, and a relay tells the receiving role it reports the outcome while the sender stays quiet on that topic.
+- How: same merge as add-0008, then `make check`, `ops/hub.sh restart`, and `make ship` for the phone's Respond sheet. By hand: `hub/internal/calendar/calendar.go`, `hub/cmd/lifectl/main.go`, `web/views/calendar.js`, `app/Life/Sources/RespondSheet.swift`, `CalendarView.swift`, `hub/internal/server/asks.go`, `hub/internal/threads/relay.go`, `shared/api.md`, and their tests.
+
+## add-0176 · 2026-11-08 · Session clones and one-shot calls
+- For: everyone with `session_user` set (clones); everyone (one-shots)
+- Fix: A session clone whose unlanded commits all landed on main under new hashes now moves to main (the old tip kept on `th-<id>-landed`) instead of failing its rebase at every start and running old code. The router, title and preflight one-shot `claude -p` calls load no MCP server (`--strict-mcp-config` with an empty `--mcp-config`), like sessions and jobs, since they run as the owner and a user-scope server would have loaded into them. `hub/go.mod` names the SQLite driver as the hub's one direct dependency.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/runas.go`, `preflight.go`, `route.go`, `threads.go`, `hub/go.mod`, `go.sum`, `hub/CLAUDE.md`, and their tests.

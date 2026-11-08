@@ -594,8 +594,11 @@ type View struct {
 // `waiting` is someone else's move: a reply, a quote, a merge owed by a day.
 // It belongs to its session, not the owner: Calendar tab only, no card, no
 // push. On its day the hub wakes the session once to look (the detail says
-// where); arrival closes it with a note, and only an empty look raises ONE
-// card on the owner (Raise: Nudge · Wait 7 days · Drop).
+// where); arrival closes it with a note, and an empty look moves it a week
+// out with a fresh look, quietly (Raise). It never raises a card on the
+// owner: a waiting item is not an action for them. When there is something
+// for the owner (a nudge only they can send), the session raises an
+// ordinary ask that says so.
 var kinds = map[string]bool{"owner": true, "homework": true, "agent": true, "note": true, "waiting": true}
 
 const kindsHelp = "kind must be owner|homework|agent|note|waiting"
@@ -1019,8 +1022,9 @@ func waitingWake(it Item) string {
 	return fmt.Sprintf("WAITING CHECK: %s (due %s).\nHow to tell it came: %s\n\n"+
 		"Check that source yourself now. Do not ask the owner and raise no card of your own.\n"+
 		"- It came: `lifectl cal %s done \"what came\"`, then act on it.\n"+
-		"- Nothing yet: `lifectl cal %s raise \"what you checked\"`. That gives the owner ONE card: Nudge · Wait 7 days · Drop.",
-		it.Title, it.Day, strings.TrimSpace(it.Detail), it.ID, it.ID)
+		"- Nothing yet: `lifectl cal %s raise \"what you checked\"`. That puts it a week out with a fresh look, quietly: no card on the owner (another day: `lifectl cal %s set --on YYYY-MM-DD`). Send a nudge yourself if it is ours to send. Only when the owner has something to do (a nudge only they can send) raise an ordinary ask that says exactly what.\n"+
+		"- No longer worth waiting for: `lifectl cal %s dismiss \"why\"`.",
+		it.Title, it.Day, strings.TrimSpace(it.Detail), it.ID, it.ID, it.ID, it.ID)
 }
 
 // cancelWake drops an item's queued wake (it was closed or moved).
@@ -1811,18 +1815,14 @@ func (c *Calendar) CloseBySource(source, by, note string) int {
 	return len(items)
 }
 
-// ErrNoteRequired: the owner closing one of their own steps with nothing said.
-var ErrNoteRequired = errors.New("say what happened: a step of yours closes with a note to its session, like a rec (Done needs words; Reopen does not)")
-
 // Resolve: done | dismissed | scheduled (reopen). Closing an item closes its
 // ask; reopening one dismisses the ask it had minted (the item will mint a
 // fresh one when it fires again) instead of orphaning it on the board.
 //
-// THE OWNER CLOSING THEIR OWN STEP IS A MESSAGE, NOT A BUTTON: a stray tap
-// must not mark a step done, so Done needs words, the way a rec's box works.
-// So by=owner on an `owner` item with done|dismissed REQUIRES a note, and the
-// close travels as ONE prompt to the item's session (`cal:<id>`, outcome
-// done|wont, the owner's words as the text): Queue calls claim, which writes the
+// The owner closing their own step: the note is optional. A Dismiss with
+// nothing said closes silently; any other close by=owner on an `owner` item
+// travels as ONE prompt to the item's session (`cal:<id>`, outcome
+// done|wont, the owner's words, if any, as the text): Queue calls claim, which writes the
 // row — the same path a Respond sheet posting that prompt directly takes, so
 // both surfaces and lifectl converge on one write. Agents, the verifier and
 // the hub still close directly (the ask relay below is theirs). Reopen never
@@ -1853,9 +1853,13 @@ func (c *Calendar) Resolve(id, state, by, note string) (Item, error) {
 	// message to a session.
 	if by == "owner" && it.Kind == "owner" && state != "scheduled" && (it.Day == "" || !sessionless(it.Kind, it.ThreadID)) {
 		note = strings.TrimSpace(note)
-		if note == "" {
-			c.mu.Unlock()
-			return it, ErrNoteRequired
+		// Dismiss with nothing said is the silent close: the row closes, its
+		// card goes, nobody is woken. Done and Won't do close with the final
+		// state and a note if the owner adds one.
+		if note == "" && state == "dismissed" {
+			defer c.mu.Unlock()
+			c.resolveLocked(it, state, by, "", true)
+			return c.Get(id)
 		}
 		// A to-do no session is behind: the owner's words close it and stay on
 		// the row. Nothing is woken to hear them.
@@ -1899,7 +1903,7 @@ func (c *Calendar) claim(id, outcome, note string) {
 	}
 	if outcome == "nudge" || outcome == "extend" {
 		if it.Kind == "waiting" && it.State == "fired" {
-			c.extendWaiting(it, outcome, note)
+			c.extendWaiting(it, outcome, note, "owner")
 		}
 		return
 	}
@@ -2316,13 +2320,21 @@ func (c *Calendar) cancelledWake(it Item) {
 
 // waitingTick: a waiting item is the clock's while its look is queued. One
 // with no wake (its Queue failed) gets one. A look delivered and never
-// answered (the session ended its turn without came or raise) is raised by
-// the hub the morning after, so nothing owed rots on the calendar.
+// answered (the session ended its turn without came or raise) is moved a
+// week out by the hub the morning after, with a fresh look, so nothing owed
+// rots on the calendar. A card raised by an older hub (Nudge · Wait 7 days
+// · Drop) goes back to waiting the same way.
 // A look cancelled while the item stayed scheduled (a cancel on a queued
 // wake) counts as no look: the item sat scheduled past its day, never
-// checked and never raised. The row is what is owed; closing it is how
-// waiting stops.
+// checked. The row is what is owed; closing it is how waiting stops.
 func (c *Calendar) waitingTick(it Item, now time.Time) {
+	if it.State == "fired" && it.AskKind == "waiting" {
+		c.mu.Lock()
+		c.extendWaiting(it, "look", "a waiting check no longer raises a card on the owner", "hub")
+		c.mu.Unlock()
+		c.thr.SyncStatus(it.ThreadID)
+		return
+	}
 	if it.State != "scheduled" || it.Day == "" {
 		return
 	}
@@ -2350,10 +2362,9 @@ func (c *Calendar) waitingTick(it Item, now time.Time) {
 	}
 }
 
-// Raise: the look found nothing, so the waiting item becomes ONE card on the
-// owner, on its session (store.WaitingOutcomes: Nudge · Wait 7 days · Drop).
-// `note` is what was checked, kept on the card. Only a scheduled waiting
-// item raises; a second raise of the same look is a no-op.
+// Raise: the look found nothing, so the waiting item moves a week out with a
+// fresh look, quietly: no card on the owner. `note` is what was checked,
+// kept in the detail. Only a scheduled waiting item moves.
 func (c *Calendar) Raise(id, by, note string) (Item, error) {
 	c.mu.Lock()
 	it, err := c.Get(id)
@@ -2369,30 +2380,14 @@ func (c *Calendar) Raise(id, by, note string) (Item, error) {
 		c.mu.Unlock()
 		return it, nil
 	}
-	tid, err := c.threadFor(it)
-	if err != nil {
-		c.mu.Unlock()
-		return it, err
-	}
 	c.cancelWake(it)
-	now := c.Now()
-	detail := strings.TrimSpace(it.Detail)
 	if note = strings.TrimSpace(note); note != "" {
-		detail += fmt.Sprintf("\n\n**Checked %s:** %s", now.Local().Format("2006-01-02"), note)
+		it.Detail = strings.TrimSpace(it.Detail) + fmt.Sprintf("\n\n**Checked %s:** %s", c.Now().Local().Format("2006-01-02"), note)
+		c.db.Exec(`UPDATE items SET detail=? WHERE id=?`, it.Detail, it.ID)
 	}
-	moved, err := c.setItem(it.ID, by, "nothing came", `UPDATE items SET thread_id=?, state='open', fired_at=?, updated_at=?, ask_kind='waiting', detail=? WHERE id=? AND state='scheduled'`,
-		tid, ts(now), ts(now), detail, it.ID)
+	c.extendWaiting(it, "look", note, by)
 	c.mu.Unlock()
-	if err != nil {
-		return it, err
-	}
-	if !moved {
-		return c.Get(id)
-	}
-	if _, err := c.thr.RaiseStep(it.ID, threads.ClassUnblock, it.Say); err != nil {
-		log.Printf("calendar: raise %s card: %v", it.ID, err)
-	}
-	log.Printf("calendar: raised %s (waiting) %s: nothing came", it.ID, it.Title)
+	log.Printf("calendar: %s (waiting) %s: nothing came, looking again in a week", it.ID, it.Title)
 	return c.Get(id)
 }
 
@@ -2413,19 +2408,24 @@ func (c *Calendar) AnswerWaiting(id, outcome, note string) (Item, error) {
 	return c.Get(id)
 }
 
-// extendWaiting: Nudge or Wait 7 days. The item goes back to waiting, a week
-// from today, with a fresh look queued (resolveLocked's reopen). Under c.mu.
-func (c *Calendar) extendWaiting(it Item, outcome, note string) {
+// extendWaiting: an empty look (`look`, by the session or the hub), or Nudge /
+// Wait 7 days on a card an older hub raised. The item goes back to waiting,
+// a week from today, with a fresh look queued (resolveLocked's reopen).
+// Under c.mu.
+func (c *Calendar) extendWaiting(it Item, outcome, note, by string) {
 	day := c.Now().Local().AddDate(0, 0, 7).Format("2006-01-02")
 	c.db.Exec(`UPDATE items SET day=?, ask_kind='' WHERE id=?`, day, it.ID)
 	why := "waiting 7 more days, to " + day
-	if outcome == "nudge" {
+	switch outcome {
+	case "nudge":
 		why = "nudged; waiting to " + day
+	case "look":
+		why = "nothing came; looking again " + day
 	}
 	if note = strings.TrimSpace(note); note != "" {
 		why += ": " + note
 	}
-	c.resolveLocked(it, "scheduled", "owner", why, true)
+	c.resolveLocked(it, "scheduled", by, why, true)
 }
 
 func (c *Calendar) threadFor(it Item) (string, error) {

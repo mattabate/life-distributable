@@ -316,8 +316,10 @@ struct RecRow: View {
                 Text(md(why)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
             HStack(spacing: 8) {
+                // Whose rec it is, in place of its kind when the hub names one.
+                if let who = rec.owner { Text(who).font(.caption.weight(.semibold)) }
                 RecChip(text: rec.domain, color: recDomainColor(rec.domain))
-                RecChip(text: rec.kind, color: .secondary)
+                if rec.owner == nil { RecChip(text: rec.kind, color: .secondary) }
                 if let m = rec.modelShort { RecChip(text: m, color: .indigo) }
                 if !rec.isOpen { RecChip(text: rec.status == "deferred" ? "later" : rec.status, color: recStatusColor(rec.status)) }
                 if let o = rec.outcome, !o.isEmpty { RecChip(text: o, color: recOutcomeColor(o)) }
@@ -433,7 +435,7 @@ struct RecDecisionSheet: View {
                 }
                 Divider()
                 Composer(draft: draft, attachments: attachments,
-                         placeholder: reply ? "Your note — it goes to the session" : request.accept ? "Anything it should know? (or just send)" : "Why not? (or just send)",
+                         placeholder: reply ? (goesToSource ? rec.owner.map { "Note to \($0)" } ?? "Your note, it goes to the session" : "Your note, it goes to a new session") : request.accept ? "Anything it should know? (or just send)" : "Why not? (or just send)",
                          sending: busy, send: send, allowEmpty: !reply)
                     .padding(10)
             }
@@ -621,8 +623,9 @@ struct RecDetail: View {
             if let error { Section { ErrorBanner(message: error) } }
             Section {
                 HStack {
+                    if let who = rec.owner { Text(who).font(.caption.weight(.semibold)) }
                     RecChip(text: rec.domain, color: recDomainColor(rec.domain))
-                    RecChip(text: rec.kind, color: .secondary)
+                    if rec.owner == nil { RecChip(text: rec.kind, color: .secondary) }
                     if let m = rec.modelShort { RecChip(text: m, color: .indigo) }
                     RecChip(text: rec.status, color: recStatusColor(rec.status))
                     if let o = rec.outcome, !o.isEmpty { RecChip(text: o, color: recOutcomeColor(o)) }
@@ -772,7 +775,12 @@ struct MacRecPills: View {
     /// Draw the status even when proposed (the rec's own page does).
     var status = false
     var body: some View {
-        WebTag(rec.kind)
+        // Whose rec it is, where the kind chip was; no role named, the kind stays.
+        if let who = rec.owner {
+            Text(who).font(.system(size: 12, weight: .semibold)).lineLimit(1).foregroundStyle(Web.fg)
+        } else {
+            WebTag(rec.kind)
+        }
         if let m = rec.modelShort { WebTag(m) }
         if status || rec.status != "proposed" {
             WebTag(rec.status == "deferred" && !status ? "later" : rec.status, tint: MacRecPill.status(rec.status))

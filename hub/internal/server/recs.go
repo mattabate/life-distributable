@@ -38,16 +38,34 @@ func (s *Server) recsList(w http.ResponseWriter, r *http.Request) {
 // stampRunning marks each rec whose filing session has a turn in flight, so
 // the card can say not to follow up yet. One threads query for the whole
 // list; a rec the owner filed themselves has no session and stays unmarked.
+// In team mode it also stamps the title of a role's session (the role's
+// name), so the card can say whose rec it is and who hears the answer; one
+// lookup per distinct session. With team mode off, or a session that plays
+// no role, nothing is named.
 func (s *Server) stampRunning(list []recs.Rec) {
 	if s.thr == nil || len(list) == 0 {
 		return
 	}
 	live := s.thr.RunningThreads()
-	if len(live) == 0 {
-		return
-	}
+	team := s.thr.TeamMode()
+	titles := map[string]string{}
 	for i := range list {
-		list[i].ThreadRunning = live[recs.SourceThread(list[i])]
+		id := recs.SourceThread(list[i])
+		if id == "" {
+			continue
+		}
+		list[i].ThreadRunning = live[id]
+		if !team {
+			continue
+		}
+		t, ok := titles[id]
+		if !ok {
+			if th, err := s.thr.Get(id); err == nil && th.Persona != "" {
+				t = th.Title
+			}
+			titles[id] = t
+		}
+		list[i].ThreadTitle = t
 	}
 }
 

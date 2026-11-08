@@ -203,7 +203,8 @@ function composerActionsHTML(key) {
       return `<span class="small muted" style="align-self:center">Are you sure?</span>
         <button class="armed" id="${d}-send" onclick="composerSend('${k}')">Send without</button>`;
     }
-    return `<button class="primary" id="${d}-send" onclick="composerSend('${k}')">${esc(spec.sendLabel || 'Send')}</button>`;
+    const label = typeof spec.sendLabel === 'function' ? spec.sendLabel(st) : spec.sendLabel;
+    return `<button class="primary" id="${d}-send" onclick="composerSend('${k}')">${esc(label || 'Send')}</button>`;
   }
   return spec.actions.map(a => {
     const armed = st.arm !== null && st.arm === a.value;
@@ -356,6 +357,8 @@ function composerPickOutcome(key, v, i) {
   const st = composerState(key);
   st.err = ''; composerShowErr(key, '');
   composerDrawRe(key);
+  // A Send that names the pick (a rec's: "Accept") follows it.
+  if (typeof (st.spec || {}).sendLabel === 'function') composerDrawActions(key);
   const box = document.getElementById(cdom(key) + '-draft');
   if (box) box.focus();
 }

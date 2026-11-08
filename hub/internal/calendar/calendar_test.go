@@ -369,12 +369,6 @@ func TestOwnerStepClosesWithWords(t *testing.T) {
 	if it.State != "fired" || it.AskID == "" {
 		t.Fatalf("%+v", it)
 	}
-	if _, err := c.Resolve(it.ID, "done", "owner", "  "); !errors.Is(err, ErrNoteRequired) {
-		t.Fatalf("closed with nothing said: %v", err)
-	}
-	if got, _ := c.Get(it.ID); got.State != "fired" {
-		t.Fatalf("refused close still wrote: %+v", got)
-	}
 	got, err := c.Resolve(it.ID, "done", "owner", "Went Saturday, freezer is full")
 	if err != nil {
 		t.Fatal(err)
@@ -1317,8 +1311,8 @@ func TestHomeworkIsHisStepInItsOwnLane(t *testing.T) {
 		t.Fatalf("a step does not make its session the owner's turn: %+v", h)
 	}
 	task, _ := c.Add(Item{Title: "Draft the letter", Day: "2026-09-13", Kind: "owner", ThreadID: host.ID})
-	if _, err := c.Resolve(task.ID, "done", "owner", ""); !errors.Is(err, ErrNoteRequired) {
-		t.Fatalf("an owner step a session waits on still closes with words: %v", err)
+	if _, err := c.Resolve(task.ID, "done", "owner", ""); err != nil {
+		t.Fatalf("I did this with nothing said still closes a step: %v", err)
 	}
 	if _, err := c.Add(Item{Title: "bad", Day: "2026-09-12", Kind: "lesson"}); err == nil || !strings.Contains(err.Error(), "homework") {
 		t.Fatalf("the kind list names homework: %v", err)

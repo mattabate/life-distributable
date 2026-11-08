@@ -630,7 +630,7 @@ func main() {
 			}
 			if os.Args[3] == "raise" {
 				// lifectl cal <id> raise ["what you checked"]: a waiting item's
-				// look found nothing, so ONE card on the owner (Nudge · Wait 7 days · Drop).
+				// look found nothing: a week out with a fresh look, no card on the owner.
 				c.call("POST", "/api/v1/calendar/"+id+"/raise", map[string]string{"by": actor(), "note": strings.Join(os.Args[4:], " ")})
 				return
 			}

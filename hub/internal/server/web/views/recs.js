@@ -160,7 +160,7 @@ function recCard(r) {
         <span class="small" style="white-space:nowrap">${costLabel(r)}</span>
       </div>
       <div class="row small muted" style="flex-wrap:wrap;gap:8px;margin-top:8px">
-        ${pill(r.kind)}
+        ${recWho(r)}
         ${r.model ? `<span class="pill" title="${esc(r.model)}">${esc(modelShort(r.model))}</span>` : ''}
         ${recPills(r)}
         ${recRunning(r)}
@@ -218,14 +218,21 @@ function recCard(r) {
 //
 // The three buttons and their tooltips are the rec's own `outcomes`
 // (store.RecOutcomes) — the hub's words, drawn by composer.js outcomeActions.
+//
+// The box says who it goes to and Send says what it does: a lit chip is
+// only the pick, so Send reads "Accept" or "Decline" until pressed, and
+// "Send to <role>" for a reply.
 const recKey = id => 'rec:' + id;
 function recDecideBox(r) {
   const src = recSourceThread(r);
   // An upload from this box is filed against the session that filed the rec.
   draftThread[recKey(r.id)] = src || null;
+  const who = r.thread_title || '';
+  const pick = st => (st.re && st.re.outcome) || '';
   return replyBox(recKey(r.id), recReplyOf(r, '', true), {
     outcomes: r.outcomes, chips: true,
-    placeholder: 'Your reply',
+    placeholder: st => pick(st) ? (who ? `Note to ${who} (optional)` : 'Anything to add (optional)') : (who ? `Reply to ${who}` : 'Your reply'),
+    sendLabel: st => (r.outcomes || []).find(o => o.value && o.value === pick(st))?.label || (who ? `Send to ${who}` : 'Send'),
     redraw: () => pageRedraw(),
     after: async () => { refreshBadges(); if (route.redraw) await pageRedraw(); else render(); },
     send: p => recSend(r, p),
@@ -241,6 +248,12 @@ function recDecideBox(r) {
 function recRunning(r) {
   return r.thread_running
     ? `<span title="its session is working right now — nothing to follow up on">${runningPill('running')}</span>` : '';
+}
+
+// Whose rec it is (its session's title, team mode), in place of the kind
+// chip; with no title the kind chip stays.
+function recWho(r) {
+  return r.thread_title ? `<span class="rec-who">${esc(r.thread_title)}</span>` : pill(r.kind);
 }
 
 // The session that filed it, which is where its decision goes by default.
@@ -316,7 +329,7 @@ async function recDetail(view, id) {
         <h2 style="margin:0">${mdInline(r.title)}</h2>
         <span class="small">${costLabel(r)}</span></div>
       <div class="row small muted" style="flex-wrap:wrap;gap:8px">
-        ${pill(r.kind)}
+        ${recWho(r)}
         ${r.model ? `<span class="pill" title="${esc(r.model)}">${esc(modelShort(r.model))}</span>` : ''}
         ${recPills(r)}
         ${recRunning(r)}

@@ -101,7 +101,7 @@ func TestFreshSchema(t *testing.T) {
 		return strings.Join(names, " ")
 	}
 	wantTables := "action_events actions ask_events asks away budget_days cal_events cal_items devices goal_notes goals item_events item_step_events item_step_plans item_steps items observations persona_defs prompts rec_events recs runs schema_migrations settings sync_runs thread_events thread_messages thread_runs threads voice_queue"
-	wantIndices := "action_events_action actions_state asks_state asks_thread away_days cal_events_item cal_items_day goal_notes_goal item_events_item item_step_events_step item_step_plans_item item_steps_item items_ask items_day items_src items_thread obs_ingested_at obs_source_kind_ts obs_supersedes obs_uniq persona_defs_key prompts_due prompts_target rec_events_rec recs_review recs_status runs_job sync_runs_name thread_events_thread thread_messages_run thread_messages_thread thread_runs_thread"
+	wantIndices := "action_events_action actions_state asks_state asks_thread away_days cal_events_item cal_items_day goal_notes_goal item_events_item item_step_events_step item_step_plans_item item_steps_item items_ask items_day items_src items_thread obs_ingested_at obs_source_kind_ts obs_supersedes obs_uniq persona_defs_key prompts_due prompts_target rec_events_rec recs_review recs_status runs_job sync_runs_name thread_events_run thread_events_thread thread_messages_run thread_messages_thread thread_runs_thread"
 	if got := inventory("table"); got != wantTables {
 		t.Errorf("tables:\n got %s\nwant %s", got, wantTables)
 	}
@@ -1712,6 +1712,36 @@ func TestAskReplacesFoldsOpenCards(t *testing.T) {
 	}
 }
 
+// A read card raised beside the session's other open read cards comes back
+// naming them, so it folds by topic; the first one, a non-read card, and
+// another session's cards say nothing.
+func TestReadCardNamesTheOpenPile(t *testing.T) {
+	s := newTest(t)
+	var a, b struct{ ID string }
+	json.Unmarshal(s.do(t, "POST", "/api/v1/threads", map[string]string{"prompt": "Triage the reviews."}).Body.Bytes(), &a)
+	json.Unmarshal(s.do(t, "POST", "/api/v1/threads", map[string]string{"prompt": "Other work."}).Body.Bytes(), &b)
+	add := func(thread, title, kind string) (id, note string) {
+		var got struct{ ID, Note string }
+		json.Unmarshal(s.do(t, "POST", "/api/v1/asks", map[string]any{"thread_id": thread, "title": title, "kind": kind}).Body.Bytes(), &got)
+		return got.ID, got.Note
+	}
+	add(b.ID, "Their reviews are fixed", "read")
+	first, note := add(a.ID, "The reviews went to two sessions", "read")
+	if note != "" {
+		t.Fatalf("first read card got a note: %q", note)
+	}
+	if _, note := add(a.ID, "Pick a port day", "decision"); note != "" {
+		t.Fatalf("a decision card got a note: %q", note)
+	}
+	second, note := add(a.ID, "Correction: the fixes are on main", "read")
+	if !strings.Contains(note, first) || !strings.Contains(note, "1 more open read card") || !strings.Contains(note, "ask "+second+" set") {
+		t.Fatalf("second read card's note: %q", note)
+	}
+	if strings.Contains(note, "Their reviews") {
+		t.Fatalf("note named another session's card: %q", note)
+	}
+}
+
 // The per-ask web page is gone: the chat shows the whole
 // card, so an ask carries no `url` and /a/… is not a route.
 func TestNoAskPage(t *testing.T) {
@@ -1969,6 +1999,27 @@ func TestRecsSayWhenTheirSessionIsRunning(t *testing.T) {
 	if w := s.do(t, "GET", "/api/v1/recs/"+bySession.ID, nil); strings.Contains(w.Body.String(), "thread_running") {
 		t.Fatal("false should be omitted:", w.Body.String())
 	}
+	// Whose rec it is rides along in team mode, running or not, for a role's
+	// session only; the owner's own has none.
+	db.Exec(`UPDATE threads SET title='Researcher' WHERE id=?`, th.ID)
+	if w := s.do(t, "GET", "/api/v1/recs/"+bySession.ID, nil); strings.Contains(w.Body.String(), "thread_title") {
+		t.Fatal("a session with no role is not named:", w.Body.String())
+	}
+	db.Exec(`UPDATE threads SET persona='researcher' WHERE id=?`, th.ID)
+	if w := s.do(t, "GET", "/api/v1/recs/"+bySession.ID, nil); !strings.Contains(w.Body.String(), `"thread_title":"Researcher"`) {
+		t.Fatal("single GET lacks the owner role:", w.Body.String())
+	}
+	if w := s.do(t, "GET", "/api/v1/recs", nil); !strings.Contains(w.Body.String(), `"thread_title":"Researcher"`) {
+		t.Fatal("list lacks the owner role:", w.Body.String())
+	}
+	if w := s.do(t, "GET", "/api/v1/recs/"+byOwner.ID, nil); strings.Contains(w.Body.String(), "thread_title") {
+		t.Fatal("the owner's own rec has no session:", w.Body.String())
+	}
+	s.thr.SetTeamMode(false)
+	if w := s.do(t, "GET", "/api/v1/recs/"+bySession.ID, nil); strings.Contains(w.Body.String(), "thread_title") {
+		t.Fatal("team mode off names nobody:", w.Body.String())
+	}
+	s.thr.SetTeamMode(true)
 	if _, err := db.Exec(`UPDATE threads SET status='running' WHERE id=?`, th.ID); err != nil {
 		t.Fatal(err)
 	}

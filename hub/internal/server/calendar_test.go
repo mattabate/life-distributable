@@ -75,11 +75,11 @@ func TestCalendarMergeAndNearDuplicate(t *testing.T) {
 	}
 }
 
-// The owner closing their own step over the wire is a message, not a button:
-// no note → 409 and nothing written; with one → 200, the item
-// closes with their words on it, and exactly one prompt carrying them is
-// queued for its session with `cal:<id>` + done. Reopen needs no words.
-func TestCalendarResolveByOwnerNeedsWords(t *testing.T) {
+// The owner closing their own step over the wire: Dismiss with nothing said
+// closes it silently and wakes nobody; with a note → 200, the item closes
+// with their words on it, and exactly one prompt carrying them is queued for
+// its session with `cal:<id>` + done. Reopen needs no words.
+func TestCalendarResolveByOwner(t *testing.T) {
 	s := newTest(t)
 	do := func(method, url, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, url, strings.NewReader(body))
@@ -96,11 +96,14 @@ func TestCalendarResolveByOwnerNeedsWords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w := do("POST", "/api/v1/calendar/"+it.ID+"/resolve", `{"state":"done"}`); w.Code != 409 || !strings.Contains(w.Body.String(), "say what happened") {
+	if w := do("POST", "/api/v1/calendar/"+it.ID+"/resolve", `{"state":"dismissed"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"dismissed"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if got, _ := s.Cal.Get(it.ID); got.State != "scheduled" {
-		t.Fatalf("refused close still wrote: %+v", got)
+	if ps, _ := s.thr.ListPrompts("", tr.ID, 10); len(ps) != 0 {
+		t.Fatalf("a silent dismiss wakes nobody: %+v", ps)
+	}
+	if w := do("POST", "/api/v1/calendar/"+it.ID+"/resolve", `{"state":"scheduled"}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
 	}
 	w := do("POST", "/api/v1/calendar/"+it.ID+"/resolve", `{"state":"done","note":"Went Saturday"}`)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"done"`) || !strings.Contains(w.Body.String(), `"resolution":"Went Saturday"`) {

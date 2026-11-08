@@ -4,6 +4,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -12,7 +13,46 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type DB struct{ *sql.DB }
+// DB is the hub's one writer (the embedded pool: Exec, Begin) and a pool of
+// readers (Query, QueryRow and their Context forms).
+//
+// Readers apart: with every statement on the one connection, each request
+// queued behind the slowest one in flight, so a click that closes a card
+// could wait seconds behind a long list read. WAL lets readers run beside
+// the writer, each on the last committed state, so reads have their own
+// connections (query_only: a write sent through Query fails loudly rather
+// than racing the writer) and the writes stay one serial queue as ever.
+type DB struct {
+	*sql.DB
+	r *sql.DB
+}
+
+// readers: how many reads may run at once.
+const readers = 8
+
+func (d *DB) reader() *sql.DB {
+	if d.r != nil {
+		return d.r
+	}
+	return d.DB
+}
+
+func (d *DB) Query(q string, args ...any) (*sql.Rows, error) { return d.reader().Query(q, args...) }
+func (d *DB) QueryRow(q string, args ...any) *sql.Row        { return d.reader().QueryRow(q, args...) }
+func (d *DB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return d.reader().QueryContext(ctx, q, args...)
+}
+func (d *DB) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	return d.reader().QueryRowContext(ctx, q, args...)
+}
+
+// Close closes the readers and the writer.
+func (d *DB) Close() error {
+	if d.r != nil {
+		d.r.Close()
+	}
+	return d.DB.Close()
+}
 
 // Schema: the observations table (obs is a thin package over it) and the
 // APNs device registry. Every other table lives with the package that owns
@@ -99,9 +139,17 @@ func Open(path string) (*DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1) // modernc sqlite + WAL: one writer, keep it simple
-	d := &DB{db}
+	d := &DB{DB: db}
 	if _, err := d.Migrate("store", Schema); err != nil {
 		return nil, err
 	}
+	// Opened after the first migration, so WAL is already the file's mode.
+	r, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=query_only(1)")
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	r.SetMaxOpenConns(readers)
+	d.r = r
 	return d, nil
 }

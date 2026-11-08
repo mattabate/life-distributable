@@ -1,7 +1,8 @@
 # hub/ — Go backend
 
-Stdlib only, one binary, config in `ops/hub.json`. Run `make check` from
-the repo root before declaring anything done. Lifecycle: `ops/hub.sh
+Stdlib plus one direct dependency, the pure-Go SQLite driver
+(`modernc.org/sqlite`; the rest of go.mod is its own), one binary, config in
+`ops/hub.json`. Run `make check` from the repo root before declaring anything done. Lifecycle: `ops/hub.sh
 install|restart|stop|status|logs|url`.
 
 Layout: `cmd/hub` (main, TLS, token) · `internal/config` · `internal/spend`
