@@ -2018,6 +2018,8 @@ const CARD_FOLD = {
   action: (id, back) => [`/actions/${id}/${back ? 'reopen' : 'dismiss'}?via=web`, {}, back ? 'reopened' : 'dismissed'],
 };
 const cardFold = (ref, id, back) => {
+  const el = document.getElementById('ask-card-' + id);
+  if (el && !back) el.classList.add('closing');
   if (!back) composerForget('chat', ref, id);
   return cardMove(...CARD_FOLD[ref](id, back));
 };

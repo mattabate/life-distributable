@@ -3,8 +3,12 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+
+	"life/hub/internal/threads"
 )
 
 // Asks: what agents need from the owner, as rows (docs/ASKS.md).
@@ -77,7 +81,34 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 	for _, id := range in.Replaces {
 		s.thr.ResolveAsk(id, "dismissed", s.actor(r, "agent"), "folded into "+a.ID)
 	}
-	writeJSON(w, 201, a)
+	writeJSON(w, 201, struct {
+		threads.Ask
+		Note string `json:"note,omitempty"`
+	}{a, s.readPile(a)})
+}
+
+// readPile: the session's other open read cards, said back to it the moment
+// it raises one more, so it folds by topic while it still holds the words:
+// several read cards on one hand-off, one correcting another, read as noise.
+// A nudge, not a cap: several topics are several cards.
+func (s *Server) readPile(a threads.Ask) string {
+	if a.Class != "read" {
+		return ""
+	}
+	open, _ := s.thr.ListAsks("active", a.ThreadID, 0)
+	var b strings.Builder
+	n := 0
+	for _, o := range open {
+		if o.ID == a.ID || o.Class != "read" {
+			continue
+		}
+		n++
+		fmt.Fprintf(&b, "; %s %q", o.ID, o.Title)
+	}
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("You now hold %d more open read card(s)%s. Same topic, or one correcting another: fold them now (`lifectl ask %s set --title … --say …` with the whole story, then `lifectl ask <old> dismiss \"folded into %s\"`). A card only echoing another session's is not yours to raise: dismiss it.", n, b.String(), a.ID, a.ID)
 }
 
 func (s *Server) getAsk(w http.ResponseWriter, r *http.Request) {

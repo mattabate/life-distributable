@@ -177,6 +177,10 @@ type Rec struct {
 	// it from the threads table on every read (server.recsList / recsGet), so
 	// the list and the page carry the same live answer.
 	ThreadRunning bool `json:"thread_running,omitempty"`
+	// ThreadTitle: the title of the role session that filed it, the role
+	// whose rec it is; stamped beside ThreadRunning in team mode, empty for a
+	// rec with no session or one that plays no role.
+	ThreadTitle string `json:"thread_title,omitempty"`
 	// Answers: the buttons on the card — Accept · Decline · Reply, the
 	// Recs page's own row (Later went 2026-09-09) — worded here like an ask's
 	// `outcomes` so both surfaces draw one row (2026-09-18). Dismiss is not

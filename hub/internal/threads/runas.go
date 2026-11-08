@@ -97,7 +97,10 @@ func (m *Manager) sessionDir(t Thread, dir string) string {
 // main when its tree is clean: a clone that only fast-forwarded kept the
 // scripts it was made with, so a fix to ops/land.sh never reached it and its
 // commits could never leave. A conflict is aborted, and a dirty tree (rebase
-// refuses it) is left as it is.
+// refuses it) is left as it is. A conflict whose every commit main already
+// has under the same subject (landed under a new hash, then main moved on)
+// moves the branch to main, the old tip kept on th-<id>-landed; otherwise
+// such a clone conflicts at every start and keeps running old code.
 func (m *Manager) catchUp(t Thread, wt string) {
 	if _, err := m.asSession("git", "-C", wt, "fetch", "--quiet", "origin", "main"); err != nil {
 		return
@@ -105,10 +108,50 @@ func (m *Manager) catchUp(t Thread, wt string) {
 	if _, err := m.asSession("git", "-C", wt, "merge", "--ff-only", "--quiet", "origin/main"); err == nil {
 		return
 	}
-	if out, err := m.asSession("git", "-C", wt, "rebase", "--quiet", "origin/main"); err != nil {
-		m.asSession("git", "-C", wt, "rebase", "--abort")
-		log.Printf("thread %s: clone not caught up to main: %s", t.ID, strings.TrimSpace(string(out)))
+	out, err := m.asSession("git", "-C", wt, "rebase", "--quiet", "origin/main")
+	if err == nil {
+		return
 	}
+	m.asSession("git", "-C", wt, "rebase", "--abort")
+	if m.allLanded(wt) {
+		m.asSession("git", "-C", wt, "branch", "-f", "th-"+t.ID+"-landed", "HEAD")
+		// --keep never touches a dirty tree: it refuses instead.
+		out2, err2 := m.asSession("git", "-C", wt, "reset", "--keep", "--quiet", "origin/main")
+		if err2 == nil {
+			log.Printf("thread %s: clone's commits already on main: moved to main (old tip th-%s-landed)", t.ID, t.ID)
+			return
+		}
+		out = out2
+	}
+	log.Printf("thread %s: clone not caught up to main: %s", t.ID, strings.TrimSpace(string(out)))
+}
+
+// allLanded: every commit the clone has and main lacks has a commit of the
+// same subject on main since the two forked.
+func (m *Manager) allLanded(wt string) bool {
+	mine, err := m.asSession("git", "-C", wt, "log", "--format=%s", "origin/main..HEAD")
+	if err != nil {
+		return false
+	}
+	theirs, err := m.asSession("git", "-C", wt, "log", "--format=%s", "HEAD..origin/main")
+	if err != nil {
+		return false
+	}
+	onMain := map[string]bool{}
+	for _, s := range strings.Split(string(theirs), "\n") {
+		onMain[strings.TrimSpace(s)] = true
+	}
+	n := 0
+	for _, s := range strings.Split(string(mine), "\n") {
+		if s = strings.TrimSpace(s); s == "" {
+			continue
+		}
+		if !onMain[s] {
+			return false
+		}
+		n++
+	}
+	return n > 0
 }
 
 // sessionClone: the session user's own clone of the main checkout, on branch

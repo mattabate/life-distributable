@@ -25,7 +25,7 @@ import (
 func (m *Manager) probeModel(model string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	c := m.sessionCLI(ctx, "-p", "--model", model, "--output-format", "text", "--max-turns", "1", "--tools", "")
+	c := m.sessionCLI(ctx, oneShotArgs(model)...)
 	c.Stdin = strings.NewReader("Reply with the single word OK.")
 	out, err := c.CombinedOutput()
 	return string(out), err
@@ -113,6 +113,15 @@ func (m *Manager) sessionCLI(ctx context.Context, args ...string) *exec.Cmd {
 	c := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "-H", "-u", m.RunAs.User, "/bin/sh", "-c", sh)
 	c.Dir = "/"
 	return c
+}
+
+// oneShotArgs: one tool-less turn on model, with no MCP server from any
+// settings layer (--strict-mcp-config, as runner.go and sched.go), so a
+// server in the user's config never loads into a call that reads a
+// transcript or the owner's message.
+func oneShotArgs(model string) []string {
+	return []string{"-p", "--model", model, "--output-format", "text", "--max-turns", "1", "--tools", "",
+		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`}
 }
 
 // sideDir is an empty folder the tool-less one-shot calls (preflight probes,

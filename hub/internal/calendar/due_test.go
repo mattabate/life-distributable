@@ -130,14 +130,24 @@ func TestOnTheDayChoreIsMissedNotOverdue(t *testing.T) {
 			t.Fatalf("a chore never nags: %v", n.msgs)
 		}
 	}
-	// A tick closes the next one with no words; a session's step needs them.
+	// A tick closes the next one with no words; so does a session's step
+	// (Dismiss closes without a note; I did this's note is optional).
 	if _, err := c.Resolve(next[0].ID, "done", "owner", ""); err != nil {
 		t.Fatalf("sessionless chore should tick closed: %v", err)
 	}
 	host, _ := th.CreateIdle("host", "Host", "life")
 	step, _ := c.Add(Item{Title: "Send the stove photo", Kind: "owner", Day: "2026-10-01", ThreadID: host.ID})
-	if _, err := c.Resolve(step.ID, "done", "owner", ""); err != ErrNoteRequired {
-		t.Fatalf("a session's step needs words: %v", err)
+	c.Tick()
+	if got, err := c.Resolve(step.ID, "dismissed", "owner", ""); err != nil || got.State != "dismissed" {
+		t.Fatalf("Dismiss closes a session's step with nothing said: %+v %v", got, err)
+	}
+	if got, _ := c.Get(step.ID); got.AskID != "" {
+		if a, _ := th.GetAsk(got.AskID); a.Active() {
+			t.Fatalf("its card should go too: %+v", a)
+		}
+	}
+	if ps, _ := th.ListPrompts("", host.ID, 10); len(ps) != 0 {
+		t.Fatalf("a silent dismiss wakes nobody: %+v", ps)
 	}
 }
 

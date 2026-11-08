@@ -133,10 +133,41 @@ func TestSessionCloneAsSessionUser(t *testing.T) {
 			sudo + "git -C " + wt + " rebase --quiet origin/main",
 		}
 		if rebaseFails {
-			want = append(want, sudo+"git -C "+wt+" rebase --abort")
+			want = append(want, sudo+"git -C "+wt+" rebase --abort",
+				sudo+"git -C "+wt+" log --format=%s origin/main..HEAD",
+				sudo+"git -C "+wt+" log --format=%s HEAD..origin/main")
 		}
 		if strings.Join(cmds, "\n") != strings.Join(want, "\n") {
 			t.Errorf("diverged clone (rebase fails %v): %v", rebaseFails, cmds)
+		}
+	}
+	// A clone whose one commit landed under a new hash while main moved on
+	// conflicts at every start. A conflict whose every commit main has by
+	// subject moves the branch to main, the old tip kept on a branch; one
+	// unlanded commit leaves the clone as it is.
+	for _, mine := range []string{"Add a script\n", "Add a script\nNot landed\n"} {
+		cmds = nil
+		m.Run = func(n string, a ...string) ([]byte, error) {
+			line := strings.Join(append([]string{n}, a...), " ")
+			cmds = append(cmds, line)
+			switch {
+			case strings.Contains(line, " merge --ff-only "), strings.Contains(line, " rebase --quiet "):
+				return nil, os.ErrInvalid
+			case strings.HasSuffix(line, " origin/main..HEAD"):
+				return []byte(mine), nil
+			case strings.HasSuffix(line, " HEAD..origin/main"):
+				return []byte("Later on main\nAdd a script\n"), nil
+			}
+			return nil, nil
+		}
+		m.catchUp(th, wt)
+		all := strings.Join(cmds, "\n")
+		landed := !strings.Contains(mine, "Not landed")
+		if got := strings.Contains(all, " reset --keep --quiet origin/main"); got != landed {
+			t.Errorf("landed=%v: reset %v: %s", landed, got, all)
+		}
+		if got := strings.Contains(all, " branch -f th-"+th.ID+"-landed HEAD"); got != landed {
+			t.Errorf("landed=%v: old tip kept %v: %s", landed, got, all)
 		}
 	}
 	m.Run = func(n string, a ...string) ([]byte, error) {

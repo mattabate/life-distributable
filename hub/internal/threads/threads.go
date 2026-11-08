@@ -177,6 +177,11 @@ CREATE INDEX IF NOT EXISTS persona_defs_key ON persona_defs(key, id);`,
 	// bookStranded), not yet confirmed by a CLI total. Carried to the next run
 	// on the session; that run's first result clears it (finishTurn).
 	`ALTER TABLE thread_runs ADD COLUMN cost_est REAL NOT NULL DEFAULT 0`,
+	// The turn in flight's tool count and clock (turnCols) look events up by
+	// run; on thread_id alone they walked every event the session ever had,
+	// several times per read, so GET /threads/{id} of a long-running session
+	// took seconds.
+	`CREATE INDEX IF NOT EXISTS thread_events_run ON thread_events(thread_id, run_id, kind)`,
 }
 
 // ModelCost: one model's share of a chat's bill. Model is the CLI's model id,
@@ -476,7 +481,7 @@ type Manager struct {
 	// ClaimCal records what the owner SAID about one of their calendar steps
 	// when they answer it (`cal:<id>` with outcome done|wont) — the calendar
 	// closes the item and the ask it raised, quietly, since this prompt IS the
-	// message (closing one of their steps needs words, like a rec). nil =
+	// message (a Dismiss with no note closes their step silently). nil =
 	// the claim is not recorded. Wired by calendar.New.
 	ClaimCal func(calID, outcome, note string)
 	// ResolveCal closes (done|dismissed) or reopens (open) a fired step whose
@@ -1099,7 +1104,7 @@ func (m *Manager) autoTitle(threadID string) {
 func (m *Manager) haikuSummarize(dir, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	c := exec.CommandContext(ctx, m.ClaudeBin, "-p", "--model", spend.HelperModel, "--output-format", "text", "--max-turns", "1", "--tools", "")
+	c := exec.CommandContext(ctx, m.ClaudeBin, oneShotArgs(spend.HelperModel)...)
 	// Not `dir`: from the project the CLI loads its instructions and memory
 	// index into every one-line title (preflight.go sideDir).
 	_ = dir

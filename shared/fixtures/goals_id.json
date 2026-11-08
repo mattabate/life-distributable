@@ -1,17 +1,17 @@
 {
   "id": "get-smarter",
-  "created_at": "2026-11-05T07:10:13.021096Z",
-  "updated_at": "2026-11-05T07:10:13.021319Z",
+  "created_at": "2026-11-08T11:02:21.545468Z",
+  "updated_at": "2026-11-08T11:02:21.5456Z",
   "title": "Get smarter",
   "statement": "Learn a thing a week",
   "horizon": "year",
   "cadence": "weekly",
   "status": "active",
   "sources": "learn",
-  "last_reviewed_at": "2026-11-05T07:10:13.021629Z",
+  "last_reviewed_at": "2026-11-08T11:02:21.545771Z",
   "note_count": 1,
   "digest": "Two tracks open.",
-  "digest_at": "2026-11-05T07:10:13.021319Z",
+  "digest_at": "2026-11-08T11:02:21.5456Z",
   "emblem": {
     "symbol": "learn",
     "hue": 195

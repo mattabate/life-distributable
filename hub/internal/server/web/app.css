@@ -518,6 +518,9 @@ a.chain-w:hover, a.chain-w.on { color: var(--accent); }
 }
 .ask.read { --tint: var(--accent); }
 .ask.install { --tint: var(--teal); }
+/* Read or Dismiss pressed: the card greys at once and takes no second click
+   while the hub closes it. */
+.ask.closing { --tint: var(--muted); opacity: .5; pointer-events: none; }
 /* The card in his ears, on a session row (2026-10-28 20:01). */
 .ask.speaking { --tint: var(--green); }
 .ask.mini.speaking .verb { color: var(--green); }

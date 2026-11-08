@@ -10,8 +10,9 @@ import (
 	"time"
 )
 
-// The hub keeps ONE SQLite connection (SetMaxOpenConns(1)), which makes
-// writes serial and the code simple. The cost is that an open `*sql.Rows`
+// The hub keeps ONE SQLite connection for writes (SetMaxOpenConns(1); reads
+// have their own pool, store.go), which makes writes serial and the code
+// simple. The cost is that an open `*sql.Rows`
 // IS the connection: any code that issues a second query while still
 // iterating the first deadlocks against itself, and because the pool never
 // times out, it deadlocks FOREVER — every later request queues behind it and
@@ -90,8 +91,8 @@ func (w *Watchdog) probe(ctx context.Context) bool {
 	defer cancel()
 	var one int
 	// Deliberately the pool's own path (not a cached conn): this is the same
-	// queue every handler waits in.
-	return w.DB.QueryRowContext(c, `SELECT 1`).Scan(&one) == nil && one == 1
+	// queue every write waits in (the writer; reads have their own, store.go).
+	return w.DB.DB.QueryRowContext(c, `SELECT 1`).Scan(&one) == nil && one == 1
 }
 
 // trip records why the hub was stuck, then ends the process.

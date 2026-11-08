@@ -39,8 +39,8 @@ struct RespondSubject {
     /// A card whose wordless answer says nothing to the session (a read): the
     /// hub records it and stops there rather than spinning the session up.
     var silentWithoutWords = false
-    /// Send needs words even with an outcome chosen. True for one of the
-    /// owner's own calendar steps, so a stray tap can't mark one done.
+    /// Send needs words even with an outcome chosen. No card sets it today:
+    /// the owner's own calendar steps close with or without a note.
     var requireWords = false
     /// A to-do no session is behind (`CalEntry.isLoneTodo`): an outcome closes
     /// the item on the hub with the owner's words as its note — no prompt, no
@@ -58,6 +58,9 @@ struct RespondSubject {
     /// A reminder (`note`): its words close it as read - Respond on a read
     /// card is its answer, as in the chat.
     var wordsClose = false
+
+    /// A rec's box names its owner and Send names the pick (RespondModel).
+    var isRec = false
 
     /// A homework row on the calendar: the console's calHomeworkBox. A
     /// reminder takes the same box with NO chips: the hub sends it no
@@ -94,7 +97,7 @@ struct RespondSubject {
         title = e.title
         detail = e.detail ?? ""
         threadID = e.thread_id ?? "calendar"
-        requireWords = true
+        // Words optional: Done and Won't do close it with or without a note.
         loneTodo = e.isLoneTodo ? e.id : nil
         outcomes = Self.chips(e.outcomes)
         initial = outcomes.first { $0.value == first } ?? .none
@@ -109,6 +112,8 @@ struct RespondSubject {
         ref = "rec:" + r.id
         title = r.title
         threadID = r.sourceThreadID ?? ""
+        threadTitle = r.owner ?? ""
+        isRec = true
         newTitle = mdPlain(r.title)
         outcomes = Self.chips(r.outcomes ?? [AskOutcome(value: "accepted", label: "Accept"),
                                              AskOutcome(value: "declined", label: "Decline"),
@@ -216,9 +221,20 @@ final class RespondModel {
     }
 
     /// An outcome IS a response, so Send stays live with nothing typed —
-    /// except on the owner's own calendar step, which closes only with words.
+    /// unless the subject requires words.
     var allowEmpty: Bool { outcome.closes && !subject.requireWords }
-    var placeholder: String { allowEmpty ? "Anything to add (optional)" : "Your reply" }
+    var placeholder: String {
+        let who = subject.isRec ? subject.threadTitle : ""
+        if who.isEmpty { return allowEmpty ? "Anything to add (optional)" : "Your reply" }
+        return allowEmpty ? "Note to \(who) (optional)" : "Reply to \(who)"
+    }
+    /// A rec's lit chip is only the pick, so Send says what it will do:
+    /// "Accept", "Decline", or "Send to <role>" for a reply.
+    var sendLabel: String {
+        guard subject.isRec else { return "Send" }
+        if outcome.closes { return outcome.label }
+        return subject.threadTitle.isEmpty ? "Send" : "Send to \(subject.threadTitle)"
+    }
 
     /// One sentence saying exactly what Send will do. Responding always means
     /// now and this session, so the sentence only has to explain the outcome.
@@ -351,7 +367,8 @@ struct RespondBar: View {
     var body: some View {
         Composer(draft: model.draft, attachments: model.attachments,
                  placeholder: model.placeholder, sending: model.busy,
-                 send: { model.submit(hub: hub, finished: finished) }, allowEmpty: model.allowEmpty)
+                 send: { model.submit(hub: hub, finished: finished) }, allowEmpty: model.allowEmpty,
+                 sendLabel: model.sendLabel)
             .padding(10)
             .confirmationDialog("Are you sure?", isPresented: Binding(get: { model.confirmingEmpty }, set: { model.confirmingEmpty = $0 }), titleVisibility: .visible) {
                 Button("Send without") { model.submit(hub: hub, confirmed: true, finished: finished) }

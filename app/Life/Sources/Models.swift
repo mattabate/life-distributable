@@ -1465,6 +1465,9 @@ struct Rec: Codable, Identifiable, Hashable {
     /// the hub on every read, never stored; the row shows "running" so the
     /// owner knows not to follow up on it.
     var thread_running: Bool?
+    /// That session's title, the role whose rec it is; stamped beside
+    /// thread_running in team mode, nil on a rec with no session.
+    var thread_title: String?
     /// The cell's word buttons, the hub's words (Accept · Decline
     /// · Reply). Optional: an older hub does not send it.
     var outcomes: [AskOutcome]?
@@ -1481,6 +1484,8 @@ struct Rec: Codable, Identifiable, Hashable {
     var window: String?
     /// nil for no model; otherwise the one `shortModel`.
     var modelShort: String? { model.flatMap { $0.isEmpty ? nil : shortModel($0) } }
+    /// nil until the hub names the role whose rec it is.
+    var owner: String? { thread_title.flatMap { $0.isEmpty ? nil : $0 } }
 
     /// The session that filed it — `thread_id`, or for older rows the id
     /// inside `source` (`claude:thread:<id>`); nil when the owner filed it.
