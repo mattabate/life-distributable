@@ -985,9 +985,13 @@ struct Board: Codable, Hashable {
     /// A listed sub-session's card: the top of its chain.
     var home: [String: String]?
     var badges: BoardBadges
+    /// Every non-archived session — what "All sessions · N" prints, since the
+    /// list behind the page reads only the live ones (2026-10-06). Optional so
+    /// an older hub still decodes.
+    var threads_total: Int?
 
     enum CodingKeys: String, CodingKey {
-        case surface, count, working, sessions, reads, installs, first, todo, detail, open, headings, section, pills, home, badges
+        case surface, count, working, sessions, reads, installs, first, todo, detail, open, headings, section, pills, home, badges, threads_total
         case forYou = "for_you"
     }
 

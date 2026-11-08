@@ -1,18 +1,26 @@
 import SwiftUI
 
-/// Sessions and Your turn. It draws the same hub
+/// Sessions — and, since 2026-09-02, Your turn as well. It draws the same hub
 /// `Board` (`GET /api/v1/board?surface=mobile`) the console draws, so the two
-/// surfaces can never disagree about whose turn it is. Nothing here ranks,
+/// surfaces can never disagree about what is his turn. Nothing here ranks,
 /// holds back or counts; the hub already did.
 ///
 /// A session is filed under Your turn or Working, or under no heading (All
-/// sessions finds it) — the console's own rule. Your turn leads, each row
-/// carrying the card that needs the owner — its title and its own description
+/// sessions finds it) — the console's own rule (the owner 2026-08-29, Recent
+/// gone 2026-09-20). Your turn leads, each row
+/// carrying the card that needs him — its title, and now its own description
 /// clamped to three lines (board `detail`).
 ///
-/// There is no separate Your turn tab: every card is in its session's chat
-/// (ThreadDetail), which is where a row lands — on the card, not at the foot
-/// of the conversation.
+/// THERE WAS A SECOND TAB HERE. From 2026-08-26 to 2026-09-02 this struct also
+/// drew `.yourTurn`: the same board as a stack of cards, one per ask or
+/// approval, with Done / Dismiss / Approve on each. The owner deleted it — "I think
+/// I've decided that we don't need the Your Turn page anymore… I don't think
+/// we need it since Your Turn is shown at the top of Sessions. It's not
+/// obvious to me what I get inside the Your Turn things outside of a bigger
+/// description." So the description came here and the tab went. The cards
+/// themselves were never only there: every one of them is in its session's
+/// chat (ThreadDetail), which is where a row now lands him — on the card, not
+/// at the foot of the conversation.
 struct ThreadsView: View {
     @Environment(HubClient.self) private var hub
     /// The one poll (BoardStore, 6s, owned by RootView): board, threads and
@@ -27,24 +35,31 @@ struct ThreadsView: View {
     /// `nav.card` and the path instead.
     @State private var openAsk: OpenAsk?
     /// An ask or proposal id tapped in a card's text (Refs.swift) is pushed
-    /// on top of whatever chat is open, so Back returns to it.
+    /// on top of whatever chat he is reading, so Back returns to it.
     @Environment(RefNav.self) private var nav
     @State private var path = NavigationPath()
 
-    /// Who needs what from the owner, decided in ONE place — the hub. The board
+    /// Who needs what from him, decided in ONE place — the hub. The board
     /// below, the red oval on the tab bar and the web console all read this
     /// same answer, so the header can never print a different number than
     /// the badge above it. Fetched in `load()`; nothing is recomputed here.
     /// The hub already sank a running session's bundle under the idle ones
     /// (its cards are answerable now — answering one steers the live turn —
-    /// they are just not the first thing seen), dropped answered asks, and
-    /// listed dated steps on their own with their date. It is the SAME board
-    /// the console gets: a `surface=web` ask is an ordinary cell here.
+    /// they are just not the first thing he sees), dropped the asks he has
+    /// answered (the owner 2026-08-24: "this says answered, but on the Your Turn
+    /// page, it still exists"; off the board whole 2026-09-20), and listed
+    /// dated steps on their own with their date (the owner 2026-08-25). It is the
+    /// SAME board the console gets: a `surface=web` ask sat behind a folded
+    /// "N waiting on the laptop" row here, uncounted, from 2026-08-24 until
+    /// 2026-09-23 ("Remove concept of waiting on laptop").
     var turn: Board { store.board ?? .empty }
-    /// ONE HEADING PER SESSION, filed by the hub (board `headings` + `section`):
-    /// running → Working, any card open for the owner → Your turn (a read or an
-    /// install sits there too, wearing its blue/teal pill; a session with both
-    /// wears BOTH pills, one per class), else → none. The console reads the same three fields,
+    /// ONE HEADING PER SESSION, filed by the hub (board `headings` + `section`,
+    /// 2026-09-14): running → Working, any card open for him → Your turn (a
+    /// read or an install sits there too, wearing its blue/teal pill — the
+    /// separate To read heading went on 2026-09-17: "you don't need separate
+    /// areas for these two"; a session with both wears BOTH pills, one per
+    /// class, since later that day: "I would like that called out
+    /// separately"), else → none. The console reads the same three fields,
     /// so the headings and their words are identical there.
     var working: [Thread] { threads.filter { $0.status == "running" } }
     /// The groups in the hub's order and words. Before the first board,
@@ -52,16 +67,29 @@ struct ThreadsView: View {
     var headings: [BoardHeading] {
         turn.headings ?? [BoardHeading(key: "working", label: "Working", count: "", n: 0, show: 0)]
     }
+    /// A PERSON is a session with a role. Only people are
+    /// rows on this list (the owner 2026-10-24 00:20, of two plain
+    /// sessions as rows: "all of the text should be
+    /// personified… they should live under people"). Any other session is a
+    /// row only while it waits on him — under Your turn, as an accident
+    /// (00:42: "if by some insane accident, one of those sessions gets a
+    /// message and is waiting, then sure, you should put it back here. But
+    /// I'd consider that to be an accident"); otherwise it has no row and no
+    /// page here ("you don't need any button for getting back to those
+    /// sessions") — threads.js drawList's `person` / `shown`.
+    func person(_ t: Thread) -> Bool { !(t.persona ?? "").isEmpty || !(t.role ?? "").isEmpty }
     /// The sessions under one heading, newest activity first (the hub's
     /// /threads order), cut to what the heading says it shows.
     func rows(_ h: BoardHeading) -> [Thread] {
-        let all = threads.filter { turn.sectionOf($0) == h.key && !nested($0) }
+        let all = threads.filter { turn.sectionOf($0) == h.key && !nested($0) && (person($0) || h.key == "your_turn") }
         return h.show > 0 ? Array(all.prefix(h.show)) : all
     }
     /// A session another one started is a row on that one's card, whatever
-    /// heading it would have had; views/threads.js drawList draws the same.
+    /// heading it would have had (the owner 2026-10-23 01:23: "2 little
+    /// subagents that are running"; 01:34: "the parent and then 2 of
+    /// these… collapsing after 5 or 3"); threads.js drawList draws the same.
     /// The hub's `home` names the card: the top of the chain, so a run
-    /// started by a run started by a session is a cell on that session's.
+    /// started by a run a person started is a cell on that person's (2026-10-27).
     func nested(_ t: Thread) -> Bool { turn.home?[t.id] != nil }
     func subs(_ t: Thread) -> [Thread] {
         threads.filter { turn.home?[$0.id] == t.id && turn.sectionOf($0) != nil }
@@ -76,27 +104,33 @@ struct ThreadsView: View {
 
     #if targetEnvironment(macCatalyst)
     /// The console's Sessions page: the list stays down the left while a
-    /// chat is open on the right, so what is waiting stays in view. A row
+    /// chat is open on the right (the owner 2026-09-29: "I don't want to have to
+    /// click out of a session to see the other things that are waiting on
+    /// me. I want to have a continuous list of those at all times"). A row
     /// or cell swaps the chat.
     @State private var selected: OpenAsk?
+    /// The saved chat is reopened ONCE PER LAUNCH (MacResume). A page is
+    /// rebuilt on every visit (RootView `macPage`), so a per-view flag ran the
+    /// resume on every trip to Sessions — + New session from Calendar or Money
+    /// came up as the last chat instead of the empty one with the screenshot
+    /// (the owner 2026-10-11 12:02).
+    private var resumed: Bool { MacResume.threadDone }
     @Environment(SnapState.self) private var snap
-    /// A PERSON is a session with a role. Only people are rows on the
-    /// desktop list, as in the console (threads.js drawList's `person` /
-    /// `shown`): any other session is a row only while it waits on the
-    /// owner, under Your turn.
-    func person(_ t: Thread) -> Bool { !(t.persona ?? "").isEmpty || !(t.role ?? "").isEmpty }
     /// The list as ONE run of things to draw — a heading, its sessions, the
     /// next heading — each session under its own id whichever heading it is
     /// under. It was a loop of sessions inside a loop of headings, and a
     /// session whose turn ended left one inner loop for the other: the list
     /// kept the row it had already drawn, so it went on reading "running"
-    /// with the old activity line beside a chat head that had moved on.
-    /// `make mac-screens PAGES=sessions LIFE_SHOT_MOVE=<id>` rehearses
+    /// with the old activity line beside a chat head that read "speaking"
+    /// (the owner 2026-09-30: "session card on upper left doesnt show the speaking
+    /// pill"). `make mac-screens PAGES=sessions LIFE_SHOT_MOVE=<id>` rehearses
     /// that move (BoardStore).
     private enum MacItem: Identifiable {
         case heading(key: String, words: String, first: Bool)
         case row(Thread)
-        /// Two idle people side by side, name over role.
+        /// Two idle people side by side, name over job (the owner 2026-11-06
+        /// 02:03: "before… a more efficient use of space, putting these like
+        /// 2 in a row… maybe with idle, we could put them 2 in a row").
         case pair([Thread])
         var id: String {
             switch self {
@@ -106,13 +140,14 @@ struct ThreadsView: View {
             }
         }
     }
-    /// YOUR TURN, WORKING, then IDLE: every person once, no counts. Idle is
-    /// the team less whoever is above.
+    /// YOUR TURN, WORKING, then IDLE: every person once (the owner 2026-11-06,
+    /// sidebar 3 — "Your turn / Working / Idle", no counts, idle people the
+    /// same size as everyone else). Idle is the team less whoever is above.
     private var macItems: [MacItem] {
         var items: [MacItem] = []
         var placed = Set<String>()
         for h in headings.filter({ $0.key == "your_turn" }) + headings.filter({ $0.key != "your_turn" }) {
-            let list = rows(h).filter { person($0) || h.key == "your_turn" }
+            let list = rows(h)
             if list.isEmpty { continue }
             items.append(.heading(key: h.key, words: h.label.uppercased(), first: items.isEmpty))
             items += list.map(MacItem.row)
@@ -127,42 +162,58 @@ struct ThreadsView: View {
     }
     private var macBody: some View {
         HStack(spacing: 0) {
-            // One white list: grey-band caps headings, a row per person with
-            // its open cards as bullets, idle people two to a line. No boxed
-            // cards, no grey page, no All sessions.
+            // The console's `.pane.list` (skin.css): caps headings, one card per
+            // session, All sessions as its own box — not an iOS grouped list
+            // (the owner 2026-09-29: "why is the layout different?").
             ScrollView {
                 // A plain VStack, never a lazy one: the list is a dozen
-                // rows, and macOS 26's lazy stack froze the whole app on it
+                // cards, and macOS 26's lazy stack froze the whole app on it
                 // — its prefetch (LazyLayoutViewCache.signalPrefetch) set the
                 // rows' phases, which dirtied the layout, which signalled the
-                // prefetch again, in one frame that never ended ("Application
-                // Not Responding").
+                // prefetch again, in one frame that never ended (the owner
+                // 2026-10-04: "Application Not Responding"; hang samples
+                // 10-01 12:40, 10-04 21:40 and 23:50, all that stack).
+                // Each person is a white row edge to edge with a line under it,
+                // on the page grey; a heading sits on the grey with room round
+                // it so it stands out (the owner 2026-11-06 01:46: "the
+                // background is kind of darker than the foreground… the
+                // spacing is big"). The people grid under SESSIONS (10-17 to
+                // 11-06) is the Idle heading now: each person once.
                 VStack(alignment: .leading, spacing: 0) {
                     if let error { ErrorBanner(message: error).padding(12) }
                     ForEach(macItems) { item in
                         switch item {
                         case .heading(_, let words, let first):
+                            // The top heading is the chat head's 52pt, so its
+                            // line runs on into the head's line: one line
+                            // across the window, no step at the corner (the
+                            // owner 2026-11-06 02:04: "this corner is just so
+                            // jarring").
                             Text(words)
-                                .font(.system(size: 13, weight: .semibold)).tracking(0.9).foregroundStyle(Web.heading)
-                                .padding(.horizontal, 18).padding(.top, first ? 0 : 24).padding(.bottom, first ? 0 : 9)
+                                .font(.zoomed(size: 13, weight: .semibold)).tracking(0.9).foregroundStyle(Web.heading)
+                                .padding(.horizontal, 18)
+                                .padding(.top, first ? 0 : 24).padding(.bottom, first ? 0 : 9)
                                 .frame(maxWidth: .infinity, minHeight: first ? 52 : nil, alignment: .leading)
-                                .overlay(alignment: .bottom) { Web.line.frame(height: 1) }
+                                .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
                         case .row(let t):
                             ThreadRow(t: t, board: turn, on: selected?.thread.id == t.id, subs: subs(t))
                         case .pair(let ts):
                             HStack(spacing: 0) {
-                                ForEach(Array(ts.enumerated()), id: \.element.id) { i, t in
-                                    idleCell(t, divider: i == 0)
-                                }
+                                ForEach(Array(ts.enumerated()), id: \.element.id) { i, t in idleCell(t, divider: i == 0) }
                                 if ts.count == 1 { Color.clear.frame(maxWidth: .infinity) }
                             }
-                            .fixedSize(horizontal: false, vertical: true)
                             .background(Web.panel)
-                            .overlay(alignment: .bottom) { Web.line.frame(height: 1) }
+                            .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
                         }
                     }
-                    if threads.isEmpty && store.team.isEmpty && error == nil {
-                        Text("No sessions yet").font(.system(size: 13.5)).foregroundStyle(Web.muted).padding(18)
+                    // No other row: the sessions that are not people have no
+                    // list and no page here since 2026-10-24 00:42 ("all
+                    // sessions is no longer native… you don't need any button
+                    // for getting back to those sessions"; the "All sessions
+                    // · 850" link, and the Legacy box that stood in for it
+                    // for one evening, went). They stay in the hub.
+                    if threads.isEmpty && error == nil {
+                        Text("No sessions yet").font(.subheadline).foregroundStyle(.secondary).padding(18)
                     }
                 }
                 .padding(.bottom, 14)
@@ -179,7 +230,8 @@ struct ThreadsView: View {
                 }
             } else {
                 // No session open = the empty chat, box ready (threads.js
-                // drawSessions): clicking Sessions means typing can start.
+                // drawSessions, the owner 2026-09-17: "there is only the chat
+                // interface"): clicking Sessions means he can start typing.
                 // + New session lands here with the page it was pressed on.
                 NewThreadSheet(initialImage: snap.desk?.image, initialPlace: snap.desk?.path ?? "",
                                onCreated: { await load() }, embedded: true,
@@ -190,23 +242,26 @@ struct ThreadsView: View {
         .onChange(of: snap.deskGen) { _, _ in path = NavigationPath(); selected = nil }
         .onChange(of: nav.card, initial: true) { _, c in if let c { nav.card = nil; path = NavigationPath(); selected = c } }
         .onChange(of: openAsk) { _, o in if let o { openAsk = nil; selected = o } }
+        .onChange(of: selected?.thread.id) { _, id in if resumed { MacResume.save(thread: id) } }
         .sheet(isPresented: $composing) { NewThreadSheet { await load() } }
     }
 
-    /// One idle person: name over role, half the row; the open one tinted
-    /// with a blue edge.
+    /// One idle person, half the row: the name over
+    /// the job, a line between the two; the open one a blue edge and tint.
     private func idleCell(_ t: Thread, divider: Bool) -> some View {
         let on = selected?.thread.id == t.id
         return Button { selected = OpenAsk(thread: t, message: nil) } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(t.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Web.fg).lineLimit(1)
-                Text(t.role ?? "").font(.system(size: 13)).foregroundStyle(Web.muted).lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(md(t.title)).font(.zoomed(size: 15, weight: .semibold)).foregroundStyle(Web.fg).lineLimit(1)
+                }
+                if let role = t.role { Text(role).font(.zoomed(size: 13)).foregroundStyle(Web.muted).lineLimit(1) }
             }
             .padding(.horizontal, 18).padding(.vertical, 9)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(on ? Web.accent.opacity(0.1) : Color.clear)
-            .overlay(alignment: .leading) { if on { Web.accent.frame(width: 4) } }
-            .overlay(alignment: .trailing) { if divider { Web.line.frame(width: 1) } }
+            .overlay(alignment: .leading) { if on { Rectangle().fill(Web.accent).frame(width: 4) } }
+            .overlay(alignment: .trailing) { if divider { Rectangle().fill(Web.line).frame(width: 1) } }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -227,23 +282,19 @@ struct ThreadsView: View {
             .sheet(isPresented: $composing) { NewThreadSheet { await load() } }
             .navigationDestination(item: $openAsk) { ThreadDetail(thread: $0.thread, focusMessage: $0.message, focusCard: $0.card, armOnOpen: $0.arm) }
             // A session row is a value link, so its chat is built on tap,
-            // not with every row (ThreadRow, here and in All sessions).
+            // not with every row (ThreadRow).
             .navigationDestination(for: OpenAsk.self) { ThreadDetail(thread: $0.thread, focusMessage: $0.message, focusCard: $0.card, armOnOpen: $0.arm) }
-            .navigationDestination(for: AllSessions.self) { _ in AllThreadsView() }
         }
     }
 
-    /// The All sessions page as a path value, so a screenshot run can push it
-    /// (`ops/screens.sh thread:all`) the way a tap on the foot row does.
-    struct AllSessions: Hashable {}
-
     /// The page: start a session, then the hub's headings — Your turn (paused
-    /// on the owner), Working (in flight). Mirrors the console's sidebar heading
-    /// for heading; the layout is a phone's, the rule is the same one.
+    /// on him), Working (in flight). Mirrors the console's sidebar heading for heading (the owner
+    /// 2026-08-29: "make sure the phone displays the same way"); the layout is
+    /// a phone's, the rule is the same one.
     @ViewBuilder private var sessionsSections: some View {
         // Secondary entry: the primary way to start a session is the
-        // Ask button top-right on every screen, which snaps the screen.
-        // This stays for text-only asks.
+        // Ask button top-right on every screen, which snaps the screen
+        // (the owner 2026-08-21). This stays for text-only asks.
         #if !targetEnvironment(macCatalyst)
         // (The desktop's + New session is on its top bar.)
         Section {
@@ -251,57 +302,57 @@ struct ThreadsView: View {
         }
         #endif
         // Your turn first, then Working — each heading's words straight from
-        // the hub.
+        // the hub. (A folded "N waiting on the laptop" row sat between them
+        // from 2026-08-24 to 2026-09-23; a web ask is an ordinary cell now.)
         ForEach(headings.filter { $0.key == "your_turn" }, id: \.key) { h in heading(h) }
         // Sessions in flight (a running session with cards open wears "N for
-        // you" and gets no second row above); the rest behind All sessions.
+        // you" and gets no second row above).
         ForEach(headings.filter { $0.key != "your_turn" }, id: \.key) { h in heading(h) }
-        Section {
-            NavigationLink(value: AllSessions()) {
-                HStack(spacing: 8) {
-                    if !working.isEmpty { LiveDot() }
-                    Text(working.isEmpty ? "All sessions" : "All sessions · \(working.count) working")
-                    Spacer()
-                    Text("\(threads.count)").foregroundStyle(.secondary)
-                }
-            }
+        // THE PEOPLE, as on the Mac's foot: a row each (the hub's role
+        // order), and nothing under them: no All
+        // sessions, no Legacy (2026-10-24 00:42; `rows(_:)`).
+        Section("Sessions") {
+            ForEach(store.team.filter(person)) { t in teamRow(t) }
         }
-        if threads.isEmpty && error == nil {
+        if (turn.threads_total ?? threads.count) == 0 && error == nil {
             Section {
                 Text("No sessions yet").font(.subheadline).foregroundStyle(.secondary)
             }
         }
-        // The people (team mode): one row per role, its name, its role and
-        // its open count, the console's grid under All sessions.
-        if !store.team.isEmpty {
-            Section {
-                ForEach(store.team) { t in
-                    NavigationLink(value: OpenAsk(thread: t, message: nil)) { teamCard(t, on: false) }
+    }
+
+    /// WHO IS TALKING, by name (the owner 2026-10-28 20:01, of a card
+    /// speaking under "and 1 more"): the person whose session, or a run homed
+    /// on them, is in his ears — the console's `voicedBy`.
+    func voiced(_ id: String) -> Bool {
+        let on: (String) -> Bool = { k in turn.pills?[k]?.contains { $0.tone == "speaking" } == true }
+        if on(id) { return true }
+        return (turn.home ?? [:]).contains { $0.value == id && on($0.key) }
+    }
+    /// A green dot beside the name: a pill crowds the role in a half-width cell.
+    static var speakDot: some View { Circle().fill(Color.green).frame(width: 7, height: 7).accessibilityLabel("speaking") }
+
+    /// One person's row: her name, her role under it, her open cards a gray
+    /// count — the Mac's `teamCard` in a phone list.
+    func teamRow(_ t: Thread) -> some View {
+        let open = turn.forYou[t.id] ?? 0
+        return NavigationLink(value: OpenAsk(thread: t, message: nil)) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(t.title).font(.body.weight(.semibold)).lineLimit(1)
+                        if voiced(t.id) { Self.speakDot }
+                    }
+                    if let role = t.role { Text(role).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
+                }
+                Spacer(minLength: 0)
+                if open > 0 {
+                    Text("\(open)").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                        .padding(.horizontal, 8).padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.15), in: Capsule())
                 }
             }
         }
-    }
-
-    /// One role's card: the session's name, the role under it, how many cards
-    /// it has open for the owner on the right.
-    @ViewBuilder func teamCard(_ t: Thread, on: Bool) -> some View {
-        let n = turn.forYou[t.id] ?? 0
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(t.title).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
-                Text(t.role ?? "").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer(minLength: 6)
-            Text("\(n)").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(.secondary)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(Color.secondary.opacity(0.15), in: Capsule())
-        }
-        #if targetEnvironment(macCatalyst)
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? Color.primary.opacity(0.3) : Color.primary.opacity(0.1)))
-        .contentShape(Rectangle())
-        #endif
     }
 
     /// One heading and its rows; a heading with no rows is not drawn. With no
@@ -317,7 +368,7 @@ struct ThreadsView: View {
 
     /// One session row, under whichever heading it landed: its whole title,
     /// one tinted cell per open card, its pills in the foot — the console's
-    /// card. Everything on it comes from
+    /// card (2026-09-20, here since 2026-09-23). Everything on it comes from
     /// the one board poll, so a row says the same thing here and there.
     @ViewBuilder func row(_ t: Thread) -> some View {
         #if targetEnvironment(macCatalyst)
@@ -335,16 +386,27 @@ struct ThreadsView: View {
         await store.refresh(hub)
         #if targetEnvironment(simulator) || targetEnvironment(macCatalyst)
         // ops/screens.sh (ops/mac-screens.sh) thread:<id> opens that session, so an agent can
-        // screenshot the conversation itself and not just the board;
-        // thread:all opens the All sessions page.
+        // screenshot the conversation itself and not just the board.
         if openAsk == nil, path.isEmpty, let want = ProcessInfo.processInfo.environment["LIFE_THREAD"], !want.isEmpty {
             // (A push straight after the first refresh is dropped — the
             // stack is not up yet; one second later it lands.)
-            #if targetEnvironment(macCatalyst)
-            if want == "all" { return }
-            #endif
-            if want == "all" { try? await Task.sleep(for: .seconds(1)); path.append(AllSessions()) }
-            else if let t = threads.first(where: { $0.id == want }) { openAsk = OpenAsk(thread: t, message: nil) }
+            // LIFE_SCROLL=<message id> lands on that message, for a bubble
+            // above the fold (a tagged one, NoteTags).
+            let at = ProcessInfo.processInfo.environment["LIFE_SCROLL"].flatMap { Int($0) }
+            // The list holds only live sessions; any other is one read away.
+            if let t = threads.first(where: { $0.id == want }) { openAsk = OpenAsk(thread: t, message: at) }
+            else if let t = try? await hub.thread(want) { openAsk = OpenAsk(thread: t, message: at) }
+        }
+        #endif
+        #if targetEnvironment(macCatalyst)
+        // Back in the chat he had open before an Update or ⌘R (MacResume).
+        if !resumed {
+            MacResume.threadDone = true
+            if ProcessInfo.processInfo.environment["LIFE_SHOT"] == nil, selected == nil, openAsk == nil, snap.desk == nil,
+               let want = MacResume.thread {
+                if let t = threads.first(where: { $0.id == want }) { selected = OpenAsk(thread: t, message: nil) }
+                else if let t = try? await hub.thread(want) { selected = OpenAsk(thread: t, message: nil) }
+            }
         }
         #endif
     }

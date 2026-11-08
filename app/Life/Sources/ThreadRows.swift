@@ -1,152 +1,47 @@
 // Session list rows: ThreadRow (one session, its open cards as cells),
-// SessionCell/MiniCard (the console's `.ask.mini`), AllThreadsView (every
-// session, a find box, twenty at a time), CostLabel and the status colour
-// they share. The phone mirrors the console's list — whole title, one tinted
-// cell per open card, pills in the foot, All sessions as a searchable table —
-// rule for rule out of views/threads.js.
+// SessionCell/MiniCard (the console's `.ask.mini`), CostLabel and the status
+// colour they share. Moved verbatim out of ThreadsView.swift (Phase 3,
+// 2026-08-26); ScheduledRow was deleted 2026-08-29 with the "Checking in
+// later" section it drew, AllThreadsView (every session as a searchable
+// table) on 2026-10-24. The console's 2026-09-20 list — whole title, one
+// tinted cell per open card, pills in the foot — was ported here on
+// 2026-09-23 (the owner: "Let's have the phone's layout / UI approximately
+// mirror the web UI"), rule for rule out of views/threads.js.
 import SwiftUI
 
-/// Every session, newest activity first — for finding something done
-/// previously: a box that narrows it by name as you type, fifty rows at a time and
-/// "Show 50 more" under them (the console's ALL_PAGE), one compact line per
-/// session — name, pills, model, when, dollars. Tapping a row lands in the
-/// chat on the card the board names first, like a session row.
-struct AllThreadsView: View {
-    @Environment(HubClient.self) private var hub
-    /// Reads the one poll (BoardStore) — no loop of its own.
-    @Environment(BoardStore.self) private var store
-    @Environment(RefNav.self) private var nav
-    @State private var find = ""
-    @State private var shown = AllThreadsView.page
-    static let page = 50
-
-    var board: Board { store.board ?? .empty }
-    /// The hub's /threads order is newest activity first already.
-    var matching: [Thread] {
-        let q = find.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return store.threads }
-        return store.threads.filter { $0.title.localizedCaseInsensitiveContains(q) || $0.id.localizedCaseInsensitiveContains(q) }
-    }
-
-    var body: some View {
-        #if targetEnvironment(macCatalyst)
-        // The console's `.chat-head` (threads.js drawAllSessions): "All
-        // sessions · N" in bold at body size, the find box at the right, both
-        // on the list's own left edge. The system's large title and search
-        // drawer sat flush on the sidebar, out of line with the rows.
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                HStack(spacing: 5) {
-                    Text("All sessions").font(.system(size: 15, weight: .semibold))
-                    Text("· \(find.isEmpty ? total : "\(matching.count) of \(total)")").font(.system(size: 15)).foregroundStyle(.secondary)
-                }.lineLimit(1)
-                Spacer(minLength: 12)
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(.secondary)
-                    TextField("Find a session…", text: $find).textFieldStyle(.plain).font(.system(size: 13))
-                }
-                .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.primary.opacity(0.12)))
-                .frame(maxWidth: 280)
-            }
-            .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 10)
-            list.contentMargins(.top, 0, for: .scrollContent)
-        }
-        .background(Color(uiColor: .systemGroupedBackground))
-        .toolbar(.hidden, for: .navigationBar)
-        .onChange(of: find) { _, _ in shown = Self.page }
-        #else
-        list
-            .searchable(text: $find, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find a session…")
-            .onChange(of: find) { _, _ in shown = Self.page }
-            .navigationTitle("All sessions")
-            .askButton()
-        #endif
-    }
-
-    var total: String { "\(store.threads.count)" }
-
-    var list: some View {
-        let rows = matching
-        return List {
-            if let error = store.error { Section { ErrorBanner(message: error) } }
-            Section {
-                ForEach(rows.prefix(shown)) { t in row(t) }
-                if rows.count > shown {
-                    HStack(spacing: 16) {
-                        Button("Show \(Self.page) more") { shown += Self.page }
-                        Button("Show all \(rows.count)") { shown = rows.count }
-                    }.font(.subheadline)
-                }
-            } header: {
-                #if !targetEnvironment(macCatalyst)
-                Text(find.isEmpty ? "\(total) sessions" : "\(rows.count) of \(total)")
-                #endif
-            }
-            if rows.isEmpty && store.error == nil {
-                Section { Text(find.isEmpty ? "No sessions yet" : "Nothing called “\(find)”").font(.subheadline).foregroundStyle(.secondary) }
-            }
-        }
-        .refreshable { await load() }
-    }
-
-    /// One line per session, the console table's columns in a phone's width.
-    func row(_ t: Thread) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(md(t.title)).font(.subheadline.weight(t.unread > 0 ? .semibold : .regular)).lineLimit(2)
-            ChipRow {
-                ForEach(board.pillsOf(t), id: \.self) { PillChip(pill: $0) }
-                if let m = t.modelShort { Chip(m, icon: "cpu") }
-                Spacer(minLength: 0)
-                CostLabel(t.cost_usd)
-                if let d = t.last_message_at { Text(shortAgo(d)).font(.caption2).foregroundStyle(.tertiary).layoutPriority(1) }
-            }
-        }
-        .padding(.vertical, 1)
-        .contentShape(Rectangle())
-        .onTapGesture { nav.card = OpenAsk(thread: t, message: nil, card: board.first[t.id].flatMap { $0.isEmpty ? nil : $0 }) }
-        .rowAccent(rail(t))
-    }
-
-    /// The rail is the sidebar's heading for this session: red under Your
-    /// turn, blue under Working, none when the sidebar does not list it.
-    func rail(_ t: Thread) -> Color {
-        guard store.board != nil else { return statusColor(t.status) }
-        switch board.section?[t.id] {
-        case "your_turn": return .red
-        case "working": return .blue
-        default: return .secondary
-        }
-    }
-
-    func load() async { await store.refresh(hub) }
-}
+// (AllThreadsView — every session that is not a person as a searchable
+// table, "All sessions" 2026-09-20 to 10-24 and "Legacy" for one evening —
+// went 2026-10-24 00:42: the owner, "all sessions is no longer native… you
+// don't need any button for getting back to those sessions". The sessions
+// stay in the hub, `GET /threads`.)
 
 /// One open card on a session's row, worded the console's way (`sessionCards`
-/// + `miniCardHTML`, views/threads.js): what it wants from the owner in one word
+/// + `miniCardHTML`, views/threads.js): what it wants from him in one word
 /// (`verb`), its whole title, and the tint
 /// its class wears. Built from the board's bundle so the phone and the console
 /// draw the same cells in the same order.
 struct SessionCell: Identifiable, Hashable {
     let id: String
     let title: String
-    // No words under the title: it says what it wants, the chat holds the rest.
+    // No words under the title (the owner 2026-10-10 15:14, of the cards
+    // without their descriptions: "I'm totally cool to move to the new
+    // system"): the title says what it wants, the chat holds the rest.
     let verb: String
     /// `needs` (red) · `read` (blue) · `install` (teal) · `error` (grey).
     let tone: String
-    /// One of the owner's own dated steps that sits in this chat — uncounted.
+    /// One of his own dated steps that sits in this chat — uncounted.
     let step: Bool
     /// A sub-session's row (`quiet` when it has no card of its own): the
     /// session it opens, the card to land on, and whether it is running.
     var sub: Thread? = nil
     var subFirst: String? = nil
     /// A job running for the session (a hub-run action or the turn's helper):
-    /// a grey "running" cell with its bar, the console's `jobCells`.
+    /// a grey "running" cell with its bar — the console's `jobCells`.
     var job: TurnTask? = nil
 
-    /// The session's running jobs as cells, ahead of its cards: what is in
-    /// hand leads the row, grey, since it is not the owner's turn.
+    /// The session's running jobs as cells, ahead of its cards (the owner
+    /// 2026-11-05 00:43, mock B: "have a running be the highest priority…
+    /// maybe it should be grey").
     static func jobs(_ t: Thread) -> [SessionCell] {
         t.liveTasks.map { k in
             SessionCell(id: "job:" + (k.id ?? k.description ?? ""), title: k.description ?? "helper",
@@ -155,18 +50,19 @@ struct SessionCell: Identifiable, Hashable {
     }
 
     var color: Color {
-        switch tone { case "read": .accentColor; case "install": .teal; case "error", "quiet": .secondary; default: .red }
+        switch tone { case "read": .accentColor; case "install": .teal; case "speaking": .green; case "error", "quiet": .secondary; default: .red }
     }
     var mark: String {
         if tone == "quiet" { return sub?.status == "running" ? "circle.fill" : "circle" }
-        return switch tone { case "read": "text.alignleft"; case "install": "square.and.arrow.down"; case "error": "exclamationmark.triangle"; default: "hand.raised.fill" }
+        return switch tone { case "read": "text.alignleft"; case "install": "square.and.arrow.down"; case "speaking": "circle.fill"; case "error": "exclamationmark.triangle"; default: "hand.raised.fill" }
     }
 
-    /// A session another one started, as a row on that one's card: its title,
-    /// its first open card's tint and verb if it has one, else gray and
-    /// "running"/"idle". The console's `subCell`.
+    /// A session another one spun off, as a row on that one's card (the owner
+    /// 2026-10-23 01:34: "the parent and then 2 of these… collapsing after 5
+    /// or 3"): its title, its first open card's tint and verb if it has one,
+    /// else gray and "running"/"idle" — the console's `subCell`.
     static func sub(_ k: Thread, board b: Board) -> SessionCell {
-        let c = b.bundleOf(k).map(cells)?.first
+        let c = b.bundleOf(k).map { cells($0, board: b) }?.first
         return SessionCell(id: "sub " + k.id, title: k.title,
                            verb: c?.verb ?? (k.status == "running" ? "running" : "idle"),
                            tone: c?.tone ?? "quiet", step: false,
@@ -174,13 +70,22 @@ struct SessionCell: Identifiable, Hashable {
     }
 
     /// The bundle as cells: approvals first (the session is stopped on them),
-    /// then its asks, then the owner's dated steps — the board's order, untouched.
-    static func cells(_ s: BoardSession) -> [SessionCell] {
+    /// then its asks, then his dated steps — the board's order, untouched.
+    /// The card in his ears reads "speaking" in green, a sub-session's row
+    /// included (the owner 2026-10-25 01:56, of a sub-session's READ cell
+    /// while its card spoke: "this spot should say speaking
+    /// also"): the card the hub marks, else — a replay holds the session's
+    /// floor, not the card's — the first card with a line.
+    static func cells(_ s: BoardSession, board b: Board = .empty) -> [SessionCell] {
         let acts = s.actions.map { a in
             SessionCell(id: a.id, title: a.title, verb: "approve", tone: "needs", step: false)
         }
+        let floor = b.pills?[s.id]?.contains { $0.tone == "speaking" } == true
+        let voiced = s.asks.first { $0.speaking == true }?.id
+            ?? (floor ? s.asks.first { !($0.said ?? "").isEmpty }?.id : nil)
         let asks = (s.asks + (s.steps ?? [])).enumerated().map { i, a in
             let k = a.kind
+            if a.id == voiced { return SessionCell(id: a.id, title: a.title, verb: "speaking", tone: "speaking", step: false) }
             return SessionCell(id: a.id, title: a.title,
                                verb: a.verb ?? "for you",  // the hub's word (store.AskVerb)
                                tone: k == "read" ? "read" : k == "install" ? "install" : k == "error" ? "error" : "needs",
@@ -227,10 +132,36 @@ struct MiniCard: View {
 }
 
 #if targetEnvironment(macCatalyst)
-/// One open card under a name on the desktop sidebar: a coloured dot and its
-/// whole title — red do, blue read, teal install, grey a quiet sub-session or
-/// a background process. A running job is its name, and its bar when its
-/// output counts done/total. A click lands the chat on that card.
+/// A session's state line, the console's `.sess-foot`: its pills, the model
+/// as the grey `WebTag` (the one small pill the desktop has — `WebPill`, a
+/// second grey style for the same word, folded into it 2026-10-11,
+/// rec-104dfb6b), then "ago · schedule · dollars". The session card and the
+/// All sessions row both draw this, never a rendering of their own.
+struct WebSessionState: View {
+    let pills: [Pill]
+    let t: Thread
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(pills, id: \.self) { PillChip(pill: $0) }
+            if let m = t.modelShort { WebTag(m) }
+            Text(sessionFootWords(t)).font(.zoomed(size: 12)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+        }
+    }
+}
+
+/// "20h ago · daily 08:00 · $47.92" — the console's foot span.
+func sessionFootWords(_ t: Thread) -> String {
+    var s = t.last_message_at.map { shortAgo($0) } ?? ""
+    if !t.schedule.isEmpty { s += " · " + scheduleChipLabel(t) }
+    if t.cost_usd > 0 { s += " · " + usd(t.cost_usd) }
+    return s
+}
+
+/// One open card under a name on the desktop sidebar (the owner 2026-11-06,
+/// sidebar 3): a coloured dot and its whole title — red do, blue read, teal
+/// install, green in his ears, grey a quiet sub-session ("dots… a little
+/// teeny bit smaller": 8pt). A running job is its bar and what it is doing.
+/// A click lands the chat on that card.
 struct SideItem: View {
     let c: SessionCell
     let tap: () -> Void
@@ -238,25 +169,33 @@ struct SideItem: View {
         switch c.tone {
         case "read": Web.accent
         case "install": Web.install
-        case "error", "quiet": Web.muted
+        case "speaking": Web.green
+        case "error": Web.muted
+        case "quiet": Web.muted
         default: Web.red
         }
     }
     var body: some View {
         Button(action: tap) {
             Group {
+                // A background process: a grey dot and its name, and a bar
+                // only off its real count (the owner 2026-11-06 02:12: "grey
+                // dots… background processes and subagents").
                 if let k = c.job {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(alignment: .firstTextBaseline, spacing: 7) {
                             Circle().fill(Web.muted).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 0.5 }
-                            Text(md(c.title)).font(.system(size: 13.5)).foregroundStyle(Web.muted).lineLimit(1)
+                            Text(md(c.title)).font(.zoomed(size: 13.5)).foregroundStyle(Web.muted).lineLimit(1)
                         }
                         if k.total ?? 0 > 0 { JobProgress(k: k).padding(.leading, 13) }
                     }
                 } else {
+                    // 13.5 under a 15 name, a 6pt dot (the owner 2026-11-06
+                    // 02:01: "the text should be smaller here… this dot is
+                    // like too big").
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Circle().fill(dot).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 0.5 }
-                        Text(md(c.title)).font(.system(size: 13.5)).foregroundStyle(Web.fg).multilineTextAlignment(.leading)
+                        Text(md(c.title)).font(.zoomed(size: 13.5)).foregroundStyle(Web.fg).multilineTextAlignment(.leading)
                         Spacer(minLength: 0)
                     }
                 }
@@ -268,6 +207,7 @@ struct SideItem: View {
         .buttonStyle(.plain)
     }
 }
+
 #endif
 
 /// One session on the list — the console's `sessionCardHTML`: its whole
@@ -281,9 +221,9 @@ struct ThreadRow: View {
     /// Open asks/approvals this session carries (board `for_you`).
     var forYou: Int = 0
     /// The capsules the hub worded for this card ("running", "1 to read",
-    /// "your turn"…) — the console draws the same ones. Every
+    /// "your turn"…) — the console draws the same ones (2026-09-14). Every
     /// card drawn as a cell = the count pills would say it twice, so then only
-    /// a RUNNING pill stays, in the foot beside the model.
+    /// a RUNNING pill stays (the owner 2026-08-26), in the foot beside the model.
     var pills: [Pill] = []
     /// The cells: one per open card, the board's bundle in its order.
     var cells: [SessionCell] = []
@@ -299,15 +239,23 @@ struct ThreadRow: View {
     var first: String? = nil
     /// How many of a session's open cards its row draws (console ROW_CARDS).
     static let rowCards = 2
+    /// The cells drawn folded: the first `rowCards`, and the card in his ears
+    /// past them — never under "and N more" (the owner 2026-10-28 20:01, a
+    /// card speaking out of sight; the console's rowCards).
+    static func folded(_ cells: [SessionCell]) -> [SessionCell] {
+        let head = Array(cells.prefix(rowCards))
+        let tail = cells.dropFirst(rowCards)
+        if let v = tail.first(where: { $0.tone == "speaking" }) { return head + [v] }
+        return head
+    }
 
     /// The desktop: this session is the one open on the right (a blue edge).
     var on = false
-    /// The sessions this one started, a row each under its own cards.
+    /// The sessions this one spun off, a row each under its own cards.
     var subs: [SessionCell] = []
     /// How many of them the card draws before "and N more" (console SUB_CELLS).
     static let subRows = 3
     @State private var subsOpen = false
-    /// The desktop: "N more" opened, every line under the name drawn.
     @State private var expanded = false
 
     init(t: Thread, board b: Board, on: Bool = false, subs: [Thread] = []) {
@@ -315,17 +263,18 @@ struct ThreadRow: View {
         self.on = on
         self.subs = subs.map { SessionCell.sub($0, board: b) }
         forYou = b.forYou[t.id] ?? 0
-        let cards = b.bundleOf(t).map(SessionCell.cells) ?? []
+        let cards = b.bundleOf(t).map { SessionCell.cells($0, board: b) } ?? []
         // Its running jobs lead the row, inside the same two (console card()).
         let jobs = SessionCell.jobs(t)
         cells = jobs + cards
         let open = b.open?[t.id] ?? 0
         openCount = max(open + jobs.count, cells.count)
-        more = max(0, openCount - min(cells.count, Self.rowCards))
+        more = max(0, openCount - Self.folded(cells).count)
         if forYou > 0, cards.isEmpty { todo = b.todo?[t.id]; detail = b.detail?[t.id] }
         let steps = cards.filter(\.step).count
         // …and "speaking" stays too: the one live fact a cell cannot carry
-        // (which session's card is being spoken right now, or queued for it).
+        // (which session's card is in his ears right now, or queued for it,
+        // 2026-09-25).
         pills = forYou > 0 && cards.count - steps >= forYou ? b.pillsOf(t).filter { ["running", "speaking", "waiting"].contains($0.tone) } : b.pillsOf(t)
         first = b.first[t.id].flatMap { $0.isEmpty ? nil : $0 }
     }
@@ -335,6 +284,11 @@ struct ThreadRow: View {
 
     func open(_ card: String?) { nav.card = OpenAsk(thread: t, message: nil, card: card.flatMap { $0.hasPrefix("job:") ? nil : $0 }) }
     func open(sub c: SessionCell) { if let k = c.sub { nav.card = OpenAsk(thread: k, message: nil, card: c.subFirst) } }
+    /// The first card the folded row did not draw.
+    var firstHidden: String? {
+        let shown = Set(Self.folded(cells).map(\.id))
+        return cells.first { !shown.contains($0.id) }?.id ?? cells.last?.id
+    }
     var subsShown: ArraySlice<SessionCell> { subs.prefix(subsOpen ? subs.count : Self.subRows) }
 
     var body: some View {
@@ -346,12 +300,21 @@ struct ThreadRow: View {
     }
 
     #if targetEnvironment(macCatalyst)
-    /// How many lines the sidebar draws under a name before "N more".
+    /// No model, dollars or tool-call row — the chat's head carries those
+    /// (rec-e4b035dd, 2026-10-17). Only the live audio pills stay (speaking,
+    /// waiting): the one fact a dot cannot carry.
+    /// THE SIDEBAR ROW (the owner 2026-11-06 01:51, sidebar 3 of the redesign
+    /// mocks: "love number 3… just the sidebar"): edge to edge, a line under
+    /// each person, the name with the job on the right, then EVERY open card
+    /// as a coloured dot and its title (red do, blue read, teal install — "do
+    /// and read words too much", no accordion), and a bar with what it is
+    /// doing while it runs. The open person is a blue edge and a blue tint
+    /// (no tan, no ring, no rounded corners).
     static let sideRows = 2
 
-    /// Every line under a name, in order: the owner's to-do (an older hub's
-    /// fallback), the subagents as one grey count, then each card and
-    /// background process, then its sub-sessions.
+    /// Every line under a name, in order: his to-do, the subagents as one
+    /// grey count (02:12: "multiple subagents… the names are stupid"), then
+    /// each card and background process, then its sub-sessions.
     private var sideItems: [(SessionCell, () -> Void)] {
         var out: [(SessionCell, () -> Void)] = []
         if let todo, !todo.isEmpty, cells.isEmpty {
@@ -367,39 +330,44 @@ struct ThreadRow: View {
         return out
     }
 
-    /// The sidebar row: edge to edge, a line under each person, the name
-    /// bold with the role grey on the right, then each open card as a
-    /// coloured dot and its title, two of them and then "N more", which
-    /// opens the rest in place. No model, dollars or tool-call row (the
-    /// chat's head carries those); only the live audio pills (speaking,
-    /// waiting) sit by the name, the one fact a dot cannot carry. The open
-    /// session is a blue edge and a blue tint.
     var macCard: some View {
-        let live = pills.filter { ["speaking", "waiting"].contains($0.tone) }
+        let voiced = cells.contains { $0.tone == "speaking" } || subs.contains { $0.tone == "speaking" }
+        let live = pills.filter { ["speaking", "waiting"].contains($0.tone) && !(voiced && $0.tone == "speaking") }
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 7) {
-                Text(md(t.title)).font(.system(size: 15, weight: t.unread > 0 ? .bold : .semibold))
+                // The chat head's 15 (the owner 02:02: "the text is
+                // smaller").
+                Text(md(t.title)).font(.zoomed(size: 15, weight: t.unread > 0 ? .bold : .semibold))
                     .foregroundStyle(Web.fg).lineLimit(1)
+                // Speaking / waiting to speak sits by the name like the chat
+                // head's state chip, never a line of its own (the owner
+                // 2026-11-07 02:35: "the speaking card appears below… like up
+                // here"); the job gives way to it.
                 ForEach(live, id: \.self) { PillChip(pill: $0).fixedSize() }
                 Spacer(minLength: 8)
                 if let role = t.role, !role.isEmpty {
-                    Text(role).font(.system(size: 13)).foregroundStyle(Web.muted).lineLimit(1)
+                    Text(role).font(.zoomed(size: 13)).foregroundStyle(Web.muted).lineLimit(1)
                         .truncationMode(.tail).layoutPriority(-1)
                 }
             }
             if t.status != "running", t.last_message_kind == "error", let m = summaryLine(t.last_message) {
-                Text(md("Error: \(m)")).font(.system(size: 13.5)).foregroundStyle(Web.red).lineLimit(2).padding(.top, 4)
+                Text(md("Error: \(m)")).font(.zoomed(size: 13.5)).foregroundStyle(Web.red).lineLimit(2).padding(.top, 4)
             }
+            // Two items, then "N more" opens the rest in place (the owner
+            // 2026-11-06 09:50: "it's more compressed… collapsed to like two,
+            // and then you can click to expand").
             let items = sideItems
             let shown = expanded ? items : Array(items.prefix(Self.sideRows))
             ForEach(shown, id: \.0.id) { c, tap in SideItem(c: c, tap: tap) }
             let hidden = items.count - shown.count + (openCount > cells.count && !cells.isEmpty ? openCount - cells.count : 0)
             if hidden > 0 {
                 Button { if items.count > shown.count { expanded = true } else { open(nil) } } label: {
-                    Text("\(hidden) more").font(.system(size: 13.5)).foregroundStyle(Web.muted).padding(.top, 6).padding(.leading, 13)
+                    Text("\(hidden) more").font(.zoomed(size: 13.5)).foregroundStyle(Web.muted).padding(.top, 6).padding(.leading, 13)
                 }.buttonStyle(.plain)
             }
         }
+        // Room between people, as the old list had (09:50: "the way that
+        // really worked well was when there was space between these").
         .padding(.horizontal, 18).padding(.top, 13).padding(.bottom, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(on ? Web.accent.opacity(0.1) : Color.clear)
@@ -409,16 +377,25 @@ struct ThreadRow: View {
         .contentShape(Rectangle())
         .onTapGesture { open(first) }
     }
+
     #endif
 
     private var phoneRow: some View {
         VStack(alignment: .leading, spacing: 5) {
-            // The whole name, never clamped.
-            Text(md(t.title)).font(.body.weight(t.unread > 0 ? .semibold : .medium))
-            ForEach(cells.prefix(Self.rowCards)) { c in MiniCard(c: c) { open(c.id) } }
+            // The whole name, never clamped (the owner 2026-09-20), and a person's
+            // role on the right (the owner 2026-10-22: "put role on the right, next
+            // to their names… im still learning their names").
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(md(t.title)).font(.body.weight(t.unread > 0 ? .semibold : .medium))
+                if let role = t.role, !role.isEmpty {
+                    Spacer(minLength: 4)
+                    Text(role).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            ForEach(Self.folded(cells)) { c in MiniCard(c: c) { open(c.id) } }
             if !cells.isEmpty, more > 0 {
                 // Lands on the first card the row did not draw.
-                Button { open(cells[min(Self.rowCards, cells.count - 1)].id) } label: {
+                Button { open(firstHidden) } label: {
                     Text("and \(more) more").font(.caption).foregroundStyle(.secondary)
                 }.buttonStyle(.plain)
             }
@@ -438,8 +415,9 @@ struct ThreadRow: View {
                 }
             }
             if t.status == "running" {
-                // Live: the turn's calls, clock and dollars, the console's
-                // `turnFacts`, not the raw step label.
+                // Live: the turn's calls, clock and dollars — the console's
+                // `turnFacts`, not the raw step label (the owner 2026-10-07).
+                // Its dollars are the CostLabel in the chips below (2026-10-08).
                 let f = t.turnFacts(withCost: false)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "arrow.turn.down.right").font(.caption2.weight(.semibold)).foregroundStyle(.blue)
@@ -455,7 +433,7 @@ struct ThreadRow: View {
                 if !t.schedule.isEmpty { Chip(scheduleChipLabel(t), icon: "clock") }
                 Spacer(minLength: 0)
                 // What this chat has cost so far, live while it runs
-                // Trailing and tertiary: it is a
+                // (the owner 2026-08-25). Trailing and tertiary: it is a
                 // number to glance at, never the row's headline.
                 CostLabel(t.cost_usd)
                 if let d = t.last_message_at { Text(shortAgo(d)).font(.caption2).foregroundStyle(.tertiary).layoutPriority(1) }
@@ -477,12 +455,18 @@ struct ThreadRow: View {
                     t.goal_id.map { "- goal: \($0)" } ?? "- no goal set",
                     t.activity.map { "- doing right now: \($0)" } ?? "",
                     t.last_message.map { "- last reply:\n\($0.prefix(800))" } ?? ""].filter { !$0.isEmpty }.joined(separator: "\n")))
-        // No swipe actions. Clearing and stopping happen inside the chat, where the card is.
+        // No swipe actions: the row had Clear/Stop under a trailing swipe until
+        // 2026-09-23 ("we don't need the swipe to clear buttons on phone").
+        // Clearing and stopping happen inside the chat, where the card is.
     }
 }
 
+/// One background helper of a session's turn (a shell job or a subagent), the
+/// console's taskRowHTML (the owner 2026-11-03: where are my two jobs?):
+/// its kind, what it is, how long it has run, a bar when its output counts
+/// done/total, and its newest line. `open`: the caller draws its log under it.
 /// A job cell's insides under its title: the bar with its count, then what
-/// it is doing and for how long, the console's taskBarHTML + jobFootHTML.
+/// it is doing and for how long — the console's taskBarHTML + jobFootHTML.
 struct JobProgress: View {
     let k: TurnTask
     var body: some View {
@@ -513,10 +497,6 @@ struct JobProgress: View {
     }
 }
 
-/// One background helper of a session's turn (a shell job or a subagent), the
-/// console's taskRowHTML: its kind, what it is, how long it has run, a bar
-/// when its output counts done/total, and its newest line. `open`: the caller
-/// draws its log under it.
 struct TaskRow<Log: View>: View {
     let k: TurnTask
     var open: Bool = false
@@ -571,8 +551,9 @@ extension TaskRow where Log == EmptyView {
     init(k: TurnTask) { self.init(k: k, log: { EmptyView() }) }
 }
 
-/// What a chat has cost, in dollars, on a session row — "$12.40". Cost, not
-/// token counts, is what matters on the list. Tokens stay inside a
+/// What a chat has cost, in dollars, on a session row — "$12.40". The owner
+/// 2026-08-25, after seeing token counts here: "I don't really care about the
+/// total number of tokens. I care about the total cost." Tokens stay inside a
 /// session (per reply, and the breakdown in Session settings). Live: the hub
 /// prices the turn in flight as it streams, so this climbs while a session
 /// works. Draws nothing when the hub has no figure at all — a chat that has
@@ -590,8 +571,11 @@ struct CostLabel: View {
 
 /// The clock chip on a session row: its cadence, and — when the hub knows one
 /// and the session is not running — the next wake, "daily 08:00 · today 18:00".
-/// Every session gets exactly ONE place on the list, so the next wake rides
-/// the row rather than a separate "Checking in later" section.
+/// The Sessions page used to carry a separate "Checking in later" section for
+/// this; it went on 2026-08-29 because a scheduled session was then listed
+/// twice on one screen, and every session now gets exactly ONE heading (Your
+/// turn / Working / Recent). The next wake had to survive that, so it rides
+/// the row.
 func scheduleChipLabel(_ t: Thread) -> String {
     let cadence = t.schedule_label ?? scheduleLabel(t.schedule)
     guard t.status != "running", let n = t.next_run_at else { return cadence }
@@ -599,18 +583,17 @@ func scheduleChipLabel(_ t: Thread) -> String {
 }
 
 /// "today 18:00" / "tomorrow 09:00" / "Thu 09:00" / "Sep 4" — how soon, not
-/// the full date (titles get the width).
+/// the full date (the owner 2026-08-22: titles get the width).
 func nextLabel(_ d: Date) -> String {
     let cal = Calendar.current
-    let time = d.formatted(.dateTime.hour().minute())
-    if cal.isDateInToday(d) { return "today \(time)" }
-    if cal.isDateInTomorrow(d) { return "tomorrow \(time)" }
-    if d.timeIntervalSinceNow < 6 * 86400 { return d.formatted(.dateTime.weekday(.abbreviated)) + " \(time)" }
-    return d.formatted(.dateTime.month(.abbreviated).day())
+    if cal.isDateInToday(d) { return "today \(clock(d))" }
+    if cal.isDateInTomorrow(d) { return "tomorrow \(clock(d))" }
+    if d.timeIntervalSinceNow < 6 * 86400 { return weekdayClock(d) }
+    return dayLabel(d)
 }
 
 /// Status is carried by colour, not an icon in the text block (icons kept
-/// pulling the layout around): a 4pt bar on the card's
+/// pulling the layout around — the owner 2026-08-22): a 4pt bar on the card's
 /// leading edge plus the first chip in the chip row. Red = your turn /
 /// blocked, blue = running, gray = scheduled or just a message.
 func statusColor(_ status: String) -> Color {

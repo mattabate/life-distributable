@@ -101,6 +101,20 @@ final class MacUpdate {
     var askBeforeApply = false
 }
 
+/// Where he was: the tab and the open session, kept as they change, so an
+/// Update's relaunch and View ▸ Reload come back on the same page and chat —
+/// a restart that reads like a refresh. New code needs a new process; losing
+/// his place does not.
+enum MacResume {
+    private static var d: UserDefaults { .standard }
+    static var tab: String? { d.string(forKey: "mac.resume.tab") }
+    static var thread: String? { d.string(forKey: "mac.resume.thread") }
+    static func save(tab: String) { d.set(tab, forKey: "mac.resume.tab") }
+    static func save(thread: String?) { d.set(thread, forKey: "mac.resume.thread") }
+    /// The first Sessions page of this process has reopened the saved chat.
+    @MainActor static var threadDone = false
+}
+
 /// The top bar's Update: only there while a build is waiting (or being made).
 struct MacUpdateButton: View {
     @State private var update = MacUpdate.shared
