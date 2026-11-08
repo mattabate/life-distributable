@@ -38,8 +38,8 @@ in [ADDENDA.md](ADDENDA.md) every week, and your agent brings each one to you.
 
 <table>
 <tr>
-<td width="50%" valign="top"><img src="docs/img/sessions.png" alt="The life desktop app's Sessions board: Your turn, 5 cards in 4 sessions, one per agent: Sam's water filter to swap, Rachel's Lisbon hotels to read, Fred's sleep log and long run day, Charlotte's $500 VTI buy to approve, and Diane, still working, with a dentist time to pick; below, the team of five: chief of staff, health coach, home manager, money manager and travel planner"></td>
-<td width="50%" valign="top"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: a Powered by card for Claude Code with the month's spend and how much of the 7 day limits is left, and a Goals card with five goals: Run a half marathon, Sleep seven hours, Invest every Thursday, Plan the Lisbon trip and Keep the apartment running"></td>
+<td width="50%" valign="top"><img src="docs/img/sessions.png" alt="The life desktop app's Sessions list: under Your turn, one row per agent with its role and open cards: Sam, home manager, a water filter to swap; Rachel, travel planner, Lisbon hotels to read; Fred, health coach, a sleep log and a long run day; Charlotte, money manager, a $500 VTI buy to approve. Under Working, Diane, chief of staff, with a dentist time to pick. Under Idle, Nina the bookkeeper and Iris the running coach"></td>
+<td width="50%" valign="top"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: Powered by Claude Code with how much of the 7 day limits is left; Devices, the Mac hub and a phone; the Team org chart, with Charlotte over Nina the bookkeeper, Diane the chief of staff over Rachel and Sam, and Fred over Iris the running coach, each card marked with the goals it owns; five goals in Health, Money and Home; and data sources by goal: Apple Health and Strava, a brokerage, and the Life app"></td>
 </tr>
 <tr>
 <td align="center"><strong>Sessions.</strong> Every agent, and what each needs from you.</td>
@@ -73,11 +73,11 @@ All of this is a starting point and subject to change. The agents maintain their
 
 | **Approvals.** The agent proposes, you approve. | **Sessions.** It asks one clear question at a time. |
 |---|---|
-| ![Charlotte, the money manager, in the life desktop app: an approval card to buy $500 of VTI on Thursday, cash staying above a $2,000 floor, tagged money, with Approve, Deny, Reply and Dismiss, and the Thursday buy coming up below](docs/img/approval.png) | ![Fred, the health coach, in the life desktop app: two cards for the half marathon goal, a choice of a Saturday or Sunday long run and a step to log last night's sleep](docs/img/chat.png) |
+| ![Charlotte, the money manager, in the life desktop app: an approval card to buy $500 of VTI on Thursday, cash staying above a $2,000 floor, tagged money, with Approve, Deny, Reply and Dismiss, a rec she filed, and the Thursday buy coming up below](docs/img/approval.png) | ![Fred, the health coach, in the life desktop app: two cards for the half marathon goal, a choice of a Saturday or Sunday long run and a step to log last night's sleep, and three recs he filed](docs/img/chat.png) |
 
 | **Recs.** Suggestions with evidence and a price. | **Calendar.** Your steps and the agent's runs. |
 |---|---|
-| ![The Recs page of the life desktop app: try a meal kit for weeknights at $60 a month, move the trip fund to a high-yield account, blackout curtains for $89, each with its reason and Accept, Decline or Reply](docs/img/recs.png) | ![The life desktop app's Calendar on a week: an easy run, the farmers market, lunch, a spending review and dry cleaning on Sunday, then a tempo run, a hotel price check, the Thursday buy and a call home, with overdue, due, sessions waiting and anytime lists](docs/img/calendar.png) |
+| ![The Recs page of the life desktop app: Fred's meal kit for weeknights at $60 a month, Charlotte's move of the trip fund to a high-yield account, Fred's blackout curtains for $89, each naming who filed it, with its reason and Accept, Decline or a reply to that agent](docs/img/recs.png) | ![The life desktop app's Calendar on a week: daily Portuguese homework all day, plants to water every other day, runs and leg days, a hotel price check, the Thursday buy, receipts to sort and a call home, with overdue, due, sessions waiting and anytime lists](docs/img/calendar.png) |
 
 ### iPhone app
 
