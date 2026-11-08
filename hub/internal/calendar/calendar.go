@@ -150,10 +150,26 @@ func (c *Calendar) edit(id, query string, args ...any) error {
 // (homework that is not a Learn assignment, or a daily step) is `on`, every
 // other dated step of the owner's `by`. Idempotent: only rows still empty.
 func (c *Calendar) backfillDue() {
+	c.backfillAt()
 	c.db.Exec(`UPDATE items SET due='on' WHERE src='cal' AND due='' AND day<>'' AND
 		((kind='homework' AND source NOT LIKE 'hub:learn:%') OR (kind='owner' AND repeat='daily'))`)
 	c.db.Exec(`UPDATE items SET due='by' WHERE src='cal' AND due='' AND day<>'' AND kind IN ('owner','homework')`)
 	c.db.Exec(`UPDATE items SET ` + store.ItemStampSet + ` WHERE src='cal'`)
+}
+
+// backfillAt: older rows can hold a one-digit hour, "9:30", which every string
+// compare against an HH:MM reads as later than 23:59: never overdue, sorted
+// last (#170). time.Parse("15:04") never took a one-digit minute, so H:MM is
+// the only shape to pad. backfillDue restamps.
+func (c *Calendar) backfillAt() {
+	r, err := c.db.Exec(`UPDATE items SET at='0' || at WHERE src='cal' AND at GLOB '[0-9]:[0-9][0-9]'`)
+	if err != nil {
+		log.Printf("calendar: pad times: %v", err)
+		return
+	}
+	if n, _ := r.RowsAffected(); n > 0 {
+		log.Printf("calendar: padded %d one-digit-hour times", n)
+	}
 }
 
 // dueOf: the window a new dated step of the owner's gets when its filer did not say —

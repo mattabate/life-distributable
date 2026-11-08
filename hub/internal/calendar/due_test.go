@@ -55,6 +55,33 @@ func TestDueTrayCoversTheRepeatsWeek(t *testing.T) {
 	}
 }
 
+// An older row holding "9:30" read as later than 23:59, so it was never
+// overdue; the open pads it (#170).
+func TestOneDigitHourRowsArePadded(t *testing.T) {
+	c, _, _ := newTest(t)
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.Local)
+	c.Now = func() time.Time { return now }
+	it, err := c.Add(Item{Title: "Medication", Kind: "owner", Day: "2026-09-24", At: "09:30"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.db.Exec(`UPDATE items SET at='9:30' WHERE id=?`, it.ID); err != nil {
+		t.Fatal(err)
+	}
+	c.backfillDue()
+	got, err := c.Get(it.ID)
+	if err != nil || got.At != "09:30" {
+		t.Fatalf("at = %q (%v), want 09:30", got.At, err)
+	}
+	v, err := c.Agenda("2026-09-20", "2026-09-26")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Overdue) != 1 || v.Overdue[0].ID != it.ID {
+		t.Fatalf("overdue = %+v, want the padded row", v.Overdue)
+	}
+}
+
 // An on-the-day chore (watering the plants early does not cover the rest of
 // the week): it fires once with no nag, closes with a tick when no session
 // is behind it, is never Overdue, and 24 hours on (not midnight) closes it as missed - the

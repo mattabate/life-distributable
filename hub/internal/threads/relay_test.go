@@ -146,6 +146,15 @@ func TestPeersHeaderSaysWhatEachIsDoing(t *testing.T) {
 	if ts, _ := m.Find("acme", false); len(ts) != 1 || ts[0].ID != waiting.ID {
 		t.Fatalf("%+v", ts)
 	}
+	// So does a word from an earlier turn, after the last message moved on
+	// (#145); a % is a character, not a wildcard.
+	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text) VALUES (?,?,'claude','message','The espresso notes: 18 g in, 36 g out.')`, done.ID, "2026-10-01T12:00:00Z")
+	if ts, _ := m.Find("espresso 36", false); len(ts) != 1 || ts[0].ID != done.ID {
+		t.Fatalf("%+v", ts)
+	}
+	if ts, _ := m.Find("espresso%", false); len(ts) != 0 {
+		t.Fatalf("%% matched as a wildcard: %+v", ts)
+	}
 }
 
 // Every turn also sees what is open for the owner EVERYWHERE — other sessions'

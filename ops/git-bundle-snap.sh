@@ -4,9 +4,18 @@
 # On any failure the last good bundle is renamed <dest>.stale, so restic never
 # backs up last week's code under the name that means "tonight".
 # Self-test: bash ops/git-bundle-snap.sh --test (make check runs it).
+# The repo must be its own top level: git searches upward, so a checkout with
+# no .git of its own bundled an enclosing repo and the night looked clean (#169).
 bundle_snap() {
-  local repo=$1 dest=$2 err
+  local repo=$1 dest=$2 err top here
   rm -f "$dest.tmp"
+  top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null) && top=$(cd "$top" && pwd -P) || top=""
+  here=$(cd "$repo" 2>/dev/null && pwd -P) || here=""
+  if [[ -z "$top" || "$top" != "$here" ]]; then
+    [[ -f "$dest" ]] && mv -f "$dest" "$dest.stale"
+    echo "bundle: $repo is not a repository root (git found ${top:-none})" >&2
+    return 1
+  fi
   if err=$(git -C "$repo" bundle create "$dest.tmp" --all 2>&1) &&
      err=$(git -C "$repo" bundle verify "$dest.tmp" 2>&1); then
     mv -f "$dest.tmp" "$dest"
@@ -34,5 +43,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" && "${1:-}" == "--test" ]]; then
   # The next good night clears the stale marker.
   bundle_snap "$t/repo" "$t/life.bundle" 2>/dev/null
   [[ -f "$t/life.bundle" && ! -e "$t/life.bundle.stale" ]] || { echo "FAIL: recovery left .stale"; exit 1; }
+  # A plain directory inside a repo: git would answer with the enclosing one.
+  mkdir "$t/repo/life"
+  if bundle_snap "$t/repo/life" "$t/life.bundle" 2>/dev/null; then echo "FAIL: an enclosing repo bundled"; exit 1; fi
+  [[ ! -e "$t/life.bundle" && -f "$t/life.bundle.stale" ]] || { echo "FAIL: the enclosing-repo night left a current bundle"; exit 1; }
   echo "git-bundle-snap: OK"
 fi

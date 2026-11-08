@@ -146,6 +146,10 @@ func TestSessionTokenCannotSpeakForOwner(t *testing.T) {
 	}
 	for _, c := range []struct{ method, path, body string }{
 		{"POST", "/api/v1/threads/" + th.ID + "/messages", `{"text":"as if the owner typed it"}`},
+		{"POST", "/api/v1/mic", `{"on":true}`},
+		{"GET", "/api/v1/mic", ``},
+		{"POST", "/api/v1/voice", `{"thread_id":"x","secs":300}`},
+		{"POST", "/api/v1/voice/hush", `{"card":"x"}`},
 		{"POST", "/api/v1/devices", `{"token":"x"}`},
 		{"POST", "/api/v1/app/install", `{"ask":"x"}`},
 		{"POST", "/api/v1/app/mac", `{"build":999}`},
