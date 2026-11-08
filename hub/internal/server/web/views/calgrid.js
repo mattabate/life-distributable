@@ -420,7 +420,7 @@ function calMiniHTML(counts) {
     const day = addDays(gs, i), d = localDate(day);
     const cls = [d.getMonth() === month ? '' : 'out', day === today ? 'today' : '',
       day >= va && day <= vb ? 'in' : ''].filter(Boolean).join(' ');
-    cells += `<button class="${cls}" onclick="calJump('${day}')" title="${counts[day] || 0} on ${day}">${d.getDate()}</button>`;
+    cells += `<button class="${cls}" onclick="calJump('${escJS(day)}')" title="${counts[day] || 0} on ${day}">${d.getDate()}</button>`;
   }
   return `<div class="cal-mini">
     <div class="cal-minihead"><span>${monthLong(calAnchor())}</span></div>

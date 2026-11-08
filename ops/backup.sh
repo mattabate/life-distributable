@@ -11,6 +11,11 @@ ROOT=$(cd .. && pwd)
 mkdir -p logs
 LIFECTL="$ROOT/ops/bin/lifectl"
 
+# The session user's wall, nightly, before anything here can exit early (a
+# missing restic.env included); its own ask on a FAIL, never this script's
+# failure card (#163). A no-op with session_user off.
+bash ./wall-audit.sh || true
+
 # A failed night reaches the owner as an ask, not a line in logs/backup.log
 # nobody reads. The hub raises it on its own "hub" thread; if the hub itself
 # is down the trap only logs — and the next run tries again.
@@ -61,3 +66,7 @@ restic check --read-data-subset=5%
 # Mac is a key a rogue session can use. Prune by hand, with a separate key
 # (ops/b2.sh prune). A key that could delete fails the run, so it gets an ask.
 if [[ "$RESTIC_REPOSITORY" == b2:* ]]; then ./b2.sh check; fi
+
+# A clean finish stamps the time; the hub raises an ask when this goes stale
+# (hub/cmd/hub/backupage.go), so a night that never runs is seen too.
+date +%s > logs/backup.ok

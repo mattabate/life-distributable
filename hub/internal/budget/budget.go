@@ -59,7 +59,7 @@ type State struct {
 	BudgetUSD    float64 `json:"budget_usd"`
 	SpentUSD     float64 `json:"spent_usd"`
 	Percent      float64 `json:"percent"`
-	Level        string  `json:"level"` // off | ok | warn | refuse | locked | cleared
+	Level        string  `json:"level"` // off | ok | warn | refuse | locked | cleared | unknown
 	Unattended   bool    `json:"unattended"`
 	ThreadCapUSD float64 `json:"thread_cap_usd"`
 	// The fable day cap: the allowance, what fable has earned today, and the
@@ -90,9 +90,15 @@ func (g *Guard) day() (string, string) {
 	return now.Format("2006-01-02"), start.UTC().Format("2006-01-02T15:04:05")
 }
 
-func (g *Guard) sum(q string, args ...any) float64 {
+// sum: one spend query. A failed read is an error and a log line, never $0:
+// read as nothing spent, every cap failed open (#149).
+func (g *Guard) sum(err *error, q string, args ...any) float64 {
 	var v float64
-	if err := g.db.QueryRow(q, args...).Scan(&v); err != nil {
+	if e := g.db.QueryRow(q, args...).Scan(&v); e != nil {
+		log.Printf("budget: spend unreadable: %v", e)
+		if *err == nil {
+			*err = e
+		}
 		return 0
 	}
 	return v
@@ -100,10 +106,17 @@ func (g *Guard) sum(q string, args ...any) float64 {
 
 // SpentToday: the hub's own Claude spend since Eastern midnight.
 func (g *Guard) SpentToday() float64 {
+	v, _ := g.spentToday()
+	return v
+}
+
+func (g *Guard) spentToday() (float64, error) {
 	_, since := g.day()
-	return g.sum(`SELECT COALESCE(SUM(cost_usd),0) FROM thread_messages WHERE role='claude' AND ts >= ?`, since) +
-		g.sum(`SELECT COALESCE(SUM(live_cost_usd),0) FROM thread_runs WHERE finished_at IS NULL`) +
-		g.sum(`SELECT COALESCE(SUM(cost_usd),0) FROM runs WHERE started_at >= ?`, since)
+	var err error
+	v := g.sum(&err, `SELECT COALESCE(SUM(cost_usd),0) FROM thread_messages WHERE role='claude' AND ts >= ?`, since) +
+		g.sum(&err, `SELECT COALESCE(SUM(live_cost_usd),0) FROM thread_runs WHERE finished_at IS NULL`) +
+		g.sum(&err, `SELECT COALESCE(SUM(cost_usd),0) FROM runs WHERE started_at >= ?`, since)
+	return v, err
 }
 
 // FableSpentToday: what fable has earned today. Read off thread_runs, the
@@ -112,20 +125,31 @@ func (g *Guard) SpentToday() float64 {
 // the turn in flight). Job runs are not here — the policy already runs them
 // on sonnet — and a long run counts on the day it started.
 func (g *Guard) FableSpentToday() float64 {
+	v, _ := g.fableSpent()
+	return v
+}
+
+func (g *Guard) fableSpent() (float64, error) {
 	_, since := g.day()
-	return g.sum(`SELECT COALESCE(SUM(cost_seen + live_cost_usd),0) FROM thread_runs
+	var err error
+	v := g.sum(&err, `SELECT COALESCE(SUM(cost_seen + live_cost_usd),0) FROM thread_runs
 		WHERE started_at >= ? AND model LIKE 'claude-fable%'`, since)
+	return v, err
 }
 
 // Floor: the rung every new process must start on for the rest of today, or
 // "" for "start where the policy says". Non-empty once the day's fable spend
 // passes the cap — the work still runs, one model down.
-// Crossing is logged and FYI'd once a day.
+// Crossing is logged and FYI'd once a day. Spend it cannot read starts the
+// process one rung down too, with no FYI (the log says why).
 func (g *Guard) Floor() string {
 	if g == nil || g.FableDailyUSD <= 0 || g.FableFloor == "" {
 		return ""
 	}
-	spent := g.FableSpentToday()
+	spent, err := g.fableSpent()
+	if err != nil {
+		return g.FableFloor
+	}
 	if spent < g.FableDailyUSD {
 		return ""
 	}
@@ -161,9 +185,16 @@ func short(model string) string {
 
 // ThreadSpentToday: one thread's share of that.
 func (g *Guard) ThreadSpentToday(threadID string) float64 {
+	v, _ := g.threadSpent(threadID)
+	return v
+}
+
+func (g *Guard) threadSpent(threadID string) (float64, error) {
 	_, since := g.day()
-	return g.sum(`SELECT COALESCE(SUM(cost_usd),0) FROM thread_messages WHERE thread_id=? AND role='claude' AND ts >= ?`, threadID, since) +
-		g.sum(`SELECT COALESCE(SUM(live_cost_usd),0) FROM thread_runs WHERE thread_id=? AND finished_at IS NULL`, threadID)
+	var err error
+	v := g.sum(&err, `SELECT COALESCE(SUM(cost_usd),0) FROM thread_messages WHERE thread_id=? AND role='claude' AND ts >= ?`, threadID, since) +
+		g.sum(&err, `SELECT COALESCE(SUM(live_cost_usd),0) FROM thread_runs WHERE thread_id=? AND finished_at IS NULL`, threadID)
+	return v, err
 }
 
 // State reads the meter and records the first crossing of each level.
@@ -174,9 +205,14 @@ func (g *Guard) State() State {
 	day, _ := g.day()
 	st := State{Day: day, BudgetUSD: g.DailyUSD, ThreadCapUSD: g.ThreadDailyUSD, Level: "off", Unattended: true,
 		FableCapUSD: g.FableDailyUSD, FableSpentUSD: fable, FableFloor: floor}
-	st.SpentUSD = g.SpentToday()
+	var err error
+	st.SpentUSD, err = g.spentToday()
 	if g.DailyUSD <= 0 {
 		st.Note = fableNote(fable, g.FableDailyUSD, floor)
+		return st
+	}
+	if err != nil {
+		st.Level, st.Unattended, st.Note = "unknown", false, "today's spend is unreadable: unattended wakes wait until it reads"
 		return st
 	}
 	st.Percent = 100 * st.SpentUSD / g.DailyUSD
@@ -276,7 +312,10 @@ func (g *Guard) Allow(kind, id string) (bool, string) {
 		return false, st.Note
 	}
 	if kind == "checkin" && g.ThreadDailyUSD > 0 {
-		spent := g.ThreadSpentToday(id)
+		spent, err := g.threadSpent(id)
+		if err != nil {
+			return false, "thread spend unreadable: this wake waits for the next one"
+		}
 		if spent >= g.ThreadDailyUSD {
 			return false, fmt.Sprintf("thread spent $%.2f today (cap $%.0f) — next wake tomorrow", spent, g.ThreadDailyUSD)
 		}

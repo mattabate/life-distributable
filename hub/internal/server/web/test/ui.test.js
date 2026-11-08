@@ -19,6 +19,28 @@ test('esc: the five HTML characters, and null is empty', () => {
   assert.equal(esc(42), '42');
 });
 
+// The HTML parser undoes esc() inside an on* attribute before the JS runs, so
+// a quote in an id, label or outcome value used to end the string (#155).
+// Run each handler against a spy instead.
+test('escJS: a quote in an id, label or outcome value stays data in an onclick (#155)', () => {
+  const Q = "it's \"quoted\" \\ </b>');alert(1);('\n";
+  const decode = s => s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" }[e]));
+  // Every bare name a handler calls is a spy that records (name, ...args).
+  const calls = h => [...h.matchAll(/onclick="([^"]*)"/g)].map(m => {
+    const got = [];
+    const env = new Proxy({}, { has: (_, k) => typeof k === 'string', get: (_, k) => (...a) => got.push([k, ...a]) });
+    new Function('env', `with (env) { ${decode(m[1])} }`)(env);
+    return got[0];
+  });
+  const base = { id: 'ask-' + Q, thread_id: 't1', title: 'x', kind: 'decision', surface: 'any', state: 'open', open: true, closed: false, created_at: new Date().toISOString() };
+  const read = calls(askHTML({ ...base, kind: 'read', outcomes: [{ value: 'done', label: Q }] }));
+  assert.deepEqual(read.find(c => c[0] === 'resolveAsk'), ['resolveAsk', 'ask-' + Q, 'done', Q]);
+  assert.deepEqual(read.find(c => c[0] === 'openRespond'), ['openRespond', 'ask-' + Q]);
+  const dec = calls(askHTML({ ...base, outcomes: [{ value: Q, label: 'Go' }] }));
+  assert.deepEqual(dec.find(c => c[0] === 'openRespond' && c.length === 3), ['openRespond', 'ask-' + Q, Q]);
+  assert.deepEqual(dec.find(c => c[0] === 'cardFold'), ['cardFold', 'ask', 'ask-' + Q]);
+});
+
 test('makePager: pages, Show all, reset, and a route change starts it over', () => {
   let painted = 0;
   const p = makePager('tpager', 2, () => painted++);
@@ -86,6 +108,21 @@ test('mdInline: bare hub ids link, shared/ref-cases.json', () => {
   // links=false (inside a clickable card) and a preview stay link-free
   assert.equal(mdInline('Decide rec-120a5f85', false), 'Decide rec-120a5f85');
   assert.equal(mdPreview('- Decide rec-120a5f85'), '• Decide rec-120a5f85');
+});
+
+// No later pass reaches into a link already made (#157): one anchor per
+// [label](url), never one inside another, the href untouched.
+test('mdInline: a link is one link, shared/ref-cases.json anchors', () => {
+  const cases = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', '..', 'shared', 'ref-cases.json'), 'utf8'));
+  for (const [src, want] of cases.anchors) {
+    const html = mdInline(src);
+    assert.equal((html.match(/<a /g) || []).length, (html.match(/<\/a>/g) || []).length, src);
+    assert.doesNotMatch(html, /<a [^>]*>(?:(?!<\/a>).)*<a /, src);
+    const got = [...html.matchAll(/<a href="([^"]*)"[^>]*>(.*?)<\/a>/g)].map(m => [m[2].replace(/<[^>]+>/g, ''), m[1]]);
+    assert.deepEqual(got, want, src);
+  }
+  assert.equal(mdInline('[*the* page](https://x.test/a)'), '<a href="https://x.test/a" target="_blank" rel="noopener"><em>the</em> page</a>');
+  assert.equal(mdInline('[x](https://example.com/a_(*b*))', false), 'x');
 });
 
 // The table the hub (internal/format) and the phone (FormatTests.swift) read:

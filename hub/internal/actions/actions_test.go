@@ -816,6 +816,11 @@ func TestShellTrustsOnlyItsOwnDirForGit(t *testing.T) {
 		t.Skip(err)
 	}
 	dir := t.TempDir()
+	// The host's own git config stays out: a global safe.directory=* (common
+	// on Linux and in containers) is the host's choice, not the action's
+	// (#148).
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	var e DefaultExecutor
 	p, _ := json.Marshal(map[string]string{"cmd": "git config --get-all safe.directory", "dir": dir})
 	out, err := e.Exec(context.Background(), "shell", p)

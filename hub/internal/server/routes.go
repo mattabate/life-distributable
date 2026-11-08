@@ -26,6 +26,7 @@ func (s *Server) routes() []route {
 	return []route{
 		{"GET /healthz", s.healthz, true},
 		{"GET /", s.index, true},
+		{"POST /api/v1/login-codes", s.postLoginCode, false},
 		{"GET /api/v1/projects", s.projects, false},
 		{"GET /api/v1/spend/summary", s.spendSummary, false},
 		{"GET /api/v1/spend/quota", s.spendQuota, false},

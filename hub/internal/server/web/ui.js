@@ -123,6 +123,12 @@ async function act(fn, done, after = () => pageRedraw()) {
 
 // ---------- helpers ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// escJS: a value inside a quoted JS string inside an on* attribute
+// (`onclick="f('${escJS(id)}')"`). esc() alone is undone there: the browser
+// decodes &#39; back to ' before the script runs, so an id or label with a
+// quote ended the string and the rest ran as code (#155). JS escapes first
+// (quotes, backslashes, line ends), then HTML.
+const escJS = s => esc(JSON.stringify(String(s ?? '')).slice(1, -1).replace(/'/g, "\\'"));
 
 // ---------- refs ----------
 // A ref is the typed pointer the hub sets on every row: `kind:<id>`. Where
@@ -405,14 +411,32 @@ function trimBareURL(u) {
 function mdInline(src, links = true) {
   // A picture inside a sentence is its caption as a link: only a line of its
   // own draws the picture (md, BLOB_LINE).
-  let s = esc(String(src ?? '').replace(/!\[([^\]]*)\]\(/g, (_, a) => `[${a || 'image'}](`));
+  let s = esc(String(src ?? '').replace(/[\u0000\u0001]/g, '').replace(/!\[([^\]]*)\]\(/g, (_, a) => `[${a || 'image'}](`));
+  // Code spans are lifted out first and put back last: they were substituted
+  // in place, so the emphasis passes then ran over their contents and
+  // "`--host *`" came out italic. Inside backticks the characters are the
+  // point.
+  const code = [];
+  s = s.replace(/`([^`]+)`/g, (_, c) => '\u0000' + (code.push(c) - 1) + '\u0000');
+  // Every anchor made here is held the same way until the end, so no later
+  // pass reaches into one: "[x](https://example.com/a_(*b*))" put <em> in
+  // the href, and the bare-URL pass linked the URL in "[see https://a.example]
+  // (https://b.example)" a second time inside the first (#157). A link's own
+  // words get their emphasis before they are held.
+  const held = [];
+  const hold = a => '\u0001' + (held.push(a) - 1) + '\u0001';
+  const emph = t => t
+    .replace(/(^|[\s([{])\*\*([^\s*][^*]*[^\s*]|[^\s*])\*\*/g, '$1<strong>$2</strong>')
+    .replace(/(^|[\s([{])\*([^\s*][^*\n]*[^\s*]|[^\s*])\*/g, '$1<em>$2</em>');
+  // A link's URL may hold one level of balanced parens, as CommonMark's does.
+  const MD_LINK = /\[([^\]]+)\]\((https?:\/\/(?:[^\s()\u0000\u0001]|\([^\s()\u0000\u0001]*\))+)\)/g;
   s = links
-    ? s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-       .replace(/(^|[\s(])(https?:\/\/[^\s<\]]+)/g, (_, pre, u) => {
+    ? s.replace(MD_LINK, (_, t, u) => hold(`<a href="${u}" target="_blank" rel="noopener">${emph(t)}</a>`))
+       .replace(/(^|[\s(])(https?:\/\/[^\s<\]\u0000\u0001]+)/g, (_, pre, u) => {
          const [link, rest] = trimBareURL(u);
-         return `${pre}<a href="${link}" target="_blank" rel="noopener">${link}</a>${rest}`;
+         return `${pre}${hold(`<a href="${link}" target="_blank" rel="noopener">${link}</a>`)}${rest}`;
        })
-    : s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '$1');
+    : s.replace(MD_LINK, '$1');
   // An asterisk is only syntax when it opens at a word boundary (start,
   // whitespace, an opening bracket) and hugs its content on both sides.
   // Without that, "you have Bash(npm install:*) and Bash(npm run:*)" matched
@@ -421,12 +445,6 @@ function mdInline(src, links = true) {
   // same bug via CommonMark's left-flanking rule. Also protects "ops/*.py and
   // src/*.go" and "2**32 and 2**64". Dropping characters out of a message is
   // worse than dropping the italics.
-  // Code spans are lifted out first and put back last: they were substituted
-  // in place, so the emphasis passes then ran over their contents and
-  // "`--host *`" came out italic. Inside backticks the characters are the
-  // point.
-  const code = [];
-  s = s.replace(/`([^`]+)`/g, (_, c) => '\u0000' + (code.push(c) - 1) + '\u0000');
   // A bare hub id is a link to the thing (2026-09-20, on "Decide
   // rec-120a5f85 / Close ask-955bfb8e": "What are the Rex and Ass? You need to
   // give me links to these things"). Not inside a link that is already there,
@@ -437,9 +455,8 @@ function mdInline(src, links = true) {
     if (ci !== undefined) return REF_WHOLE.test(code[ci]) ? `<a href="${refHref(refOf(code[ci]))}">${m}</a>` : m;
     return `<a href="${refHref(refOf(id))}">${id}</a>`;
   });
-  return s
-    .replace(/(^|[\s([{])\*\*([^\s*][^*]*[^\s*]|[^\s*])\*\*/g, '$1<strong>$2</strong>')
-    .replace(/(^|[\s([{])\*([^\s*][^*\n]*[^\s*]|[^\s*])\*/g, '$1<em>$2</em>')
+  return emph(s)
+    .replace(/\u0001(\d+)\u0001/g, (_, i) => held[i])
     .replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${code[i]}</code>`);
 }
 
@@ -962,7 +979,7 @@ function askBody(detail, key) {
   if (!isLongText(detail)) return md(detail);
   const open = cardLongOpen.has(key);
   return `<div class="ask-long${open ? ' open' : ''}">${md(detail)}</div>
-    ${foldButtonHTML(open, `toggleCardLong(this,'${esc(key)}')`)}`;
+    ${foldButtonHTML(open, `toggleCardLong(this,'${escJS(key)}')`)}`;
 }
 function toggleCardLong(btn, key) {
   const open = !cardLongOpen.delete(key);
@@ -1191,26 +1208,26 @@ function askHTML(a, opened, armed, cost) {
   // runs the hub's `mac` lane, which builds if it must and restarts the app.
   const mac = install && askInstallTarget(a) === 'mac';
   const link = install && !mac && askInstallLink(a.detail);
-  const dismiss = { label: 'Dismiss', js: `cardFold('ask','${id}')` };
-  const respond = { label: 'Respond', js: `openRespond('${id}')`, primary: onBar, suggested: !onBar };
+  const dismiss = { label: 'Dismiss', js: `cardFold('ask','${escJS(a.id)}')` };
+  const respond = { label: 'Respond', js: `openRespond('${escJS(a.id)}')`, primary: onBar, suggested: !onBar };
   // A closed card carries Reopen when the hub says so (`reopen`: every kind
   // but an install, 2026-09-29) — the done ones too, not just a fold.
-  const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('ask','${id}',true)` }] : [])
+  const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('ask','${escJS(a.id)}',true)` }] : [])
     // An error is a run that wants starting again (2026-08-24).
-    : err ? [{ label: paused ? 'Resume now' : 'Restart', js: `retryAsk('${id}')`, primary: true }, dismiss]
-    : install ? [mac ? { label: 'Install', js: `macInstall('${id}')`, primary: true } : link ? { label: 'Install', href: link, primary: true } : respond, dismiss]
+    : err ? [{ label: paused ? 'Resume now' : 'Restart', js: `retryAsk('${escJS(a.id)}')`, primary: true }, dismiss]
+    : install ? [mac ? { label: 'Install', js: `macInstall('${escJS(a.id)}')`, primary: true } : link ? { label: 'Install', href: link, primary: true } : respond, dismiss]
     // A read: Respond arms the reply (sending closes it, words or not); Read
     // is its silent close — done, "Read it", wakes nothing (2026-09-17:
     // "when I hit the white read button… I have read this message and I
     // don't care about it").
-    : read ? [respond, { label: 'Read', js: `resolveAsk('${id}','done','${esc(((a.outcomes || [])[0] || {}).label || '')}')` }]
+    : read ? [respond, { label: 'Read', js: `resolveAsk('${escJS(a.id)}','done','${escJS(((a.outcomes || [])[0] || {}).label || '')}')` }]
     // An item with steps is answered a step at a time: no buttons for the
     // whole card, it closes when the last step is done or skipped.
     : (a.steps || []).length ? []
     // Every other kind: the hub's words (Decided · Just
     // reply), each arming the composer with that pick, then Dismiss — the
     // silent close (2026-08-28: "once I read it, I can just dismiss it").
-    : (a.outcomes && a.outcomes.length ? outcomeBtns(a.outcomes, v => `openRespond('${id}','${v}')`, armed) : [respond]).concat(dismiss);
+    : (a.outcomes && a.outcomes.length ? outcomeBtns(a.outcomes, v => `openRespond('${escJS(a.id)}','${escJS(v)}')`, armed) : [respond]).concat(dismiss);
   return cardHTML({
     ref: 'ask', id: a.id, title: a.title, verb: a.verb || 'for you',
     tint: paused && open ? 'paused' : err ? 'err-card' : read ? 'read' : install ? 'install' : '',
@@ -1263,8 +1280,8 @@ function actionHTML(a, opened, armed, cost) {
     ? `<details style="margin:6px 0"><summary class="muted">What it runs</summary>
        <pre class="io mono">${esc(typeof a.exec_payload === 'string' ? a.exec_payload : JSON.stringify(a.exec_payload, null, 2))}</pre></details>`
     : '';
-  const arm = v => a.thread_id ? `armActionReply('${id}','${v}')` : `decideAction('${id}',${v === 'approved'})`;
-  const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('action','${id}',true)` }] : []) : outcomeBtns(a.outcomes, arm, armed).concat({ label: 'Dismiss', js: `cardFold('action','${id}')` });
+  const arm = v => a.thread_id ? `armActionReply('${escJS(a.id)}','${escJS(v)}')` : `decideAction('${escJS(a.id)}',${v === 'approved'})`;
+  const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('action','${escJS(a.id)}',true)` }] : []) : outcomeBtns(a.outcomes, arm, armed).concat({ label: 'Dismiss', js: `cardFold('action','${escJS(a.id)}')` });
   return cardHTML({
     ref: 'action', id: a.id, title: a.title, tint: '', verb: 'approve',
     mark: '🔴 ',

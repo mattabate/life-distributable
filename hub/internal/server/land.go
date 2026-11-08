@@ -30,7 +30,9 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from := strings.TrimSpace(r.Header.Get("X-Life-Thread"))
-	if from == "" {
+	// The thread names refs/incoming/<from> in the fetch refspec, so it is a
+	// thread id or nothing, as appShip and appWalk hold it (#148).
+	if from == "" || !shipThread.MatchString(from) {
 		jsonErr(w, 403, "only a session lands through this route")
 		return
 	}

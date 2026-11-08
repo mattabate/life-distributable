@@ -7,7 +7,7 @@
 //
 // No build step and no framework on purpose: the hub is one static binary
 // with no node toolchain, and `make check` should not grow a JS lane. Auth is
-// the `life_token` cookie the hub already sets from /?token=…
+// the `life_token` cookie the hub already sets from a /?code=… login code
 //
 // Files (all plain scripts, index.html loads them in this order):
 //   ui.js          shared render helpers, the one ask card, the action card
@@ -48,7 +48,7 @@ async function api(path, opts = {}) {
   }
   conn(r.ok);
   seenBuild(r.headers.get('X-Hub-Build'));
-  if (r.status === 401) { document.body.innerHTML = '<div class="empty">Unauthorized. Open <code>/?token=&lt;hub token&gt;</code> once.</div>'; throw new Error('unauthorized'); }
+  if (r.status === 401) { document.body.innerHTML = '<div class="empty">Unauthorized. Run <code>ops/hub.sh url</code> in a Terminal and open what it prints.</div>'; throw new Error('unauthorized'); }
   if (r.status === 204) return null;
   const txt = await r.text();
   let j = null; try { j = txt ? JSON.parse(txt) : null; } catch { /* non-JSON */ }

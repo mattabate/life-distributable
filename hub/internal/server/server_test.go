@@ -1139,27 +1139,75 @@ func TestAuth(t *testing.T) {
 	}
 }
 
-func TestIndexCookieFlow(t *testing.T) {
-	s := newTest(t)
-	r := httptest.NewRequest("GET", "/?token=secret", nil)
+// codeFor is a code for tok from POST /api/v1/login-codes.
+func codeFor(t *testing.T, s *Server, tok string) string {
+	t.Helper()
+	r := httptest.NewRequest("POST", "/api/v1/login-codes", nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, r)
-	if w.Code != 303 || !strings.Contains(w.Header().Get("Set-Cookie"), "life_token=secret") {
-		t.Fatalf("%d %q", w.Code, w.Header().Get("Set-Cookie"))
+	var got struct{ Code string }
+	if json.Unmarshal(w.Body.Bytes(), &got); w.Code != 201 || got.Code == "" {
+		t.Fatalf("login code: %d %s", w.Code, w.Body)
 	}
-	r = httptest.NewRequest("GET", "/", nil)
+	return got.Code
+}
+
+// The console's cookie comes from a one-minute single-use code, never a
+// token in the URL (#161).
+func TestIndexCookieFlow(t *testing.T) {
+	s := newTest(t)
+	visit := func(q string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest("GET", "/"+q, nil))
+		return w
+	}
+	if w := visit("?token=secret"); w.Code != 401 || len(w.Result().Cookies()) != 0 {
+		t.Fatalf("?token= still signs in: %d %v", w.Code, w.Result().Cookies())
+	}
+	code := codeFor(t, s, "secret")
+	w := visit("?code=" + code)
+	if w.Code != 303 || w.Header().Get("Location") != "/" || !strings.Contains(w.Header().Get("Set-Cookie"), "life_token=secret") {
+		t.Fatalf("%d %q %q", w.Code, w.Header().Get("Location"), w.Header().Get("Set-Cookie"))
+	}
+	// Spent: the visit still moves on to "/", setting nothing.
+	if w := visit("?code=" + code); w.Code != 303 || len(w.Result().Cookies()) != 0 {
+		t.Fatalf("a spent code: %d %v", w.Code, w.Result().Cookies())
+	}
+	if w := visit("?code=nope"); w.Code != 303 || len(w.Result().Cookies()) != 0 {
+		t.Fatalf("an unknown code: %d %v", w.Code, w.Result().Cookies())
+	}
+	// Past its minute.
+	old := s.logins.mint("secret", time.Now().Add(-2*loginCodeTTL))
+	if w := visit("?code=" + old); len(w.Result().Cookies()) != 0 {
+		t.Fatalf("an expired code set a cookie")
+	}
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/login-codes", nil))
+	if w.Code != 401 {
+		t.Fatalf("a code with no token: %d", w.Code)
+	}
+	r := httptest.NewRequest("GET", "/", nil)
 	r.AddCookie(&http.Cookie{Name: "life_token", Value: "secret"})
 	w = httptest.NewRecorder()
 	s.ServeHTTP(w, r)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "<html") {
 		t.Fatalf("%d", w.Code)
 	}
+	// #158: the console document's own headers.
+	for k, want := range map[string]string{
+		"Content-Security-Policy": "frame-ancestors 'none'; object-src 'none'; base-uri 'none'",
+		"X-Content-Type-Options":  "nosniff",
+		"Referrer-Policy":         "no-referrer",
+	} {
+		if got := w.Header().Get(k); got != want {
+			t.Errorf("%s: %q, want %q", k, got, want)
+		}
+	}
 	// &next= lands on a blob (the phone's Open in browser); anything else is "/".
 	for n, want := range map[string]string{"/api/v1/blobs/sha256/28/28bf.html": "/api/v1/blobs/sha256/28/28bf.html",
 		"/api/v1/blobs/../secret": "/", "/api/v1/sessions": "/", "https://evil/x": "/"} {
-		r = httptest.NewRequest("GET", "/?token=secret&next="+url.QueryEscape(n), nil)
-		w = httptest.NewRecorder()
-		s.ServeHTTP(w, r)
+		w = visit("?code=" + codeFor(t, s, "secret") + "&next=" + url.QueryEscape(n))
 		if w.Code != 303 || w.Header().Get("Location") != want {
 			t.Fatalf("next=%s: %d -> %q, want %q", n, w.Code, w.Header().Get("Location"), want)
 		}

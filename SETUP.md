@@ -199,14 +199,14 @@ over Tailscale, which only their own devices can join.
    shows a code. Save it in the Passwords app with the title
    `life decider code`, then close the window." You never see it.
 8. **Open the console** (the web version of the app). You open
-   `ops/hub.sh url` in its own window. It shows the console address with
-   the hub's password (the token) in it. Tell them:
-   1. Open **Passwords** (the Apple app) → **+** → **Title** `life hub`,
-      **Website** the address up to and including `:8443`, **Username**
-      leave blank, **Password** the part after `token=` → **Save**.
-   2. Open that full printed address in a browser on this Mac (and, if they
-      chose `web`, on each other computer on Tailscale). The console loads
-      and remembers them for a year.
+   `ops/hub.sh url` in its own Terminal window. It prints the console
+   address with a sign-in code in it that works once, for one minute (the
+   hub's password never goes in a URL). Tell them:
+   1. Open that printed address in a browser on this Mac within a minute.
+      The console loads and remembers them for a year.
+   2. If they chose `web`, for each other computer on Tailscale: run
+      `ops/hub.sh url` again on this Mac and open the new address on that
+      computer within a minute.
 9. **The console's mic** (macOS 26 only; skip otherwise). `make build` made
    `ops/bin/mic`, which turns speech into text on this Mac; nothing leaves
    it. Tell them: "Click **Mic** at the top of the console (or tap Option

@@ -31,9 +31,17 @@ if [ "${1:-}" = "preview" ]; then
   exit 0
 fi
 
-# The URL with a token, never printed: `hub.sh url` gives the owner's only
-# in a Terminal (#129).
-url="https://$(plutil -extract public_host raw -o - ops/hub.json)/?token=${LIFE_SESSION_TOKEN:-$(cat ops/secrets/hub.token)}"
+# The login URL is built here, never printed: `hub.sh url` mints the owner's
+# only in a Terminal (#129). Each visit below takes its own one-minute login
+# code, so the token never goes in a URL (#161). The token reaches curl on
+# stdin.
+base="https://$(plutil -extract public_host raw -o - ops/hub.json)"
+url() {
+  local code
+  code=$(printf 'Authorization: Bearer %s\n' "${LIFE_SESSION_TOKEN:-$(cat ops/secrets/hub.token)}" |
+    curl -fsS --max-time 5 -X POST -H @- "$base/api/v1/login-codes" | sed -n 's/.*"code": *"\([0-9a-f]*\)".*/\1/p') || code=
+  echo "$base/?code=$code"
+}
 
 # `web-smoke.sh shot [thread-id] [route]` — screenshots of the LIVE hub
 # instead of assertions, so a session can look at what it changed
@@ -43,22 +51,22 @@ if [ "${1:-}" = "shot" ]; then
   tid=${2:-$(ops/bin/lifectl threads --json | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)}
   chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
     --window-size=1500,1000 --virtual-time-budget=9000 \
-    --screenshot=ops/logs/web/list.png "$url" >/dev/null 2>&1 || true
+    --screenshot=ops/logs/web/list.png "$(url)" >/dev/null 2>&1 || true
   chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
     --window-size=1500,1000 --virtual-time-budget=9000 \
-    --screenshot=ops/logs/web/chat.png "$url#/sessions/$tid" >/dev/null 2>&1 || true
+    --screenshot=ops/logs/web/chat.png "$(url)#/sessions/$tid" >/dev/null 2>&1 || true
   if [ -n "${3:-}" ]; then
     # SHOT_H: the panes scroll inside the window, so a long page (Calendar) is
     # only visible in one picture when the window itself is tall.
     chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
       --window-size=1500,"${SHOT_H:-2200}" --virtual-time-budget=9000 \
-      --screenshot=ops/logs/web/view.png "$url$3" >/dev/null 2>&1 || true
+      --screenshot=ops/logs/web/view.png "$(url)$3" >/dev/null 2>&1 || true
   fi
   ls -l ops/logs/web/
   exit 0
 fi
 dom=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
-      --virtual-time-budget=8000 --dump-dom "$url" 2>/dev/null || true)
+      --virtual-time-budget=8000 --dump-dom "$(url)" 2>/dev/null || true)
 
 fail() { echo "web-smoke: FAILED — $1"; exit 1; }
 [ -n "$dom" ] || fail "no DOM (hub down? token stale?)"
@@ -86,7 +94,7 @@ case "$dom" in
 esac
 echo "web-smoke: OK (landed on Sessions)"
 dom=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
-      --virtual-time-budget=8000 --dump-dom "$url#/sessions" 2>/dev/null || true)
+      --virtual-time-budget=8000 --dump-dom "$(url)#/sessions" 2>/dev/null || true)
 for want in 'id="list"' 'New session'; do
   case "$dom" in
     *"$want"*) ;;
@@ -100,7 +108,7 @@ echo "web-smoke: OK (sessions list rendered)"
 tid=$(ops/bin/lifectl threads --json | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)
 [ -n "$tid" ] || { echo "web-smoke: no threads to open"; exit 0; }
 chat=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
-       --virtual-time-budget=9000 --dump-dom "$url#/sessions/$tid" 2>/dev/null || true)
+       --virtual-time-budget=9000 --dump-dom "$(url)#/sessions/$tid" 2>/dev/null || true)
 # ids are the shared composer's, one per key (composer.js `cdom`): the chat's
 # box is c-chat, its textarea c-chat-draft — they were plain "composer"/"draft"
 # until the box became one component used by chat, calendar steps and recs.
@@ -118,7 +126,7 @@ echo "web-smoke: OK (chat rendered, thread $tid)"
 for pair in 'goals:Goals' 'recs:Recommendations' 'spend:Spend' 'sources:Sources'; do
   tab=${pair%%:*}; head=${pair#*:}
   page=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
-         --virtual-time-budget=8000 --dump-dom "$url#/$tab" 2>/dev/null || true)
+         --virtual-time-budget=8000 --dump-dom "$(url)#/$tab" 2>/dev/null || true)
   # A heading may carry a count now ("Recommendations · 4"), so match the h2's
   # opening text rather than the whole element — but keep it anchored to <h2
   # so the nav link of the same name cannot satisfy the assertion.
@@ -132,7 +140,7 @@ done
 # grid itself is the better assertion anyway — the title bar, the scroller the
 # hours live in, and the rail that holds the anytime rows.
 cal=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
-      --virtual-time-budget=9000 --dump-dom "$url#/calendar/week" 2>/dev/null || true)
+      --virtual-time-budget=9000 --dump-dom "$(url)#/calendar/week" 2>/dev/null || true)
 for want in 'class="cal-title"' 'id="cal-scroll"' 'class="cal-rail"'; do
   case "$cal" in
     *"$want"*) ;;
@@ -147,7 +155,7 @@ echo "web-smoke: OK (your turn, goals, calendar grid, recs, spend, sources rende
 gid=$(ops/bin/lifectl goals | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)
 if [ -n "$gid" ]; then
   gp=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
-       --virtual-time-budget=8000 --dump-dom "$url#/goals/$gid" 2>/dev/null || true)
+       --virtual-time-budget=8000 --dump-dom "$(url)#/goals/$gid" 2>/dev/null || true)
   for want in 'id="ghead"' 'class="switch"' 'Where this stands' 'Recent notes'; do
     case "$gp" in
       *"$want"*) ;;
@@ -161,7 +169,6 @@ fi
 # — an ask card built from a hostile title, its Reply button clicked). Rendering
 # is what every phase above tests; this is the only one that tests behaviour,
 # and the Reply button is why it exists.
-base=${url%%/\?token=*}
 cw=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
      --virtual-time-budget=9000 --dump-dom "file://$PWD/ops/web-check.html?hub=$base" 2>/dev/null || true)
 # The result block is multi-line, so it comes out as a range, tags stripped.
@@ -178,7 +185,7 @@ echo "web-smoke: OK (ask card controls behave — $(printf '%s\n' "$res" | grep 
 rid=$(ops/bin/lifectl recs all --json | sed -n 's/.*"id": "\(rec-[^"]*\)".*/\1/p' | head -1)
 if [ -n "$rid" ]; then
   rp=$(chrome --headless --disable-gpu --no-first-run --ignore-certificate-errors \
-       --virtual-time-budget=8000 --dump-dom "$url#/recs/$rid" 2>/dev/null || true)
+       --virtual-time-budget=8000 --dump-dom "$(url)#/recs/$rid" 2>/dev/null || true)
   for want in 'Decision' 'Outcome' '‹ Recommendations'; do
     case "$rp" in
       *"$want"*) ;;

@@ -135,7 +135,7 @@ function goalHeadHTML(g) {
       <h2 class="grow m0">${mdInline(g.title)}</h2>
       <label class="row small muted" style="gap:6px;flex:none">${esc(g.status)}
         <span class="switch"><input type="checkbox"${active ? ' checked' : ''}
-          onchange="setGoalActive('${esc(g.id)}', this.checked)"><span></span></span></label>
+          onchange="setGoalActive('${escJS(g.id)}', this.checked)"><span></span></span></label>
       <button class="sm" onclick="editGoal()">Edit</button>
     </div>
     <div class="prose statement">${g.statement ? md(g.statement) : '<span class="muted">No statement yet.</span>'}</div>
@@ -152,7 +152,7 @@ function goalEditHTML(g, v) {
     <div class="row mt10">
       <span class="grow"></span>
       <button class="sm" onclick="closeGoalForm()">Cancel</button>
-      <button class="primary sm" onclick="saveGoal('${esc(g.id)}')">Save</button>
+      <button class="primary sm" onclick="saveGoal('${escJS(g.id)}')">Save</button>
     </div>`;
 }
 

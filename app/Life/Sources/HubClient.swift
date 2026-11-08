@@ -563,6 +563,15 @@ final class HubClient {
                                          replies: replies), decider: decider)
     }
 
+    /// A one-minute, single-use code that sets the console's cookie in a
+    /// browser (`/?code=…`): the token itself in Safari's URL stayed in its
+    /// history (#161).
+    func loginCode() async throws -> String {
+        struct R: Decodable, Sendable { let code: String }
+        let r: R = try await request("POST", "/api/v1/login-codes", cache: false)
+        return r.code
+    }
+
     /// Was this error the hub refusing a decision for want of the code (403)?
     static func isDeciderRefusal(_ error: Error) -> Bool {
         (error as? APIError)?.status == 403

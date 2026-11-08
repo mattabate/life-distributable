@@ -107,7 +107,7 @@ async function recsAll(view) {
           <thead><tr><th>Recommendation</th><th>Domain</th><th></th><th>When</th><th class="n">Cost</th></tr></thead>
           <tbody>${shown.map(r => {
             const href = `#/recs/${esc(r.id)}`;
-            return `<tr onclick="location.hash='${href}'">
+            return `<tr onclick="location.hash='${escJS('#/recs/' + r.id)}'">
               <td class="all-t"><a href="${href}"${r.status === 'proposed' ? ' class="unread"' : ''}>${mdInline(r.title, false)}</a></td>
               <td>${pill(r.domain, DOM_PILL[r.domain])}</td>
               <td class="all-p">${recPills(r)}</td>
@@ -339,7 +339,7 @@ async function recDetail(view, id) {
             ${r.outcome_note ? `<div style="margin-top:6px">${md(r.outcome_note)}</div>` : ''}`
         : `<span class="muted">Not scored yet${r.review_on ? ' — due ' + esc(dayLabel(r.review_on)) : ''}</span>`}
         ${decided ? `<div class="row" style="flex-wrap:wrap;margin-top:8px">
-          ${OUTCOMES.map(([o, label]) => `<button class="sm" onclick="scoreRec('${esc(r.id)}','${o}')">${label}</button>`).join('')}
+          ${OUTCOMES.map(([o, label]) => `<button class="sm" onclick="scoreRec('${escJS(r.id)}','${o}')">${label}</button>`).join('')}
         </div>
         <textarea class="rscore" rows="1" placeholder="What actually happened (optional)" style="margin-top:8px"></textarea>` : ''}`)}
 

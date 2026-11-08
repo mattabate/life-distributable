@@ -97,7 +97,9 @@ if (!steps.length) {
 }
 if (!fs.existsSync(CHROME)) { console.error('browse: no Chrome at ' + CHROME); process.exit(2); }
 
-// The hub URL carries the token; `goto #/money` must land authenticated.
+// The hub URL carries a login code (hub.sh url): the first visit spends it on
+// the cookie, and every later `goto #/money` through the same URL lands on
+// the cookie (a spent code still moves on to "/").
 // A git worktree has no secrets/: the token is the main checkout's.
 let hubRoot = ROOT;
 if (!fs.existsSync(path.join(ROOT, 'secrets/hub.token'))) {
@@ -349,10 +351,10 @@ window.__box = function(sel) {
         if (m.method !== 'Fetch.requestPaused') return;
         const { requestId, request } = m.params;
         const u = new URL(request.url);
-        // The ?token= visit still goes to the hub: it sets the cookie.
+        // The ?code= visit still goes to the hub: it sets the cookie.
         let f = '';
         if (u.pathname.startsWith('/static/')) f = path.join(web, u.pathname.slice('/static/'.length));
-        else if (u.pathname === '/' && !u.searchParams.has('token')) f = path.join(web, 'index.html');
+        else if (u.pathname === '/' && !u.searchParams.has('code')) f = path.join(web, 'index.html');
         if (!f || !f.startsWith(web) || !fs.existsSync(f)) return cdp.send('Fetch.continueRequest', { requestId }).catch(() => {});
         cdp.send('Fetch.fulfillRequest', {
           requestId, responseCode: 200,

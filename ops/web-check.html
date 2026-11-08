@@ -27,6 +27,9 @@
 <head><meta charset="utf-8"><title>console check</title>
 <script>
   const HUB = new URLSearchParams(location.search).get('hub') || '';
+  // ?web=file://.../hub/internal/server/web: this tree's console instead of the
+  // hub's, so a branch is checked before it lands.
+  const WEB = new URLSearchParams(location.search).get('web') || HUB + '/static';
   const POSTED = [];
   // `outcomes` is the hub's per-kind answer vocabulary (store/close.go
   // AskOutcomes), default first — the console draws whatever it is sent.
@@ -113,7 +116,7 @@
                    'views/money.js', 'views/engagement.js', 'views/people.js', 'views/goals.js',
                    'views/recs.js', 'views/sources.js', 'views/documents.js',
                    'views/runs.js', 'app.js']) {
-    document.write(`<scr` + `ipt src="${HUB}/static/${f}"></scr` + `ipt>`);
+    document.write(`<scr` + `ipt src="${WEB}/${f}"></scr` + `ipt>`);
   }
 </script>
 <script>
@@ -206,11 +209,13 @@ setTimeout(async () => {
       for (let i = 0; i < 40 && stripOf(); i++) await settle();
       check('composer disarms on send', !chatState.send.re && !stripOf(), JSON.stringify(chatState.send));
 
-      // A rec is a cell of the chat too, under the reply
-      // that filed it, with the Recs page's four answers on it.
+      // A rec in the chat is one line that it was filed, under the reply that
+      // filed it; its card and answers live on the Recs page, which the title
+      // opens (recNoticeHTML).
       const msgs = document.getElementById('msgs');
-      const card = document.getElementById('ask-card-rec-t3st');
-      check('rec card is drawn in the chat', !!card && card.textContent.includes('Move the "idle" cash'), String(msgs && msgs.innerHTML).replace(/\s+/g, ' ').slice(0, 300));
+      const card = document.getElementById('rec-rec-t3st');
+      check('rec notice is drawn in the chat', !!card && card.matches('.rec-notice') && card.textContent.includes('Move the "idle" cash')
+        && !!card.querySelector('a[href="#/recs/rec-t3st"]'), String(msgs && msgs.innerHTML).replace(/\s+/g, ' ').slice(0, 300));
       // An empty reply draws nothing: its card is the turn, and the turn's
       // dollars ride on that card's head, no tokens. (An open card has no
       // time on its head, only the dollars.)
@@ -227,37 +232,15 @@ setTimeout(async () => {
       // before reply 6's row, the rec reply 6 filed after it, never under the
       // owner's answer at the end.
       const hostMsg = el => { let p = el.previousElementSibling; while (p && !/^msg-/.test(p.id)) p = p.previousElementSibling; return p; };
-      check('rec card sits under the reply that filed it', !!card && !!reply6 && hostMsg(card) === reply6,
+      check('rec notice sits under the reply that filed it', !!card && !!reply6 && hostMsg(card) === reply6,
         String(card && card.previousElementSibling && card.previousElementSibling.className));
       check('the reply card is drawn before the next message', !!askCard && !!reply6 && !!(askCard.compareDocumentPosition(reply6) & Node.DOCUMENT_POSITION_FOLLOWING),
         String(askCard && hostMsg(askCard) && hostMsg(askCard).id));
       const recRe = [...document.querySelectorAll('#msgs .chat-row.me .re')].find(e => e.textContent.includes('Accepted'));
       check('a Recs-page decision shows in the chat', !!recRe && recRe.textContent.includes('Move the "idle" cash'), String(recRe && recRe.textContent));
-      const accept = card && [...card.querySelectorAll('button')].find(b => b.textContent === 'Accept');
-      // Later left both surfaces with the three bands (d70bcc1).
-      check('rec card offers Accept · Decline · Reply', !!card && ['Accept', 'Decline', 'Reply'].every(l => [...card.querySelectorAll('button')].some(b => b.textContent === l)),
-        String(card && card.innerHTML).slice(0, 300));
-      if (accept) {
-        accept.click();
-        for (let i = 0; i < 40 && !stripOf(); i++) await settle();
-        const rs = stripOf();
-        check('Accept arms the composer with the rec', !!rs && rs.textContent.includes('Move the "idle" cash') && /primary[^>]*>Accept</.test(rs.innerHTML), String(rs && rs.innerHTML).slice(0, 300));
-        const d2 = document.getElementById('c-chat-draft');
-        if (d2) { d2.value = 'yes, from Bank A'; d2.dispatchEvent(new Event('input')); }
-        // A screenshot pasted while the rec is armed rides IN the decision
-        // (the screenshot backs up the note), not as a second message after it.
-        paste('shot.png');
-        for (let i = 0; i < 40 && !(drafts.chat[0] && drafts.chat[0].ref); i++) await settle();
-        check('a paste in the armed composer becomes a chip', !!document.querySelector('#c-chat-chips .chip') && drafts.chat[0]?.ref === 'sha256/ab/abc.png', JSON.stringify(drafts.chat));
-        await composerSend('chat');
-        await settle();
-        const dec = DECIDED[0];
-        check('Accept posts the decision, not a prompt', DECIDED.length === 1 && POSTED.length === 1, JSON.stringify({ DECIDED, prompts: POSTED.length }));
-        check('decision carries status, note and source delivery', !!dec && dec.status === 'accepted' && dec.note === 'yes, from Bank A' && dec.deliver === 'source', JSON.stringify(dec));
-        check('the screenshot is IN the decision', !!dec && JSON.stringify(dec.attachments) === '["sha256/ab/abc.png"]', JSON.stringify(dec));
-        check('no message rides after the decision', SENT.length === 0, JSON.stringify(SENT));
-        check('composer disarms after the decision', !chatState.send.re, JSON.stringify(chatState.send));
-      }
+      // The chat answers no rec: the notice carries no buttons.
+      const recBtns = card ? [...card.querySelectorAll('button')] : [];
+      check('rec notice offers no answers', recBtns.length === 0, String(card && card.innerHTML).slice(0, 300));
     }
   }
 
@@ -348,7 +331,7 @@ setTimeout(async () => {
     await composerSend('rec:rec-t3st');
     await settle();
     const rdec = DECIDED[DECIDED.length - 1];
-    check('Recs page Accept carries the screenshot', DECIDED.length === 2 && !!rdec && rdec.note === 'I already have this' && JSON.stringify(rdec.attachments) === '["sha256/ab/abc.png"]', JSON.stringify(rdec));
+    check('Recs page Accept carries the screenshot', DECIDED.length === 1 && !!rdec && rdec.status === 'accepted' && rdec.deliver === 'source' && rdec.note === 'I already have this' && JSON.stringify(rdec.attachments) === '["sha256/ab/abc.png"]', JSON.stringify(rdec));
     check('still no message after the decision', SENT.length === 0, JSON.stringify(SENT));
     check('the chip is gone once sent', !(drafts['rec:rec-t3st'] || []).length, JSON.stringify(drafts['rec:rec-t3st']));
   }
@@ -367,6 +350,27 @@ setTimeout(async () => {
   check('the block is bullets a phone can render',
     block.split('\n').filter(l => l && !l.startsWith('- ')).length === 1 && block.includes('- URL: ') && block.includes('views/money.js'),
     JSON.stringify(block));
+
+  // ---- A quote in an id, a label or a value stays data (#155) ----
+  // esc() is undone inside an on* attribute (the browser decodes &#39; back to
+  // ' before the script runs), so a quote ended the string and the rest ran as
+  // code. Each handler's own text runs against a spy, which must get exactly
+  // the strings the card was built from.
+  const Q = "it's \"quoted\" \\ </b>');alert(1);('\n";
+  const runs = (b, fn) => {
+    const got = [];
+    try { new Function(fn, b.getAttribute('onclick'))((...a) => got.push(a)); } catch (e) { got.push(['threw: ' + e.message]); }
+    return JSON.stringify(got);
+  };
+  host.innerHTML = askHTML({ ...ASK, id: 'ask-' + Q, kind: 'read', outcomes: [{ value: 'done', label: Q }] });
+  const readBtn = [...host.querySelectorAll('button')].find(b => b.textContent === 'Read');
+  const readGot = readBtn ? runs(readBtn, 'resolveAsk') : 'no Read button';
+  check('a quote in a read card\'s id and label stays data', readGot === JSON.stringify([['ask-' + Q, 'done', Q]]), readGot);
+  host.innerHTML = askHTML({ ...ASK, id: 'ask-' + Q, outcomes: [{ value: Q, label: 'Pick' }] });
+  const pickBtn = [...host.querySelectorAll('button')].find(b => b.textContent === 'Pick');
+  const pickGot = pickBtn ? runs(pickBtn, 'openRespond') : 'no Pick button';
+  check('a quote in an outcome value stays data', pickGot === JSON.stringify([['ask-' + Q, Q]]), pickGot);
+  host.innerHTML = '';
 
   const pre = document.createElement('pre');
   pre.id = 'result';
