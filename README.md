@@ -99,13 +99,13 @@ You don't need to be technical.
 <th align="left"><strong>Calendar.</strong> Your day at a glance.</th>
 </tr>
 <tr>
-<td valign="top"><img src="docs/img/phone-approval.png" alt="The life iPhone app: a session chat with the approval card to buy $500 of VTI, Approve, Deny, Reply and Dismiss buttons"></td>
-<td valign="top"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions tab: Your turn, 4 cards in 4 sessions, three red cards to approve or decide and one teal card to install an app build"></td>
-<td valign="top"><img src="docs/img/phone-calendar.png" alt="The life iPhone app Calendar tab on the Day view: today's hours with a walk after lunch, the weekly recs score and the gym, the investing run, and the due and do-soon tray"></td>
+<td valign="top"><img src="docs/img/phone-approval.png" alt="The life iPhone app: Charlotte, the money manager, in chat with an approval card to buy $500 of VTI on Thursday, cash staying above a $2,000 floor, with Approve, Deny, Reply and Dismiss buttons"></td>
+<td valign="top"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions tab: Your turn, 5 cards in 4 sessions, one row per agent: Sam's water filter to swap, Rachel's Lisbon hotels to read, Fred's sleep log and long run day, Charlotte's buy to approve, and Diane booking a dentist cleaning"></td>
+<td valign="top"><img src="docs/img/phone-calendar.png" alt="The life iPhone app Calendar tab on the Day view: an easy run at 7, the farmers market at 10, a water filter swap, reviewing the month's spending at 4 and picking up dry cleaning"></td>
 </tr>
 </table>
 
-The screenshots are the maker's own hub, with private details changed.
+The screenshots are the real apps on a demo hub with made-up people and plans.
 
 ## What it costs
 
@@ -143,7 +143,7 @@ The agent follows [SETUP.md](SETUP.md). Here is the timeline.
 Your data lives on your Mac. The hub listens only on your private
 [Tailscale](https://tailscale.com) network, so nothing about it is public.
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/security-dark.png"><img src="docs/img/security.png" alt="Security diagram for life: the iPhone app and a laptop or browser talk to the hub on your Mac inside your private Tailscale network, where your data lives. Only four things leave your Mac: Claude sessions to Anthropic, push notifications to Apple, nightly backups encrypted on the Mac first to your Backblaze bucket, and an opt-in weekly usage heartbeat with counts only. The public internet has no way in." width="900"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/security-dark.png"><img src="docs/img/security.png" alt="Security diagram for life: the iPhone app, the Mac app on your laptop and any browser talk to the hub on a Mac you leave on, such as a Mac mini, inside your private Tailscale network, where your data lives. Only four things leave the hub's Mac: Claude sessions to Anthropic, push notifications to Apple, nightly backups encrypted on the Mac first to your Backblaze bucket, and an opt-in weekly usage heartbeat with counts only. The public internet has no way in." width="900"></picture></p>
 
 - **Nothing public.** No open ports, no public URL. Your phone reaches the
   hub through Tailscale.
