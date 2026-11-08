@@ -1311,3 +1311,8 @@ Entry format:
 - For: everyone
 - Change: `GET /api/v1/settings` carries `owner_name`, the name `owner_name` in `ops/hub.json` gives the person the hub serves (read only, not a PATCH key). It is `""` when hub.json names no one, and the apps then say "You". So an app can draw its owner (the org chart's top node, the author of their messages) instead of a fixed "You".
 - How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/server/settings.go`, `hub/internal/server/settings_test.go`, `shared/api.md`.
+
+## add-0183 · 2026-11-08 · The team chart puts your name on top
+- For: everyone with team mode on
+- Change: the top of the org chart on Configuration is the name hub.json's `owner_name` gives (add-0182), in the console, on the phone and on the desktop app. With no name set it still says "You".
+- How: same merge as add-0008 (after add-0182), then `make webcheck` and reload the console; `make ship` for the app. By hand: `hub/internal/server/web/views/config.js`, `hub/internal/server/web/test/config.test.js`, `app/Life/Sources/ConfigView.swift`, `app/Life/Sources/HubClient.swift`.

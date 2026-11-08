@@ -120,10 +120,11 @@ function cfgTeamHTML(st, personas, sessions, goals) {
   if (!st || !st.team_mode) return switches;
   if (!personas) return `${switches}<div class="cfg-team">${failHTML('the team', 'pageRedraw()')}</div>`;
   if (!personas.length) return `${switches}<div class="cfg-team">${emptyHTML('No roles yet.')}</div>`;
-  return `${switches}<div class="cfg-team">${cfgOrgHTML(personas, sessions, goals)}</div>`;
+  return `${switches}<div class="cfg-team">${cfgOrgHTML(personas, sessions, goals, st.owner_name)}</div>`;
 }
 
-function cfgOrgHTML(personas, sessions, goals) {
+// The top is /settings owner_name (hub.json's), else You.
+function cfgOrgHTML(personas, sessions, goals, owner) {
   const byKey = new Map((sessions || []).map(t => [t.persona, t]));
   const byId = new Map((sessions || []).map(t => [t.id, t]));
   const goalById = new Map((goals || []).map(g => [g.id, g]));
@@ -154,7 +155,7 @@ function cfgOrgHTML(personas, sessions, goals) {
   const cards = top.map(card);
   // Whatever a loop left out still gets a card.
   for (const p of personas) if (!placed.has(p.key)) { placed.add(p.key); cards.push(card(p)); }
-  return `<div class="cfg-org"><div class="cfg-me">You</div><div class="cfg-ocards">${cards.join('')}</div></div>`;
+  return `<div class="cfg-org"><div class="cfg-me">${esc((owner || '').trim() || 'You')}</div><div class="cfg-ocards">${cards.join('')}</div></div>`;
 }
 
 // Devices: the hub's Mac (how long it has been up, its clock's zone) and the
