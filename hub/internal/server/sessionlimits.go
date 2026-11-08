@@ -34,6 +34,14 @@ var ownerOnlyRoutes = map[string]bool{
 	"POST /api/v1/app/install":           true,
 	"POST /api/v1/app/mac":               true,
 	"POST /api/v1/recs/{id}/reply":       true, // always delivers the note as the owner's
+	// The owner's room: the microphone, the live take's words, and the floor a
+	// reply holds while it plays, which every push waits out (#168: a session
+	// re-marking any key kept the owner's cards up to 45 min late). The app and
+	// the console are the only callers.
+	"POST /api/v1/mic":        true,
+	"GET /api/v1/mic":         true,
+	"POST /api/v1/voice":      true,
+	"POST /api/v1/voice/hush": true,
 }
 
 // ownerSources: observations only the owner's devices make. App speech moves

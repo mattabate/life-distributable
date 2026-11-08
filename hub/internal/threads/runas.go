@@ -126,14 +126,17 @@ func (m *Manager) catchUp(t Thread, wt string) {
 	log.Printf("thread %s: clone not caught up to main: %s", t.ID, strings.TrimSpace(string(out)))
 }
 
-// allLanded: every commit the clone has and main lacks has a commit of the
-// same subject on main since the two forked.
+// allLanded: every commit the clone has and main lacks has a commit on main
+// since the two forked with the same author, author time and subject, which a
+// rebase keeps. The subject alone took two different "Fix parser" commits for
+// one and reset unlanded work (#166).
 func (m *Manager) allLanded(wt string) bool {
-	mine, err := m.asSession("git", "-C", wt, "log", "--format=%s", "origin/main..HEAD")
+	const key = "--format=%ae %at %s"
+	mine, err := m.asSession("git", "-C", wt, "log", key, "origin/main..HEAD")
 	if err != nil {
 		return false
 	}
-	theirs, err := m.asSession("git", "-C", wt, "log", "--format=%s", "HEAD..origin/main")
+	theirs, err := m.asSession("git", "-C", wt, "log", key, "HEAD..origin/main")
 	if err != nil {
 		return false
 	}

@@ -134,18 +134,23 @@ func TestSessionCloneAsSessionUser(t *testing.T) {
 		}
 		if rebaseFails {
 			want = append(want, sudo+"git -C "+wt+" rebase --abort",
-				sudo+"git -C "+wt+" log --format=%s origin/main..HEAD",
-				sudo+"git -C "+wt+" log --format=%s HEAD..origin/main")
+				sudo+"git -C "+wt+" log --format=%ae %at %s origin/main..HEAD",
+				sudo+"git -C "+wt+" log --format=%ae %at %s HEAD..origin/main")
 		}
 		if strings.Join(cmds, "\n") != strings.Join(want, "\n") {
 			t.Errorf("diverged clone (rebase fails %v): %v", rebaseFails, cmds)
 		}
 	}
 	// A clone whose one commit landed under a new hash while main moved on
-	// conflicts at every start. A conflict whose every commit main has by
-	// subject moves the branch to main, the old tip kept on a branch; one
-	// unlanded commit leaves the clone as it is.
-	for _, mine := range []string{"Add a script\n", "Add a script\nNot landed\n"} {
+	// conflicts at every start. A conflict whose every commit main has (same
+	// author, author time and subject) moves the branch to main, the old tip
+	// kept on a branch; one unlanded commit leaves the clone as it is, and so
+	// does another commit of the same subject (#166: two "Fix parser" commits).
+	for _, mine := range []string{
+		"r@x 1730000000 Add a script\n",
+		"r@x 1730000000 Add a script\nr@x 1730000500 Not landed\n",
+		"r@x 1730000900 Add a script\n",
+	} {
 		cmds = nil
 		m.Run = func(n string, a ...string) ([]byte, error) {
 			line := strings.Join(append([]string{n}, a...), " ")
@@ -153,16 +158,18 @@ func TestSessionCloneAsSessionUser(t *testing.T) {
 			switch {
 			case strings.Contains(line, " merge --ff-only "), strings.Contains(line, " rebase --quiet "):
 				return nil, os.ErrInvalid
+			case strings.Contains(line, " log ") && !strings.Contains(line, "--format=%ae %at %s"):
+				t.Errorf("landed check keyed by subject alone: %s", line)
 			case strings.HasSuffix(line, " origin/main..HEAD"):
 				return []byte(mine), nil
 			case strings.HasSuffix(line, " HEAD..origin/main"):
-				return []byte("Later on main\nAdd a script\n"), nil
+				return []byte("g@x 1730001000 Later on main\nr@x 1730000000 Add a script\n"), nil
 			}
 			return nil, nil
 		}
 		m.catchUp(th, wt)
 		all := strings.Join(cmds, "\n")
-		landed := !strings.Contains(mine, "Not landed")
+		landed := mine == "r@x 1730000000 Add a script\n"
 		if got := strings.Contains(all, " reset --keep --quiet origin/main"); got != landed {
 			t.Errorf("landed=%v: reset %v: %s", landed, got, all)
 		}

@@ -1373,10 +1373,11 @@ func (m *Manager) costByModel(id string) []ModelCost {
 	return out
 }
 
-// Find: the sessions whose title, goal, standing prompt, last message or
-// cards mention every word of q (case-insensitive) — how an agent finds the
-// session with experience in a task before handing it over (`lifectl threads
-// --q <word>`, 2026-10-02). Empty q is List.
+// Find: the sessions whose title, goal, standing prompt, last message, cards
+// or any message mention every word of q (case-insensitive) — how an agent
+// finds the session with experience in a task before handing it over
+// (`lifectl threads --q <word>`, 2026-10-02). A word said a month ago counts
+// though the last message moved on (#115, #145 by Nari-Ab). Empty q is List.
 func (m *Manager) Find(q string, includeArchived bool) ([]Thread, error) {
 	all, err := m.List(includeArchived)
 	words := strings.Fields(strings.ToLower(q))
@@ -1393,12 +1394,26 @@ func (m *Manager) Find(q string, includeArchived bool) ([]Thread, error) {
 		}
 		rows.Close()
 	}
+	said := map[string]map[string]bool{} // word → the threads with a message holding it
+	for _, w := range words {
+		said[w] = map[string]bool{}
+		// instr, not LIKE: a % or _ in the query is a character, not a wildcard.
+		if rows, err := m.db.Query(`SELECT DISTINCT thread_id FROM thread_messages WHERE instr(lower(text), ?) > 0`, w); err == nil {
+			for rows.Next() {
+				var id string
+				if rows.Scan(&id) == nil {
+					said[w][id] = true
+				}
+			}
+			rows.Close()
+		}
+	}
 	out := []Thread{}
 	for _, t := range all {
 		hay := strings.ToLower(t.Title + " " + t.GoalID + " " + t.SchedulePrompt + " " + t.LastMessage + " " + cards[t.ID])
 		ok := true
 		for _, w := range words {
-			if !strings.Contains(hay, w) {
+			if !strings.Contains(hay, w) && !said[w][t.ID] {
 				ok = false
 				break
 			}
