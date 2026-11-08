@@ -121,7 +121,13 @@ type run struct {
 	busy, eof, turns             int
 	lastBoundary, lastOutput     time.Time
 	lastResult                   time.Time
-	costSeen                     float64
+	costSeen, costBase           float64
+	// costEst: the estimate inside costBase + costSeen (thread_runs.cost_est).
+	// result: the CLI's own figure for a turn that ended on a result the hub
+	// then kills the process over (a rung error, a transient retry), set by
+	// finishTurn so bookStranded books that instead of the estimate.
+	costEst float64
+	result  *turnCost
 	// liveMsg: ids of the recent assistant messages whose usage was counted
 	// into the run's live token total, space-separated, newest last. The
 	// stream repeats one message's usage once per content block (thinking,
@@ -315,12 +321,12 @@ func (m *Manager) Models() map[string]string {
 }
 
 // runCols: what scanRun reads, in order.
-const runCols = `id, thread_id, out_file, in_file, trigger, out_offset, busy, eof, turns, last_boundary, last_output, last_result, cost_seen, model, live_msg, effort, bg_tasks, held`
+const runCols = `id, thread_id, out_file, in_file, trigger, out_offset, busy, eof, turns, last_boundary, last_output, last_result, cost_seen, cost_base, model, live_msg, effort, bg_tasks, held, cost_est`
 
 func scanRun(s scanner) (run, error) {
 	var r run
 	var lb, lo, lr string
-	if err := s.Scan(&r.id, &r.thread, &r.out, &r.in, &r.trigger, &r.off, &r.busy, &r.eof, &r.turns, &lb, &lo, &lr, &r.costSeen, &r.model, &r.liveMsg, &r.effort, &r.tasks, &r.held); err != nil {
+	if err := s.Scan(&r.id, &r.thread, &r.out, &r.in, &r.trigger, &r.off, &r.busy, &r.eof, &r.turns, &lb, &lo, &lr, &r.costSeen, &r.costBase, &r.model, &r.liveMsg, &r.effort, &r.tasks, &r.held, &r.costEst); err != nil {
 		return r, err
 	}
 	r.lastBoundary, r.lastOutput, r.lastResult = parseTS(lb), parseTS(lo), parseTS(lr)
@@ -949,7 +955,7 @@ func (m *Manager) launch(t Thread) error {
 	// Dropped errors here left a live process with no thread_runs row: nothing
 	// polled it, its reply never landed, and the messages stayed queued for a
 	// second process. If the record cannot be written the process is stopped.
-	if err := m.recordStart(runID, t.ID, qs, now, base, model, res.Effort); err != nil {
+	if err := m.recordStart(runID, t.ID, qs, now, base, model, res.Effort, t.ClaudeSessionID != "" && !lean); err != nil {
 		m.tmux("kill-session", "-t", tmuxName)
 		return fmt.Errorf("record run: %w", err)
 	}
@@ -998,13 +1004,23 @@ func (m *Manager) transcriptExists(id string) bool {
 	return len(hits) > 0
 }
 
-func (m *Manager) recordStart(runID, threadID string, qs []queuedMsg, now time.Time, base, model, effort string) error {
+func (m *Manager) recordStart(runID, threadID string, qs []queuedMsg, now time.Time, base, model, effort string, resumed bool) error {
 	tx, err := m.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO thread_runs (id, thread_id, started_at, trigger, out_file, in_file, busy, turns, last_boundary, last_output, model, effort) VALUES (?,?,?,?,?,?,1,1,?,?,?,?)`, runID, threadID, ts(now), qs[0].kind, base+".out", base+".in", ts(now), ts(now), model, effort); err != nil {
+	// The CLI's total_cost_usd is the SESSION's, summed across every
+	// --resume, so a resumed process starts where the last run on that
+	// session left off; from 0, its first result booked the session's whole
+	// lifetime again (#104). An estimate booked when the last run died before
+	// its result (cost_est, bookStranded) rides along until a CLI total
+	// confirms it.
+	costBase, costEst := 0.0, 0.0
+	if resumed {
+		tx.QueryRow(`SELECT cost_base + cost_seen, cost_est FROM thread_runs WHERE thread_id=? ORDER BY started_at DESC LIMIT 1`, threadID).Scan(&costBase, &costEst)
+	}
+	if _, err := tx.Exec(`INSERT INTO thread_runs (id, thread_id, started_at, trigger, out_file, in_file, busy, turns, last_boundary, last_output, model, effort, cost_base, cost_est) VALUES (?,?,?,?,?,?,1,1,?,?,?,?,?,?)`, runID, threadID, ts(now), qs[0].kind, base+".out", base+".in", ts(now), ts(now), model, effort, costBase, costEst); err != nil {
 		return err
 	}
 	for _, q := range qs {
@@ -1125,22 +1141,23 @@ func (m *Manager) proposedThisTurn(id string) bool {
 // killRuns kills every live process of a thread and sets its status.
 // Caller holds m.mu.
 func (m *Manager) killRuns(id, note, status string) error {
-	rows, err := m.db.Query(`SELECT id FROM thread_runs WHERE thread_id=? AND finished_at IS NULL`, id)
+	rows, err := m.db.Query(`SELECT `+runCols+` FROM thread_runs WHERE thread_id=? AND finished_at IS NULL`, id)
 	if err != nil {
 		return err
 	}
-	var runs []string
+	var runs []run
 	for rows.Next() {
-		var r string
-		rows.Scan(&r)
-		runs = append(runs, r)
+		if r, err := scanRun(rows); err == nil {
+			runs = append(runs, r)
+		}
 	}
 	rows.Close()
 	now := time.Now()
-	for _, runID := range runs {
+	for _, r := range runs {
 		// Ignore "no such session": the process may already be gone.
-		m.tmux("kill-session", "-t", m.tmuxSession(id, runID))
-		m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0 WHERE id=?`, ts(now), runID)
+		m.tmux("kill-session", "-t", m.tmuxSession(id, r.id))
+		m.bookStranded(r) // Stop mid-turn: the turn's cost still counts
+		m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0 WHERE id=?`, ts(now), r.id)
 	}
 	// Anything not yet handed over stays queued for the next process.
 	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text) VALUES (?,?,?,?,?)`, id, ts(now), "system", "error", note)
@@ -2096,6 +2113,20 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 	if isEndSentinel(text) {
 		text = ""
 	}
+	// env.Cost is the session's running total; this run's share starts at
+	// costBase. A total below it means a fresh session: all of it is new,
+	// unless it is within the estimate a dead turn booked (costEst,
+	// bookStranded): that estimate ran high, and the turn adds nothing more.
+	cost := env.Cost - r.costBase - r.costSeen
+	if cost < 0 && env.Cost >= r.costBase+r.costSeen-r.costEst-1e-9 {
+		cost = 0
+	} else if cost < 0 {
+		cost = env.Cost
+		r.costBase = 0
+		m.db.Exec(`UPDATE thread_runs SET cost_base=0 WHERE id=?`, r.id)
+	}
+	r.costSeen = env.Cost - r.costBase
+	r.costEst = 0 // a CLI total: whatever was estimated is in it now
 	if env.IsError {
 		ok = 0
 		kind = "error"
@@ -2104,6 +2135,9 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 		if text == "" {
 			text = "turn failed"
 		}
+		// Both kill the process: what the result says the turn cost is booked
+		// first (bookStranded), or it was lost with the run.
+		r.result = &turnCost{usd: cost, tok: h.Tok}
 		if spend.IsRungError(text) && m.relaunchBelow(r, text) {
 			r.busy = 0
 			return r
@@ -2114,15 +2148,11 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 			r.busy = 0
 			return r
 		}
+		r.result = nil
 	}
 	if env.SessionID != "" {
 		m.db.Exec(`UPDATE threads SET claude_session_id=? WHERE id=?`, env.SessionID, threadID)
 	}
-	cost := env.Cost - r.costSeen
-	if cost < 0 {
-		cost = env.Cost
-	}
-	r.costSeen = env.Cost
 	// Asks raised during this turn (`lifectl ask add`, tied by LIFE_RUN_ID,
 	// not yet linked to a reply). Fallback: NEEDS YOU lines in the reply
 	// still become asks when the agent made none itself — belt and braces so
@@ -2278,7 +2308,7 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 	// The turn is settled, so its live estimate is spent: zero it here and the
 	// authoritative usage lands on the thread instead, or the two double up.
 	r.liveMsg = ""
-	m.db.Exec(`UPDATE thread_runs SET busy=?, turns=?, cost_seen=?, last_boundary=?, last_result=?, ok=?, live_tok_in=0, live_tok_out=0, live_tok_cache_read=0, live_tok_cache_write=0, live_cost_usd=0, live_msg='', held='' WHERE id=?`, r.busy, r.turns, r.costSeen, ts(now), ts(now), ok, r.id)
+	m.db.Exec(`UPDATE thread_runs SET cost_est=0, busy=?, turns=?, cost_seen=?, last_boundary=?, last_result=?, ok=?, live_tok_in=0, live_tok_out=0, live_tok_cache_read=0, live_tok_cache_write=0, live_cost_usd=0, live_msg='', held='' WHERE id=?`, r.busy, r.turns, r.costSeen, ts(now), ts(now), ok, r.id)
 	m.db.Exec(`UPDATE threads SET updated_at=?, unread=unread+?, cost_usd=cost_usd+?, tok_in=tok_in+?, tok_out=tok_out+?, tok_cache_read=tok_cache_read+?, tok_cache_write=tok_cache_write+? WHERE id=?`,
 		ts(now), unreadBump, cost, tok.In, tok.Out, tok.CacheRead, tok.CacheWrite, threadID)
 	if r.busy == 1 {
@@ -2330,6 +2360,7 @@ func (m *Manager) relaunchBelow(r run, text string) bool {
 	}
 	now := time.Now()
 	m.tmux("kill-session", "-t", m.tmuxSession(r.thread, r.id))
+	r = m.bookStranded(r)
 	m.db.Exec(`UPDATE thread_runs SET finished_at=?, ok=0, busy=0, cost_seen=? WHERE id=?`, ts(now), r.costSeen, r.id)
 	// The turn's input goes back on the queue (turn ids are <run>, <run>-t2,
 	// …); with none, a resume note, or launch finds nothing and starts nothing.
@@ -2438,10 +2469,64 @@ func (m *Manager) settleStatus(threadID string) {
 	m.db.Exec(`UPDATE threads SET status=? WHERE id=? AND status != 'archived'`, status, threadID)
 }
 
+// turnCost: what one turn cost, in dollars and tokens.
+type turnCost struct {
+	usd float64
+	tok Tokens
+}
+
+// bookStranded books what a turn that will never reach finishTurn cost (the
+// process killed, crashed, gone or stepped down a rung) the way finishTurn
+// books a result: a claude row in thread_messages (what SpentToday and
+// ThreadSpentToday read; empty, so no surface draws it), the thread's
+// cost_usd and tokens, and the run's cost_seen. The figure is the CLI's own
+// when the turn ended on a result (r.result), else the live estimate. Every
+// such path used to set finished_at and leave live_cost_usd behind, which
+// only the open-run meters count, so the daily and per-thread meters dropped
+// the turn (#104).
+//
+// No double count on the resume: the CLI's total_cost_usd is the session's
+// and does include the killed turn. Adding the booked figure to cost_seen
+// moves the next run's cost_base past it, so that result books only the
+// rest; an estimate is also kept in cost_est so a total that lands just under
+// the base (the estimate ran high) is not mistaken for a fresh session
+// (finishTurn). A process killed with no result may not have saved its total
+// for the resume; then the next result nets the estimate back out. Caller
+// holds m.mu.
+func (m *Manager) bookStranded(r run) run {
+	c, est := turnCost{}, true
+	if r.result != nil {
+		c, est = *r.result, false
+	} else {
+		m.db.QueryRow(`SELECT live_cost_usd, live_tok_in, live_tok_out, live_tok_cache_read, live_tok_cache_write FROM thread_runs WHERE id=?`, r.id).
+			Scan(&c.usd, &c.tok.In, &c.tok.Out, &c.tok.CacheRead, &c.tok.CacheWrite)
+	}
+	r.result = nil
+	if est {
+		if c.usd <= 0 && c.tok == (Tokens{}) {
+			return r
+		}
+		r.costSeen += c.usd
+		r.costEst += c.usd
+	} else {
+		r.costEst = 0 // a CLI total: whatever was estimated is in it now
+	}
+	r.liveMsg = ""
+	now := ts(time.Now())
+	m.db.Exec(`UPDATE thread_runs SET cost_seen=?, cost_est=?, live_tok_in=0, live_tok_out=0, live_tok_cache_read=0, live_tok_cache_write=0, live_cost_usd=0, live_msg='' WHERE id=?`, r.costSeen, r.costEst, r.id)
+	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, cost_usd, tok_in, tok_out, tok_cache_read, tok_cache_write, run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		r.thread, now, "claude", "message", "", c.usd, c.tok.In, c.tok.Out, c.tok.CacheRead, c.tok.CacheWrite, r.turnID())
+	m.db.Exec(`UPDATE threads SET cost_usd=cost_usd+?, tok_in=tok_in+?, tok_out=tok_out+?, tok_cache_read=tok_cache_read+?, tok_cache_write=tok_cache_write+? WHERE id=?`,
+		c.usd, c.tok.In, c.tok.Out, c.tok.CacheRead, c.tok.CacheWrite, r.thread)
+	log.Printf("thread %s: process %s ended before its result: $%.2f booked (estimate=%v)", r.thread, r.id, c.usd, est)
+	return r
+}
+
 // finishProcess settles an exited process. A turn still open means claude
 // died (or was killed) mid-turn: that is an error the owner should see. Anything
 // queued meanwhile starts a fresh process. Caller holds m.mu.
 func (m *Manager) finishProcess(r run) {
+	r = m.bookStranded(r)
 	// claude has exited; its `feed` may still be waiting for an eof line that
 	// never comes, holding the tmux session open. It gets that line, so it and
 	// the session end with the run. A second eof after sendEOF's is never read.

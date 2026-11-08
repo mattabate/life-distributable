@@ -168,6 +168,15 @@ CREATE INDEX IF NOT EXISTS thread_events_thread ON thread_events(thread_id, id);
 	route_lane TEXT NOT NULL DEFAULT '', brief TEXT NOT NULL DEFAULT '', team TEXT NOT NULL DEFAULT '',
 	by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS persona_defs_key ON persona_defs(key, id);`,
+	// cost_base: the CLI session's total_cost_usd when this run resumed it
+	// (the figure is the session's, summed across every --resume), so a run's
+	// own cost is its cost_seen and never the session's lifetime again (#104).
+	`ALTER TABLE thread_runs ADD COLUMN cost_base REAL NOT NULL DEFAULT 0`,
+	// cost_est: the part of cost_base + cost_seen that is the hub's live
+	// estimate, booked when a turn died before its result (runner.go
+	// bookStranded), not yet confirmed by a CLI total. Carried to the next run
+	// on the session; that run's first result clears it (finishTurn).
+	`ALTER TABLE thread_runs ADD COLUMN cost_est REAL NOT NULL DEFAULT 0`,
 }
 
 // ModelCost: one model's share of a chat's bill. Model is the CLI's model id,

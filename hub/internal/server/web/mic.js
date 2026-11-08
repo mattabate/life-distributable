@@ -173,7 +173,7 @@ function micSendFrom() {
 // words are going; the bar's is lit whenever the sensor is on.
 function micButtonHTML(key) {
   const on = mic.on && mic.key === key;
-  return `<button class="sm mic${on ? ' on' : ''}" id="${cdom(key)}-mic" onclick="micToggle('${esc(key)}')"
+  return `<button class="sm mic${on ? ' on' : ''}" id="${cdom(key)}-mic" onclick="micToggle('${escJS(key)}')"
     title="Option: tap to listen, tap again to stop">${esc(micLabel(key))}</button>`;
 }
 function micLabel(key) {

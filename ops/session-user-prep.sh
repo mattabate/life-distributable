@@ -53,7 +53,12 @@ while [ "$d" != / ]; do
 done
 
 echo "== the wall"
-refused "read the hub token" "cat '$ROOT/ops/secrets/hub.token'"
+# The folder, then every file in it by name: a file left 0644 behind a folder
+# that is not 0700 is readable, and the hub token is one of several (#153).
+refused "list ops/secrets" "ls '$ROOT/ops/secrets'"
+for f in "$ROOT"/ops/secrets/*; do
+  [ -f "$f" ] && refused "read ops/secrets/${f##*/}" "cat '$f'"
+done
 refused "write the database" "test -w '$ROOT/data/life.db'"
 refused "replace the hub" "test -w '$ROOT/ops/bin/hub'"
 refused "write the main checkout's git" "touch '$ROOT/.git/session-user-probe'"

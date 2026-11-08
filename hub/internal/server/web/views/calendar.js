@@ -86,7 +86,7 @@ function calEntryHTML(i, opts) {
   // proposal has no session and is decided here (decideAction).
   const proposed = i.kind === 'action' && i.state === 'proposed';
   const actID = proposed ? esc(String(i.ref || '').replace(/^action:/, '') || i.id) : '';
-  const actArg = proposed && i.thread_id ? `{id:'${actID}',thread_id:'${esc(i.thread_id)}',title:'${esc(String(i.title || '').replace(/'/g, '’'))}'}` : '';
+  const actArg = proposed && i.thread_id ? `{id:'${actID}',thread_id:'${escJS(i.thread_id)}',title:'${escJS(String(i.title || '').replace(/'/g, '’'))}'}` : '';
   // His own task closes like a rec — with words, from a box under the row
   // (calStepBox) — so the buttons are not here for it. A closed item keeps
   // Reopen: the undo a stray tap needs (2026-08-29: "there's no way to
@@ -113,23 +113,23 @@ function calEntryHTML(i, opts) {
   const macInstall = install && askInstallTarget(i) === 'mac';
   const installLink = install && !macInstall ? askInstallLink(i.detail) : null;
   const acts = closed ? `<span class="small muted">${esc(i.state)}</span>${isItem
-        ? ` <button class="sm" onclick="resolveCal('${esc(i.id)}','scheduled')" title="Put it back on the calendar (and the board, if it was due)">Reopen</button>` : ''}`
+        ? ` <button class="sm" onclick="resolveCal('${escJS(i.id)}','scheduled')" title="Put it back on the calendar (and the board, if it was due)">Reopen</button>` : ''}`
     // The row's decisive `outcomes` (Approve · Deny); Reply is the session's.
     : proposed ? (i.outcomes || []).filter(o => o.value).map((o, n) => `<button class="sm${n ? '' : ' primary'}" onclick="${actArg
-        ? `openApprove(${actArg},'${esc(o.value)}')` : `decideAction('${actID}',${o.value === 'approved'})`}">${esc(o.label)}</button>`).join('\n                  ')
+        ? `openApprove(${actArg},'${escJS(o.value)}')` : `decideAction('${actID}',${o.value === 'approved'})`}">${esc(o.label)}</button>`).join('\n                  ')
     : hisStep || homework ? ''
-    : isItem ? `<button class="sm" onclick="resolveCal('${esc(i.id)}','done')">Done</button>
-                <button class="sm" onclick="resolveCal('${esc(i.id)}','dismissed')">Dismiss</button>`
-    : install ? (macInstall ? `<button class="sm install" onclick="macInstall('${esc(i.ask_id)}')" title="Build it if it isn't already, then restart the desktop app on it; the card closes itself">Install</button>`
+    : isItem ? `<button class="sm" onclick="resolveCal('${escJS(i.id)}','done')">Done</button>
+                <button class="sm" onclick="resolveCal('${escJS(i.id)}','dismissed')">Dismiss</button>`
+    : install ? (macInstall ? `<button class="sm install" onclick="macInstall('${escJS(i.ask_id)}')" title="Build it if it isn't already, then restart the desktop app on it; the card closes itself">Install</button>`
                   : installLink ? `<a class="btn sm install" href="${esc(installLink)}" target="_blank" title="Open the install page — the phone reports the new build and the card closes itself">Install</a>`
-                  : `<button class="sm primary" onclick="openRespond('${esc(i.ask_id)}')">Respond</button>`)
-                + `<button class="sm" onclick="resolveAskGlobal('${esc(i.ask_id)}','dismissed')" title="Skip this build">Won't install</button>`
+                  : `<button class="sm primary" onclick="openRespond('${escJS(i.ask_id)}')">Respond</button>`)
+                + `<button class="sm" onclick="resolveAskGlobal('${escJS(i.ask_id)}','dismissed')" title="Skip this build">Won't install</button>`
     // An ask answers from its session's chat bar, armed on the card
     // (2026-10-05, 23:40, on a Sessions-waiting row: "there isn't any sort of
     // bar to respond") — Respond, the chat card's own button, first.
-    : i.ask_id ? `${i.thread_id ? `<button class="sm primary" onclick="openRespond('${esc(i.ask_id)}')" title="Open its session with the chat bar replying to this card">Respond</button>
-                  ` : ''}<button class="sm" onclick="resolveAskGlobal('${esc(i.ask_id)}','done')">Done</button>
-                  <button class="sm" onclick="resolveAskGlobal('${esc(i.ask_id)}','dismissed')">Dismiss</button>`
+    : i.ask_id ? `${i.thread_id ? `<button class="sm primary" onclick="openRespond('${escJS(i.ask_id)}')" title="Open its session with the chat bar replying to this card">Respond</button>
+                  ` : ''}<button class="sm" onclick="resolveAskGlobal('${escJS(i.ask_id)}','done')">Done</button>
+                  <button class="sm" onclick="resolveAskGlobal('${escJS(i.ask_id)}','dismissed')">Dismiss</button>`
     : '';
   // A deferred rec on its review day reads as the question it is (Phase
   // 2b): "Check back: <title>", and opens the rec's own page.
@@ -334,15 +334,15 @@ function calStepsHTML(i, stage) {
   const live = !!id && !i.coming;
   const staged = (s, v, label) => {
     const on = stage.armed(s.n) === v;
-    return `<button class="sm${on ? ' primary' : ''}" onclick="armStepReply('${esc(stage.card)}',${s.n},'${v}')">${label}</button>`;
+    return `<button class="sm${on ? ' primary' : ''}" onclick="armStepReply('${escJS(stage.card)}',${s.n},'${v}')">${label}</button>`;
   };
   return `<div class="cal-steps">${steps.map(s => {
     const g = s.mark === 'done' ? '✓' : s.mark === 'wont' ? '✕' : '○';
     const t = s.mark === 'wont' ? `<s>${esc(s.title)}</s>` : esc(s.title);
     const btns = !live ? ''
       : stage ? (s.state === 'open' ? staged(s, 'done', 'Did it') + staged(s, 'wont', 'Skip') + staged(s, '', 'Reply') : `<span class="small muted">${esc(s.state)}</span>`)
-      : s.state === 'open' ? `<button class="sm" onclick="closeCalStep('${esc(id)}',${s.n},'done')">Did it</button><button class="sm" onclick="closeCalStep('${esc(id)}',${s.n},'wont')">Skip</button>`
-      : `<span class="small muted">${esc(s.state)}</span><button class="sm" onclick="closeCalStep('${esc(id)}',${s.n},'open')">Undo</button>`;
+      : s.state === 'open' ? `<button class="sm" onclick="closeCalStep('${escJS(id)}',${s.n},'done')">Did it</button><button class="sm" onclick="closeCalStep('${escJS(id)}',${s.n},'wont')">Skip</button>`
+      : `<span class="small muted">${esc(s.state)}</span><button class="sm" onclick="closeCalStep('${escJS(id)}',${s.n},'open')">Undo</button>`;
     return `<div class="cal-step${s.state === 'open' ? '' : ' closed'}"><span class="tick">${g}</span><span class="grow">${t}</span>${btns}</div>`;
   }).join('')}</div>`;
 }

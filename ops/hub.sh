@@ -6,7 +6,7 @@
 #   hub.sh stop      unload the hub agent
 #   hub.sh status    launchd state + healthz
 #   hub.sh logs      tail the hub log
-#   hub.sh url       print the console URL with the token baked in (first visit; a Terminal only)
+#   hub.sh url       print the console URL with a one-minute login code (first visit; a Terminal only)
 #   hub.sh web       open the console in the browser (sets the cookie for a year)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -127,9 +127,15 @@ case "${1:-}" in
   # The owner's token only to a person at a Terminal (stdin a tty, as
   # decider-set.sh): run from a session it put the token in the session's
   # transcript (#129). web-smoke.sh builds its own URL.
-  url)     if [[ -n "${LIFE_SESSION_TOKEN:-}" ]]; then echo "https://$HOST/?token=$LIFE_SESSION_TOKEN"
-           elif [[ -t 0 ]]; then echo "https://$HOST/?token=$(cat secrets/hub.token)"
-           else echo "https://$HOST/"; echo "hub.sh url: the owner's token is printed only in a Terminal" >&2; exit 2; fi ;;
-  web)     open "https://$HOST/?token=$(cat secrets/hub.token)" ;;
+  # The URL carries a one-minute single-use login code, never the token: a
+  # ?token= link stayed in the browser's history (#161). The token goes to
+  # curl on stdin, so no process listing shows it either.
+  url)     if [[ -n "${LIFE_SESSION_TOKEN:-}" ]]; then tok=$LIFE_SESSION_TOKEN
+           elif [[ -t 0 ]]; then tok=$(cat secrets/hub.token)
+           else echo "https://$HOST/"; echo "hub.sh url: the owner's code is minted only in a Terminal" >&2; exit 2; fi
+           code=$(printf 'Authorization: Bearer %s\n' "$tok" | curl -fsS --max-time 5 -X POST -H @- "https://$HOST/api/v1/login-codes" | sed -n 's/.*"code": *"\([0-9a-f]*\)".*/\1/p') || code=
+           [[ -n "$code" ]] || { echo "hub.sh url: the hub gave no login code (is it up?)" >&2; exit 1; }
+           echo "https://$HOST/?code=$code" ;;
+  web)     open "$("$SELF" url)" ;;
   *) sed -n '2,10p' "$0"; exit 1 ;;
 esac

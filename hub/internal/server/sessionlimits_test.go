@@ -164,3 +164,29 @@ func TestSessionRawBodiesAreStoredAsSent(t *testing.T) {
 		t.Fatalf("null: %d %s", w.Code, w.Body)
 	}
 }
+
+// The stamp reads a session's body at the route's own cap, not 96 MB on
+// every route (#159).
+func TestSessionStampReadsAtTheRoutesCap(t *testing.T) {
+	s := newTest(t)
+	th, _ := s.thr.Create("Caps", "life", "", "Caps.", "", "", nil)
+	s.cfg.SessionTokens = true
+	big := `{"title":"` + strings.Repeat("x", maxJSON) + `"}`
+	r := httptest.NewRequest("POST", "/api/v1/goals", strings.NewReader(big))
+	r.Header.Set("Authorization", "Bearer "+SessionToken(s.token, th.ID))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != 413 {
+		t.Fatalf("a body past 4 MB on a 4 MB route: %d %s", w.Code, w.Body)
+	}
+	have := map[string]bool{}
+	for _, rt := range s.routes() {
+		have[rt.pattern] = true
+	}
+	for p := range stampCaps {
+		if !have[p] {
+			t.Errorf("stampCaps names %q, which is no route", p)
+		}
+	}
+}

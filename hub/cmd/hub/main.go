@@ -507,6 +507,16 @@ func main() {
 		_, err = thr.AddAskOn("hub", "", title, detail, "other", "", "any")
 		return err
 	})
+	// No nightly backup finished clean in 36 h (backupage.go, #151): one ask
+	// per stall on the "hub" thread, where backup.sh's own failure asks go.
+	ck.Every("backup-age", 6*time.Hour, true, func() error {
+		title, detail, due := backupAgeAsk(cfg.OpsPath("logs"), time.Now())
+		if !due || thr.AskSeen("hub", title) {
+			return nil
+		}
+		_, err := thr.AddAskOn("hub", "", title, detail, "other", "", "any")
+		return err
+	})
 	h.StatusExtra = func() map[string]any {
 		out := statusExtra(cfg)
 		out["clock"] = ck.Status()

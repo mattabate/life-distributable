@@ -1,5 +1,5 @@
 {
-  "_note": "USD per million tokens. Anthropic first-party API rates; the hub embeds this file (pricing.go) and ops/hublib.py reads it — the one table. Longest prefix first where one id contains another. cache_read 0 = input x cache.read. Fable 5.1 cache reads $0.25 (2026-09-01); Opus 5.5 $0.20 (2026-09-22).",
+  "_note": "USD per million tokens. Anthropic first-party API rates; the hub embeds this file (pricing.go) and ops/hublib.py reads it — the one table. Longest prefix first where one id contains another. cache_read 0 = input x cache.read. Fable 5.1 cache reads $0.25 (2026-09-01); Opus 5.5 $0.20 (2026-09-22). Sonnet 5.5 + Haiku 5.5 (2026-10-23; Haiku's is the <=100k-context rate).",
   "cache": {"read": 0.10, "write_5m": 1.25, "write_1h": 2.00},
   "unknown": {"input": 4, "output": 20, "cache_read": 0.20},
   "models": [
@@ -14,8 +14,10 @@
     {"prefix": "claude-opus-4-6", "input": 5, "output": 25, "cache_read": 0},
     {"prefix": "claude-opus-4-5", "input": 5, "output": 25, "cache_read": 0},
     {"prefix": "claude-opus-4", "input": 15, "output": 75, "cache_read": 0},
+    {"prefix": "claude-sonnet-5-5", "input": 2, "output": 10, "cache_read": 0.10},
     {"prefix": "claude-sonnet-5", "input": 3, "output": 15, "cache_read": 0},
     {"prefix": "claude-sonnet-4", "input": 3, "output": 15, "cache_read": 0},
+    {"prefix": "claude-haiku-5-5", "input": 0.10, "output": 0.50, "cache_read": 0},
     {"prefix": "claude-haiku-4-5", "input": 1, "output": 5, "cache_read": 0},
     {"prefix": "claude-haiku", "input": 1, "output": 5, "cache_read": 0}
   ]

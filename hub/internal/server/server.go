@@ -77,11 +77,13 @@ var consoleBuild = func() string {
 type Server struct {
 	cfg   *config.Config
 	token string
-	acts  *actions.Queue
-	sch   *sched.Scheduler
-	goals *goals.Store
-	obs   *obs.Store
-	thr   *threads.Manager
+	// logins: the one-minute codes that set a browser's cookie (login.go).
+	logins loginCodes
+	acts   *actions.Queue
+	sch    *sched.Scheduler
+	goals  *goals.Store
+	obs    *obs.Store
+	thr    *threads.Manager
 	// Push: APNs sender (nil when the hub has no APNs key configured).
 	Push *notify.APNs
 	// Cal: the plan layer (dated steps, agent runs, reminders).
@@ -276,7 +278,7 @@ func (s *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 // auth accepts "Authorization: Bearer <token>" or the "life_token" cookie
-// (set by the dashboard once from ?token=). Constant-time compare.
+// (set by the dashboard once from a ?code=, login.go). Constant-time compare.
 func (s *Server) auth(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.authorized(r) {
@@ -311,8 +313,8 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true, "time": time.Now()})
 }
 
-// index serves the dashboard. ?token=X on first visit sets the cookie so
-// the phone's browser can bookmark the bare URL afterwards. &next=/api/v1/blobs/…
+// index serves the dashboard. ?code=X (POST /api/v1/login-codes) on first
+// visit sets the cookie so the browser can bookmark the bare URL afterwards. &next=/api/v1/blobs/…
 // lands on that blob instead: the phone app's "Open in browser" on an .html
 // card file hands Safari a page it can show. A local copy cannot cross from
 // one app to Safari, so it is the hub's own URL with the cookie set on the way.
@@ -321,10 +323,17 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// A session token is taken too (ops/hub.sh url as the session user, which
-	// cannot read hub.token): its cookie is that session's, held to its limits.
-	if t := r.URL.Query().Get("token"); t != "" && (subtle.ConstantTimeCompare([]byte(t), []byte(s.token)) == 1 || s.cfg.SessionTokens && sessionFromToken(s.token, t) != "") {
-		http.SetCookie(w, &http.Cookie{Name: "life_token", Value: t, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
+	pageHeaders(w)
+	// A login code (login.go) sets the cookie to the token that minted it: a
+	// session's code (ops/hub.sh url as the session user, which cannot read
+	// hub.token) opens the console as that session, held to its limits.
+	// Spent, unknown or expired, the visit still moves to a URL without it
+	// (the #route rides along), where the cookie decides: browse.js goes to
+	// every #route through the one URL.
+	if code := r.URL.Query().Get("code"); code != "" {
+		if t := s.logins.take(code, time.Now()); t != "" {
+			http.SetCookie(w, &http.Cookie{Name: "life_token", Value: t, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
+		}
 		next := "/"
 		if n := r.URL.Query().Get("next"); strings.HasPrefix(n, "/api/v1/blobs/") && !strings.Contains(n, "..") {
 			next = n
@@ -333,7 +342,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.authorized(r) {
-		http.Error(w, "unauthorized: open /?token=<hub token> once", http.StatusUnauthorized)
+		http.Error(w, "unauthorized: run ops/hub.sh url in a Terminal and open what it prints", http.StatusUnauthorized)
 		return
 	}
 	b, _ := webFS.ReadFile("web/index.html")

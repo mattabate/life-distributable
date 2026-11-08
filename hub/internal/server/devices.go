@@ -126,7 +126,7 @@ func (s *Server) appInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"status": "started", "lane": strings.TrimSuffix(filepath.Base(script), ".sh")}
-	run := script
+	run := []string{script}
 	if in.Lane == "mac" {
 		if in.Ask != "" {
 			if a, err := s.thr.GetAsk(in.Ask); err == nil && in.Build == 0 {
@@ -134,12 +134,12 @@ func (s *Server) appInstall(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// Through bash: the script need not be executable in the tree.
-		run = "bash " + script + " " + strconv.Itoa(in.Build)
+		run = []string{"bash", script, strconv.Itoa(in.Build)}
 		// Staged already → the click is a swap (seconds); else a build (minutes).
 		out["staged"] = macStagedBuild() >= in.Build && macStagedBuild() > 0
 	}
 	logPath := s.cfg.OpsPath("logs", "app-install.log")
-	cmd := run + " > " + logPath + " 2>&1; echo \"exit=$?\" >> " + logPath
+	cmd := installLine(run, logPath)
 	if o, err := exec.Command("tmux", "new-session", "-d", "-s", "life-app-install", "-c", s.cfg.Root, cmd).CombinedOutput(); err != nil {
 		jsonErr(w, 500, "tmux: "+strings.TrimSpace(string(o)))
 		return
@@ -153,6 +153,21 @@ func (s *Server) appInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 202, out)
 }
+
+// installLine is the shell line the install's tmux session runs: every word
+// quoted (#156), so a checkout path with a space or a ; stays one argument
+// and never runs more.
+func installLine(words []string, logPath string) string {
+	q := make([]string, len(words))
+	for i, w := range words {
+		q[i] = shellQuote(w)
+	}
+	l := shellQuote(logPath)
+	return strings.Join(q, " ") + " > " + l + " 2>&1; echo \"exit=$?\" >> " + l
+}
+
+// shellQuote wraps s in single quotes for sh, a ' inside closed and reopened.
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // macStagedBuild: the build number waiting in the desktop updater's staging
 // folder, 0 when none. `defaults` reads the bundle's plist whichever form

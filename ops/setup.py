@@ -84,6 +84,7 @@ def cmd_hub(a):
     cfg["key_file"] = "~/life/ops/secrets/%s.key" % host
     cfg["claude_bin"] = os.path.realpath(claude) if a.resolve else claude
     os.makedirs(SECRETS, mode=0o700, exist_ok=True)
+    os.chmod(SECRETS, 0o700)  # an existing folder gets the mode too (#153)
     with open(HUB_JSON, "w") as f:
         json.dump(cfg, f, indent=2)
         f.write("\n")
@@ -134,6 +135,7 @@ def cmd_apns(a):
     if not os.path.exists(src):
         sys.exit("setup: no such key file: " + a.key_file)
     os.makedirs(SECRETS, mode=0o700, exist_ok=True)
+    os.chmod(SECRETS, 0o700)  # an existing folder gets the mode too (#153)
     dst = os.path.join(SECRETS, "apns.p8")
     shutil.copy(src, dst)
     os.chmod(dst, 0o600)
@@ -153,6 +155,7 @@ def cmd_backup(a):
     text = open(os.path.join(ROOT, "ops", "restic.env.example")).read()
     text = text.replace("b2:<bucket-name>:life", "b2:%s:life" % a.bucket)
     os.makedirs(SECRETS, mode=0o700, exist_ok=True)
+    os.chmod(SECRETS, 0o700)  # an existing folder gets the mode too (#153)
     fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(text)

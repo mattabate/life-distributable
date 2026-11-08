@@ -1,5 +1,12 @@
 {
-  "_": "Which bare hub ids in a card's text come out as links (rec-caa3e181, 2026-09-20). Each row: [text, [ids linked, in order]]. Read by the console (web/test/ui.test.js, mdInline) and the phone (RefTests.swift, linkRefs).",
+  "_": "Which bare hub ids in a card's text come out as links (rec-caa3e181, 2026-09-20). Each row: [text, [ids linked, in order]]. Read by the console (web/test/ui.test.js, mdInline) and the phone (RefTests.swift, linkRefs). \"anchors\": a [label](url) comes out as exactly one link, its URL whole and its label's words as typed, whatever is inside either (#157). Each row: [text, [[label, url], ...]].",
+  "anchors": [
+    ["[docs](https://x.test/a)", [["docs", "https://x.test/a"]]],
+    ["[x](https://example.com/a_(*b*))", [["x", "https://example.com/a_(*b*)"]]],
+    ["[see https://a.example](https://b.example)", [["see https://a.example", "https://b.example"]]],
+    ["[*the* page](https://x.test/a) then [two](https://x.test/b)", [["the page", "https://x.test/a"], ["two", "https://x.test/b"]]],
+    ["[wiki](https://en.wikipedia.org/wiki/A_(b)) and *more*", [["wiki", "https://en.wikipedia.org/wiki/A_(b)"]]]
+  ],
   "links": [
     ["Decide rec-120a5f85", ["rec-120a5f85"]],
     ["Close ask-955bfb8e, then cal-53e0.", ["ask-955bfb8e", "cal-53e0"]],

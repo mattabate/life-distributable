@@ -11,6 +11,7 @@ pylint:
 	ops/py.sh b2-key-check.py --test
 	bash ops/git-bundle-snap.sh --test
 	bash ops/sqlite-snap.sh --test
+	ops/py.sh doc-text.py --test
 
 test:
 	cd hub && gofmt -l . | (! grep .) && go vet ./... && go test -timeout 180s ./...

@@ -28,6 +28,30 @@ final class RefTests: XCTestCase {
         }
     }
 
+    /// #157: a [label](url) is one link, its URL whole; the same "anchors"
+    /// rows the console's mdInline reads.
+    func testSharedAnchors() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("shared/ref-cases.json")
+        let obj = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any] ?? [:]
+        let rows = try XCTUnwrap(obj["anchors"] as? [[Any]])
+        XCTAssertFalse(rows.isEmpty)
+        for row in rows {
+            let src = try XCTUnwrap(row[0] as? String), want = try XCTUnwrap(row[1] as? [[String]])
+            let a = md(linkRefs(src))
+            var got: [[String]] = []
+            var last: URL?
+            for run in a.runs {
+                guard let u = run.link else { last = nil; continue }
+                let words = String(a[run.range].characters)
+                if u == last, var tail = got.popLast() { tail[0] += words; got.append(tail) } else { got.append([words, u.absoluteString]) }
+                last = u
+            }
+            XCTAssertEqual(got, want, src)
+        }
+    }
+
     func testTextIsUntouchedAroundTheLink() {
         XCTAssertEqual(linkRefs("Decide rec-120a5f85, then go"), "Decide [rec-120a5f85](life://open/rec-120a5f85), then go")
         XCTAssertEqual(linkRefs("no ids - here"), "no ids - here")

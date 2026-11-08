@@ -598,8 +598,8 @@ func isHTMLRef(_ ref: String) -> Bool {
 /// link's text ("report.html"), the phone offers the Files save sheet — and
 /// **Open in browser** — the Mac hands the local copy to the default browser;
 /// the phone sends Safari the hub's own URL (a local file cannot cross apps),
-/// setting the cookie on the way (`/?token=…&next=`). The console's twin is
-/// `attachHTML` in ui.js.
+/// setting the cookie on the way (`/?code=…&next=`, a one-minute login code,
+/// never the token). The console's twin is `attachHTML` in ui.js.
 struct BlobHTML: View {
     @Environment(HubClient.self) private var hub
     let ref: String
@@ -692,9 +692,11 @@ struct BlobHTML: View {
         guard let local else { return }
         _ = await UIApplication.shared.open(local)
         #else
+        // No hub, no code: Safari could not reach the page either.
+        guard let code = try? await hub.loginCode() else { return }
         var c = URLComponents(string: hub.baseURL)
         c?.path = "/"
-        c?.queryItems = [URLQueryItem(name: "token", value: hub.token), URLQueryItem(name: "next", value: "/api/v1/blobs/" + ref)]
+        c?.queryItems = [URLQueryItem(name: "code", value: code), URLQueryItem(name: "next", value: "/api/v1/blobs/" + ref)]
         guard let url = c?.url else { return }
         _ = await UIApplication.shared.open(url)
         #endif

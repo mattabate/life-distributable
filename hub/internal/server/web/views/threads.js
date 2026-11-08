@@ -154,7 +154,7 @@ async function drawList(activeID, reuse) {
     if (!list.length) return '';
     const key = 'subs ' + t.id, shown = moreOpen.has(key) ? list.length : SUB_CELLS;
     return list.slice(0, shown).map(subCell).join('')
-      + (list.length > SUB_CELLS ? `<a class="small muted more-cards" href="#" onclick="event.preventDefault();toggleMoreCards('${esc(key)}')">${shown > SUB_CELLS ? 'Show less' : `and ${list.length - SUB_CELLS} more`}</a>` : '');
+      + (list.length > SUB_CELLS ? `<a class="small muted more-cards" href="#" onclick="event.preventDefault();toggleMoreCards('${escJS(key)}')">${shown > SUB_CELLS ? 'Show less' : `and ${list.length - SUB_CELLS} more`}</a>` : '');
   };
   const group = (label, list, count) => !list.length ? '' :
     `<h3>${label}${count ? ` <span class="muted">· ${count}</span>` : ''}</h3>` + list.map(t => card(t)).join('');
@@ -205,7 +205,7 @@ async function drawList(activeID, reuse) {
         // the board's `first` — the approval card, else the first ask.
         first: b.first[t.id] || '',
         cells: drawn.map(c => miniCardHTML(t.id, c)).join('')
-          + (cards.length > rowCards(cards, false).length ? `<a class="small muted more-cards" href="#" onclick="event.preventDefault();toggleMoreCards('${esc(t.id)}')">${moreOpen.has(t.id) ? 'Show less' : `and ${more} more`}</a>`
+          + (cards.length > rowCards(cards, false).length ? `<a class="small muted more-cards" href="#" onclick="event.preventDefault();toggleMoreCards('${escJS(t.id)}')">${moreOpen.has(t.id) ? 'Show less' : `and ${more} more`}</a>`
             : cards.length && more > 0 ? `<a class="small muted more-cards" href="#/sessions/${encodeURIComponent(t.id)}">and ${more} more</a>` : '')
           + (todo ? `<div class="small wrap2" style="margin-top:6px;color:var(--${tone})">→ ${mdInline(todo, false)}</div>` : '')
           + (detail ? `<div class="small muted wrap3" style="margin-top:2px">${detail}</div>` : '')
@@ -283,8 +283,8 @@ function sessionCardHTML(t, o) {
   const href = `#/sessions/${encodeURIComponent(t.id)}${o.first ? '/' + encodeURIComponent(o.first) : ''}`;
   const bare = !o.cells;
   return `
-    <div class="card click sess${bare ? ' sess-line' : ''}${o.active ? ' on' : ''}" onclick="if(!event.target.closest('a'))location.hash='${href}'">
-      <div class="sess-h"><a class="sess-t${t.unread > 0 ? ' unread' : ''}" href="${href}">${mdInline(t.title || t.id, false)}${live ? '<span class="sess-dot"></span>' : ''}</a>${o.pills ? `<span class="sess-pills">${o.pills}</span>` : ''}<span class="sess-gap"></span>${t.role ? `<span class="small muted sess-role">${esc(t.role)}</span>` : ''}${bare ? `<span class="small muted sess-ago">${ago(t.last_message_at || t.updated_at)}</span>` : ''}</div>
+    <div class="card click sess${bare ? ' sess-line' : ''}${o.active ? ' on' : ''}" onclick="if(!event.target.closest('a'))location.hash='${escJS(href)}'">
+      <div class="sess-h"><a class="sess-t${t.unread > 0 ? ' unread' : ''}" href="${esc(href)}">${mdInline(t.title || t.id, false)}${live ? '<span class="sess-dot"></span>' : ''}</a>${o.pills ? `<span class="sess-pills">${o.pills}</span>` : ''}<span class="sess-gap"></span>${t.role ? `<span class="small muted sess-role">${esc(t.role)}</span>` : ''}${bare ? `<span class="small muted sess-ago">${ago(t.last_message_at || t.updated_at)}</span>` : ''}</div>
       ${failed ? `<div class="small wrap2 err mt6">${failedPreview(t.last_message)}</div>` : ''}
       ${o.cells || ''}
     </div>`;
@@ -750,6 +750,7 @@ function newSendingSince() {
 function paintNewSending() {
   const el = document.getElementById('new-sending');
   if (!el) return;
+  sinceWake();
   const since = newSendingSince();
   el.hidden = !since;
   if (since && !el.querySelector('.since')) el.innerHTML = `<span class="dot pulse"></span> sending · ${sinceHTML(since)}`;
@@ -1036,40 +1037,70 @@ async function refreshThread(id, first) {
   if (focusNeedsFull(chatState.focus, askById, acts)) chatState.full = true;
   const full = chatState.full;
   const liveIDs = new Set(full ? [] : starters.filter(m => m.role === OWNER).map(m => m.id));
-  let rows;
+  // The rows in groups, one per message (its row and the cards under it) and
+  // one per card at the end, each keyed so a redraw can keep what did not
+  // change (chatPatch).
+  const groups = [['full', chatFullHTML(full)]];
+  const tails = (as, cs, rs) => {
+    for (const a of as) groups.push(['ask:' + a.id, chatAskHTML(a)]);
+    for (const a of cs) groups.push(['action:' + a.id, chatActionHTML(a)]);
+    for (const r of rs) groups.push(['rec:' + r.id, recNoticeHTML(r)]);
+  };
   if (full) {
-    rows = ordered.map(m => msgHTML(m, askByMsg[m.id], actByMsg[m.id], recByMsg[m.id], askById, recById)).join('')
-      + tailAsks.map(a => chatAskHTML(a)).join('') + tail.map(a => chatActionHTML(a)).join('') + tailRecs.map(recNoticeHTML).join('');
+    for (const m of ordered) groups.push(['msg:' + m.id, msgHTML(m, askByMsg[m.id], actByMsg[m.id], recByMsg[m.id], askById, recById)]);
+    tails(tailAsks, tail, tailRecs);
   } else {
-    rows = ordered.map(m => {
+    for (const m of ordered) {
       const [ka, kc, kr] = openCards(askByMsg[m.id], actByMsg[m.id], recByMsg[m.id]);
-      if (liveIDs.has(m.id)) return msgHTML(m, ka, kc, [], askById, recById) + kr.map(recNoticeHTML).join('');
-      noteLeadCost(m, ka, kc);
-      return ka.map(a => chatAskHTML(a)).join('') + kc.map(a => chatActionHTML(a)).join('') + kr.map(recNoticeHTML).join('');
-    }).join('');
-    const [ta, tc, tr] = openCards(tailAsks, tail, tailRecs);
-    rows += ta.map(a => chatAskHTML(a)).join('') + tc.map(a => chatActionHTML(a)).join('') + tr.map(recNoticeHTML).join('');
-    if (!rows && !running && !sendingSince()) rows = '<div class="small muted">Nothing open</div>';
+      let h;
+      if (liveIDs.has(m.id)) h = msgHTML(m, ka, kc, [], askById, recById) + kr.map(recNoticeHTML).join('');
+      else {
+        noteLeadCost(m, ka, kc);
+        h = ka.map(a => chatAskHTML(a)).join('') + kc.map(a => chatActionHTML(a)).join('') + kr.map(recNoticeHTML).join('');
+      }
+      if (h) groups.push(['msg:' + m.id, h]);
+    }
+    tails(...openCards(tailAsks, tail, tailRecs));
+    if (groups.length === 1 && !running && !sendingSince()) groups.push(['none', '<div class="small muted">Nothing open</div>']);
   }
-  el.innerHTML = `
-    <div class="chat-head">
-      <button class="sm narrow-only" onclick="showList()">←</button>
+  // Everything around the rows. When none of it changed and this chat is
+  // already drawn, only the groups that changed are redrawn, in place: the
+  // whole chat used to be rebuilt on every new message or card change, the
+  // composer with it, which made a click on a long session slow (#160).
+  const head = `<button class="sm narrow-only" onclick="showList()">←</button>
       <div class="grow" style="min-width:0">
         <div class="trunc"><strong>${mdInline(t.title || t.id)}</strong></div>
       </div>
       <div class="head-id">
         <span id="chat-pills">${headPills(board, t)}</span>${t.model ? `<span class="pill" title="${esc(t.model)}">${esc(t.model_label || modelShort(t.model))}</span>` : ''}
-      </div>
+      </div>`;
+  const frame = `${t.title}|${t.model}|${t.model_label}|${queuedHTML(queued)}|${aboutTagHTML(chatState.about)}${composerHTML('chat', chatComposerSpec(running))}`;
+  if (frame === chatState.frame && el.dataset.thread === id && chatPatch(document.getElementById('msgs'), groups)) {
+    paintChatPills(t);
+    paintWorking(running, t);
+    paintChain();
+    loadChain();
+    loadTasks();
+    const box = document.getElementById('msgs');
+    if (anchor && anchor.id) restoreChatAnchor(box, anchor);
+    if (chatState.focus && focusAsk(chatState.focus)) chatState.focus = '';
+    return;
+  }
+  chatState.frame = frame;
+  el.dataset.thread = id;
+  el.innerHTML = `
+    <div class="chat-head">
+      ${head}
     </div>
     <div class="msgs" id="msgs">
-      ${chatFullHTML(full)}
-      ${rows}
+      ${groups.map(([k, h]) => `<!--k:${esc(k)}-->${h}`).join('')}
       <div class="working small muted" id="run-working" hidden></div>
       <div class="tasks small" id="run-tasks" hidden></div>
       <div class="chain small" id="run-chain" hidden></div>
     </div>
     ${queuedHTML(queued)}
     <div class="composer-wrap">${aboutTagHTML(chatState.about)}${composerHTML('chat', chatComposerSpec(running))}</div>`;
+  chatState.drawn = new Map(groups);
 
   paintWorking(running, t);
   paintChain();
@@ -1084,6 +1115,41 @@ async function refreshThread(id, first) {
   // The deep-linked ask wins over "open on the newest", once.
   if (chatState.focus && focusAsk(chatState.focus)) chatState.focus = '';
   wireChat();
+}
+
+// The chat's rows redrawn by group (refreshThread): each group starts at its
+// <!--k:key--> mark. One whose HTML is what was drawn last time keeps its
+// nodes (no parse, an audio player keeps playing); a changed one is replaced,
+// a new one inserted, a gone one removed, and none is moved unless the order
+// changed. False when the box is not the one drawn (the caller redraws all).
+function chatPatch(box, groups) {
+  const drawn = chatState.drawn, end = box && document.getElementById('run-working');
+  if (!drawn || !end || end.parentNode !== box) return false;
+  const have = new Map();
+  let k = null;
+  for (let n = box.firstChild; n && n !== end; n = n.nextSibling) {
+    if (n.nodeType === 8 && n.data.startsWith('k:')) have.set(k = n.data.slice(2), [n]);
+    else if (k !== null) have.get(k).push(n);
+  }
+  const keep = new Set(groups.filter(([key, h]) => have.has(esc(key)) && drawn.get(key) === h).map(([key]) => esc(key)));
+  for (const [key, nodes] of have) if (!keep.has(key)) for (const n of nodes) n.remove();
+  // From the first mark: the template's whitespace before it is no group's.
+  let at = box.firstChild;
+  while (at && at !== end && !(at.nodeType === 8 && at.data.startsWith('k:'))) at = at.nextSibling;
+  const tpl = document.createElement('template');
+  for (const [key, h] of groups) {
+    let nodes = have.get(esc(key));
+    if (!keep.has(esc(key))) {
+      tpl.innerHTML = `<!--k:${esc(key)}-->${h}`;
+      nodes = [...tpl.content.childNodes];
+    }
+    for (const n of nodes) {
+      if (n === at) at = at.nextSibling;
+      else box.insertBefore(n, at);
+    }
+  }
+  chatState.drawn = new Map(groups);
+  return true;
 }
 
 // The one button at the top of the chat: "Show full chat" over the open cards,
@@ -1164,7 +1230,7 @@ function replyOneHTML(threadID, ref, label, askById, recById) {
   if (type === 'ask') {
     const a = (askById || {})[id];
     const title = a ? mdInline(a.title, false) : esc(id);
-    return `<div class="re small muted">↩ <b>${esc(label)}</b> · <a href="#/sessions/${esc(threadID)}/${esc(id)}" onclick="focusAsk('${esc(id)}');return false">${title}</a></div>`;
+    return `<div class="re small muted">↩ <b>${esc(label)}</b> · <a href="#/sessions/${esc(threadID)}/${esc(id)}" onclick="focusAsk('${escJS(id)}');return false">${title}</a></div>`;
   }
   if (type === 'rec') {
     const r = (recById || {})[id];
@@ -1176,7 +1242,7 @@ function replyOneHTML(threadID, ref, label, askById, recById) {
     // deep-linked one); the id otherwise — the link reads the card either way.
     const a = chatState.cards['action:' + id];
     const title = a ? mdInline(a.title, false) : esc(id);
-    return `<div class="re small muted">↩ <b>${esc(label)}</b> · <a href="#/sessions/${esc(threadID)}/${esc(id)}" onclick="focusAsk('${esc(id)}');return false">${title}</a></div>`;
+    return `<div class="re small muted">↩ <b>${esc(label)}</b> · <a href="#/sessions/${esc(threadID)}/${esc(id)}" onclick="focusAsk('${escJS(id)}');return false">${title}</a></div>`;
   }
   if (type === 'cal' || type === 'step') {
     // The step's name, not its id (2026-09-26: a session started from a
@@ -1229,6 +1295,17 @@ function noteLeadCost(m, asks, acts) {
   if (m.role === 'claude' && m.cost_usd && cards.length) chatState.costs[cards[0]] = m.cost_usd;
   return cards;
 }
+// A message's words never change, so each is set once (#160: every redraw
+// re-ran md over the whole list). Emptied past 1000.
+const mdDone = new Map();
+function mdKept(s) {
+  let h = mdDone.get(s);
+  if (h === undefined) {
+    if (mdDone.size > 1000) mdDone.clear();
+    mdDone.set(s, h = md(s));
+  }
+  return h;
+}
 function msgHTML(m, asks, acts, recs, askById, recById) {
   const cards = noteLeadCost(m, asks, acts);
   const html = (asks || []).map(a => chatAskHTML(a)).join('') + (acts || []).map(a => chatActionHTML(a)).join('') + (recs || []).map(recNoticeHTML).join('');
@@ -1238,20 +1315,20 @@ function msgHTML(m, asks, acts, recs, askById, recById) {
     cls, k, title, when: dayWhen(m.ts) + (m.role === 'claude' && m.cost_usd && !cards.length ? ' · ' + usd(m.cost_usd) : ''),
     body: body + (atts ? `<div class="atts">${atts}</div>` : '') });
   const line = mdInline(firstLine(text), false);
-  if (m.kind === 'error') return (isPauseText(text) ? row('⏸ Paused', 'paused', 'session limit', md(text)) : row('⚠ Error', 'error', line, md(text))) + html;
+  if (m.kind === 'error') return (isPauseText(text) ? row('⏸ Paused', 'paused', 'session limit', mdKept(text)) : row('⚠ Error', 'error', line, mdKept(text))) + html;
   if (m.kind === 'schedule') {
     // The agent set (or cleared) its check-in: when it comes back, then the
     // instructions it left itself.
     const cut = text.indexOf('\n\n');
-    return row('⏰ Check-in', 'sched', esc(cut < 0 ? text : text.slice(0, cut)), cut < 0 ? '' : md(text.slice(cut + 2))) + html;
+    return row('⏰ Check-in', 'sched', esc(cut < 0 ? text : text.slice(0, cut)), cut < 0 ? '' : mdKept(text.slice(cut + 2))) + html;
   }
-  if (m.role === 'claude') return (text.trim() || atts ? row('Reply', '', line, md(text)) : '') + html;
-  if (m.kind === 'checkin') return row('⏰ Check-in', 'sched', line, md(text)) + html;
+  if (m.role === 'claude') return (text.trim() || atts ? row('Reply', '', line, mdKept(text)) : '') + html;
+  if (m.kind === 'checkin') return row('⏰ Check-in', 'sched', line, mdKept(text)) + html;
   // Another session's words, the hub's frame folded off (threads/shown.go,
   // tags relay | sub): its name is the row's label, in the accent
   // (2026-10-28 23:39: "remove this and then put a tag for the other session").
   const from = (m.tags || []).includes('relay') || (m.tags || []).includes('sub');
-  if (m.role === 'system') return row(from ? esc(m.author_title || 'Session') : 'Note', from ? 'from' : '', line, md(text)) + html;
+  if (m.role === 'system') return row(from ? esc(m.author_title || 'Session') : 'Note', from ? 'from' : '', line, mdKept(text)) + html;
   // His message, or one another session or the hub sent in his place: the
   // card it answered leads the title ("↩ Got it · …"), whole in the body.
   const a = m.author || OWNER;
@@ -1261,7 +1338,7 @@ function msgHTML(m, asks, acts, recs, askById, recById) {
   const what = line || (re && esc(refTitle(re.ref || '', askById, recById))) || (atts ? '📎' : '');
   const title = re ? `↩ ${esc(re.label || re.outcome)}${what ? ' · ' + what : ''}` : what;
   const foot = noteTagsHTML(m) + (a === OWNER ? '' : sentByHTML(m));
-  return row(k, 'me', title, replyLineHTML(m, askById, recById) + md(text) + (foot ? `<div class="small muted">${foot}</div>` : '')) + html;
+  return row(k, 'me', title, replyLineHTML(m, askById, recById) + mdKept(text) + (foot ? `<div class="small muted">${foot}</div>` : '')) + html;
 }
 const firstLine = s => String(s || '').split('\n').find(l => l.trim()) || '';
 // The title of the card a ref names, when the chat holds it ('' otherwise).
@@ -1356,6 +1433,7 @@ const startingSince = t => Math.max(chatState.liveSince, (t && t.turn_at && Date
 function paintWorking(running, t) {
   const el = document.getElementById('run-working');
   if (!el) return;
+  sinceWake();
   const since = sendingSince();
   el.hidden = !running && !since;
   if (el.hidden) return;
@@ -1412,7 +1490,7 @@ function chainHTML(ch, all, total, o = {}) {
     const s = task && subs[task.id];
     if (s && s.ok) {
       const sc = toolChain(s.evs);
-      html += row(s.open, `${esc(d)} · ${callsWord(sc.steps.filter(x => !x.agent).length)}`, `toggleChainSub('${esc(task.id)}')`);
+      html += row(s.open, `${esc(d)} · ${callsWord(sc.steps.filter(x => !x.agent).length)}`, `toggleChainSub('${escJS(task.id)}')`);
       if (s.open) html += `<div class="chain-calls">${callsHTML(sc.steps, true, 0, '')}</div>`;
     } else html += row(false, `${esc(d)} · subagent`, '');
   }
@@ -1439,7 +1517,7 @@ function taskLogHTML(k) {
   if (!g.ok) return '<div class="task-log muted">no log to read</div>';
   const shown = g.all ? g.lines : g.lines.slice(-TASK_LINES);
   const earlier = g.lines.length - shown.length;
-  return `<div class="task-log">${earlier || g.cut ? `<a href="#" class="chain-more muted" onclick="event.preventDefault();taskAll('${esc(k.id)}')">${earlier ? earlier + ' earlier' : 'older lines are cut'}</a>` : ''}${shown.map(l => `<div>${esc(l)}</div>`).join('')}</div>`;
+  return `<div class="task-log">${earlier || g.cut ? `<a href="#" class="chain-more muted" onclick="event.preventDefault();taskAll('${escJS(k.id)}')">${earlier ? earlier + ' earlier' : 'older lines are cut'}</a>` : ''}${shown.map(l => `<div>${esc(l)}</div>`).join('')}</div>`;
 }
 function paintTasks() {
   const el = document.getElementById('run-tasks'), t = chatState.thread;
@@ -1448,7 +1526,7 @@ function paintTasks() {
   // An action the hub runs has no log to open: its row is its newest line.
   const tasks = liveTasks(t);
   el.hidden = !tasks.length;
-  el.innerHTML = tasks.map(k => k.type === 'action' ? taskRowHTML(k) : taskRowHTML(k, { open: taskState.open[k.id], click: `toggleTask('${esc(k.id)}')`,
+  el.innerHTML = tasks.map(k => k.type === 'action' ? taskRowHTML(k) : taskRowHTML(k, { open: taskState.open[k.id], click: `toggleTask('${escJS(k.id)}')`,
     log: taskState.open[k.id] ? taskLogHTML(k) : '' })).join('');
 }
 function toggleTask(id) {
@@ -1545,16 +1623,32 @@ async function chainEarlier() {
   paintChain();
 }
 // Every "N s" on the page, once a second — and the two sending lines come
-// and go here too.
+// and go here too. The clock runs only while the tab is seen and the page has
+// a counter or a sending line to move: it ran every second on every page, a
+// hidden tab too (#160). A paint that draws a counter or a sending line winds
+// it again (sinceWake), and so does the tab coming back.
+let sinceTimer = 0;
+function sinceWake() {
+  if (sinceTimer || typeof document === 'undefined' || document.hidden) return;
+  sinceTimer = setInterval(tickSince, 1000);
+}
 function tickSince() {
   const el = document.getElementById('run-working');
+  if (document.hidden || (!el && !document.getElementById('new-sending') && !document.querySelectorAll('[data-since]').length)) {
+    clearInterval(sinceTimer);
+    sinceTimer = 0;
+    return;
+  }
   if (el && chatState.thread && !!sendingSince() !== el.textContent.includes('sending')) paintWorking(chatState.running, chatState.thread);
   paintNewSending();
   for (const s of document.querySelectorAll('[data-since]')) {
     s.textContent = Math.max(0, Math.floor((Date.now() - +s.dataset.since) / 1000)) + ' s';
   }
 }
-if (typeof document !== 'undefined') setInterval(tickSince, 1000);
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { tickSince(); sinceWake(); } });
+  sinceWake();
+}
 
 // A folded card's row remembers his click across the redraw (cardHTML).
 const chatOpened = (ref, id) => chatState.open.get(ref + ':' + id) === true;
@@ -1668,7 +1762,7 @@ function queuedHTML(prompts) {
       ${p.target === 'new' ? '<span class="pill">new session</span>' : ''}
       ${p.outcome ? pill(p.outcome) : ''}
       <span class="grow trunc small" title="${esc(p.text || '')}">${esc(promptWords(p))} <span class="muted">· from ${esc(mine(p))}</span></span>
-      <button class="sm" onclick="cancelPrompt('${esc(p.id)}')">${p.repeat ? 'Turn off' : 'Cancel'}</button>
+      <button class="sm" onclick="cancelPrompt('${escJS(p.id)}')">${p.repeat ? 'Turn off' : 'Cancel'}</button>
     </div>`;
   // A run is drawn ONCE (2026-10-12: "there was only one upcoming… it
   // opened anyway and just shows that run twice… if there is only one then

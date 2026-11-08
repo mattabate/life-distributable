@@ -159,3 +159,25 @@ func TestOff(t *testing.T) {
 		t.Fatal("nil allows")
 	}
 }
+
+// #149: a spend read that failed read as $0, so every cap failed open. Now
+// the fable cap drops a rung, a capped check-in waits and the ladder (when
+// on) pauses unattended wakes until the spend reads again.
+func TestUnreadableSpendFailsClosed(t *testing.T) {
+	g, db, notes := guard(t)
+	if _, err := db.Exec(`DROP TABLE thread_runs`); err != nil {
+		t.Fatal(err)
+	}
+	if f := g.Floor(); f != "claude-opus-5" {
+		t.Fatalf("fable floor on an unreadable spend: %q", f)
+	}
+	if ok, why := g.Allow("checkin", "th-a"); ok {
+		t.Fatalf("capped check-in ran on an unreadable spend: %q", why)
+	}
+	if st := g.State(); st.Unattended || st.Level != "unknown" {
+		t.Fatalf("%+v", st)
+	}
+	if len(*notes) != 0 {
+		t.Fatalf("no FYI for an unreadable spend: %v", *notes)
+	}
+}

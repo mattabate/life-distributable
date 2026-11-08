@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"life/hub/internal/actions"
+	"life/hub/internal/workspace"
 )
 
 // What a session token may not do, whatever the hub token may. Nothing here
@@ -77,7 +78,7 @@ func (s *Server) sessionLimits(pattern string, h http.HandlerFunc) http.HandlerF
 			jsonErr(w, 403, "only the owner does this")
 			return
 		}
-		if r.Method != "GET" && r.Method != "HEAD" && !rawBody(pattern, r) && !stampActor(w, r, "claude:thread:"+id) {
+		if r.Method != "GET" && r.Method != "HEAD" && !rawBody(pattern, r) && !stampActor(w, r, "claude:thread:"+id, stampCap(pattern)) {
 			return
 		}
 		h(w, r)
@@ -99,10 +100,28 @@ func rawBody(pattern string, r *http.Request) bool {
 	return false
 }
 
+// stampCaps: the routes whose handler takes more than maxJSON, at the
+// handler's own cap. stampActor holds the whole body in memory before the
+// handler runs, and read up to 96 MB on every route, so one session request
+// could make the hub hold 96 MB where the handler would refuse past 4 (#159).
+var stampCaps = map[string]int64{
+	"POST /api/v1/land":                         64 << 20,
+	"POST /api/v1/observations":                 65 << 20,
+	"POST /api/v1/observations/batch":           32 << 20,
+	"PUT /api/v1/workspace/{persona}/{name...}": workspace.MaxBytes + 1<<20,
+}
+
+func stampCap(pattern string) int64 {
+	if n, ok := stampCaps[pattern]; ok {
+		return n
+	}
+	return maxJSON
+}
+
 // stampActor rewrites a JSON object body. Any other body passes as it came: a
 // handler that decodes JSON refuses it, and an upload names nobody.
-func stampActor(w http.ResponseWriter, r *http.Request, who string) bool {
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 96<<20))
+func stampActor(w http.ResponseWriter, r *http.Request, who string, max int64) bool {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, max))
 	if err != nil {
 		jsonErr(w, 413, "body too large")
 		return false

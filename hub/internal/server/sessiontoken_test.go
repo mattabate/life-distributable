@@ -77,7 +77,7 @@ func TestSessionTokenCannotCallAsOwner(t *testing.T) {
 	// The console opens with a session token (ops/hub.sh url in a clone), and
 	// its cookie is that session's: it still cannot write into another one.
 	w := httptest.NewRecorder()
-	s.ServeHTTP(w, httptest.NewRequest("GET", "/?token="+tok, nil))
+	s.ServeHTTP(w, httptest.NewRequest("GET", "/?code="+codeFor(t, s, tok), nil))
 	cookies := w.Result().Cookies()
 	if w.Code != 303 || len(cookies) != 1 || cookies[0].Value != tok {
 		t.Fatalf("console with a session token: %d %v", w.Code, cookies)
@@ -90,10 +90,12 @@ func TestSessionTokenCannotCallAsOwner(t *testing.T) {
 	if w.Code != 403 {
 		t.Errorf("session cookie wrote into another session: %d", w.Code)
 	}
+	r = httptest.NewRequest("POST", "/api/v1/login-codes", nil)
+	r.Header.Set("Authorization", "Bearer s1."+a+".00")
 	w = httptest.NewRecorder()
-	s.ServeHTTP(w, httptest.NewRequest("GET", "/?token=s1."+a+".00", nil))
-	if len(w.Result().Cookies()) != 0 {
-		t.Errorf("forged token set a cookie")
+	s.ServeHTTP(w, r)
+	if w.Code != 401 {
+		t.Errorf("a forged token got a login code: %d", w.Code)
 	}
 }
 

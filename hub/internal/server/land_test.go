@@ -86,6 +86,11 @@ func TestLandRunsOnStandingApproval(t *testing.T) {
 		want              int
 	}{
 		{"", "work", good, 403},
+		// The thread goes into refs/incoming/<from>: a colon, a slash or a
+		// space would change the refspec (#148).
+		{"th-1:refs/heads/main", "work", good, 403},
+		{"../main", "work", good, 403},
+		{"th 1", "work", good, 403},
 		{"th-1", "--upload-pack=x", good, 400},
 		{"th-1", "work", "!!", 400},
 		{"th-1", "work", base64.StdEncoding.EncodeToString([]byte("not a bundle")), 400},

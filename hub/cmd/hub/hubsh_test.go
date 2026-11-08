@@ -10,8 +10,7 @@ import (
 
 // `ops/hub.sh url` gives the owner's hub token only to a person at a
 // Terminal: run from a session (no tty) it put the token in the session's
-// transcript (#129). A session token still prints, it is the session's own.
-// Run on a copy, against a throwaway hub.json and token.
+// transcript (#129). Run on a copy, against a throwaway hub.json and token.
 func TestHubURLKeepsOwnerTokenOutOfSessions(t *testing.T) {
 	if _, err := exec.LookPath("plutil"); err != nil {
 		t.Skip("hub.sh reads hub.json with plutil (macOS)")
@@ -47,8 +46,11 @@ func TestHubURLKeepsOwnerTokenOutOfSessions(t *testing.T) {
 	if err == nil || !strings.Contains(out, "https://hub.test:8443/") {
 		t.Fatalf("want the bare URL and a refusal, got %q err=%v", out, err)
 	}
+	// A session's URL carries a login code, never its token (#161): with no
+	// hub at hub.test there is no code, so it says so rather than fall back
+	// to the token.
 	out, err = run("LIFE_SESSION_TOKEN=sess-tok")
-	if err != nil || strings.TrimSpace(out) != "https://hub.test:8443/?token=sess-tok" {
-		t.Fatalf("a session's own token: got %q err=%v", out, err)
+	if err == nil || strings.Contains(out, "sess-tok") || !strings.Contains(out, "no login code") {
+		t.Fatalf("a session with no hub: got %q err=%v", out, err)
 	}
 }
