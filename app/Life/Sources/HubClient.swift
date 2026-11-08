@@ -500,6 +500,8 @@ final class HubClient {
     }
     /// The sessions with a role, in role order; `[]` when team mode is off.
     func personaThreads() async throws -> [Thread] { try await request("GET", Self.threadsPath + "?persona=1") }
+    /// The owner's switches; the app reads only owner_name.
+    func settings() async throws -> HubSettings { try await request("GET", "/api/v1/settings") }
     func sendThread(_ id: String, text: String, attachments: [String] = []) async throws -> Thread {
         struct B: Encodable { var text: String; var attachments: [String] }
         return try await request("POST", "/api/v1/threads/\(id)/messages", body: B(text: text, attachments: attachments))

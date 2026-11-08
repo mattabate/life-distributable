@@ -37,6 +37,9 @@ const cards = html => html.split('<div class="cfg-ocard">').slice(1);
 test('team: the owner on top, a card per role under the owner, reports inside', () => {
   const html = cfgTeamHTML(st, personas, sessions, goals);
   assert.match(html, /<div class="cfg-me">You<\/div>/);
+  assert.match(cfgTeamHTML({ ...st, owner_name: 'Robin' }, personas, sessions, goals), /<div class="cfg-me">Robin<\/div>/, "hub.json's owner_name on top");
+  assert.match(cfgTeamHTML({ ...st, owner_name: '  ' }, personas, sessions, goals), /<div class="cfg-me">You<\/div>/);
+  assert.match(cfgTeamHTML({ ...st, owner_name: '<b>' }, personas, sessions, goals), /<div class="cfg-me">&lt;b&gt;<\/div>/);
   assert.match(html, /setSetting\('team_mode'/, 'the switches stay');
   const cs = cards(html);
   assert.equal(cs.length, 2, 'Alex, and Kim whose boss is no role');

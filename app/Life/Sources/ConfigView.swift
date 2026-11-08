@@ -27,6 +27,25 @@ struct ConfigData: Sendable {
     var status: HubStatus?
     /// The roles (`GET /threads?persona=1`); empty with team mode off.
     var people: [Thread]?
+    var settings: HubSettings?
+}
+
+/// The part of `GET /settings` this page reads: owner_name, hub.json's name
+/// for the owner ("" when unset), the top of the org chart.
+struct HubSettings: Codable, Sendable, Equatable {
+    var owner_name: String = ""
+
+    enum CodingKeys: String, CodingKey { case owner_name }
+
+    init(owner_name: String = "") { self.owner_name = owner_name }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        owner_name = (try c.decodeIfPresent(String.self, forKey: .owner_name) ?? "").trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The name on top of the org chart: owner_name, else You.
+    var ownerLabel: String { owner_name.isEmpty ? "You" : owner_name }
 }
 
 /// The goals under the owner's section names, each section where its first
@@ -151,7 +170,8 @@ struct ConfigView: View {
             let g = try? await hub.goals()
             let st = try? await hub.status()
             let people = try? await hub.personaThreads()
-            return ConfigData(quota: q, model: m, goals: g, sources: try await hub.sources(), status: st, people: people)
+            let set = try? await hub.settings()
+            return ConfigData(quota: q, model: m, goals: g, sources: try await hub.sources(), status: st, people: people, settings: set)
         }
     }
 
@@ -205,7 +225,7 @@ struct ConfigView: View {
             let byId = Dictionary((d.goals ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             let goalsOf = { (p: Thread) in (p.owns_goals ?? []).compactMap { byId[$0] } }
             VStack(spacing: 0) {
-                Text("You").font(.system(size: 14, weight: .semibold))
+                Text(d.settings?.ownerLabel ?? "You").font(.system(size: 14, weight: .semibold))
                     .padding(.horizontal, 16).padding(.vertical, 5)
                     .overlay { Capsule().strokeBorder(line, lineWidth: 1) }
                 if !ps.isEmpty {
