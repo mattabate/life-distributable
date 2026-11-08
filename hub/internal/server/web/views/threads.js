@@ -141,82 +141,47 @@ async function drawList(activeID, reuse) {
   const nested = t => !!home[t.id];
   const kids = {};
   for (const t of threads) if (nested(t) && sectionOf(b, t)) (kids[home[t.id]] ||= []).push(t);
-  const subCell = k => {
+  // A sub-session as a line under its person: its own first card's colour
+  // and mark, else grey.
+  const subItem = k => {
     const cs = sessionCards(bundles[k.id], speakingOn(b, k.id));
     const c = cs.find(x => x.speaking) || cs[0];
     const href = `#/sessions/${encodeURIComponent(k.id)}${b.first[k.id] ? '/' + encodeURIComponent(b.first[k.id]) : ''}`;
-    const live = k.status === 'running';
-    return `<a class="ask mini sub ${c ? c.tint : 'quiet'}" href="${href}">
-      <div class="t"><span class="verb">${esc(c ? c.verb : live ? 'running' : 'idle')}</span>${live ? '<span class="sess-dot"></span>' : ''}${mdInline(k.title || k.id, false)}</div></a>`;
+    return { id: 'sub ' + k.id, title: k.title || k.id, tint: c ? c.tint : 'quiet', under: c && c.under, speaking: !!(c && c.speaking), href };
   };
-  const subCells = t => {
-    const list = kids[t.id] || [];
-    if (!list.length) return '';
-    const key = 'subs ' + t.id, shown = moreOpen.has(key) ? list.length : SUB_CELLS;
-    return list.slice(0, shown).map(subCell).join('')
-      + (list.length > SUB_CELLS ? `<a class="small muted more-cards" href="#" onclick="event.preventDefault();toggleMoreCards('${escJS(key)}')">${shown > SUB_CELLS ? 'Show less' : `and ${list.length - SUB_CELLS} more`}</a>` : '');
-  };
-  const group = (label, list, count) => !list.length ? '' :
-    `<h3>${label}${count ? ` <span class="muted">· ${count}</span>` : ''}</h3>` + list.map(t => card(t)).join('');
+  // THE DESKTOP'S SIDEBAR, line for line (ThreadRow.macCard, 2026-11-08:
+  // the web app should match the desktop app): edge to edge, a line under
+  // each person, the name with one audio pill and the role on the right,
+  // then each open card as a coloured dot and its title, two and then
+  // "N more" opening the rest in place.
   const card = t => {
-      const n = by(t.id);
-      // EVERY OPEN CARD IS ITS OWN CELL (2026-09-20: "when there are two
-      // to-dos for me and they're bundled into the same section… keeping a
-      // disconnect would kind of confuse me"): the board's bundle for this
-      // session, drawn one cell per card. The one-card todo/detail below is
-      // only the fallback for a board that counts cards it did not bundle.
-      // A ROW DRAWS TWO, THEN SAYS HOW MANY MORE (later that day, of a
-      // session with one read and five to-dos that showed one cell: "should
-      // show up to two things I'm supposed to do in a session. After that, it
-      // should say 'and more'"). The to-dos were his dated steps — the
-      // calendar's, uncounted — so the bundle carries them now (`steps`) and
-      // the row stands for what the chat draws (board `open`).
-      // WHAT IS RUNNING LEADS THE ROW, GREY (2026-11-05 00:43, mock
-      // B: "have a running be the highest priority… maybe it should be grey"
-      // — it is in hand, not his turn): every job and helper is a cell, then
-      // his cards newest first, two drawn in all (jobCells).
-      const live = t.status === 'running' || ((b.pills || {})[t.id] || []).some(p => p.tone === 'running');
-      const jobs = jobCells(t);
-      const cards = jobs.concat(sessionCards(bundles[t.id], speakingOn(b, t.id)));
-      const open = Math.max(((b.open || {})[t.id] || 0) + jobs.length, cards.length);
-      const drawn = rowCards(cards, moreOpen.has(t.id));
-      const more = open - Math.min(cards.length, rowCards(cards, false).length);
-      // The todo line's colour is the first cards pill's: blue to read, teal
-      // to install, red when something is blocked on him. A session wears one
-      // pill per class (red, blue, teal in that order — 2026-09-17: an
-      // install "called out separately") and the hub names the row's card in
-      // the same order, so the first coloured pill is the todo's own class.
-      const cardsPill = ((b.pills || {})[t.id] || []).find(p => TODO_COLOR[p.tone]);
-      const tone = TODO_COLOR[cardsPill ? cardsPill.tone : 'needs'];
-      const todo = n && !cards.length ? (b.todo || {})[t.id] || '' : '';
-      // …and what the card actually SAYS, under it. The Your turn page is
-      // gone and this is the one thing it had that a session row did not
-      // (2026-09-02: "it's not obvious to me what I get inside the Your
-      // Turn things outside of a bigger description… perhaps you truncate
-      // after a couple of lines"). The hub caps it at 400 chars; .wrap3 cuts
-      // it at three lines, so a long ask never pushes the next card off
-      // screen. mdPreview is the same flattening a reply preview gets: the
-      // ask's "- " bullets become "• " clauses on one running line.
-      const detail = todo ? mdPreview((b.detail || {})[t.id] || '') : '';
-      return sessionCardHTML(t, {
-        active: t.id === activeID,
-        live,
-        // Land on the card (approval or ask), not at the foot of the chat:
-        // the board's `first` — the approval card, else the first ask.
-        first: b.first[t.id] || '',
-        cells: drawn.map(c => miniCardHTML(t.id, c)).join('')
-          + (cards.length > rowCards(cards, false).length ? `<a class="small muted more-cards" href="#" onclick="event.preventDefault();toggleMoreCards('${escJS(t.id)}')">${moreOpen.has(t.id) ? 'Show less' : `and ${more} more`}</a>`
-            : cards.length && more > 0 ? `<a class="small muted more-cards" href="#/sessions/${encodeURIComponent(t.id)}">and ${more} more</a>` : '')
-          + (todo ? `<div class="small wrap2" style="margin-top:6px;color:var(--${tone})">→ ${mdInline(todo, false)}</div>` : '')
-          + (detail ? `<div class="small muted wrap3" style="margin-top:2px">${detail}</div>` : '')
-          + subCells(t),
-        // The cells and the blue dot say what the count and RUNNING pills
-        // did; only the live audio ones stay (rec-e4b035dd, 2026-10-17).
-        // A cell already reading "speaking" is the one mark (the desktop's
-        // `voiced`, 2026-10-25).
-        pills: audioPills(b, t, cards.some(c => c.speaking)),
-      });
+    const href = `#/sessions/${encodeURIComponent(t.id)}`;
+    const items = [];
+    const jobs = jobCells(t);
+    const cards = sessionCards(bundles[t.id], speakingOn(b, t.id));
+    const todo = by(t.id) && !cards.length ? (b.todo || {})[t.id] || '' : '';
+    if (todo) items.push({ id: 'todo', title: todo, tint: '', href: href + (b.first[t.id] ? '/' + encodeURIComponent(b.first[t.id]) : '') });
+    // Subagents are one grey count, never their names.
+    const agents = jobs.filter(k => k.job.type === 'local_agent');
+    if (agents.length) items.push({ id: 'agents', title: agents.length === 1 ? '1 subagent' : `${agents.length} subagents`, tint: 'quiet', href });
+    for (const k of jobs.filter(k => k.job.type !== 'local_agent')) items.push({ ...k, tint: 'quiet', href });
+    for (const c of cards) items.push({ ...c, href: `${href}/${encodeURIComponent(c.id)}` });
+    for (const k of kids[t.id] || []) items.push(subItem(k));
+    const unbundled = Math.max(0, ((b.open || {})[t.id] || 0) - cards.length);
+    const drawn = moreOpen.has(t.id) ? items : items.slice(0, SIDE_ROWS);
+    const hidden = items.length - drawn.length + (cards.length ? unbundled : 0);
+    const more = !hidden ? '' : items.length > drawn.length
+      ? `<a class="side-more" href="#" onclick="event.preventDefault();toggleMoreCards('${escJS(t.id)}')">${hidden} more</a>`
+      : `<a class="side-more" href="${href}">${hidden} more</a>`;
+    return sideRowHTML(t, {
+      active: t.id === activeID,
+      first: b.first[t.id] || '',
+      audio: audioSlotHTML(b, t),
+      items: drawn.map(sideItemHTML).join('') + more,
+    });
   };
+  const group = (label, list) => !list.length ? '' :
+    `<h3 class="side-h">${esc(label)}</h3>` + list.map(t => card(t)).join('');
   // A SESSION ON THIS LIST IS WORKING OR WAITING ON HIM — Your turn or Working
   // — and the hub files it (board `section`) and words each heading (board
   // `headings`: "3 in 2 sessions · 1 working"). The phone draws the same
@@ -235,19 +200,24 @@ async function drawList(activeID, reuse) {
   // button in this column — it is on the toolbar, on every page
   // (2026-08-26). A module's own link is the last row, always a whole one,
   // drawn by that module when it is loaded.
-  const people = (team || []).filter(person);
-  // WHO IS TALKING, by name (2026-10-28 20:01, of a role's card
-  // speaking under "and 1 more": he must always see which agent it is): the
-  // person whose session, or a run homed on them, is in his ears.
-  const voicedBy = id => speakingOn(b, id) || threads.some(k => home[k.id] === id && speakingOn(b, k.id));
+  // IDLE IS EVERYONE ELSE, each person once (the desktop's macItems,
+  // 2026-11-08: Idle leaves out anyone already under Your turn or Working):
+  // two to a line, the name over the role. Your turn leads.
+  const people = (team || []).filter(t => person(t) && !nested(t));
+  const heads = b.headings || NO_HEADINGS;
+  const placed = new Set();
+  const groups = heads.filter(h => h.key === 'your_turn').concat(heads.filter(h => h.key !== 'your_turn')).map(h => {
+    let rows = threads.filter(t => sectionOf(b, t) === h.key && !nested(t) && shown(t, h.key));
+    if (h.show) rows = rows.slice(0, h.show);
+    rows = rows.filter(t => !placed.has(t.id));
+    rows.forEach(t => placed.add(t.id));
+    return group(h.label, rows);
+  }).join('');
+  const idle = people.filter(t => !placed.has(t.id));
   paint(list, `
-    ${(b.headings || NO_HEADINGS).map(h => {
-      const rows = threads.filter(t => sectionOf(b, t) === h.key && !nested(t) && shown(t, h.key));
-      return group(h.label, h.show ? rows.slice(0, h.show) : rows, rows.length ? h.count : 0);
-    }).join('')}
-    <h3>Sessions</h3>
-    ${people.length ? `<div class="foot-links team">${people.map(t => `<a class="all-link person${t.id === activeID ? ' on' : ''}" href="#/sessions/${encodeURIComponent(t.id)}"><span><strong>${esc(t.title)}${voicedBy(t.id) ? '<span class="dot pulse speak-dot" title="speaking"></span>' : ''}</strong>${t.role ? `<span class="muted">${esc(t.role)}</span>` : ''}</span>${by(t.id) ? `<span class="count">${by(t.id)}</span>` : ''}</a>`).join('')}</div>` : ''}
-    ${(b.threads_total || threads.length) ? '' : emptyHTML('No sessions yet.')}`);
+    ${groups}
+    ${idle.length ? `<h3 class="side-h">Idle</h3><div class="idle-grid">${idle.map(t => idleCellHTML(b, t, t.id === activeID)).join('')}</div>` : ''}
+    ${(b.threads_total || threads.length || people.length) ? '' : emptyHTML('No sessions yet.')}`);
 }
 
 // The heading a session is filed under: the board's word for it, else (a
@@ -256,82 +226,72 @@ async function drawList(activeID, reuse) {
 const NO_HEADINGS = [{ key: 'working', label: 'Working', count: '' }];
 const sectionOf = (b, t) => (b.section || {})[t.id] || (t.status === 'running' ? 'working' : '');
 
-// ONE SESSION'S CARD on the list (2026-09-20: "I don't want
-// truncated titles… see the cards and what they mean from the sessions page
-// without clicking into the chat"). The NAME has the card's full width and
-// wraps — the pills that shared its line and cut it to "Generated puzzle c…"
-// are in the foot now, beside the model and the dollars. Between the two sit
-// the session's open cards, EACH ITS OWN CELL (miniCardHTML) in the chat
-// card's own tint — red blocked on him, blue to read, teal to install — so
-// two things waiting read as two things, each opening the chat AT that card.
-// The box is a <div> because a link cannot hold links; a click anywhere on it
-// that is not one of them opens the session at its first card.
-//
-// THE NAME AND THE ONE THING IT NEEDS FROM HIM (rec-e4b035dd,
-// 2026-10-17 on the mock: "that works for me… it declutters the design"):
-// no model, dollars or tool-call row — the chat's head carries those. A Your
-// turn card is the name over its first cell ("and N more" under it); a
-// Working card is one line, a blue dot, the name and when it last moved. Only
-// the live audio pills stay (speaking, waiting): the fact a cell cannot carry.
-function sessionCardHTML(t, o) {
-  // The blue dot is the board's "running" pill, which a chain top wears for
-  // the runs under it (attention.Live, 2026-10-27 22:18: "something I
-  // can visualize… to know that [a role] is active, so I don't send a message
-  // to [it] when [it's] doing work").
-  const live = t.status === 'running' || !!o.live;
-  const failed = !live && t.last_message_kind === 'error' && !isPauseText(t.last_message);
+// How many lines a person's row draws before "N more" (the desktop's sideRows).
+const SIDE_ROWS = 2;
+
+// One person on the list: the name, its audio pill, the role on the right,
+// then its lines; the open one a blue edge and tint.
+function sideRowHTML(t, o) {
   const href = `#/sessions/${encodeURIComponent(t.id)}${o.first ? '/' + encodeURIComponent(o.first) : ''}`;
-  const bare = !o.cells;
+  const failed = t.status !== 'running' && t.last_message_kind === 'error' && !isPauseText(t.last_message);
   return `
-    <div class="card click sess${bare ? ' sess-line' : ''}${o.active ? ' on' : ''}" onclick="if(!event.target.closest('a'))location.hash='${escJS(href)}'">
-      <div class="sess-h"><a class="sess-t${t.unread > 0 ? ' unread' : ''}" href="${esc(href)}">${mdInline(t.title || t.id, false)}${live ? '<span class="sess-dot"></span>' : ''}</a>${o.pills ? `<span class="sess-pills">${o.pills}</span>` : ''}<span class="sess-gap"></span>${t.role ? `<span class="small muted sess-role">${esc(t.role)}</span>` : ''}${bare ? `<span class="small muted sess-ago">${ago(t.last_message_at || t.updated_at)}</span>` : ''}</div>
-      ${failed ? `<div class="small wrap2 err mt6">${failedPreview(t.last_message)}</div>` : ''}
-      ${o.cells || ''}
+    <div class="side-row${o.active ? ' on' : ''}" onclick="if(!event.target.closest('a'))location.hash='${escJS(href)}'">
+      <div class="side-name"><a class="side-t${t.unread > 0 ? ' unread' : ''}" href="${esc(href)}">${mdInline(t.title || t.id, false)}</a>${o.audio || ''}<span class="sess-gap"></span>${t.role ? `<span class="side-role">${esc(t.role)}</span>` : ''}</div>
+      ${failed ? `<div class="side-err wrap2">${failedPreview(t.last_message)}</div>` : ''}
+      ${o.items || ''}
     </div>`;
 }
 
+// The small speaker the card being spoken wears instead of its dot, in the
+// card's own colour, the size of the dots.
+const SPEAKER_SVG = '<svg class="side-spk" viewBox="0 0 16 16" aria-label="speaking"><path d="M1.5 5.75h2.6L7.6 2.9v10.2L4.1 10.25H1.5z" fill="currentColor"/><path d="M10 5.4a3.6 3.6 0 0 1 0 5.2M12.3 3.3a6.6 6.6 0 0 1 0 9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+
+// One line under a name: a dot in the card's colour (red do, blue read, teal
+// install, grey in hand) and its whole title; a running job is grey with its
+// bar while it has a count.
+function sideItemHTML(c) {
+  const tone = c.speaking ? c.under || '' : c.tint || '';
+  const mark = c.speaking ? SPEAKER_SVG : '<span class="side-dot"></span>';
+  return `<a class="side-item ${tone}${c.job ? ' job' : ''}" href="${esc(c.href)}"><span class="side-mark">${mark}</span><span class="side-tt">${mdInline(c.title, false)}</span></a>`
+    + (c.job && c.job.total > 0 ? `<div class="side-bar">${taskBarHTML(c.job)}</div>` : '');
+}
+
+// The one audio pill by a name, one state at a time: green speaking, else
+// orange waiting to speak.
+function audioSlotHTML(b, t) {
+  const ps = ((b && b.pills) || {})[t.id] || [];
+  const p = ps.find(x => x.tone === 'speaking') || ps.find(x => x.tone === 'waiting');
+  return p ? `<span class="side-audio">${livePillsHTML([p])}</span>` : '';
+}
+
+// An idle person: the name (its audio pill beside it) over the role.
+function idleCellHTML(b, t, on) {
+  return `<a class="idle-cell${on ? ' on' : ''}" href="#/sessions/${encodeURIComponent(t.id)}"><span class="side-name"><strong>${esc(t.title)}</strong>${audioSlotHTML(b, t)}</span>${t.role ? `<span class="side-role">${esc(t.role)}</span>` : ''}</a>`;
+}
+
 // A session's open cards in the board's own order: approvals (the session is
-// stopped on them), then its asks as the hub sorted them. Each is the chat
-// card's tint and mark (askHTML / actionHTML in ui.js), so the cell here and
-// the card in the chat read as one object.
-// THE CARD IN HIS EARS reads "speaking" in green (the desktop's
-// SessionCell.cells): the ask the hub marks, else — a replay holds the
-// session's floor, not the card's — its first card with a line.
+// stopped on them), then its asks as the hub sorted them, then the owner's
+// dated steps that sit in this chat (`steps`, the calendar's). An answered
+// ask is never here: the board drops it (2026-09-20). `tint` is the card's
+// class: '' do (red), read, install, paused, err-card.
+// THE CARD BEING SPOKEN is `speaking` and keeps its own class in `under`
+// (the desktop's SessionCell.cells): the ask the hub marks, else — a replay
+// holds the session's floor, not the card's — its first card with a line.
 function sessionCards(bundle, floor) {
   if (!bundle) return [];
-  const acts = (bundle.actions || []).map(a => ({ id: a.id, title: a.title, tint: '', mark: '🔴', verb: 'approve' }));
+  const acts = (bundle.actions || []).map(a => ({ id: a.id, title: a.title, tint: '' }));
   const voiced = ((bundle.asks || []).find(a => a.speaking) || (floor ? (bundle.asks || []).find(a => a.said) : null) || {}).id;
-  // …then his dated steps that sit in this chat (`steps`, the calendar's).
-  // An ask he has answered is never here: the board drops it (2026-09-20).
   const asks = (bundle.asks || []).concat(bundle.steps || []).map(a => {
     const k = a.kind, paused = k === 'error' && !!a.resumes_at;
-    if (voiced && a.id === voiced) return { id: a.id, title: a.title, verb: 'speaking', tint: 'speaking', mark: '<span class="dot pulse"></span>', speaking: true };
-    return {
-      id: a.id, title: a.title, verb: a.verb || 'for you',
-      tint: k === 'read' ? 'read' : k === 'install' ? 'install' : paused ? 'paused' : k === 'error' ? 'err-card' : '',
-      mark: k === 'read' ? '🔵' : k === 'install' ? '📲' : paused ? PAUSE_MARK : k === 'error' ? '⚠︎' : '🔴',
-    };
+    const tint = k === 'read' ? 'read' : k === 'install' ? 'install' : paused ? 'paused' : k === 'error' ? 'err-card' : '';
+    if (voiced && a.id === voiced) return { id: a.id, title: a.title, tint: 'speaking', under: tint, speaking: true };
+    return { id: a.id, title: a.title, tint };
   });
   return acts.concat(asks);
 }
-// How many of a session's open cards its row draws; the rest is "and N more"
-// (two, 2026-10-28 20:01: "I thought we sort of decided" — one since
-// rec-e4b035dd hid a role's speaking card; the desktop's `deskCards`).
-// The card in his ears is never folded: it draws past the cap (rowCards).
-const ROW_CARDS = 2;
-function rowCards(cards, open) {
-  if (open) return cards;
-  const head = cards.slice(0, ROW_CARDS);
-  const voiced = cards.slice(ROW_CARDS).find(c => c.speaking);
-  return voiced ? head.concat(voiced) : head;
-}
-// …and how many of its sub-sessions, the rest "and N more" (2026-10-23:
-// "collapsing after 5 or 3"; the desktop's `deskSubs`).
-const SUB_CELLS = 3;
-// "AND N MORE" OPENS THE REST IN PLACE (2026-10-18 00:43: "could be
-// able to expand to get to the previous action items… clicking on and one
-// more"): the row's older cards drop in under the newest one, each its own
-// cell; "Show less" folds them. Kept per session across the list's repaints.
+// "N MORE" OPENS THE REST IN PLACE (2026-10-18 00:43: "could be able to
+// expand to get to the previous action items"). Kept per session across the
+// list's repaints.
 const moreOpen = new Set();
 let listSide = '';
 function toggleMoreCards(id) {
@@ -339,27 +299,11 @@ function toggleMoreCards(id) {
   drawList(listSide, true);
 }
 
-// One open card as a cell on its session's card: the chat's `.ask` box, small.
-// The title is whole and alone — no words under it (2026-10-10
-// 15:14, of the cells without their descriptions: "I'm totally cool to move
-// to the new system"); the chat holds the rest.
-function miniCardHTML(threadID, c) {
-  if (c.job) return `<a class="ask mini quiet job" href="#/sessions/${encodeURIComponent(threadID)}">
-      <div class="t"><span class="verb">running</span>${mdInline(c.title, false)}</div>${taskBarHTML(c.job)}${jobFootHTML(c.job)}</a>`;
-  return `<a class="ask mini ${c.tint}" href="#/sessions/${encodeURIComponent(threadID)}/${encodeURIComponent(c.id)}">
-      <div class="t"><span class="verb">${esc(c.verb)}</span>${c.mark} ${mdInline(c.title, false)}</div></a>`;
-}
-// A session's running jobs as row cells (mock B, 2026-11-05): the actions
+// A session's running jobs as row lines (mock B, 2026-11-05): the actions
 // the hub runs for it and its helpers, reply sent or not.
 const jobCells = t => liveTasks(t).map(k => ({ id: 'job:' + (k.id || k.description), title: k.description || 'helper', job: k }));
-// Its newest line and how long it has run, one muted line.
-function jobFootHTML(k) {
-  const words = [k.doing, taskAge(k)].filter(Boolean).join(' · ');
-  return words ? `<div class="small muted job-doing">${esc(words)}</div>` : '';
-}
-// …and its SPEAKING pill, the one live fact a cell cannot carry (2026-09-25).
+// Whether the session's card is being spoken (board pills, 2026-09-25).
 const speakingOn = (b, id) => ((b.pills || {})[id] || []).some(p => p.tone === 'speaking');
-const audioPills = (b, t, voiced) => livePillsHTML(((b.pills || {})[t.id] || []).filter(p => (p.tone === 'speaking' && !voiced) || p.tone === 'waiting'));
 
 // (The All sessions page — `#/sessions/all`, every session as a table of
 // fifty, a find box, 2026-09-20 to 2026-10-24 — is gone: drawSessions.)
@@ -367,7 +311,6 @@ const audioPills = (b, t, voiced) => livePillsHTML(((b.pills || {})[t.id] || [])
 // A session's capsules, in the hub's order and words (board `pills`, else the
 // thread's own `pill`): "running" + "2 for you", "1 to read" + "1 to
 // install", "done". The tone is the pill's class; `idle` has none.
-const TODO_COLOR = { needs: 'red', read: 'accent', install: 'teal' };
 const PILL_CLASS = { needs: 'needs', read: 'read', install: 'install', running: 'running', done: 'done', waiting: 'waiting' };
 
 // The open chat's head: the same pills, but the live ones are the controls

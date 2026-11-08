@@ -44,67 +44,64 @@ button.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 8
 .dot { width: 6px; height: 6px; }
 
 /* ---- the bar ---- */
-#nav { height: 52px; padding: 0 16px; gap: 0 2px; }
-#nav .brand { font-size: 17px; font-weight: 750; letter-spacing: -.03em; margin-right: 20px; }
+/* the desktop's height (2026-11-08: the web's bar was bigger than desktop) */
+#nav { height: 44px; padding: 0 14px; gap: 0 2px; }
+#nav .brand { font-size: 15.5px; font-weight: 750; letter-spacing: -.03em; margin-right: 18px; }
+#nav .tabs a, #nav .navmore { padding: 4px 10px; font-size: 13.5px; }
 /* the tabs stay the original filled blue shape (round five: "i much
    prefer the bubble selector… put the blue shapes back") — only the corners
    join the one shape */
 #nav .tabs a, #nav .navmore { border-radius: var(--radius); font-weight: 500; }
 #nav .tabs a.on, #nav .navmore.on { font-weight: 600; }
 .badge { font-size: 10.5px; line-height: 16px; min-width: 16px; padding: 0 5px; margin-left: 6px; text-align: center; border-radius: 8px; }
-#nav .navmic, #nav .navnew { padding: 6px 13px; font-size: 13.5px; font-weight: 550; border-radius: var(--radius); }
+#nav .navmic, #nav .navnew { padding: 4px 12px; font-size: 13px; font-weight: 550; border-radius: var(--radius); }
 #nav .navmic.on { box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent); }
 
 /* ---- the sessions column ---- */
-.pane.list { background: var(--bg); padding: 14px 12px; }
 h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px 10px; }
-.pane.list h3 ~ h3 { margin-top: 24px; }
-/* a session card, top-down: its name, its state, what it is doing, then its
-   open cards — the pills moved up under the name, so the first two lines
-   answer "which one, and is it moving" before any card text */
-.card.sess { display: flex; flex-direction: column; padding: 12px 14px; margin-bottom: 8px; border-radius: 10px;
-  box-shadow: none; transition: border-color .12s, box-shadow .12s; }
-.card.sess:hover { border-color: var(--line-strong); box-shadow: 0 2px 8px rgba(0, 0, 0, .05); }
-.card.sess.on { border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
-.sess-t { order: 0; font-size: 14.5px; font-weight: 600; line-height: 1.35; }
-.sess-t.unread { font-weight: 700; }
-.sess-foot { order: 1; margin-top: 7px; gap: 5px; font-size: 12px; font-variant-numeric: tabular-nums; }
-/* the name line: a blue dot while it runs, and on a Working card (no cells)
-   when it last moved at the right (rec-e4b035dd, 2026-10-17) */
-.sess-h { order: 0; display: flex; align-items: baseline; gap: 8px; }
-.sess-h .sess-t { flex: 0 1 auto; min-width: 0; }
-.sess-h .sess-gap { flex: 1; }
+/* The desktop's sidebar, drawn the same (ThreadsView.swift macItems,
+   2026-11-08: the web app should match the desktop app): grey heading bands
+   Your turn / Working / Idle, white edge-to-edge rows, a name with its role
+   on the right, then a coloured dot and the whole title per card. No boxes. */
+.pane.list { background: var(--bg); padding: 0 0 18px; }
+.side-h { margin: 0; padding: 24px 18px 9px; font-size: 13px; font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--heading); border-bottom: 1px solid var(--line); }
+.side-h:first-child { padding-top: 18px; }
+.side-row { --c: var(--red); background: var(--panel); padding: 13px 18px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.side-row.on, .idle-cell.on { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); box-shadow: inset 4px 0 0 var(--accent); }
+.side-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.side-name .sess-gap { flex: 1; }
+.side-t, .side-name strong { min-width: 0; font-size: 15px; font-weight: 600; color: var(--fg); text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-role { flex: 0 1 auto; min-width: 0; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-audio { flex: none; display: flex; }
+.side-audio .pill { font-size: 11.5px; padding: 1px 7px; }
+.side-err { margin-top: 6px; font-size: 13.5px; color: var(--red); }
+/* one line per card: a 6px dot in its colour, centred on the first line */
+.side-item { --c: var(--red); display: flex; align-items: flex-start; padding-top: 6px; font-size: 13.5px; line-height: 1.4;
+  color: var(--fg); text-decoration: none; }
+.side-item:hover .side-tt { text-decoration: underline; text-decoration-color: var(--line-strong); }
+.side-item.read { --c: var(--accent); }
+.side-item.install { --c: var(--teal); }
+.side-item.paused { --c: var(--amber); }
+.side-item.quiet, .side-item.err-card { --c: var(--muted); }
+.side-item.job .side-tt, .side-item.quiet .side-tt { color: var(--muted); }
+.side-item.job .side-tt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-mark { flex: none; width: 13px; height: 1.4em; display: flex; align-items: center; }
+.side-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+.side-spk { width: 11px; height: 11px; margin-left: -2px; color: var(--c); }
+.side-tt { min-width: 0; }
+.side-bar { padding-left: 13px; }
+.side-more { display: block; padding: 6px 0 0 13px; font-size: 13.5px; color: var(--muted); text-decoration: none; }
+.side-more:hover { color: var(--fg); }
+/* Idle: two to a line, the name over the role, a hairline between */
+.idle-grid { display: grid; grid-template-columns: 1fr 1fr; background: var(--panel); }
+.idle-cell { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 9px 18px; color: var(--fg); text-decoration: none;
+  border-bottom: 1px solid var(--line); }
+.idle-cell:nth-child(odd) { border-right: 1px solid var(--line); }
+.idle-cell:hover { background: color-mix(in srgb, var(--fg) 3%, var(--panel)); }
 /* whose rec it is, first on its pill line */
 .rec-who { color: var(--fg); font-weight: 600; }
-/* speaking / waiting to speak by the name, like the chat head's state chip,
-   never a line of its own */
-.sess-pills { flex: none; display: flex; gap: 5px; align-self: center; font-size: 12px; }
-.sess-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); align-self: center; }
-.sess-ago { flex: none; font-variant-numeric: tabular-nums; }
-/* a person's role on the right of their name, as on the phone (2026-10-22) */
-.sess-role { flex: none; white-space: nowrap; }
-/* a session it spun off: a row on its card, gray unless it has a card of its
-   own (2026-10-23: a role with two little subagents) */
-.ask.mini.quiet { --tint: var(--line); }
-.ask.mini.quiet .verb { color: var(--muted); }
-.ask.mini.sub .sess-dot { display: inline-block; margin: 0 7px 1px 0; vertical-align: middle; }
-/* the working dot after the name, so the name never moves (2026-11-05 00:34) */
-.sess-t .sess-dot { display: inline-block; margin: 0 0 2px 7px; vertical-align: middle; }
-/* a running job, first on its card and grey: in hand, not his turn (mock B, 2026-11-05) */
-.ask.mini.job { --tint: var(--line-strong); }
-.ask.mini.job .tbar { margin-top: 6px; }
-.ask.mini.job .job-doing { margin-top: 2px; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.card.sess > .ask.mini, .card.sess > .more-cards { order: 3; }
-/* its open cards: rows under a hairline, a tint rail each — not boxes in a box */
-.card.sess > .ask.mini { margin: 10px -14px 0; padding: 9px 14px 9px 13px; border: 0; border-radius: 0;
-  border-top: 1px solid var(--line); border-left: 3px solid var(--tint); background: transparent; }
-.card.sess > .ask.mini + .ask.mini { margin-top: 0; }
-.card.sess > .ask.mini:last-of-type { margin-bottom: -12px; border-radius: 0 0 0 9px; }
-.card.sess > .ask.mini:hover { background: color-mix(in srgb, var(--tint) 6%, var(--panel)); }
-.ask.mini .t { font-size: 13px; font-weight: 550; }
-.ask.mini .verb { font-size: 10px; letter-spacing: .06em; padding: 1px 6px; border-radius: 5px;
-  background: color-mix(in srgb, var(--tint) 12%, transparent); }
 .all-link { margin: 14px 0 6px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px;
   background: var(--panel); color: var(--fg); font-weight: 550; font-size: 13.5px; }
 .all-link:hover, .all-link.on { border-color: var(--line-strong); border-style: solid; background: var(--panel); }
