@@ -12,6 +12,7 @@ pylint:
 	bash ops/git-bundle-snap.sh --test
 	bash ops/sqlite-snap.sh --test
 	ops/py.sh doc-text.py --test
+	bash ops/xcode-shut.sh --test
 
 test:
 	cd hub && gofmt -l . | (! grep .) && go vet ./... && go test -timeout 180s ./...
@@ -102,6 +103,7 @@ app-project:
 	cd app && xcodegen generate
 
 app-build-sim:
+	bash ops/xcode-shut.sh app/Life.xcodeproj
 	cd app && xcodebuild -project Life.xcodeproj -scheme Life -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build -quiet
 
 # Unit tests (app/LifeTests: decode every hub response type from api.md JSON).
@@ -109,6 +111,7 @@ app-build-sim:
 # -only-testing keeps the UI driver (LifeUITests, minutes) out of this lane.
 SIM ?= iPhone 17
 app-test:
+	bash ops/xcode-shut.sh app/Life.xcodeproj
 	cd app && xcodebuild -project Life.xcodeproj -scheme Life -destination 'platform=iOS Simulator,name=$(SIM)' -derivedDataPath build -only-testing:LifeTests CODE_SIGNING_ALLOWED=NO test -quiet
 
 # WALK the phone app: tap, type, swipe, screenshot each step.
@@ -137,6 +140,7 @@ mac-keychain:
 	bash ops/install-mac.sh probe
 
 mac-build:
+	bash ops/xcode-shut.sh app/Life.xcodeproj
 	cd app && xcodebuild -project Life.xcodeproj -scheme LifeMac -destination 'platform=macOS,variant=Mac Catalyst' -derivedDataPath build-mac CODE_SIGNING_ALLOWED=NO build -quiet
 
 # Screenshot every tab in the simulator against the live hub (ops/logs/screens/).

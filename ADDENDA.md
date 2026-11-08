@@ -1291,3 +1291,8 @@ Entry format:
 - For: everyone with the phone or desktop app
 - Fix: The app's Sessions list is now the maintainer's current version in full, not a backport of pieces. On the phone, the people section is one Sessions row per role (name, role on the right, a green dot while it speaks, its open count), the separate All sessions page is gone, and only sessions with a role are listed, plus any other session under Your turn. On both apps, a card that is speaking shows as a green "speaking" cell and never folds under "and N more".
 - How: same merge as add-0008, then `make check` and `make ship` / `make mac`. By hand: `app/Life/Sources/ThreadRows.swift`, `ThreadsView.swift`, `Format.swift`, `Models.swift`, `MacFonts.swift`, `MacUpdate.swift`.
+
+## add-0179 · 2026-11-08 · No one else writes the Xcode project before a build
+- For: everyone with `session_user` set
+- Fix: Xcode makes `project.xcworkspace/xcshareddata/swiftpm/configuration` mode 777, so a session user could leave a workspace scheme whose build pre-action runs as you on your next build. `ops/xcode-shut.sh` now runs before every xcodebuild (`make app-build-sim`, `app-test`, `mac-build`, `install-mac.sh`, `install-phone.sh`, `ota.sh`, `app-ui.sh`): it takes group and other write off the project and refuses the build if any file in it belongs to someone else. `session-user-audit.py --wall` (the nightly wall audit) now also walks your whole checkout except `data/` and lists any folder a session could write, by folder with its modes.
+- How: same merge as add-0008, then `make check`; run `ops/wall-audit.sh` once to see the checkout is shut. By hand: `ops/xcode-shut.sh` (new), `Makefile`, `ops/install-mac.sh`, `ops/install-phone.sh`, `ops/ota.sh`, `ops/app-ui.sh`, `ops/session-user-audit.py`.
