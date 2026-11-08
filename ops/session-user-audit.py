@@ -2,7 +2,7 @@
 
     ops/py.sh session-user-audit.py        # from a session: one PASS/FAIL line per row
     ops/py.sh session-user-audit.py --wall # the path rows only, from the main checkout (ops/wall-audit.sh, nightly)
-    ops/py.sh session-user-audit.py --test # shut_dir against a folder in each mode
+    ops/py.sh session-user-audit.py --test # shut_dir and shut_write_tree against folders in each mode
 
 Read-only: every probe is a read, a self-test or a lookup; nothing is written
 but a temp file it removes. A FAIL on a `shut` or `no-write` row is a hole in
@@ -41,6 +41,29 @@ def shut_dir(p):
     row(not any(os.access(p, m) for m in (os.R_OK, os.W_OK, os.X_OK)), "shut-dir " + p, "listable, writable or enterable")
 
 
+def shut_write_tree(p, skip=()):
+    # The owner's checkout is what the hub, the installers and every build run
+    # as the owner (.git hooks and the Xcode project included): a session that
+    # can write any file or folder in it can run code as the owner.
+    if not os.path.exists(p):
+        return row(True, "shut-write " + p, "absent")
+    # A folder it cannot list is still checked: write without read is a mode.
+    hid, bad = [], []
+    for d, dirs, files in os.walk(p, onerror=lambda e: hid.append(e.filename)):
+        dirs[:] = [x for x in dirs if os.path.join(d, x) not in skip]
+        bad += [q for q in [d] + [os.path.join(d, f) for f in files] if os.access(q, os.W_OK)]
+    bad += [q for q in hid if os.access(q, os.W_OK)]
+    if bad:
+        # One line per place, the folder that holds them, with a count and modes.
+        by = {}
+        for q in bad:
+            k = os.path.dirname(os.path.relpath(q, p)) or "."
+            by.setdefault(k, set()).add("%o" % (os.lstat(q).st_mode & 0o7777))
+        return row(False, "shut-write " + p, "%d writable in %d folders:\n%s" % (len(bad), len(by), "\n".join(
+            "      %s (%s)" % (k, ",".join(sorted(v))) for k, v in sorted(by.items()))))
+    row(True, "shut-write " + p)
+
+
 def no_write(p):
     row(not os.access(p, os.W_OK), "no-write " + p, "writable")
 
@@ -76,6 +99,10 @@ def wall(main):
     for p in ("data/life.db", "data/life.db-wal", "data/life.db-shm", "data/imports/intake", "ops/bin/hub", ".git", "hub", "ops/hub.json"):
         no_write(os.path.join(main, p))
     row(os.access(os.path.join(main, "data"), os.R_OK), "read " + os.path.join(main, "data"), "not readable")
+    # The whole checkout but data/ (its own rows above). Xcode makes its
+    # project's swiftpm configuration folder 777; ops/xcode-shut.sh closes it
+    # before each build, and this row shows any that are open now.
+    shut_write_tree(main, skip=(os.path.join(main, "data"),))
 
 
 def selftest():
@@ -91,6 +118,24 @@ def selftest():
             shut_dir(d)
             bad += fails != want
         os.chmod(d, 0o700)
+        # shut_write_tree: a read-only build passes; a writable file deep in
+        # it, or a writable folder it cannot list, fails.
+        b = os.path.join(t, "build")
+        deep = os.path.join(b, "life.app", "Contents", "MacOS")
+        os.makedirs(deep)
+        exe = os.path.join(deep, "life")
+        open(exe, "w").close()
+        cases = ((0o555, 0o555, 0o555, 0), (0o555, 0o555, 0o755, 1), (0o555, 0o300, 0o555, 1))
+        for top, mid, f, want in cases:
+            os.chmod(exe, f)
+            for x in (deep, os.path.dirname(deep), os.path.dirname(os.path.dirname(deep))):
+                os.chmod(x, mid if x == deep else 0o555)
+            os.chmod(b, top)
+            fails = 0
+            shut_write_tree(b)
+            bad += fails != want
+            for x in (b, os.path.dirname(os.path.dirname(deep)), os.path.dirname(deep), deep):
+                os.chmod(x, 0o755)
     print("session-user-audit selftest " + ("ok" if not bad else "FAILED"))
     sys.exit(1 if bad else 0)
 

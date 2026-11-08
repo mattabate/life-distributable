@@ -70,6 +70,7 @@ mkdir -p "$ROOT/ops/logs"
 
 cd "$ROOT/app"
 xcodegen generate -q
+bash "$ROOT/ops/xcode-shut.sh" Life.xcodeproj
 echo "▶ building LifeMac $N (team $LIFE_TEAM_ID)…"
 xcodebuild -project Life.xcodeproj -scheme LifeMac -configuration Debug \
   -destination 'platform=macOS,variant=Mac Catalyst' -derivedDataPath "$BUILD" \

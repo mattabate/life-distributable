@@ -58,6 +58,7 @@ xcrun simctl ui "$UDID" appearance "$APPEARANCE" >/dev/null 2>&1 || true
 # blocked by another session's pending delete).
 ACTION=test; [ -z "${NOBUILD:-}" ] || ACTION=test-without-building
 
+bash ops/xcode-shut.sh app/Life.xcodeproj
 echo "app-ui: $SIM ($APPEARANCE) — $(printf '%s' "$STEPS" | tr ';' '\n' | grep -c .) steps"
 set +e
 TEST_RUNNER_LIFE_UI_STEPS="$STEPS" \

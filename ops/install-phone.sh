@@ -17,6 +17,7 @@ mkdir -p logs
 
 cd "$ROOT/app"
 xcodegen generate -q
+bash "$ROOT/ops/xcode-shut.sh" Life.xcodeproj
 echo "▶ building + signing (team $LIFE_TEAM_ID)…"
 xcodebuild -project Life.xcodeproj -scheme Life -configuration Debug \
   -destination "id=$DEVICE" -derivedDataPath "$BUILD" \
