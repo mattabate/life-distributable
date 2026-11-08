@@ -43,6 +43,9 @@ enum Web {
     static let muted = pair(0x6b7280, 0x9aa1ad)
     static let accent = pair(0x2563eb, 0x6aa1ff)
     static let fg = pair(0x14161a, 0xe8eaee)
+    /// The desktop sidebar's YOUR TURN / WORKING / IDLE headings.
+    static let heading = pair(0x4b5160, 0xb4bac6)
+    static let install = pair(0x1d9e88, 0x3cc7ad)
     static let red = pair(0xdc2626, 0xf87171)
     static let amber = pair(0xd97706, 0xfbbf24)
     static let green = pair(0x059669, 0x34d399)
@@ -120,7 +123,7 @@ struct WebButtonStyle: ButtonStyle {
 }
 
 /// The console's `.pill`: a small squared chip (skin.css radius 6), grey, or
-/// in a tint (ThreadRows' `WebPill` is the grey one the sessions draw).
+/// in a tint.
 struct WebTag: View {
     let text: String
     var tint: Color? = nil

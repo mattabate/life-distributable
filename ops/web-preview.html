@@ -37,17 +37,17 @@
     ],
     // Team mode's roles: the sessions that play one (a full path with its
     // query is matched before the query is dropped), and the roles under
-    // their `team` label.
+    // their org lines (reports_to) and the goals each owns.
     '/threads?persona=1': [
-      { id: 't-staff', title: 'Chief of staff', status: 'idle', persona: 'staff', role: 'Chief of staff' },
-      { id: TIDY, title: 'Tidy the weekly digest', status: 'running', persona: 'digest', role: 'Digest editor' },
-      { id: 't-coach', title: 'Coach', status: 'idle', persona: 'coach', role: 'Training coach' },
+      { id: 't-staff', title: 'Chief of staff', status: 'idle', persona: 'staff', role: 'Chief of staff', owns_goals: ['tidy-inbox'] },
+      { id: TIDY, title: 'Tidy the weekly digest', status: 'running', persona: 'digest', role: 'Digest editor', reports_to: 'staff' },
+      { id: 't-coach', title: 'Coach', status: 'idle', persona: 'coach', role: 'Training coach', owns_goals: ['get-stronger', 'sleep-earlier'] },
     ],
     '/personas': [
-      { key: 'staff', role: 'Chief of staff', team: 'Core', builtin: true, session: 't-staff' },
-      { key: 'digest', role: 'Digest editor', team: 'Core', session: TIDY },
-      { key: 'coach', role: 'Training coach', team: 'Health', session: 't-coach' },
-      { key: 'travel', role: 'Trip planner', team: '' },
+      { key: 'staff', role: 'Chief of staff', team: 'Core', reports_to: '', goals: ['tidy-inbox'], builtin: true, session: 't-staff' },
+      { key: 'digest', role: 'Digest editor', team: 'Core', reports_to: 'staff', goals: [], session: TIDY },
+      { key: 'coach', role: 'Training coach', team: 'Health', reports_to: '', goals: ['get-stronger', 'sleep-earlier'], session: 't-coach' },
+      { key: 'travel', role: 'Trip planner', team: '', reports_to: 'staff', goals: ['travel-more'] },
     ],
     '/settings': { team_mode: true, plain_sessions: false, model_cap: 'claude-opus-5-5',
       models: ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'] },

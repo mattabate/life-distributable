@@ -1,8 +1,8 @@
 [
   {
     "id": "water-the-plants-00000001",
-    "created_at": "2026-11-08T11:02:21.547858Z",
-    "updated_at": "2026-11-08T11:02:21.551562Z",
+    "created_at": "2026-11-08T18:25:03.348302Z",
+    "updated_at": "2026-11-08T18:25:03.352544Z",
     "title": "Water the plants",
     "project": "life",
     "goal_id": "get-smarter",
@@ -11,7 +11,7 @@
     "status": "running",
     "schedule": "",
     "schedule_prompt": "",
-    "last_run_at": "2026-11-08T11:02:21.548953Z",
+    "last_run_at": "2026-11-08T18:25:03.349488Z",
     "unread": 1,
     "cost_usd": 0,
     "tokens": 0,
@@ -20,9 +20,9 @@
     "tokens_cache_read": 0,
     "tokens_cache_write": 0,
     "last_message": "p",
-    "last_message_at": "2026-11-08T11:02:21.548306Z",
+    "last_message_at": "2026-11-08T18:25:03.348576Z",
     "last_message_kind": "message",
-    "turn_at": "2026-11-08T11:02:21.548953Z",
+    "turn_at": "2026-11-08T18:25:03.349488Z",
     "needs_you": 1,
     "speaking": true,
     "waiting_to_speak": true,
@@ -30,6 +30,10 @@
       "word": "running",
       "tone": "running"
     },
-    "role": "Executive assistant"
+    "role": "Executive assistant",
+    "reports_to": "staff",
+    "owns_goals": [
+      "get-smarter"
+    ]
   }
 ]

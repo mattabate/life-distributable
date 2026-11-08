@@ -1,7 +1,7 @@
 [
   {
     "id": "p-00000001",
-    "created_at": "2026-11-08T11:02:21.554684Z",
+    "created_at": "2026-11-08T18:25:03.356219Z",
     "author": "hub",
     "target": "new-or:split-my-brokerage-cash-sensibly-00000002",
     "not_before": "2026-11-09T15:00:00Z",
@@ -17,7 +17,7 @@
   },
   {
     "id": "p-00000004",
-    "created_at": "2026-11-08T11:02:21.552873Z",
+    "created_at": "2026-11-08T18:25:03.354043Z",
     "author": "owner",
     "target": "split-my-brokerage-cash-sensibly-00000002",
     "not_before": "2026-11-11T14:00:00Z",

@@ -26,15 +26,25 @@ type threadOut struct {
 	// Role: the words under a role's name on its card (team mode), "" for a
 	// plain session.
 	Role string `json:"role,omitempty"`
+	// ReportsTo: the role key the role reports to on the org chart
+	// (Configuration's Team), omitted when it reports to the owner.
+	ReportsTo string `json:"reports_to,omitempty"`
+	// OwnsGoals: the goal ids the role owns (the org chart's emblems).
+	OwnsGoals []string `json:"owns_goals,omitempty"`
 }
 
 func (s *Server) newThreadOut(t threads.Thread, model string) threadOut {
-	role := ""
+	out := threadOut{Thread: t, Model: model, ModelLabel: threads.ModelLabel(model),
+		ScheduleLabel: threads.ScheduleLabel(t.Schedule), Pill: threads.StatusPill(t.Status)}
 	if t.Persona != "" {
-		role = s.thr.RoleOf(t.Persona)
+		if p, ok := s.thr.PersonaDef(t.Persona); ok {
+			out.Role, out.OwnsGoals = p.Role, p.Goals
+			if p.ReportsTo != "" && s.thr.IsPersona(p.ReportsTo) {
+				out.ReportsTo = p.ReportsTo
+			}
+		}
 	}
-	return threadOut{Thread: t, Model: model, ModelLabel: threads.ModelLabel(model),
-		ScheduleLabel: threads.ScheduleLabel(t.Schedule), Pill: threads.StatusPill(t.Status), Role: role}
+	return out
 }
 
 func (s *Server) listThreads(w http.ResponseWriter, r *http.Request) {

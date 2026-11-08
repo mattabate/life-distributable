@@ -124,4 +124,51 @@ func TestPersonasRoutes(t *testing.T) {
 	if w := call(other.ID, "PATCH", "/api/v1/settings", `{"team_mode":false}`); w.Code != 403 {
 		t.Fatalf("a session flipped a setting: %d", w.Code)
 	}
+
+	// The org chart: reports_to and goals on POST (an array) and PATCH (a
+	// comma list), on /personas as `reports_to`/`goals` and on the role's
+	// session as `reports_to`/`owns_goals`.
+	if w := call("", "POST", "/api/v1/personas", `{"key":"chef","role":"Chef","who":"w","brief":"b","reports_to":"ghost"}`); w.Code != 400 {
+		t.Fatalf("reports to no role: %d %s", w.Code, w.Body)
+	}
+	w = call("", "POST", "/api/v1/personas", `{"key":"chef","role":"Chef","who":"w","brief":"b","reports_to":"coach","goals":["eat-well"]}`)
+	if w.Code != 201 || !strings.Contains(w.Body.String(), `"reports_to":"coach"`) || !strings.Contains(w.Body.String(), `"goals":["eat-well"]`) {
+		t.Fatalf("new with a line: %d %s", w.Code, w.Body)
+	}
+	if w := call("", "PATCH", "/api/v1/personas/coach", `{"reports_to":"chef"}`); w.Code != 400 {
+		t.Fatalf("a loop: %d %s", w.Code, w.Body)
+	}
+	w = call("", "PATCH", "/api/v1/personas/coach", `{"reports_to":"staff","goals":"get-fit, sleep"}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"goals":["get-fit","sleep"]`) {
+		t.Fatalf("patch the line: %d %s", w.Code, w.Body)
+	}
+	w = call("", "GET", "/api/v1/personas", "")
+	json.Unmarshal(w.Body.Bytes(), &list)
+	got := map[string]threads.Persona{}
+	for _, p := range list {
+		got[p.Key] = p
+	}
+	if got["staff"].ReportsTo != "" || got["staff"].Goals == nil || got["coach"].ReportsTo != "staff" || got["chef"].ReportsTo != "coach" ||
+		strings.Join(got["coach"].Goals, ",") != "get-fit,sleep" || !strings.Contains(w.Body.String(), `"goals":[]`) {
+		t.Fatalf("list: %s", w.Body)
+	}
+	var rows []map[string]any
+	w = call("", "GET", "/api/v1/threads?persona=1", "")
+	json.Unmarshal(w.Body.Bytes(), &rows)
+	by := map[string]map[string]any{}
+	for _, r := range rows {
+		by[r["persona"].(string)] = r
+	}
+	if _, ok := by["staff"]["reports_to"]; ok {
+		t.Fatalf("the chief of staff reports to the owner: reports_to omitted: %v", by["staff"])
+	}
+	if _, ok := by["staff"]["owns_goals"]; ok {
+		t.Fatalf("no goals: owns_goals omitted: %v", by["staff"])
+	}
+	if by["coach"]["reports_to"] != "staff" || by["chef"]["reports_to"] != "coach" {
+		t.Fatalf("reports_to: %s", w.Body)
+	}
+	if g, _ := by["coach"]["owns_goals"].([]any); len(g) != 2 || g[0] != "get-fit" || g[1] != "sleep" {
+		t.Fatalf("owns_goals: %s", w.Body)
+	}
 }

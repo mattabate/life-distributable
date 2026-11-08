@@ -332,3 +332,130 @@ enum MixSeries {
                 blue: Double(hex & 0xff) / 255, alpha: 1)
     }
 }
+
+#if targetEnvironment(macCatalyst)
+// MARK: - The desktop's hover card
+//
+// On the Mac a card rides above the pointer while it is over a mark (`.help`
+// never shows on Catalyst), drawn by MacTipLayerView over the whole window
+// (RootView's overlay): an overlay of the hovered view only rises above its
+// own siblings, so a small mark's card went under every card drawn after it.
+// Like tip.js tipPlace it always stays inside the window.
+
+/// The console's tip card on the Mac: title, sub, rows, foot.
+struct MacTipCard: View {
+    let spec: TipSpec
+    static let width: CGFloat = 236
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(spec.title).font(.system(size: 12.5, weight: .semibold))
+            if let s = spec.sub, !s.isEmpty {
+                Text(s).foregroundStyle(Web.muted).padding(.top, 1)
+            }
+            if !spec.rows.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(spec.rows.indices, id: \.self) { row(spec.rows[$0]) }
+                }
+                .padding(.top, 6)
+            }
+            if let f = spec.foot, !f.isEmpty {
+                Text(f).foregroundStyle(Web.muted).padding(.top, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .top) { Web.line.frame(height: 1) }
+                    .padding(.top, 7)
+            }
+        }
+        .font(.system(size: 12)).foregroundStyle(Web.fg)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 9)
+        .frame(width: Self.width, alignment: .leading)
+        .background(Web.panel, in: RoundedRectangle(cornerRadius: 10))
+        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Web.lineStrong, lineWidth: 1) }
+        .shadow(color: .black.opacity(0.14), radius: 12, y: 6)
+    }
+
+    private func row(_ r: TipRow) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            RoundedRectangle(cornerRadius: 2).fill(r.color ?? .clear).frame(width: 10, height: 3)
+            Text(r.value).fontWeight(.semibold).monospacedDigit()
+            Text(r.key).foregroundStyle(r.on ? Web.fg : Web.muted).lineLimit(1)
+            if let t = r.trail, !t.isEmpty {
+                Spacer(minLength: 12)
+                Text(t).monospacedDigit().foregroundStyle(r.on ? Web.fg : Web.muted)
+            }
+        }
+        .opacity(r.dim ? 0.6 : 1)
+    }
+}
+
+private struct MacTipHover: ViewModifier {
+    let pick: (CGPoint, CGSize) -> TipSpec?
+    @State private var id = UUID()
+    /// This view in window space, kept as it scrolls.
+    @State private var frame: CGRect = .zero
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(Rectangle())
+            .background {
+                GeometryReader { geo in
+                    let f = geo.frame(in: .global)
+                    Color.clear
+                        .onAppear { frame = f }
+                        .onChange(of: f) { _, nf in frame = nf }
+                }
+            }
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let p):
+                    if let spec = pick(p, frame.size) {
+                        MacTipLayer.shared.show(id, spec, at: CGPoint(x: frame.minX + p.x, y: frame.minY + p.y))
+                    } else { MacTipLayer.shared.hide(id) }
+                case .ended: MacTipLayer.shared.hide(id)
+                }
+            }
+            .onDisappear { MacTipLayer.shared.hide(id) }
+    }
+}
+
+/// The one hover card open in the window: whose it is, what it says, and
+/// the pointer in window space.
+@Observable final class MacTipLayer {
+    @MainActor static let shared = MacTipLayer()
+    private(set) var owner: UUID?
+    private(set) var spec: TipSpec?
+    private(set) var at: CGPoint = .zero
+
+    func show(_ who: UUID, _ s: TipSpec, at p: CGPoint) { owner = who; spec = s; at = p }
+    /// Only its own view closes a card, so leaving one mark for the next
+    /// never shuts the next one's.
+    func hide(_ who: UUID) { if owner == who { owner = nil; spec = nil } }
+}
+
+/// Draws MacTipLayer's card above everything in the window: over the
+/// pointer, 8pt inside each wall.
+struct MacTipLayerView: View {
+    private var layer: MacTipLayer { MacTipLayer.shared }
+
+    var body: some View {
+        GeometryReader { geo in
+            if let spec = layer.spec {
+                let w = MacTipCard.width
+                let g = geo.frame(in: .global)
+                let x = min(max(layer.at.x - g.minX - w / 2, 8), g.width - 8 - w)
+                MacTipCard(spec: spec)
+                    .frame(width: w, height: 0, alignment: .bottom)
+                    .offset(x: x, y: layer.at.y - g.minY - 12)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+}
+
+extension View {
+    /// A hover card over this view on the Mac.
+    func macTip(_ spec: TipSpec?) -> some View { modifier(MacTipHover { _, _ in spec }) }
+}
+#endif
