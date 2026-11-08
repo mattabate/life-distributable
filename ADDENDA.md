@@ -1306,3 +1306,8 @@ Entry format:
 - For: everyone who uses the web console
 - Change: the console's Sessions list now matches the desktop app. Grey heading bands Your turn, Working, Idle; white edge-to-edge rows with the name, one audio pill (green speaking, else orange waiting) and the role on the right, then a small coloured dot and the whole title for each open card (two, then "N more"). The card being spoken wears a small speaker in its own colour. Idle lists everyone not already under Your turn or Working, two to a line, name over role. The bordered session boxes, DO/READ chips and the roles grid at the foot are gone, and the top bar is 44px, the desktop's height.
 - How: same merge as add-0008, then `make webcheck`; reload the console (no restart). By hand: `hub/internal/server/web/views/threads.js`, `skin.css`, `app.css`, `test/sending.test.js`, `ops/web-check.html`.
+
+## add-0182 · 2026-11-08 · GET /settings says the owner's name
+- For: everyone
+- Change: `GET /api/v1/settings` carries `owner_name`, the name `owner_name` in `ops/hub.json` gives the person the hub serves (read only, not a PATCH key). It is `""` when hub.json names no one, and the apps then say "You". So an app can draw its owner (the org chart's top node, the author of their messages) instead of a fixed "You".
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/server/settings.go`, `hub/internal/server/settings_test.go`, `shared/api.md`.

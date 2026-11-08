@@ -16,16 +16,23 @@ import (
 )
 
 // settingsOut: GET /api/v1/settings. models is the ladder model_cap is one
-// of, best first ("" = no cap, the top).
+// of, best first ("" = no cap, the top). owner_name is hub.json's, read only:
+// what the apps call the owner (the org chart's top node, their messages'
+// author); "" = none, and the apps say "You".
 type settingsOut struct {
 	TeamMode      bool     `json:"team_mode"`
 	PlainSessions bool     `json:"plain_sessions"`
 	ModelCap      string   `json:"model_cap"`
 	Models        []string `json:"models"`
+	OwnerName     string   `json:"owner_name"`
 }
 
 func (s *Server) settingsNow() settingsOut {
-	out := settingsOut{TeamMode: s.thr.TeamMode(), PlainSessions: s.thr.PlainSessions(), Models: s.modelChoices()}
+	out := settingsOut{TeamMode: s.thr.TeamMode(), PlainSessions: s.thr.PlainSessions(), Models: s.modelChoices(),
+		OwnerName: strings.TrimSpace(s.cfg.OwnerName)}
+	if out.OwnerName == "the owner" { // config's stand-in when hub.json names no one
+		out.OwnerName = ""
+	}
 	if s.picker != nil {
 		out.ModelCap = s.picker.Cap()
 	} else {
