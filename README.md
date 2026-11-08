@@ -1,77 +1,55 @@
-<p align="center"><img src="docs/img/logo.svg" alt="life logo: a blue rounded square with a white dot, next to the word life" width="144"></p>
+<p align="center"><img src="docs/img/logo.svg" alt="life logo: the app icon, an L made of a mint bar and a sand bar on dark green, next to the word life" width="144"></p>
 
 # life
 
-**A small company of AI agents you keep in view, on iPhone, Mac and web.**
+**A self-hosted swarm of AI agents, with apps on iPhone, Mac and web.**
 
 *life* is a self-hosted team of AI agents built on [Claude Code][claude-code].
 It will help you meet your goals, whatever they are.
 
-Think of it as a small company that works for you. A chief of staff runs
-the day and hires the rest of the team as you need them: a coach, a trip
-planner, whoever your goals call for. You manage all of them from one
-screen. Every agent has a cell that shows what it is doing right now, what
-it is waiting on you for, and how far along its running jobs are, so you
-can steer a dozen agents at a glance instead of watching a dozen chats.
+Your Mac runs the agents. It connects to your iPhone over a private
+[Tailscale](https://tailscale.com) VPN, and you talk to the agents from an
+iPhone app, a desktop app or a web app. Nothing is on the public internet.
+Only your devices can reach it, and you can connect as many as you like: a
+Mac mini, a laptop, a phone.
 
-Your Mac (a Mac mini, or a laptop that stays on) runs the agents. It
-connects to your iPhone over a private [Tailscale](https://tailscale.com)
-VPN, and you talk to the agent from an iPhone app, a desktop app or a web
-app. Nothing is on the public internet. Only your devices can reach it.
+The agents learn about you and your goals as you work with them. They 
+maintain their own code, and can change the UI or add data sources when asked. 
+Dangerous actions, like sending emails, are safe behind a secure approval step.
 
-The assistant can change its apps to make you new pages, add
-data sources, or modify itself and the way it interacts with you.
-Nothing about the app you start with is set in stone; tell the agent
-your desired changes through the app.
+**Setup takes about 2 hours,** mostly waiting on Apple and the Xcode
+download. **You need** a Mac that stays on, a
+[Claude subscription][claude-pricing] (about $20 to $200 a month), and an
+[Apple Developer membership][apple-dev] ($99 a year, only for the iPhone and
+desktop apps).
 
-As you work with the assistant, it learns about you and your goals. 
-It can make recommendations, or take actions on your behalf.
-It connects safely to your data sources, and the data you share is 
-saved on the computer.
+## Install with one prompt
 
-**Setup takes about 2 hours,** but it is mostly following simple steps the
-agent gives you. Your only job at the start is to open Claude Code and
-give it the prompt below.
-
-**You need:** a personal computer that is always on (a Mac), an
-[Apple Developer membership][apple-dev] ($99 a year, for the iPhone and
-desktop apps), and a [Claude subscription][claude-pricing] that works with
-Claude Code (about $20 to $200 a month, depending on plan).
-
-## Install: paste one sentence
-
-The only step: open Claude Code on your Mac and give it this prompt.
+Open Claude Code on your Mac and paste this:
 
 ```
 Clone github.com/mattabate/life-distributable and set up my life agent. Follow its SETUP.md.
 ```
 
-Most of the 2 hours is waiting on Apple and the Xcode download. The agent runs the Terminal for you. Your part is clicking where
-it tells you. You never type a command.
+The agent walks you through setup from there.
 
 ⭐ **[Star it][repo]** to get developer addenda: new features and fixes land
-in [ADDENDA.md](ADDENDA.md), and your agent brings each one to you.
-**Check back often:** updates from the developer's own copy land here every week.
+in [ADDENDA.md](ADDENDA.md) every week, and your agent brings each one to you.
 
-<p align="center"><img src="docs/img/sessions.png" alt="The life desktop app: the Sessions board with four cards waiting on the owner, an approval to buy $500 of VTI on Thursday, a honeymoon decision, an app build to install and today's tweet to pick, a Gmail expense scan the agent is running, and a new session ready to start" width="900"></p>
-
-**Configuration.** What it is connected to, what it may spend, and who is on the team: the Claude plan and how much of each limit is left, the order of models new sessions start on and the best one they may use, your team grouped the way you named it, your goals, your devices, and every data source under the goal it serves.
-
-<p align="center"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: a Powered by card with the Claude Max 20x plan, $728 spent this month, 60% of the 5 hour limit, 86% of the 7 day limit and 79% of the Fable limit left, and the model picker; a Goals card with seven goals; and data sources grouped under the goals Grow my audience, Make more money, Build agent and Make me healthier, most sources first, each goal on its own row in its colour, every source with its logo, row count and last sync" width="900"></p>
-
-## Is this for me?
-
-Yes, if you want an AI agent that actually does things, not a chat window
-you have to babysit. You don't need to be technical. You need:
-
-- **A Mac that stays on.** A Mac mini is ideal. A laptop works if it stays
-  plugged in and awake.
-- **A Claude subscription.** Pro works. Max is better for an agent that
-  runs all day.
-- **Claude Code installed.** [Here is how][claude-code-setup]. It's one
-  line to paste, and it's the only one you paste yourself.
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/img/sessions.png" alt="The life desktop app's Sessions list: under Your turn, one row per agent with its title and open cards: Rachel, head of wellness, a sleep log; Jules, head of AI, a local model that can route messages; Justin, head of strategy, how to open a pitch; Grace, chief technology officer, nightly tests and when to ship the desktop build; Diane, executive assistant, a dinner night to pick; Charlotte, marketing manager, a build thread to post on X. Under Working, Herbert, chief of staff. Under Idle, Fred, Brahms, Randy, Choppy, Lothar and Owen"></td>
+<td width="50%" valign="top"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: Powered by Claude Code with how much of the 7 day limits is left; Devices, the Mac hub and a phone; the Team org chart: Charlotte, marketing manager; Diane, executive assistant, over Choppy the wedding planner; Fred, chief financial officer; Grace, chief technology officer, over Owen, Randy and Tim; Herbert, chief of staff; Jules, head of AI, over Brahms the composer and Lothar the mathematician; Justin, head of strategy; Rachel, head of wellness; each card marked with the goals it owns; seven goals in Entrepreneurial, Social and Lifestyle; and data sources by goal, like GitHub, Search Console and YouTube for the audience"></td>
+</tr>
+<tr>
+<td align="center"><strong>Sessions.</strong> Every agent, and what each needs from you.</td>
+<td align="center"><strong>Configuration.</strong> Your team, goals, devices, and data sources.</td>
+</tr>
+</table>
 
 ### Your first five minutes
+
+You don't need to be technical.
 
 1. Open **Terminal**: press **Cmd-Space**, type `Terminal`, press **Return**.
 2. If you don't have Claude Code yet, install it with
@@ -81,37 +59,13 @@ you have to babysit. You don't need to be technical. You need:
 4. Paste the sentence above and press **Return**.
 5. From here, the agent leads. Do what it says, click where it points.
 
-## What it does
+## How it works
 
-- **A team, not a chat window.** Each agent is a long-running Claude Code
-  session with a standing role. It keeps full memory and keeps working while
-  you sleep. Say what you want and it goes to the agent whose job it is;
-  anything nobody owns goes to the chief of staff.
-- **You stay in control of the whole team.** New roles come from asking the
-  chief of staff, never a form. Name the sections your team and goals are
-  grouped under the same way. Two switches in Configuration turn the roles
-  off or let you start plain sessions too.
-- **Talk to it.** Tap Option on the Mac, or the Mic button, and speak; your
-  words land in the box you're in. Speech is turned into text on the Mac
-  itself.
-- **Puts a card on your phone when it needs you.** One clear thing to do,
-  decide or read. Everything else it handles itself.
-- **Asks before anything that matters.** Money, deleting, contacting
-  people, sharing data and pushing code wait for your approval, with a code
-  only you hold. Local commits don't.
-- **Tracks your goals.** Sessions file what they learn under each goal, so
-  every goal has a living "where this stands".
-- **Recommends, with receipts.** Every suggestion goes in a ledger with its
-  evidence and the price, so you can see later whether it worked.
-- **Four pages, on iPhone, Mac and web.** Sessions, Recs and Calendar
-  are the pages you live in. Configuration holds your goals, your spend
-  limits and each data source, grouped under the goal it serves. You pick
-  the apps you want at setup, and every change you ask for later is built
-  for those. The others wait until you ask for them.
-- **Grows with you.** Ask for a new data source, a page or an automation,
-  and it builds it in your own copy of the code. A page for a part of your
-  life (money, a training log, a reading list) is something your agent
-  builds for a goal when that goal needs one. None ships in the box.
+- **Calendar.** The agents keep a calendar that stores what they need to do for you, and what you need to do for them.
+- **Roles.** Each agent is a long-running Claude Code session with a role, like chief of staff or CTO.  They pass tasks between one another when some part of their task requires know-how from a different part of the swarm.
+- **Cards, not chat.** By default the chat history isn't displayed. You can only see what the agent needs you to do or wants to tell you in that moment.
+
+All of this is a starting point and subject to change. The agents maintain their own code, so if you don't like how something looks or works, just ask and they can change it from one prompt.
 
 ## Example app layout
 
@@ -119,11 +73,11 @@ you have to babysit. You don't need to be technical. You need:
 
 | **Approvals.** The agent proposes, you approve. | **Sessions.** It asks one clear question at a time. |
 |---|---|
-| ![The Weekly investing session in the life desktop app: the agent checks cash and price, then raises an approval card to buy $500 of VTI on Thursday, tagged money](docs/img/approval.png) | ![A session in the life desktop app planning a honeymoon: the agent asks which of six beach and spa plans to pick, St. Lucia and Costa Rica first, each with flight time and total](docs/img/chat.png) |
+| ![Charlotte, the marketing manager, in the life desktop app: an approval card to post this week's build thread on X, with the first post quoted, tagged share, with Approve, Deny, Reply and Dismiss, a rec she filed, and a search rankings check coming up below](docs/img/approval.png) | ![Grace, the chief technology officer, in the life desktop app: two cards for the Build agent goal, whether to ship the desktop build tonight or after the calendar fix, and a read that the nightly tests are all green, with the 5 PM build run coming up below](docs/img/chat.png) |
 
 | **Recs.** Suggestions with evidence and a price. | **Calendar.** Your steps and the agent's runs. |
 |---|---|
-| ![The Recs page of the life desktop app: get to bed by 11:30 on weeknights, send the first newsletter, destroy an idle $6 a month server, import an art portfolio, each with evidence and Accept or Decline](docs/img/recs.png) | ![The life desktop app's Calendar: supplements as a daily chore, Fenaroli practice in the evenings, the Gmail expense scan and weekly agent runs, with due, do-soon and sessions-waiting lists](docs/img/calendar.png) |
+| ![The Recs page of the life desktop app: Rachel's blackout curtains for $89, Jules's switch to a free local model for routing, Justin's demo at a spring AI builders night, each naming who filed it, with its reason and Accept, Decline or a reply to that agent](docs/img/recs.png) | ![The life desktop app's Calendar on a week: a morning routine every day, piano harmony homework each evening, a proof to read every other morning, plants to water, a build thread to post, a demo to record, the desktop build to ship, a weekly team review, a pitch at an AI meetup and gym days, with overdue, due, do soon and sessions waiting lists](docs/img/calendar.png) |
 
 ### iPhone app
 
@@ -134,15 +88,17 @@ you have to babysit. You don't need to be technical. You need:
 <th align="left"><strong>Calendar.</strong> Your day at a glance.</th>
 </tr>
 <tr>
-<td valign="top"><img src="docs/img/phone-approval.png" alt="The life iPhone app: a session chat with the approval card to buy $500 of VTI, Approve, Deny, Reply and Dismiss buttons"></td>
-<td valign="top"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions tab: Your turn, 4 cards in 4 sessions, three red cards to approve or decide and one teal card to install an app build"></td>
-<td valign="top"><img src="docs/img/phone-calendar.png" alt="The life iPhone app Calendar tab on the Day view: today's hours with a walk after lunch, the weekly recs score and the gym, the investing run, and the due and do-soon tray"></td>
+<td valign="top"><img src="docs/img/phone-approval.png" alt="The life iPhone app: Charlotte, the money manager, in chat with an approval card to buy $500 of VTI on Thursday, cash staying above a $2,000 floor, with Approve, Deny, Reply and Dismiss buttons"></td>
+<td valign="top"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions tab: Your turn, 5 cards in 4 sessions, one row per agent: Sam's water filter to swap, Rachel's Lisbon hotels to read, Fred's sleep log and long run day, Charlotte's buy to approve, and Diane booking a dentist cleaning"></td>
+<td valign="top"><img src="docs/img/phone-calendar.png" alt="The life iPhone app Calendar tab on the Day view: an easy run at 7, the farmers market at 10, a water filter swap, reviewing the month's spending at 4 and picking up dry cleaning"></td>
 </tr>
 </table>
 
-The screenshots are the maker's own hub, with private details changed.
+The screenshots are the real apps on a demo hub with made-up people and plans.
 
 ## What it costs
+
+Every cost below goes to an outside service. Nothing goes to me.
 
 | What | Cost | Needed for |
 |---|---|---|
@@ -150,7 +106,7 @@ The screenshots are the maker's own hub, with private details changed.
 | [Apple Developer Program][apple-dev] | $99 a year | Only the iPhone app and the desktop app. Web only? Skip it |
 | [Tailscale](https://tailscale.com/pricing) | free | Reaching your hub privately from your phone and laptops |
 | [Backblaze B2](https://www.backblaze.com/cloud-storage/pricing) | cents a month | Nightly encrypted backup |
-| A Mac | the one you own | The hub |
+| A Mac on macOS 15 or later | the one you own | The hub |
 
 ## Setup, in order
 
@@ -178,7 +134,7 @@ The agent follows [SETUP.md](SETUP.md). Here is the timeline.
 Your data lives on your Mac. The hub listens only on your private
 [Tailscale](https://tailscale.com) network, so nothing about it is public.
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/security-dark.png"><img src="docs/img/security.png" alt="Security diagram for life: the iPhone app and a laptop or browser talk to the hub on your Mac inside your private Tailscale network, where your data lives. Only four things leave your Mac: Claude sessions to Anthropic, push notifications to Apple, nightly backups encrypted on the Mac first to your Backblaze bucket, and an opt-in weekly usage heartbeat with counts only. The public internet has no way in." width="900"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/security-dark.png"><img src="docs/img/security.png" alt="Security diagram for life: the iPhone app, the Mac app on your laptop and any browser talk to the hub on a Mac you leave on, such as a Mac mini, inside your private Tailscale network, where your data lives. Only four things leave the hub's Mac: Claude sessions to Anthropic, push notifications to Apple, nightly backups encrypted on the Mac first to your Backblaze bucket, and an opt-in weekly usage heartbeat with counts only. The public internet has no way in." width="900"></picture></p>
 
 - **Nothing public.** No open ports, no public URL. Your phone reaches the
   hub through Tailscale.
@@ -191,9 +147,9 @@ Your data lives on your Mac. The hub listens only on your private
   install id and these fields only: `version`, `active_days`,
   `sessions_started`, `goals`, `pages` and `token_bucket` (a range such as
   "1-10M"), with GeoIP lookup disabled (`hub/internal/usage`). Never text,
-  titles, names or amounts. Settings
-  shows the payload and where it goes, and switches it off; `usage_host` in
-  `ops/hub.json` sends it somewhere else.
+  titles, names or amounts. Settings shows the payload and where it goes,
+  and switches it off; `usage_host` in `ops/hub.json` sends it somewhere
+  else.
 - **Backups are yours.** Encrypted on your Mac before upload, so the
   storage only ever sees noise. The nightly key can't delete anything.
 - **The gate.** Anything that spends money, deletes, contacts a person,
@@ -201,34 +157,21 @@ Your data lives on your Mac. The hub listens only on your private
   only you hold. With sessions run as a separate user (SETUP.md, optional),
   no session can approve itself; without it a session runs as your account
   and could reach the code's hash, so the gate is a rule it follows, not a
-  wall. A session can commit locally
-  without asking; that commit stays on your Mac until a push is approved.
+  wall. A session can commit locally without asking; that commit stays on
+  your Mac until a push is approved.
 
 ## Updates and addenda
 
 - **The copy is yours.** Setup makes a private copy in your GitHub account.
   Change anything.
-- **Upstream is read-only.** Nothing from this repo lands in your copy
-  without your yes.
-- **New every week.** The developer runs this same app daily. Each week the
-  fixes and new pieces from that copy are ported here, so check back often.
-- **Your app can drift.** Your copy will grow its own pages and look. Each
-  update is written so your agent can fit it into what you have, not
-  overwrite it. Optional add-ons (like voice) arrive the same way, off
-  until you opt in.
+- **New every week.** The developer runs this same app daily, and each week
+  its fixes and new pieces are ported here.
 - **Your agent checks weekly.** It reads [ADDENDA.md](ADDENDA.md) every
   Monday and shows each new entry as a card on your phone.
-- **Nothing merges without you.** The check only reads and shows cards. Say
-  yes in a new session and that session applies the one update, tests it, and
-  tells you what changed.
-
-## What you need
-
-- A Mac on macOS 15 or later that stays on
-- A Claude Pro or Max subscription, with [Claude Code][claude-code-setup]
-- An Apple Developer membership, for the iPhone and desktop apps
-- An iPhone, if you want the phone app
-- About 2 hours, mostly waiting
+- **Nothing lands without you.** Say yes and a new session applies that one
+  update, fitted to your copy (which will have grown its own pages and look),
+  tests it, and tells you what changed. Optional add-ons (like voice) arrive
+  the same way, off until you opt in.
 
 ## FAQ
 
@@ -255,10 +198,6 @@ No. Those actions are gated. It proposes, you approve with your decider code.
 **Is this an Anthropic product?**
 No. It's an independent open source project built on Claude Code.
 
-**How do I get new features?**
-They're announced in [ADDENDA.md](ADDENDA.md). Your agent brings each one
-to you as a card, and you choose.
-
 **What's in the folders?**
 `hub/` is the server on your Mac and the web console it serves. `app/` is
 the iPhone and desktop app. `shared/` is the contract between them, so the
@@ -269,9 +208,9 @@ is also the list of what the agent can do to your Mac.
 
 ## Who made this
 
-[Matt Abate](https://mattabate.com), [@_laundry_matt_ on X](https://x.com/_laundry_matt_). Questions and ideas:
-[open an issue][issues]. Want it set up for you or your team? Get in touch
-through [mattabate.com](https://mattabate.com).
+[Matt Abate](https://mattabate.com), [@_laundry_matt_ on X](https://x.com/_laundry_matt_).
+Questions and ideas: [open an issue][issues]. Want it set up for you or your
+team? Get in touch through [mattabate.com](https://mattabate.com).
 
 Found a security hole? [Report it privately](https://github.com/mattabate/life-distributable/security/advisories/new), not in an issue.
 
