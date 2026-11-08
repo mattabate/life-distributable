@@ -1,6 +1,6 @@
-#if targetEnvironment(macCatalyst)
 import SwiftUI
 
+#if targetEnvironment(macCatalyst)
 /// The desktop app's type sizes (the owner 2026-09-29: "make sure the text is big
 /// enough to read on literally everything"). A Mac-idiom Catalyst app draws
 /// the text styles at the Mac's desk sizes — body 13, caption and footnote 10
@@ -22,6 +22,21 @@ extension Font {
     static var caption: Font { .system(size: 12) }
     static var caption2: Font { .system(size: 11.5) }
 }
+#endif
+
+extension Font {
+    /// `.system(size:)` that follows the page's text scale (`Zoom`).
+    static func zoomed(size: CGFloat, weight: Font.Weight? = nil, design: Font.Design? = nil) -> Font {
+        .system(size: size * Zoom.scale, weight: weight, design: design)
+    }
+}
+
+/// The current text scale: always 1 here (no ⌘+ / ⌘− page zoom yet).
+enum Zoom {
+    static var scale: CGFloat { 1 }
+}
+
+#if targetEnvironment(macCatalyst)
 
 // The phone's third grey is too faint to read on the Mac's grey page (Sources'
 // "rows · newest row", a rec's review date): tertiary text is secondary here.

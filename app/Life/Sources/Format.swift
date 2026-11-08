@@ -82,6 +82,10 @@ func dayLabel(_ s: String) -> String {
 }
 func dayLabel(_ d: Date) -> String { Fmt.dayLabel.string(from: d) }
 
+/// "3:15 PM" — the console's `clock`; "Sun 3:15 PM" — a weekday and its clock.
+func clock(_ d: Date) -> String { Fmt.clock.string(from: d) }
+func weekdayClock(_ d: Date) -> String { Fmt.weekday.string(from: d) + " " + clock(d) }
+
 /// "Mon, Sep 8, 2025" — the console's `fullDay`, the title of a plot tooltip.
 func fullDay(_ s: String) -> String {
     guard let d = parseDay(s) else { return s }
