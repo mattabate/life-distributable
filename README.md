@@ -36,11 +36,11 @@ The agent walks you through setup from there.
 ⭐ **[Star it][repo]** to get developer addenda: new features and fixes land
 in [ADDENDA.md](ADDENDA.md) every week, and your agent brings each one to you.
 
-<p align="center"><img src="docs/img/sessions.png" alt="The life desktop app: the Sessions board with four cards waiting on the owner, an approval to buy $500 of VTI on Thursday, a honeymoon decision, an app build to install and today's tweet to pick, a Gmail expense scan the agent is running, and a new session ready to start" width="900"></p>
+<p align="center"><img src="docs/img/sessions.png" alt="The life desktop app's Sessions board: Your turn, 5 cards in 4 sessions, one per agent: Sam's water filter to swap, Rachel's Lisbon hotels to read, Fred's sleep log and long run day, Charlotte's $500 VTI buy to approve, and Diane, still working, with a dentist time to pick; below, the team of five: chief of staff, health coach, home manager, money manager and travel planner" width="900"></p>
 
 **Configuration.** Your team, goals, devices, and data sources.
 
-<p align="center"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: a Powered by card with the Claude Max 20x plan, $728 spent this month, 60% of the 5 hour limit, 86% of the 7 day limit and 79% of the Fable limit left, and the model picker; a Goals card with seven goals; and data sources grouped under the goals Grow my audience, Make more money, Build agent and Make me healthier, most sources first, each goal on its own row in its colour, every source with its logo, row count and last sync" width="900"></p>
+<p align="center"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: a Powered by card for Claude Code with the month's spend and how much of the 7 day limits is left, and a Goals card with five goals: Run a half marathon, Sleep seven hours, Invest every Thursday, Plan the Lisbon trip and Keep the apartment running" width="900"></p>
 
 ### Your first five minutes
 
@@ -68,11 +68,11 @@ All of this is a starting point and subject to change. The agents maintain their
 
 | **Approvals.** The agent proposes, you approve. | **Sessions.** It asks one clear question at a time. |
 |---|---|
-| ![The Weekly investing session in the life desktop app: the agent checks cash and price, then raises an approval card to buy $500 of VTI on Thursday, tagged money](docs/img/approval.png) | ![A session in the life desktop app planning a honeymoon: the agent asks which of six beach and spa plans to pick, St. Lucia and Costa Rica first, each with flight time and total](docs/img/chat.png) |
+| ![Charlotte, the money manager, in the life desktop app: an approval card to buy $500 of VTI on Thursday, cash staying above a $2,000 floor, tagged money, with Approve, Deny, Reply and Dismiss, and the Thursday buy coming up below](docs/img/approval.png) | ![Fred, the health coach, in the life desktop app: two cards for the half marathon goal, a choice of a Saturday or Sunday long run and a step to log last night's sleep](docs/img/chat.png) |
 
 | **Recs.** Suggestions with evidence and a price. | **Calendar.** Your steps and the agent's runs. |
 |---|---|
-| ![The Recs page of the life desktop app: get to bed by 11:30 on weeknights, send the first newsletter, destroy an idle $6 a month server, import an art portfolio, each with evidence and Accept or Decline](docs/img/recs.png) | ![The life desktop app's Calendar: supplements as a daily chore, Fenaroli practice in the evenings, the Gmail expense scan and weekly agent runs, with due, do-soon and sessions-waiting lists](docs/img/calendar.png) |
+| ![The Recs page of the life desktop app: try a meal kit for weeknights at $60 a month, move the trip fund to a high-yield account, blackout curtains for $89, each with its reason and Accept, Decline or Reply](docs/img/recs.png) | ![The life desktop app's Calendar on a week: an easy run, the farmers market, lunch, a spending review and dry cleaning on Sunday, then a tempo run, a hotel price check, the Thursday buy and a call home, with overdue, due, sessions waiting and anytime lists](docs/img/calendar.png) |
 
 ### iPhone app
 
