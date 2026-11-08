@@ -274,9 +274,9 @@ setTimeout(async () => {
   const workingText = () => (document.getElementById('run-working') || {}).textContent || '';
   check('a running session shows working…', workingShown(), 'shown: ' + workingShown());
   check('the working line says the turn\'s calls, clock and dollars', /^\s*working · 23 tool calls · today \d+:\d\d [AP]M · \$1\.12$/.test(workingText()), workingText());
-  const sideFacts = sessionCardHTML({ ...THREAD, activity: 'Run the verify proof again' }, {});
-  // The list card is one line now: a blue dot, the name, when.
-  check('a working session card is the dot, the name and when, no calls, dollars or step label', sideFacts.includes('sess-dot') && sideFacts.includes('sess-ago')
+  const sideFacts = sideRowHTML({ ...THREAD, activity: 'Run the verify proof again' }, {});
+  // The list row is the name and its lines (the desktop's sidebar, 2026-11-08).
+  check('a working session row is the name, no calls, dollars or step label', sideFacts.includes('side-t')
     && !sideFacts.includes('tool calls') && !sideFacts.includes('$1.12') && !sideFacts.includes('verify proof'), sideFacts);
 
   // The owner's message is in and no tool call has landed yet: the line

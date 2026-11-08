@@ -183,13 +183,19 @@ test('the tool chain: what the turn is doing, what it waits on, its helpers', ()
   // ahead of the cards (2026-11-05, mock B).
   const jobs = jobCells({ running_actions: [{ id: 'act', description: 'Trash promo mail', doing: '280 trashed', done: 280, total: 400 }] });
   assert.deepEqual(jobs.map(c => [c.id, c.title]), [['job:act', 'Trash promo mail']]);
-  const cell = miniCardHTML('staff', jobs[0]);
-  assert.match(cell, /class="ask mini quiet job"/);
-  assert.match(cell, /<span class="verb">running<\/span>Trash promo mail/);
+  const cell = sideItemHTML({ ...jobs[0], tint: 'quiet', href: '#/sessions/staff' });
+  assert.match(cell, /class="side-item quiet job"/);
+  assert.match(cell, /Trash promo mail/);
   assert.match(cell, /280\/400/);
-  assert.match(cell, /280 trashed/);
-  // The dot follows the name, so the name never moves.
-  assert.match(sessionCardHTML({ id: 'staff', title: 'Staff', status: 'done' }, { live: true, cells: '' }), /Staff<span class="sess-dot"><\/span><\/a>/);
+  // The card being spoken is a speaker in its own colour, never a green dot.
+  const said = sideItemHTML({ id: 'a', title: 'Read me', tint: 'speaking', under: 'read', speaking: true, href: '#' });
+  assert.match(said, /class="side-item read"/);
+  assert.match(said, /side-spk/);
+  // One audio pill by the name: speaking beats waiting.
+  const b = { pills: { staff: [{ tone: 'waiting', word: 'waiting to speak' }, { tone: 'speaking', word: 'speaking' }] } };
+  assert.match(audioSlotHTML(b, { id: 'staff' }), /pill speaking/);
+  assert.doesNotMatch(audioSlotHTML(b, { id: 'staff' }), /waiting/);
+  assert.equal(audioSlotHTML(b, { id: 'other' }), '');
   // Drawn (23:11): a row per worker, each opening on a second
   // click; no dot inside the chain.
   const tasks = [{ id: 'a1', type: 'local_agent', description: 'Literature search' }];

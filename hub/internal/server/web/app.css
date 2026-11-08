@@ -5,6 +5,7 @@
   --bg: #f6f7f9; --panel: #fff; --line: #e3e5ea; --fg: #14161a; --muted: #6b7280;
   --accent: #2563eb; --accent-fg: #fff; --red: #dc2626; --amber: #d97706;
   --green: #059669; --violet: #7c3aed; --teal: #0d9488; --code: #f3f4f6; --shadow: 0 1px 2px rgba(0,0,0,.05);
+  --heading: #4b5160;
   /* --line is the hairline BETWEEN things inside one card; a control that has
      to read as its own object on a white card (the composer) needs an edge you
      can actually see. Two weights, so "bordered" never means "muddier". */
@@ -37,6 +38,7 @@
     --bg: #0e1014; --panel: #171a21; --line: #272a33; --fg: #e8eaee; --muted: #9aa1ad;
     --accent: #6aa1ff; --accent-fg: #0b1220; --red: #f87171; --amber: #fbbf24;
     --green: #34d399; --violet: #a78bfa; --teal: #2dd4bf; --code: #1e222b; --shadow: none;
+    --heading: #b4bac6;
     --line-strong: #3a3f4c;
     /* the same eight hues re-stepped for the dark surface, not an automatic
        flip: each is chosen for the dark band and validated as a set. */
@@ -523,9 +525,6 @@ a.chain-w:hover, a.chain-w.on { color: var(--accent); }
 .ask.closing { --tint: var(--muted); opacity: .5; pointer-events: none; }
 /* The card in his ears, on a session row (2026-10-28 20:01). */
 .ask.speaking { --tint: var(--green); }
-.ask.mini.speaking .verb { color: var(--green); }
-.ask.mini.speaking .dot { display: inline-block; margin-right: 6px; vertical-align: 1px; color: var(--green); }
-.speak-dot { display: inline-block; margin-left: 6px; vertical-align: 1px; color: var(--green); }
 .ask.rec { --tint: var(--violet); }
 /* A rec in the open-cards view: one violet line until he dismisses it (2026-11-04). */
 .rec-notice { display: flex; align-items: center; gap: 6px; margin: 6px 0; padding: 6px 10px; font-size: 13px; border-radius: 10px;
@@ -572,7 +571,6 @@ a.chain-w:hover, a.chain-w.on { color: var(--accent); }
    want to see the text for what is played"): plain body type under the head
    line; the detail — his steps — follows it, smaller. */
 .ask .said { margin: 0 0 6px; font-size: 14px; color: var(--fg); line-height: 1.5; }
-.ask.mini .said { display: none; }
 .ask .acts { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
 /* Filled = the pick on the bar (what Send will do), or a one-shot act
    (Install, Restart). Outlined = the suggested first pick while nothing from
@@ -593,45 +591,11 @@ a.chain-w:hover, a.chain-w.on { color: var(--accent); }
   0%, 45% { box-shadow: 0 0 0 3px var(--accent); }
   100% { box-shadow: 0 0 0 3px transparent; }
 }
-/* A session's card on the Sessions list and on All sessions (2026-09-20): the
-   name whole on its own lines, its open cards as cells — the `.ask` box above,
-   small, one per card, each a link to that card — and the pills in the foot,
-   where they cannot cut the name short. */
-.card.sess { padding: 12px 13px; }
-.card.sess.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.sess-t { display: block; color: inherit; text-decoration: none; font-weight: 500; line-height: 1.3; letter-spacing: -.005em; }
-.sess-t.unread { font-weight: 650; }
-.sess-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.ask.mini { display: block; margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; color: inherit; text-decoration: none; }
-.ask.mini:hover { background: color-mix(in srgb, var(--tint) 12%, var(--panel)); }
-.ask.mini .t { font-size: 13px; line-height: 1.35; margin-bottom: 0; }
-.more-cards { display: block; margin: 6px 0 0; padding: 0 10px; text-decoration: none; }
-.more-cards:hover { color: var(--fg); }
-.ask.mini .t + .small { margin-top: 3px; }
-.ask.mini .verb {
-  float: right; margin: 1px 0 2px 8px; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .05em; color: var(--tint);
-}
-.ask.mini.err-card .verb { color: var(--muted); }
 .all-link {
   display: flex; justify-content: space-between; margin: 18px 2px 6px; padding: 9px 12px; border-radius: 10px;
   color: var(--muted); text-decoration: none; font-size: 13px; border: 1px dashed var(--line);
 }
 .all-link:hover, .all-link.on { color: var(--fg); border-color: var(--accent); border-style: solid; }
-/* Links at the very foot, a whole row each. */
-.foot-links { display: flex; gap: 8px; }
-.foot-links .all-link { flex: 1; }
-/* The roles above them, one card each: name, role under it, a gray count of
-   its open cards (2026-10-17). */
-.foot-links.team .all-link { margin-bottom: 0; align-items: center; }
-/* Two to a row; an odd one out is the hub's first role, alone on top
-   (2026-10-19). */
-.foot-links.team { display: grid; grid-template-columns: 1fr 1fr; margin-top: 18px; }
-.foot-links.team .all-link { margin-top: 0; }
-.foot-links.team .all-link:first-child:nth-last-child(odd) { grid-column: 1 / -1; }
-.person > span:first-child { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.person .muted { font-size: 12px; font-weight: 400; }
-.person .count { font-size: 11.5px; font-weight: 600; color: var(--muted); background: rgba(127, 127, 127, .15); border-radius: 999px; padding: 1px 6px; flex: none; }
 /* All sessions: one table in one card, a row per session, the whole row a link. */
 .all-table { max-width: 1100px; margin: 0 auto; padding: 4px 16px 10px; }
 .all-table td, .all-table th { padding: 9px 8px; vertical-align: baseline; }
