@@ -2,22 +2,53 @@ import SwiftUI
 
 // Configuration: how the sessions are powered, what the owner's goals are,
 // what the hub is connected to. The fourth tab on every surface; the
-// console's twin is views/config.js, block for block:
+// console's twin is views/config.js, block for block. Row 1 is Powered by
+// beside Devices, row 2 the Team beside Goals, then the data sources:
 //   Powered by: the plan (its price when the hub has found one), this
 //     month's list-price spend, each limit's headroom, the model new sessions
 //     start on. One block per provider, so a second one is a second block.
-//   Goals: the active goals as small tiles, each the door to its page.
+//   Devices: the hub's Mac (uptime, zone) and the phone (its app's profile).
+//   Team: the org chart: the owner on top, a card per role reporting to
+//     them, that role's reports listed inside, its goals' emblems on the card.
+//   Goals: the active goals as small tiles under their sections, each the
+//     door to its page.
 //   Data sources: one card per source — the provider's tile, rows, the newest
-//     row — edged in its group's colour, a section per group (sources.go
-//     sourceTags) under its name. A card opens SourceDetail.
+//     row — edged in its group's colour. On the desktop one grid filled left
+//     to right, a group's name over its first card; on the phone a section
+//     per group (sources.go sourceTags). A card opens SourceDetail.
 
 /// Everything the page reads, in one load. Only the sources are required;
-/// the plan and the goals each draw their own failure.
+/// the other blocks each draw their own failure.
 struct ConfigData: Sendable {
     var quota: Quota?
     var model: ModelSetting?
     var goals: [Goal]?
     var sources: SourcesInventory
+    var status: HubStatus?
+    /// The roles (`GET /threads?persona=1`); empty with team mode off.
+    var people: [Thread]?
+}
+
+/// The goals under the owner's section names, each section where its first
+/// goal falls; unsectioned goals last, under "Other" when anything is
+/// sectioned (the console's goalGroups).
+struct GoalSection: Identifiable {
+    var name: String
+    var goals: [Goal]
+    var id: String { name }
+}
+
+func goalSections(_ goals: [Goal]) -> [GoalSection] {
+    var out: [GoalSection] = []
+    var rest: [Goal] = []
+    for g in goals {
+        let name = (g.section ?? "").trimmingCharacters(in: .whitespaces)
+        if name.isEmpty { rest.append(g); continue }
+        if let i = out.firstIndex(where: { $0.name == name }) { out[i].goals.append(g) }
+        else { out.append(GoalSection(name: name, goals: [g])) }
+    }
+    if !rest.isEmpty { out.append(GoalSection(name: out.isEmpty ? "" : "Other", goals: rest)) }
+    return out
 }
 
 /// The newest row: "12m ago" inside a day, the date after that — the
@@ -31,6 +62,19 @@ func configDay(_ d: Date, now: Date = Date()) -> String {
 struct ConfigView: View {
     @Environment(HubClient.self) private var hub
     @State private var load = HubLoad<ConfigData>()
+    /// The page's width: two blocks a row only when each gets ~440 pt.
+    @State private var width: CGFloat = 1200
+    private var wide: Bool { width >= 900 }
+
+    @ViewBuilder private func pair<A: View, B: View>(@ViewBuilder _ a: () -> A, @ViewBuilder _ b: () -> B) -> some View {
+        if wide {
+            // One height, the taller one's, like the console's grid row.
+            HStack(alignment: .top, spacing: 12) { a(); b() }
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            VStack(alignment: .leading, spacing: 12) { a(); b() }
+        }
+    }
 
     #if targetEnvironment(macCatalyst)
     private let mac = true
@@ -58,14 +102,21 @@ struct ConfigView: View {
                 if let e = load.error { ErrorBanner(message: e) }
                 if let d = load.value {
                     if mac {
-                        // One height, the taller one's, like the console's
-                        // grid row.
-                        HStack(alignment: .top, spacing: 12) {
+                        // Two blocks a row; below ~900 pt (a half-screen
+                        // window) one block a row.
+                        pair {
                             block("Powered by") { plan(d) }
+                        } _: {
+                            block("Devices") { devices(d.status) }
+                        }
+                        pair {
+                            block("Team") { orgTree(d) }
+                        } _: {
                             block("Goals", opens: { GoalsView() }) { goals(d.goals) }
                         }
-                        .fixedSize(horizontal: false, vertical: true)
                     } else {
+                        // The phone keeps its own page (Devices and the Team
+                        // are desktop blocks for now).
                         block("Powered by") { plan(d) }
                         block("Goals", opens: { GoalsView() }) { goals(d.goals) }
                     }
@@ -85,6 +136,7 @@ struct ConfigView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         }
         }
         .background(bg)
@@ -97,8 +149,161 @@ struct ConfigView: View {
             let q = try? await hub.quota()
             let m = try? await hub.modelSetting()
             let g = try? await hub.goals()
-            return ConfigData(quota: q, model: m, goals: g, sources: try await hub.sources())
+            let st = try? await hub.status()
+            let people = try? await hub.personaThreads()
+            return ConfigData(quota: q, model: m, goals: g, sources: try await hub.sources(), status: st, people: people)
         }
+    }
+
+    // MARK: devices
+
+    /// The console's cfgDevicesHTML: the hub's Mac, then the phone, a row
+    /// each with a hairline between.
+    @ViewBuilder private func devices(_ s: HubStatus?) -> some View {
+        if let s {
+            let up = s.uptime_s
+            let upWord = up >= 86400 ? "\(up / 86400)d" : up >= 3600 ? "\(up / 3600)h" : "\(up / 60)m"
+            let macWord = ["up " + upWord, s.time_zone ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+            let phoneWord: String = {
+                guard let a = s.app_installed, !a.isEmpty else { return "app not installed" }
+                let left = s.app_profile_days_left.map { "profile \($0) \($0 == 1 ? "day" : "days") left" } ?? "app installed"
+                let until = s.app_profile_expires.flatMap { $0.isEmpty ? nil : "until " + dayLabel(String($0.prefix(10))) }
+                return [left, until].compactMap { $0 }.joined(separator: " · ")
+            }()
+            VStack(alignment: .leading, spacing: 9) {
+                deviceRow("Mac · hub", macWord)
+                Rectangle().fill(line).frame(height: 1)
+                deviceRow("Phone", phoneWord)
+            }
+        } else {
+            Text("Couldn't load devices").font(.system(size: 13)).foregroundStyle(.red)
+        }
+    }
+
+    private func deviceRow(_ title: String, _ sub: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.system(size: 14, weight: .semibold))
+            if !sub.isEmpty {
+                Text(sub).font(.system(size: 12.5)).foregroundStyle(muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: team
+
+    /// The org chart, the console's cfgOrgHTML: the owner on top, a card per
+    /// role under them (reports_to empty or unknown), that role's goals'
+    /// emblems on the card's top line; a role's own reports are a list inside
+    /// its card, so the block stays near Goals' height. A name opens the
+    /// chat, an emblem the goal.
+    @ViewBuilder private func orgTree(_ d: ConfigData) -> some View {
+        if let all = d.people {
+            var seen = Set<String>()
+            let ps = all.filter { p in guard let k = p.persona, !k.isEmpty else { return false }; return seen.insert(k).inserted }
+            let byId = Dictionary((d.goals ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            let goalsOf = { (p: Thread) in (p.owns_goals ?? []).compactMap { byId[$0] } }
+            VStack(spacing: 0) {
+                Text("You").font(.system(size: 14, weight: .semibold))
+                    .padding(.horizontal, 16).padding(.vertical, 5)
+                    .overlay { Capsule().strokeBorder(line, lineWidth: 1) }
+                if !ps.isEmpty {
+                    Rectangle().fill(line).frame(width: 1, height: 10)
+                    Rectangle().fill(line).frame(height: 1).padding(.horizontal, 24)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 8, alignment: .top)], alignment: .leading, spacing: 8) {
+                        ForEach(orgRows(ps, under: "", depth: 0).filter { $0.1 == 0 }.map(\.0)) { p in
+                            orgCard(p, reports: orgRows(ps, under: p.persona ?? "", depth: 0), goalsOf: goalsOf)
+                        }
+                    }
+                    .padding(.top, 10)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        } else {
+            Text("Couldn't load the team").font(.system(size: 13)).foregroundStyle(.red)
+        }
+    }
+
+    private func orgCard(_ p: Thread, reports: [(Thread, Int)], goalsOf: @escaping (Thread) -> [Goal]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Name and emblems share the top line (the emblems overlap to
+            // leave the name room); the role runs the card's width under both.
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .center, spacing: 6) {
+                    NavigationLink { ThreadDetail(thread: p) } label: {
+                        Text(p.title).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    emblems(goalsOf(p), size: 22)
+                }
+                if let r = p.role, !r.isEmpty {
+                    NavigationLink { ThreadDetail(thread: p) } label: {
+                        Text(r).font(.system(size: 11.5)).foregroundStyle(muted)
+                            .lineLimit(1).minimumScaleFactor(0.85)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            ForEach(reports, id: \.0.id) { r, depth in
+                HStack(alignment: .center, spacing: 6) {
+                    NavigationLink { ThreadDetail(thread: r) } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
+                            Text(r.title).font(.system(size: 12.5, weight: .semibold)).fixedSize()
+                            if let role = r.role, !role.isEmpty {
+                                Text(role).font(.system(size: 11)).foregroundStyle(muted).lineLimit(1)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Spacer(minLength: 0)
+                    emblems(goalsOf(r), size: 18)
+                }
+                .padding(.leading, CGFloat(depth) * 10)
+                .padding(.top, 5)
+                .overlay(alignment: .top) { Rectangle().fill(line).frame(height: 1) }
+            }
+        }
+        .padding(EdgeInsets(top: 9, leading: 11, bottom: 9, trailing: 9))
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(bg, in: RoundedRectangle(cornerRadius: 10))
+        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(line, lineWidth: 1) }
+    }
+
+    /// A role's goals as their emblems, each the door to the goal, stacked a
+    /// third over the last, each ringed in the card's colour.
+    private func emblems(_ gs: [Goal], size: CGFloat) -> some View {
+        HStack(spacing: -size / 3) {
+            ForEach(gs) { g in
+                NavigationLink { GoalDetail(goal: g) } label: {
+                    GoalEmblemView(emblem: g.emblem, size: size)
+                        .background(Circle().fill(bg).padding(-1.5))
+                }
+                    .buttonStyle(.plain)
+                    #if targetEnvironment(macCatalyst)
+                    // .help never shows on Catalyst; the hover card does.
+                    .macTip(TipSpec(title: g.title))
+                    #else
+                    .help(g.title)
+                    #endif
+            }
+        }
+    }
+
+    /// Depth-first: each role, then the roles under it. A reports_to that
+    /// names no role is the owner.
+    private func orgRows(_ ps: [Thread], under boss: String, depth: Int) -> [(Thread, Int)] {
+        let keys = Set(ps.compactMap(\.persona))
+        let kids = ps.filter { p in
+            let r = p.reports_to ?? ""
+            return (keys.contains(r) ? r : "") == boss
+        }.sorted { $0.title < $1.title }
+        return kids.flatMap { [($0, depth)] + orgRows(ps, under: $0.persona ?? "", depth: depth + 1) }
     }
 
     // MARK: blocks
@@ -278,8 +483,13 @@ struct ConfigView: View {
         if let all {
             let on = all.filter { $0.status == "active" }
             if on.isEmpty { Text("No active goals.").font(.system(size: 13)).foregroundStyle(muted) }
+            ForEach(goalSections(on)) { grp in
+            if !grp.name.isEmpty {
+                // The console's div.goal-group.
+                Text(grp.name).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(muted).padding(.top, 4)
+            }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: mac ? 170 : 140), spacing: 6)], alignment: .leading, spacing: 6) {
-                ForEach(on) { g in
+                ForEach(grp.goals) { g in
                     NavigationLink { GoalDetail(goal: g) } label: {
                         HStack(spacing: 9) {
                             GoalEmblemView(emblem: g.emblem, size: 30)
@@ -292,6 +502,7 @@ struct ConfigView: View {
                     }
                     .buttonStyle(.plain)
                 }
+            }
             }
         } else {
             Text("Couldn't load goals").font(.system(size: 13)).foregroundStyle(.red)
@@ -321,10 +532,43 @@ struct ConfigView: View {
         return out.filter { !$0.refs.isEmpty }
     }
 
+    /// One cell of the desktop's flow: every cell keeps the group's name line
+    /// (shown on the group's first card only) so a row's cards line up.
+    private struct Cell: Identifiable {
+        var section: Section
+        var ref: SourceRef
+        var first: Bool
+        var id: String { section.tag + "/" + ref.id }
+    }
+
     @ViewBuilder private func sources(_ groups: [SourceGroup]) -> some View {
         let secs = sections(groups)
         if secs.isEmpty { Text("Nothing connected.").font(.system(size: 13)).foregroundStyle(muted) }
-        VStack(alignment: .leading, spacing: 14) { ForEach(secs) { section($0) } }
+        if mac { flow(secs) } else {
+            VStack(alignment: .leading, spacing: 14) { ForEach(secs) { section($0) } }
+        }
+    }
+
+    /// The desktop: one grid filled left to right, the console's .sflow; the
+    /// next group starts in the hole the last one left.
+    private func flow(_ secs: [Section]) -> some View {
+        let cells = secs.flatMap { s in s.refs.enumerated().map { Cell(section: s, ref: $1, first: $0 == 0) } }
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 215), spacing: 8)], alignment: .leading, spacing: 4) {
+            ForEach(cells) { c in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(c.section.tag).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Color(hex: c.section.color))
+                        Text("\(c.section.refs.count)").font(.system(size: 11.5)).foregroundStyle(muted)
+                    }
+                    .lineLimit(1)
+                    .opacity(c.first ? 1 : 0)
+                    .accessibilityHidden(!c.first)
+                    NavigationLink { SourceDetail(source: c.ref.source, group: c.ref.group.tag ?? c.ref.group.title) } label: { card(c.ref) }
+                        .buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func section(_ s: Section) -> some View {
@@ -363,9 +607,9 @@ struct ConfigView: View {
         .padding(EdgeInsets(top: 10, leading: 13, bottom: 9, trailing: 12))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(panel, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(alignment: .leading) {
-            UnevenRoundedRectangle(topLeadingRadius: 10, bottomLeadingRadius: 10).fill(c).frame(width: 3)
-        }
+        // The goal's bar, clipped by the card's corners.
+        .overlay(alignment: .leading) { Rectangle().fill(c).frame(width: 3) }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(bad ? Color.red.opacity(0.45) : line, lineWidth: 1) }
         .contentShape(RoundedRectangle(cornerRadius: 10))
     }

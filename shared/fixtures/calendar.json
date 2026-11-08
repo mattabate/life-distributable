@@ -6,7 +6,7 @@
     {
       "id": "cal-00000001",
       "day": "2026-11-08",
-      "at": "06:02",
+      "at": "13:25",
       "kind": "owner",
       "title": "Buy a fern",
       "state": "scheduled",
@@ -187,38 +187,6 @@
       "day": "2026-11-08",
       "entries": [
         {
-          "id": "cal-00000001",
-          "day": "2026-11-08",
-          "at": "06:02",
-          "kind": "owner",
-          "title": "Buy a fern",
-          "state": "scheduled",
-          "soon": true,
-          "window": "soon",
-          "actor": "owner",
-          "ref": "cal:cal-00000001",
-          "lane": "mine",
-          "open": true,
-          "mark": "todo",
-          "item": true,
-          "move": "item",
-          "kind_label": "anytime",
-          "outcomes": [
-            {
-              "value": "done",
-              "label": "Done"
-            },
-            {
-              "value": "wont",
-              "label": "Won't do"
-            },
-            {
-              "value": "",
-              "label": "Reply"
-            }
-          ]
-        },
-        {
           "id": "cal-00000007",
           "day": "2026-11-08",
           "at": "09:00",
@@ -250,6 +218,38 @@
           "item": true,
           "move": "item",
           "kind_label": "your step",
+          "outcomes": [
+            {
+              "value": "done",
+              "label": "Done"
+            },
+            {
+              "value": "wont",
+              "label": "Won't do"
+            },
+            {
+              "value": "",
+              "label": "Reply"
+            }
+          ]
+        },
+        {
+          "id": "cal-00000001",
+          "day": "2026-11-08",
+          "at": "13:25",
+          "kind": "owner",
+          "title": "Buy a fern",
+          "state": "scheduled",
+          "soon": true,
+          "window": "soon",
+          "actor": "owner",
+          "ref": "cal:cal-00000001",
+          "lane": "mine",
+          "open": true,
+          "mark": "todo",
+          "item": true,
+          "move": "item",
+          "kind_label": "anytime",
           "outcomes": [
             {
               "value": "done",

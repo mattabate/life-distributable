@@ -1577,18 +1577,36 @@ div.goal-group:first-child { margin-top: 0; }
 .cfg-dev .cfg-setting:last-child { padding-bottom: 0; }
 .cfg-dev .cfg-setting .top { flex-wrap: wrap; row-gap: 5px; }
 .cfg-dev .cfg-vol { margin-left: auto; }
-/* The Team: the switches, a hairline, then a card per role under its team's
-   name. */
+/* The Team: the switches, a hairline, then the org chart, a tree: the owner
+   on top, a line down and across, a card per role that reports to the owner,
+   its goals' emblems beside its name, its own reports a list inside. */
 .cfg-team { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
-.cfg-team .goal-group:first-child { margin-top: 0; }
-.cfg-ocards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; align-items: start; }
+.cfg-org { display: flex; flex-direction: column; align-items: center; }
+.cfg-me { font-weight: 650; padding: 4px 16px; border: 1px solid var(--line); border-radius: 999px; position: relative; margin-bottom: 20px; }
+.cfg-me::after { content: ""; position: absolute; left: 50%; top: 100%; height: 10px; border-left: 1px solid var(--line); }
+.cfg-ocards { align-self: stretch; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; align-items: start;
+  border-top: 1px solid var(--line); padding-top: 10px; }
 .cfg-ocard { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); padding: 8px 9px 8px 11px; min-width: 0; }
 /* Name and emblems on one line, the role the card's width under them, each
    one line (11-03 17:51: a name and a title broke mid-word). */
 .cfg-ocard .hd { display: flex; align-items: center; gap: 6px; }
-.cfg-ocard .hd .nm { flex: 1; min-width: 0; font-weight: 650; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
-.cfg-ocard .hd .nm:hover { text-decoration: underline; }
+.cfg-ocard .hd .nm { flex: 1; min-width: 0; font-weight: 650; color: inherit; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cfg-ocard .hd a.nm:hover { text-decoration: underline; }
 .cfg-ocard > .role { display: block; font-size: 11.5px; line-height: 1.25; margin-top: 2px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cfg-who { display: flex; align-items: baseline; gap: 5px; color: inherit; text-decoration: none; line-height: 1.25; }
+a.cfg-who:hover strong { text-decoration: underline; }
+.cfg-orep { display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--line); margin-top: 5px; padding-top: 5px; }
+.cfg-orep .cfg-who { flex: 1; min-width: 0; font-size: 12.5px; }
+.cfg-orep .cfg-who strong { white-space: nowrap; }
+.cfg-orep .cfg-who .muted { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A role's goals: emblems overlapping a third, ringed in the card colour. */
+.cfg-marks { display: flex; flex: none; }
+.cfg-marks > a + a { margin-left: -7px; }
+.cfg-marks .emblem { width: 22px; height: 22px; box-shadow: 0 0 0 1.5px var(--bg); }
+.cfg-marks.sm > a + a { margin-left: -6px; }
+.cfg-marks .emblem svg { width: 12px; height: 12px; }
+.cfg-marks.sm .emblem { width: 18px; height: 18px; }
+.cfg-marks.sm .emblem svg { width: 9px; height: 9px; }
 /* Settings: one tile per switch, side by side like the source cards — the
    switch right after its title, the one-line meaning under both (
    2026-10-12: a full-width row put "the title… very far from the toggle"). */

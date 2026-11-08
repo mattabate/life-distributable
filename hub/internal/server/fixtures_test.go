@@ -165,6 +165,11 @@ func seedFixtures(t *testing.T, s *Server, db *store.DB) fixtureIDs {
 	if _, err := s.thr.Update(quiet.ID, map[string]string{"persona": "assistant"}); err != nil {
 		t.Fatal(err)
 	}
+	// It reports to the chief of staff and owns the goal, so the org chart's
+	// reports_to and owns_goals ride on its row.
+	if _, err := s.thr.EditPersona("assistant", map[string]string{"reports_to": "staff", "goals": id.goal}, "owner"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.WS.Write("assistant", "appointments.md", []byte("# Appointments\n\nDentist is Tuesday."), "owner"); err != nil {
 		t.Fatal(err)
 	}

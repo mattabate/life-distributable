@@ -227,47 +227,42 @@ struct MiniCard: View {
 }
 
 #if targetEnvironment(macCatalyst)
-/// The console's grey `.pill` (a model name): no icon, 12px.
-struct WebPill: View {
-    let text: String
-    var body: some View {
-        Text(text).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
-            .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 5))
-    }
-}
-
-/// The console's `.card.sess > .ask.mini`: a full-width row under a hairline,
-/// a 3pt tint rail on the left, the whole title, the verb in caps in a tinted
-/// box at the right.
-struct WebMiniCard: View {
+/// One open card under a name on the desktop sidebar: a coloured dot and its
+/// whole title — red do, blue read, teal install, grey a quiet sub-session or
+/// a background process. A running job is its name, and its bar when its
+/// output counts done/total. A click lands the chat on that card.
+struct SideItem: View {
     let c: SessionCell
     let tap: () -> Void
+    var dot: Color {
+        switch c.tone {
+        case "read": Web.accent
+        case "install": Web.install
+        case "error", "quiet": Web.muted
+        default: Web.red
+        }
+    }
     var body: some View {
         Button(action: tap) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    if c.sub?.status == "running" {
-                        Circle().fill(Color.accentColor).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-                            .padding(.trailing, -1)
+            Group {
+                if let k = c.job {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Circle().fill(Web.muted).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 0.5 }
+                            Text(md(c.title)).font(.system(size: 13.5)).foregroundStyle(Web.muted).lineLimit(1)
+                        }
+                        if k.total ?? 0 > 0 { JobProgress(k: k).padding(.leading, 13) }
                     }
-                    Text(md(c.title)).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary)
-                        .multilineTextAlignment(.leading)
-                    Spacer(minLength: 4)
-                    Text(c.verb.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(0.6)
-                        .foregroundStyle(c.color)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(c.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
-                        .layoutPriority(1)
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Circle().fill(dot).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 0.5 }
+                        Text(md(c.title)).font(.system(size: 13.5)).foregroundStyle(Web.fg).multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                    }
                 }
-                if let k = c.job { JobProgress(k: k).padding(.top, 3) }
             }
-            .padding(.leading, 13).padding(.trailing, 14).padding(.vertical, 9)
+            .padding(.top, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // (A Divider in an overlay lays out vertically — it drew a line
-            // down the middle of every card in build 1496.)
-            .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
-            .overlay(alignment: .leading) { Rectangle().fill(c.tone == "error" ? Color.secondary.opacity(0.5) : c.job != nil ? Color.primary.opacity(0.2) : c.tone == "quiet" ? Color.primary.opacity(0.12) : c.color).frame(width: 3) }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -305,15 +300,15 @@ struct ThreadRow: View {
     /// How many of a session's open cards its row draws (console ROW_CARDS).
     static let rowCards = 2
 
-    /// The desktop: this session is the one open on the right (a blue ring).
+    /// The desktop: this session is the one open on the right (a blue edge).
     var on = false
-    /// The desktop: "and N more" opened, the older cards drawn under the newest.
-    @State private var moreOpen = false
     /// The sessions this one started, a row each under its own cards.
     var subs: [SessionCell] = []
     /// How many of them the card draws before "and N more" (console SUB_CELLS).
     static let subRows = 3
     @State private var subsOpen = false
+    /// The desktop: "N more" opened, every line under the name drawn.
+    @State private var expanded = false
 
     init(t: Thread, board b: Board, on: Bool = false, subs: [Thread] = []) {
         self.t = t
@@ -351,85 +346,68 @@ struct ThreadRow: View {
     }
 
     #if targetEnvironment(macCatalyst)
-    /// The console's `.card.sess`, line for line (skin.css). THE NAME AND THE
-    /// ONE THING IT NEEDS FROM THE OWNER: no model, dollars or tool-call row;
-    /// the session's own header carries those. A Your turn card is the name
-    /// over its newest open card, a full-width row under a hairline with a
-    /// tint rail and its verb in a small caps box ("and N more" under it,
-    /// which opens the older ones in place); a Working card is one line, a
-    /// blue dot, the name and when it last moved. Only the live audio pills
-    /// stay (speaking, waiting): the one fact a cell cannot carry.
+    /// How many lines the sidebar draws under a name before "N more".
+    static let sideRows = 2
+
+    /// Every line under a name, in order: the owner's to-do (an older hub's
+    /// fallback), the subagents as one grey count, then each card and
+    /// background process, then its sub-sessions.
+    private var sideItems: [(SessionCell, () -> Void)] {
+        var out: [(SessionCell, () -> Void)] = []
+        if let todo, !todo.isEmpty, cells.isEmpty {
+            out.append((SessionCell(id: "todo", title: todo, verb: "", tone: "needs", step: false), { open(first) }))
+        }
+        let agents = cells.filter { $0.job?.type == "local_agent" }
+        if !agents.isEmpty {
+            out.append((SessionCell(id: "agents", title: agents.count == 1 ? "1 subagent" : "\(agents.count) subagents",
+                                    verb: "", tone: "quiet", step: false), { open(nil) }))
+        }
+        out += cells.filter { $0.job?.type != "local_agent" }.map { c in (c, { open(c.id) }) }
+        out += subs.map { c in (c, { open(sub: c) }) }
+        return out
+    }
+
+    /// The sidebar row: edge to edge, a line under each person, the name
+    /// bold with the role grey on the right, then each open card as a
+    /// coloured dot and its title, two of them and then "N more", which
+    /// opens the rest in place. No model, dollars or tool-call row (the
+    /// chat's head carries those); only the live audio pills (speaking,
+    /// waiting) sit by the name, the one fact a dot cannot carry. The open
+    /// session is a blue edge and a blue tint.
     var macCard: some View {
         let live = pills.filter { ["speaking", "waiting"].contains($0.tone) }
-        let more = max(0, openCount - min(cells.count, Self.rowCards))
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(md(t.title)).font(.system(size: 14.5, weight: t.unread > 0 ? .bold : .semibold))
-                    .foregroundStyle(.primary).multilineTextAlignment(.leading)
-                // Its own turn or one under it at work (the board's running
-                // pill): the owner can see it is busy before typing. After
-                // the name, so the name never shifts.
-                if t.status == "running" || pills.contains(where: { $0.tone == "running" }) {
-                    Circle().fill(Color.accentColor).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-                        .padding(.leading, -1)
+            HStack(alignment: .center, spacing: 7) {
+                Text(md(t.title)).font(.system(size: 15, weight: t.unread > 0 ? .bold : .semibold))
+                    .foregroundStyle(Web.fg).lineLimit(1)
+                ForEach(live, id: \.self) { PillChip(pill: $0).fixedSize() }
+                Spacer(minLength: 8)
+                if let role = t.role, !role.isEmpty {
+                    Text(role).font(.system(size: 13)).foregroundStyle(Web.muted).lineLimit(1)
+                        .truncationMode(.tail).layoutPriority(-1)
                 }
-                Spacer(minLength: 0)
-                if cells.isEmpty, subs.isEmpty, todo?.isEmpty ?? true, let d = t.last_message_at {
-                    Text(shortAgo(d)).font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).layoutPriority(1)
-                }
-            }
-            if !live.isEmpty {
-                HStack(spacing: 5) { ForEach(live, id: \.self) { PillChip(pill: $0) } }.padding(.top, 7)
             }
             if t.status != "running", t.last_message_kind == "error", let m = summaryLine(t.last_message) {
-                Text(md("Error: \(m)")).font(.system(size: 12.5)).foregroundStyle(.red).lineLimit(2).padding(.top, 6)
+                Text(md("Error: \(m)")).font(.system(size: 13.5)).foregroundStyle(Web.red).lineLimit(2).padding(.top, 4)
             }
-            if let todo, !todo.isEmpty, cells.isEmpty {
-                Text(md(todo)).font(.system(size: 13, weight: .medium)).foregroundStyle(tone).lineLimit(2).padding(.top, 8)
-            }
-            if !cells.isEmpty || !subs.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(cells.prefix(moreOpen ? cells.count : Self.rowCards)) { c in WebMiniCard(c: c) { open(c.id) } }
-                    if !cells.isEmpty, more > 0 || cells.count > Self.rowCards {
-                        // "And N more" opens the older cards in place; the
-                        // console's toggleMoreCards.
-                        Button { if cells.count > Self.rowCards { moreOpen.toggle() } else { open(nil) } } label: {
-                            Text(moreOpen ? "Show less" : "and \(more) more").font(.system(size: 12.5)).foregroundStyle(.secondary)
-                                .padding(.horizontal, 14).padding(.vertical, 8)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
-                        }.buttonStyle(.plain)
-                    }
-                    ForEach(subsShown) { c in WebMiniCard(c: c) { open(sub: c) } }
-                    if subs.count > Self.subRows {
-                        Button { subsOpen.toggle() } label: {
-                            Text(subsOpen ? "Show less" : "and \(subs.count - Self.subRows) more").font(.system(size: 12.5)).foregroundStyle(.secondary)
-                                .padding(.horizontal, 14).padding(.vertical, 8)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1) }
-                        }.buttonStyle(.plain)
-                    }
-                }
-                .padding(.top, 10).padding(.horizontal, -14).padding(.bottom, -12)
+            let items = sideItems
+            let shown = expanded ? items : Array(items.prefix(Self.sideRows))
+            ForEach(shown, id: \.0.id) { c, tap in SideItem(c: c, tap: tap) }
+            let hidden = items.count - shown.count + (openCount > cells.count && !cells.isEmpty ? openCount - cells.count : 0)
+            if hidden > 0 {
+                Button { if items.count > shown.count { expanded = true } else { open(nil) } } label: {
+                    Text("\(hidden) more").font(.system(size: 13.5)).foregroundStyle(Web.muted).padding(.top, 6).padding(.leading, 13)
+                }.buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
+        .padding(.horizontal, 18).padding(.top, 13).padding(.bottom, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 10))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? Color.accentColor : Color.primary.opacity(0.1), lineWidth: 1))
-        .background(RoundedRectangle(cornerRadius: 13).fill(on ? Color.accentColor.opacity(0.14) : .clear).padding(-3))
+        .background(on ? Web.accent.opacity(0.1) : Color.clear)
+        .background(Web.panel)
+        .overlay(alignment: .leading) { if on { Rectangle().fill(Web.accent).frame(width: 4) } }
+        .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
         .contentShape(Rectangle())
         .onTapGesture { open(first) }
-    }
-    /// A running card with something to say about its turn.
-    var runRow: Bool { t.status == "running" && !t.turnFacts(withCost: false).isEmpty }
-    /// "20h ago · daily 08:00 · $47.92" — the console's foot span.
-    var footWords: String {
-        var s = t.last_message_at.map { shortAgo($0) } ?? ""
-        if !t.schedule.isEmpty { s += " · " + scheduleChipLabel(t) }
-        if t.cost_usd > 0 { s += " · " + usd(t.cost_usd) }
-        return s
     }
     #endif
 

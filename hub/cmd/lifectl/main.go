@@ -873,8 +873,9 @@ func main() {
 		// lifectl personas   the team's roles (team mode)
 		c.call("GET", "/api/v1/personas", nil)
 	case "persona":
-		// lifectl persona new <key> --name n --role r --who w --brief text|@file [--covers c] [--lane l] [--route-lane l] [--team t]
-		// lifectl persona <key> set role|covers|who|lane|route_lane|brief|team <value|@file>
+		// lifectl persona new <key> --name n --role r --who w --brief text|@file [--covers c] [--lane l] [--route-lane l] [--team t] [--reports-to key] [--goals a,b]
+		// lifectl persona <key> set role|covers|who|lane|route_lane|brief|team|reports_to|goals <value|@file>
+		//   (reports_to: a role key, "" = the owner; goals: goal ids, comma-separated)
 		// The owner asks the chief of staff for a role; the chief of staff runs these.
 		need(3)
 		if os.Args[2] == "new" {
@@ -888,9 +889,17 @@ func main() {
 			routeLane := fs.String("route-lane", "", "what the router sends it (default: lane)")
 			brief := fs.String("brief", "", "the standing brief, text|@file|-")
 			team := fs.String("team", "", "the team group it is listed under")
+			reportsTo := fs.String("reports-to", "", "the role key it reports to on the org chart (default: the owner)")
+			goals := fs.String("goals", "", "the goal ids it owns, comma-separated")
 			fs.Parse(os.Args[4:])
-			body := map[string]string{"key": os.Args[3], "name": *name, "role": *role, "who": *who, "covers": *covers,
-				"lane": *lane, "route_lane": *routeLane, "team": *team, "by": actor()}
+			gs := []string{}
+			for _, g := range strings.Split(*goals, ",") {
+				if g = strings.TrimSpace(g); g != "" {
+					gs = append(gs, g)
+				}
+			}
+			body := map[string]any{"key": os.Args[3], "name": *name, "role": *role, "who": *who, "covers": *covers,
+				"lane": *lane, "route_lane": *routeLane, "team": *team, "reports_to": *reportsTo, "goals": gs, "by": actor()}
 			if *brief != "" {
 				body["brief"] = text(*brief)
 			}
@@ -1348,7 +1357,8 @@ sessions  threads [--q words] [--archived] · thread new "prompt" [--goal g] [--
           thread <id> [send text|@file|- | schedule when|off ["check-in prompt"] | goal g|off
             | model auto|judgment|build|claude-… | persona key|off | checkin | stop | archive | events]
           personas · persona new <key> --role r --who w --brief text|@file [--name n] [--covers c] [--lane l]
-            [--route-lane l] [--team t] · persona <key> set role|covers|who|lane|route_lane|brief|team <value>
+            [--route-lane l] [--team t] [--reports-to key] [--goals a,b]
+            · persona <key> set role|covers|who|lane|route_lane|brief|team|reports_to|goals <value>
           settings · settings set team_mode|plain_sessions true|false · settings set model_cap <model|"">
           workspace [persona] · workspace cat <persona>/<name> · workspace put <name> text|@file [--persona p]
           prompt "text" [--thread id | --new [--title t] [--goal g]] [--in 30m | --on YYYY-MM-DD [--at HH:MM]]

@@ -2,8 +2,8 @@
   "recs": [
     {
       "id": "rec-00000001",
-      "created_at": "2026-11-08T11:02:21.557112Z",
-      "updated_at": "2026-11-08T11:02:21.55738Z",
+      "created_at": "2026-11-08T18:25:03.35929Z",
+      "updated_at": "2026-11-08T18:25:03.359663Z",
       "title": "Cancel the gym",
       "source": "owner",
       "domain": "money",
@@ -14,7 +14,7 @@
       "confidence": 50,
       "review_on": "2026-12-08",
       "status": "accepted",
-      "decided_at": "2026-11-08T11:02:21.55738Z",
+      "decided_at": "2026-11-08T18:25:03.359663Z",
       "decided_by": "owner",
       "decision_note": "yes",
       "outcomes": [
@@ -44,8 +44,8 @@
     },
     {
       "id": "rec-00000002",
-      "created_at": "2026-11-08T11:02:21.556819Z",
-      "updated_at": "2026-11-08T11:02:21.556819Z",
+      "created_at": "2026-11-08T18:25:03.358926Z",
+      "updated_at": "2026-11-08T18:25:03.358926Z",
       "title": "Try Semantic Scholar's API key",
       "detail": "free tier",
       "goal_id": "get-smarter",

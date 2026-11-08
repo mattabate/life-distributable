@@ -337,6 +337,9 @@ struct Goal: Codable, Identifiable, Hashable {
     /// The goal's face: a symbol word and a hue, derived by the hub from the
     /// name (never stored). The console draws the same symbol and hue.
     var emblem: GoalEmblem
+    /// The group the owner files it under (`lifectl goal <id> set section`);
+    /// nil or empty = ungrouped.
+    var section: String?
 }
 
 /// `emblem` on a Goal (shared/api.md): `symbol` is one of health, money, agent,
@@ -573,6 +576,10 @@ struct Thread: Codable, Identifiable, Hashable {
     /// its name on the people grid ("Executive assistant"). Absent = none.
     var persona: String?
     var role: String?
+    /// Team mode (`?persona=1`): the role key this role reports to (empty or
+    /// unknown = the owner), and the goal ids it owns.
+    var reports_to: String?
+    var owns_goals: [String]?
     var modelShort: String? { model_label.flatMap { $0.isEmpty ? nil : $0 } ?? model.flatMap { $0.isEmpty ? nil : shortModel($0) } }
 }
 

@@ -9,9 +9,10 @@
 //     not a redesign.
 //   Devices: the hub's Mac and the phone, from /status.
 //   Team: the owner's two switches (/settings team_mode, plain_sessions),
-//     then the roles (/personas) under their `team` label, a card each with
-//     the session's name and the role's title. Roles are made by asking the
-//     chief of staff, never a form, so there is none here.
+//     then the org chart: the owner on top, a card per role that reports to
+//     the owner (/personas reports_to), its goals' emblems (goals) beside its
+//     name, its own reports listed inside. Roles and their lines are made by
+//     asking the chief of staff, never a form, so there is none here.
 //   Goals: the active goals as small tiles under the owner's sections, each
 //     the door to its page.
 //   Data sources: one card per source, the provider's tile, rows and the
@@ -105,39 +106,55 @@ function cfgSwitchHTML(key, title, on) {
     </label>`;
 }
 
-// The team: the two switches, then the roles under their `team` label (in the
-// hub's role order; a role with no label sits under "Other" when anything is
-// labelled). A card per role: the name of the session playing it (its title,
-// from /threads?persona=1), then the role's title. A role with no session yet
-// is its title alone.
-function cfgTeamHTML(st, personas, sessions) {
+// The team: the two switches, then the org chart, a tree: the owner on top, a
+// card per role that reports to the owner (`reports_to` "" or naming no
+// role), the emblems of the goals it owns (`goals`) on the card's top line
+// beside its name, and the roles under it listed inside the card, a step in
+// per level. A role's name is the title of the session playing it (from
+// /threads?persona=1), else its role words; a name opens the session.
+function cfgTeamHTML(st, personas, sessions, goals) {
   const switches = st ? `<div class="cfg-settings">
       ${cfgSwitchHTML('team_mode', 'Personas', !!st.team_mode)}
       ${st.team_mode ? cfgSwitchHTML('plain_sessions', 'Plain sessions', !!st.plain_sessions) : ''}
     </div>` : failHTML('settings', 'pageRedraw()');
   if (!st || !st.team_mode) return switches;
+  if (!personas) return `${switches}<div class="cfg-team">${failHTML('the team', 'pageRedraw()')}</div>`;
+  if (!personas.length) return `${switches}<div class="cfg-team">${emptyHTML('No roles yet.')}</div>`;
+  return `${switches}<div class="cfg-team">${cfgOrgHTML(personas, sessions, goals)}</div>`;
+}
+
+function cfgOrgHTML(personas, sessions, goals) {
   const byKey = new Map((sessions || []).map(t => [t.persona, t]));
   const byId = new Map((sessions || []).map(t => [t.id, t]));
-  const groups = new Map();
-  for (const p of personas || []) {
-    const team = String(p.team || '').trim();
-    if (!groups.has(team)) groups.set(team, []);
-    groups.get(team).push(p);
-  }
-  const named = [...groups].filter(([t]) => t);
-  if (groups.has('')) named.push([named.length ? 'Other' : '', groups.get('')]);
+  const goalById = new Map((goals || []).map(g => [g.id, g]));
+  const keys = new Set(personas.map(p => p.key));
+  const sid = p => p.session || byKey.get(p.key)?.id || '';
+  const name = p => byId.get(p.session)?.title || byKey.get(p.key)?.title || p.role || p.key;
+  const boss = p => (p.reports_to && p.reports_to !== p.key && keys.has(p.reports_to) ? p.reports_to : '');
+  const kids = b => personas.filter(p => boss(p) === b);
+  // Each role once, however the lines run (the hub refuses a loop; a role
+  // caught in one anyway is drawn under the owner).
+  const placed = new Set();
+  const under = (b, depth) => kids(b).filter(p => !placed.has(p.key) && placed.add(p.key))
+    .flatMap(p => [[p, depth], ...under(p.key, depth + 1)]);
+  const marks = p => (p.goals || []).map(id => goalById.get(id)).filter(Boolean).map(g =>
+    `<a href="#/goals/${encodeURIComponent(g.id)}" title="${esc(g.title)}">${goalEmblem(g)}</a>`).join('');
+  const link = (p, cls, inner) => sid(p) ? `<a class="${cls}" href="#/sessions/${encodeURIComponent(sid(p))}">${inner}</a>` : `<span class="${cls}">${inner}</span>`;
+  const roleWords = p => (p.role && p.role !== name(p) ? p.role : '');
   const card = p => {
-    const t = byId.get(p.session) || byKey.get(p.key);
-    const id = p.session || (t && t.id) || '';
-    const name = (t && t.title) || p.role || p.key;
-    const nm = id ? `<a class="nm" href="#/sessions/${encodeURIComponent(id)}">${esc(name)}</a>` : `<span class="nm">${esc(name)}</span>`;
-    return `<div class="cfg-ocard"><div class="hd">${nm}</div>
-      ${name !== p.role && p.role ? `<span class="role muted">${esc(p.role)}</span>` : ''}</div>`;
+    const reps = under(p.key, 0);
+    return `<div class="cfg-ocard">
+      <div class="hd">${link(p, 'nm', esc(name(p)))}<span class="cfg-marks">${marks(p)}</span></div>
+      ${roleWords(p) ? link(p, 'role muted', esc(roleWords(p))) : ''}
+      ${reps.map(([r, d]) => `<div class="cfg-orep"${d ? ` style="padding-left:${d * 10}px"` : ''}>${
+        link(r, 'cfg-who', `<strong>${esc(name(r))}</strong><span class="muted">${esc(roleWords(r))}</span>`)}<span class="cfg-marks sm">${marks(r)}</span></div>`).join('')}
+    </div>`;
   };
-  const list = personas ? named.map(([team, ps]) => `${team ? `<div class="goal-group small muted">${esc(team)}</div>` : ''}
-      <div class="cfg-ocards">${ps.map(card).join('')}</div>`).join('') || emptyHTML('No roles yet.')
-    : failHTML('the team', 'pageRedraw()');
-  return `${switches}<div class="cfg-team">${list}</div>`;
+  const top = kids('').filter(p => !placed.has(p.key) && placed.add(p.key));
+  const cards = top.map(card);
+  // Whatever a loop left out still gets a card.
+  for (const p of personas) if (!placed.has(p.key)) { placed.add(p.key); cards.push(card(p)); }
+  return `<div class="cfg-org"><div class="cfg-me">You</div><div class="cfg-ocards">${cards.join('')}</div></div>`;
 }
 
 // Devices: the hub's Mac (how long it has been up, its clock's zone) and the
@@ -216,7 +233,7 @@ async function drawConfig(view) {
       <section class="card cfg-dev"><h3>Devices</h3>${status ? cfgDevicesHTML(status) : failHTML('devices', 'pageRedraw()')}</section>
     </div>
     <div class="cfg-top">
-      <section class="card cfg-dev"><h3>Team</h3>${cfgTeamHTML(st, personas, sessions)}</section>
+      <section class="card cfg-dev"><h3>Team</h3>${cfgTeamHTML(st, personas, sessions, goals)}</section>
       <section class="card"><h3><a href="#/goals">Goals</a></h3>${goals ? cfgGoalsHTML(goals) : failHTML('goals', 'pageRedraw()')}</section>
     </div>
     <h3>Data sources</h3>

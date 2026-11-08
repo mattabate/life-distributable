@@ -37,6 +37,10 @@ struct RootView: View {
             versionTag
         }
             .ignoresSafeArea(edges: .bottom)
+            #if targetEnvironment(macCatalyst)
+            // The one hover card (ChartTip.swift MacTipLayer), over every view.
+            .overlay { MacTipLayerView() }
+            #endif
             // A push tap lands on the board of things that need the owner:
             // Sessions, whose first group is Your turn.
             .onChange(of: push.openSessions) { _, open in if open { tab = "sessions"; push.openSessions = false } }

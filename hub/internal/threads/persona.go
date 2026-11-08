@@ -45,6 +45,13 @@ type Persona struct {
 	Brief string `json:"brief"`
 	// Team: the owner's name for the group the role sits in ("" = none).
 	Team string `json:"team"`
+	// ReportsTo: the role key this role reports to on the org chart
+	// (Configuration's Team), "" for the owner. A write naming no role, the
+	// role itself or one of its own reports is refused.
+	ReportsTo string `json:"reports_to"`
+	// Goals: the ids of the goals this role owns (the org chart's emblems);
+	// stored comma-separated, never nil in JSON.
+	Goals []string `json:"goals"`
 	// Builtin: shipped with the hub (its text may still be rewritten).
 	Builtin bool `json:"builtin"`
 	// Session: the live session that plays it, "" for none (PersonaDefs).
@@ -68,7 +75,7 @@ var builtinPersonas = map[string]Persona{
 		Who:       "the owner's chief of staff",
 		Lane:      "relay it anything no other role owns, anything about the team (a new role, a renamed one), and anything about scheduling while no other role holds the calendar: a meeting, a booking, a time to find, a dated errand",
 		RouteLane: calendarLane + "; a new role for the team, or who on the team does what",
-		Brief:     "the owner's first stop. A new message no other role owns comes to you, and you are the one long-lived session behind the owner's calendar until the owner gives it to another role: every step and chore no other session owns fires here, and the owner's words on them come to you. Keep the calendar true, chase what is due, and hand work that belongs elsewhere to the session that owns it with `lifectl relay <id> \"…\"` (the hub delivers it). You also run the team. When the owner wants a new role (a coach, a bookkeeper, a researcher), agree its name, its lane and its brief with them in their own words, then make it with `lifectl persona new <key> --name \"<its name>\" --role \"<two words>\" --who \"…\" --covers \"…\" --lane \"…\" --brief @file`; it gets a session of its own. `lifectl personas` lists the team; `lifectl persona <key> set <field> <value>` rewrites one field. The owner names their own sections: `lifectl persona <key> set team \"<group>\"` groups roles, `lifectl goal <id> set section \"<group>\"` groups goals. Contacting anyone outside stays `lifectl propose --kind contact`.",
+		Brief:     "the owner's first stop. A new message no other role owns comes to you, and you are the one long-lived session behind the owner's calendar until the owner gives it to another role: every step and chore no other session owns fires here, and the owner's words on them come to you. Keep the calendar true, chase what is due, and hand work that belongs elsewhere to the session that owns it with `lifectl relay <id> \"…\"` (the hub delivers it). You also run the team. When the owner wants a new role (a coach, a bookkeeper, a researcher), agree its name, its lane and its brief with them in their own words, then make it with `lifectl persona new <key> --name \"<its name>\" --role \"<two words>\" --who \"…\" --covers \"…\" --lane \"…\" --brief @file`; it gets a session of its own. `lifectl personas` lists the team; `lifectl persona <key> set <field> <value>` rewrites one field; `reports_to <key>` places a role under another on the org chart (\"\" = under the owner), `goals <id,id>` names the goals it owns. The owner names their own sections: `lifectl persona <key> set team \"<group>\"` groups roles, `lifectl goal <id> set section \"<group>\"` groups goals. Contacting anyone outside stays `lifectl propose --kind contact`.",
 	},
 	PersonaAssistant: {
 		Role:      "Executive assistant",
@@ -103,8 +110,9 @@ func (m *Manager) persona(key string) (Persona, bool) {
 		return Persona{}, false
 	}
 	var p Persona
-	err := m.db.QueryRow(`SELECT key, role, covers, who, lane, route_lane, brief, team FROM persona_defs WHERE key=? ORDER BY id DESC LIMIT 1`, key).
-		Scan(&p.Key, &p.Role, &p.Covers, &p.Who, &p.Lane, &p.RouteLane, &p.Brief, &p.Team)
+	var goals string
+	err := m.db.QueryRow(`SELECT key, role, covers, who, lane, route_lane, brief, team, reports_to, goals FROM persona_defs WHERE key=? ORDER BY id DESC LIMIT 1`, key).
+		Scan(&p.Key, &p.Role, &p.Covers, &p.Who, &p.Lane, &p.RouteLane, &p.Brief, &p.Team, &p.ReportsTo, &goals)
 	_, builtin := builtinPersonas[key]
 	if err != nil {
 		if !builtin {
@@ -113,9 +121,50 @@ func (m *Manager) persona(key string) (Persona, bool) {
 		p = builtinPersonas[key]
 		p.Key = key
 	}
+	p.Goals = splitGoals(goals)
 	p.Builtin = builtin
 	return p, true
 }
+
+// splitGoals: a comma-separated list of goal ids, trimmed, empties and
+// repeats dropped, in the order given; never nil.
+func splitGoals(s string) []string {
+	out := []string{}
+	for _, g := range strings.Split(s, ",") {
+		if g = strings.TrimSpace(g); g != "" && !slices.Contains(out, g) {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// checkReportsTo: may key report to boss? "" (the owner) always; else boss
+// must be another role, and not one that reports, at any depth, to key.
+func (m *Manager) checkReportsTo(key, boss string) error {
+	if boss == "" {
+		return nil
+	}
+	if boss == key {
+		return errors.New("reports_to: a role cannot report to itself")
+	}
+	seen := map[string]bool{key: true}
+	for b := boss; b != ""; {
+		p, ok := m.persona(b)
+		if !ok {
+			return fmt.Errorf("reports_to: no role %q (one of %s, or \"\" for the owner)", b, strings.Join(m.personaNames(), "|"))
+		}
+		if seen[b] {
+			return fmt.Errorf("reports_to: %s already reports to %s", boss, key)
+		}
+		seen[b] = true
+		b = p.ReportsTo
+	}
+	return nil
+}
+
+// PersonaDef: a role as it stands (no Session), false for no role: what a
+// session's card and the org chart read (role, reports_to, goals).
+func (m *Manager) PersonaDef(key string) (Persona, bool) { return m.persona(key) }
 
 // IsPersona: is key a role?
 func (m *Manager) IsPersona(key string) bool { _, ok := m.persona(key); return ok }
@@ -176,8 +225,8 @@ func (m *Manager) PersonaDefs() []Persona {
 }
 
 func (m *Manager) writePersona(p Persona, by string) error {
-	_, err := m.db.Exec(`INSERT INTO persona_defs (key, role, covers, who, lane, route_lane, brief, team, by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		p.Key, p.Role, p.Covers, p.Who, p.Lane, p.RouteLane, p.Brief, p.Team, by, ts(time.Now()))
+	_, err := m.db.Exec(`INSERT INTO persona_defs (key, role, covers, who, lane, route_lane, brief, team, reports_to, goals, by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		p.Key, p.Role, p.Covers, p.Who, p.Lane, p.RouteLane, p.Brief, p.Team, p.ReportsTo, strings.Join(splitGoals(strings.Join(p.Goals, ",")), ","), by, ts(time.Now()))
 	return err
 }
 
@@ -195,11 +244,14 @@ func (m *Manager) NewPersona(p Persona, name, by string) (Persona, error) {
 	if m.IsPersona(p.Key) {
 		return Persona{}, fmt.Errorf("%s is already a role (`lifectl persona %s set <field> <value>` changes it)", p.Key, p.Key)
 	}
-	for _, f := range []*string{&p.Role, &p.Covers, &p.Who, &p.Lane, &p.RouteLane, &p.Brief, &p.Team} {
+	for _, f := range []*string{&p.Role, &p.Covers, &p.Who, &p.Lane, &p.RouteLane, &p.Brief, &p.Team, &p.ReportsTo} {
 		*f = strings.TrimSpace(*f)
 	}
 	if p.Role == "" || p.Who == "" || p.Brief == "" {
 		return Persona{}, errors.New("role, who and brief are required")
+	}
+	if err := m.checkReportsTo(p.Key, p.ReportsTo); err != nil {
+		return Persona{}, err
 	}
 	if p.Covers == "" {
 		p.Covers = p.Lane
@@ -227,7 +279,9 @@ func (m *Manager) NewPersona(p Persona, name, by string) (Persona, error) {
 }
 
 // personaFields: what `lifectl persona <key> set` may rewrite.
-var personaFields = []string{"role", "covers", "who", "lane", "route_lane", "brief", "team"}
+// reports_to is a role key ("" = the owner); goals is goal ids, comma-separated
+// ("" = none).
+var personaFields = []string{"role", "covers", "who", "lane", "route_lane", "brief", "team", "reports_to", "goals"}
 
 // EditPersona rewrites fields of a role (a built-in one too) as a new
 // persona_defs row; the next turn of its session reads the new words.
@@ -253,6 +307,13 @@ func (m *Manager) EditPersona(key string, patch map[string]string, by string) (P
 			p.Brief = v
 		case "team":
 			p.Team = v
+		case "reports_to":
+			if err := m.checkReportsTo(p.Key, v); err != nil {
+				return Persona{}, err
+			}
+			p.ReportsTo = v
+		case "goals":
+			p.Goals = splitGoals(v)
 		default:
 			return Persona{}, fmt.Errorf("%s: not a role field (%s)", k, strings.Join(personaFields, "|"))
 		}

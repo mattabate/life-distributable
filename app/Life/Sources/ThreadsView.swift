@@ -77,10 +77,14 @@ struct ThreadsView: View {
     #if targetEnvironment(macCatalyst)
     /// The console's Sessions page: the list stays down the left while a
     /// chat is open on the right, so what is waiting stays in view. A row
-    /// or cell swaps the chat; All sessions opens in the list's own column.
+    /// or cell swaps the chat.
     @State private var selected: OpenAsk?
-    @State private var showAll = false
     @Environment(SnapState.self) private var snap
+    /// A PERSON is a session with a role. Only people are rows on the
+    /// desktop list, as in the console (threads.js drawList's `person` /
+    /// `shown`): any other session is a row only while it waits on the
+    /// owner, under Your turn.
+    func person(_ t: Thread) -> Bool { !(t.persona ?? "").isEmpty || !(t.role ?? "").isEmpty }
     /// The list as ONE run of things to draw — a heading, its sessions, the
     /// next heading — each session under its own id whichever heading it is
     /// under. It was a loop of sessions inside a loop of headings, and a
@@ -92,89 +96,83 @@ struct ThreadsView: View {
     private enum MacItem: Identifiable {
         case heading(key: String, words: String, first: Bool)
         case row(Thread)
+        /// Two idle people side by side, name over role.
+        case pair([Thread])
         var id: String {
             switch self {
             case .heading(let key, _, _): "heading " + key
             case .row(let t): t.id
+            case .pair(let ts): "pair " + ts.map(\.id).joined(separator: " ")
             }
         }
     }
+    /// YOUR TURN, WORKING, then IDLE: every person once, no counts. Idle is
+    /// the team less whoever is above.
     private var macItems: [MacItem] {
         var items: [MacItem] = []
+        var placed = Set<String>()
         for h in headings.filter({ $0.key == "your_turn" }) + headings.filter({ $0.key != "your_turn" }) {
-            let list = rows(h)
+            let list = rows(h).filter { person($0) || h.key == "your_turn" }
             if list.isEmpty { continue }
-            items.append(.heading(key: h.key, words: "\(h.label) · \(h.count.isEmpty ? "\(list.count)" : h.count)".uppercased(), first: items.isEmpty))
+            items.append(.heading(key: h.key, words: h.label.uppercased(), first: items.isEmpty))
             items += list.map(MacItem.row)
+            placed.formUnion(list.map(\.id))
+        }
+        let idle = store.team.filter { !placed.contains($0.id) && !nested($0) }
+        if !idle.isEmpty {
+            items.append(.heading(key: "idle", words: "IDLE", first: items.isEmpty))
+            items += stride(from: 0, to: idle.count, by: 2).map { .pair(Array(idle[$0..<min($0 + 2, idle.count)])) }
         }
         return items
     }
     private var macBody: some View {
         HStack(spacing: 0) {
-            // The console's `.pane.list` (skin.css): caps headings, one card per
-            // session, All sessions as its own box — not an iOS grouped list.
+            // One white list: grey-band caps headings, a row per person with
+            // its open cards as bullets, idle people two to a line. No boxed
+            // cards, no grey page, no All sessions.
             ScrollView {
                 // A plain VStack, never a lazy one: the list is a dozen
-                // cards, and macOS 26's lazy stack froze the whole app on it
+                // rows, and macOS 26's lazy stack froze the whole app on it
                 // — its prefetch (LazyLayoutViewCache.signalPrefetch) set the
                 // rows' phases, which dirtied the layout, which signalled the
                 // prefetch again, in one frame that never ended ("Application
                 // Not Responding").
-                VStack(alignment: .leading, spacing: 8) {
-                    if let error { ErrorBanner(message: error) }
+                VStack(alignment: .leading, spacing: 0) {
+                    if let error { ErrorBanner(message: error).padding(12) }
                     ForEach(macItems) { item in
                         switch item {
                         case .heading(_, let words, let first):
                             Text(words)
-                                .font(.system(size: 11.5, weight: .semibold)).tracking(0.8).foregroundStyle(.secondary)
-                                .padding(.horizontal, 4).padding(.top, first ? 4 : 16).padding(.bottom, 2)
+                                .font(.system(size: 13, weight: .semibold)).tracking(0.9).foregroundStyle(Web.heading)
+                                .padding(.horizontal, 18).padding(.top, first ? 0 : 24).padding(.bottom, first ? 0 : 9)
+                                .frame(maxWidth: .infinity, minHeight: first ? 52 : nil, alignment: .leading)
+                                .overlay(alignment: .bottom) { Web.line.frame(height: 1) }
                         case .row(let t):
-                            ThreadRow(t: t, board: turn, on: selected?.thread.id == t.id && !showAll, subs: subs(t))
-                        }
-                    }
-                    Button { selected = nil; showAll = true } label: {
-                        // The console's `.all-link`: the words and the count,
-                        // no phone dot.
-                        HStack {
-                            Text("All sessions").font(.system(size: 13.5, weight: .semibold))
-                            Spacer()
-                            Text("\(threads.count)").font(.system(size: 13.5)).foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 14).padding(.vertical, 10)
-                        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(showAll ? Color.primary.opacity(0.3) : Color.primary.opacity(0.1)))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).padding(.top, 6)
-                    if threads.isEmpty && error == nil {
-                        Text("No sessions yet").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 4)
-                    }
-                    // The people grid (team mode; the console's `.foot-links.team`):
-                    // a card per role, two across, its name, its role, its count.
-                    if !store.team.isEmpty {
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                            ForEach(store.team) { t in
-                                Button { showAll = false; selected = OpenAsk(thread: t, message: nil) } label: {
-                                    teamCard(t, on: selected?.thread.id == t.id && !showAll)
+                            ThreadRow(t: t, board: turn, on: selected?.thread.id == t.id, subs: subs(t))
+                        case .pair(let ts):
+                            HStack(spacing: 0) {
+                                ForEach(Array(ts.enumerated()), id: \.element.id) { i, t in
+                                    idleCell(t, divider: i == 0)
                                 }
-                                .buttonStyle(.plain)
+                                if ts.count == 1 { Color.clear.frame(maxWidth: .infinity) }
                             }
+                            .fixedSize(horizontal: false, vertical: true)
+                            .background(Web.panel)
+                            .overlay(alignment: .bottom) { Web.line.frame(height: 1) }
                         }
-                        .padding(.top, 12)
+                    }
+                    if threads.isEmpty && store.team.isEmpty && error == nil {
+                        Text("No sessions yet").font(.system(size: 13.5)).foregroundStyle(Web.muted).padding(18)
                     }
                 }
-                .padding(.horizontal, 12).padding(.vertical, 14)
+                .padding(.bottom, 14)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(Web.page)
             .refreshable { await load() }
             .task { await load() }
             .frame(width: 380)
             Divider().ignoresSafeArea()
-            if showAll {
-                // The console draws All sessions in the chat's pane, so the
-                // list of what is waiting stays beside it.
-                NavigationStack { AllThreadsView() }
-            } else if let s = selected {
+            if let s = selected {
                 NavigationStack(path: $path) {
                     ThreadDetail(thread: s.thread, focusMessage: s.message, focusCard: s.card, armOnOpen: s.arm).id(s)
                         .navigationDestination(for: OpenAsk.self) { ThreadDetail(thread: $0.thread, focusMessage: $0.message, focusCard: $0.card, armOnOpen: $0.arm) }
@@ -189,10 +187,29 @@ struct ThreadsView: View {
                     .id(snap.deskGen)
             }
         }
-        .onChange(of: snap.deskGen) { _, _ in path = NavigationPath(); selected = nil; showAll = false }
-        .onChange(of: nav.card, initial: true) { _, c in if let c { nav.card = nil; path = NavigationPath(); showAll = false; selected = c } }
-        .onChange(of: openAsk) { _, o in if let o { openAsk = nil; showAll = false; selected = o } }
+        .onChange(of: snap.deskGen) { _, _ in path = NavigationPath(); selected = nil }
+        .onChange(of: nav.card, initial: true) { _, c in if let c { nav.card = nil; path = NavigationPath(); selected = c } }
+        .onChange(of: openAsk) { _, o in if let o { openAsk = nil; selected = o } }
         .sheet(isPresented: $composing) { NewThreadSheet { await load() } }
+    }
+
+    /// One idle person: name over role, half the row; the open one tinted
+    /// with a blue edge.
+    private func idleCell(_ t: Thread, divider: Bool) -> some View {
+        let on = selected?.thread.id == t.id
+        return Button { selected = OpenAsk(thread: t, message: nil) } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(t.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Web.fg).lineLimit(1)
+                Text(t.role ?? "").font(.system(size: 13)).foregroundStyle(Web.muted).lineLimit(1)
+            }
+            .padding(.horizontal, 18).padding(.vertical, 9)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(on ? Web.accent.opacity(0.1) : Color.clear)
+            .overlay(alignment: .leading) { if on { Web.accent.frame(width: 4) } }
+            .overlay(alignment: .trailing) { if divider { Web.line.frame(width: 1) } }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
     #endif
 
@@ -324,7 +341,7 @@ struct ThreadsView: View {
             // (A push straight after the first refresh is dropped — the
             // stack is not up yet; one second later it lands.)
             #if targetEnvironment(macCatalyst)
-            if want == "all" { showAll = true; return }
+            if want == "all" { return }
             #endif
             if want == "all" { try? await Task.sleep(for: .seconds(1)); path.append(AllSessions()) }
             else if let t = threads.first(where: { $0.id == want }) { openAsk = OpenAsk(thread: t, message: nil) }

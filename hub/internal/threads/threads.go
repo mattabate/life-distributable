@@ -182,6 +182,10 @@ CREATE INDEX IF NOT EXISTS persona_defs_key ON persona_defs(key, id);`,
 	// several times per read, so GET /threads/{id} of a long-running session
 	// took seconds.
 	`CREATE INDEX IF NOT EXISTS thread_events_run ON thread_events(thread_id, run_id, kind)`,
+	// The org chart (Configuration's Team): reports_to is the role key a role
+	// reports to ("" = the owner); goals the goal ids it owns, comma-separated.
+	`ALTER TABLE persona_defs ADD COLUMN reports_to TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE persona_defs ADD COLUMN goals TEXT NOT NULL DEFAULT ''`,
 }
 
 // ModelCost: one model's share of a chat's bill. Model is the CLI's model id,
