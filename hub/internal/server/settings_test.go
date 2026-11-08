@@ -26,6 +26,17 @@ func TestSettings(t *testing.T) {
 	if w.Code != 200 || !got.TeamMode || !got.PlainSessions || got.ModelCap != "" || len(got.Models) == 0 {
 		t.Fatalf("GET: %d %s", w.Code, w.Body)
 	}
+	// What the apps call the owner: hub.json's owner_name, "" when it names
+	// none (config's "the owner" stand-in included).
+	s.cfg.OwnerName = "the owner"
+	if w := s.do(t, "GET", "/api/v1/settings", nil); !strings.Contains(w.Body.String(), `"owner_name":""`) {
+		t.Fatalf("no owner: %s", w.Body)
+	}
+	s.cfg.OwnerName = " Sam "
+	if w := s.do(t, "GET", "/api/v1/settings", nil); !strings.Contains(w.Body.String(), `"owner_name":"Sam"`) {
+		t.Fatalf("owner: %s", w.Body)
+	}
+	s.cfg.OwnerName = ""
 
 	cap := got.Models[1]
 	w = s.do(t, "PATCH", "/api/v1/settings", map[string]any{"plain_sessions": false, "model_cap": cap})
