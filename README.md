@@ -36,11 +36,16 @@ The agent walks you through setup from there.
 ⭐ **[Star it][repo]** to get developer addenda: new features and fixes land
 in [ADDENDA.md](ADDENDA.md) every week, and your agent brings each one to you.
 
-<p align="center"><img src="docs/img/sessions.png" alt="The life desktop app's Sessions board: Your turn, 5 cards in 4 sessions, one per agent: Sam's water filter to swap, Rachel's Lisbon hotels to read, Fred's sleep log and long run day, Charlotte's $500 VTI buy to approve, and Diane, still working, with a dentist time to pick; below, the team of five: chief of staff, health coach, home manager, money manager and travel planner" width="900"></p>
-
-**Configuration.** Your team, goals, devices, and data sources.
-
-<p align="center"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: a Powered by card for Claude Code with the month's spend and how much of the 7 day limits is left, and a Goals card with five goals: Run a half marathon, Sleep seven hours, Invest every Thursday, Plan the Lisbon trip and Keep the apartment running" width="900"></p>
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/img/sessions.png" alt="The life desktop app's Sessions board: Your turn, 5 cards in 4 sessions, one per agent: Sam's water filter to swap, Rachel's Lisbon hotels to read, Fred's sleep log and long run day, Charlotte's $500 VTI buy to approve, and Diane, still working, with a dentist time to pick; below, the team of five: chief of staff, health coach, home manager, money manager and travel planner"></td>
+<td width="50%" valign="top"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: a Powered by card for Claude Code with the month's spend and how much of the 7 day limits is left, and a Goals card with five goals: Run a half marathon, Sleep seven hours, Invest every Thursday, Plan the Lisbon trip and Keep the apartment running"></td>
+</tr>
+<tr>
+<td align="center"><strong>Sessions.</strong> Every agent, and what each needs from you.</td>
+<td align="center"><strong>Configuration.</strong> Your team, goals, devices, and data sources.</td>
+</tr>
+</table>
 
 ### Your first five minutes
 
