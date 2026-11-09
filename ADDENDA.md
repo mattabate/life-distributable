@@ -1358,3 +1358,4 @@ Entry format:
 - For: everyone, most of all installs without `session_user`
 - Fix: the hub pins the decider hash in its database the first time it sees `ops/secrets/decider.hash`, and refuses every Approve and Deny while the file differs from that pin. Without `session_user` a session runs as you and could write the file with the hash of a code it chose; the old check only caught an emptied or deleted file (#182). The refusal goes on the action's record, and `hub.log` gets a `decider: TAMPERED` line. `ops/decider-set.sh`, run in a terminal, moves the pin before it replaces the file, so a rotation works, and if the database is locked it changes nothing and says so. A hub armed before this pins the file it finds.
 - How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/actions/decider.go`, `decider_test.go`, `hub/internal/server/actions.go`, `ops/decider-set.sh`, `hub/CLAUDE.md`.
+- Reported by @ponponpon888 (#182).
