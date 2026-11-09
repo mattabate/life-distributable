@@ -315,14 +315,15 @@ struct ConfigView: View {
         }
     }
 
-    /// Depth-first: each role, then the roles under it. A reports_to that
-    /// names no role is the owner.
+    /// Depth-first: each role, then the roles under it, in the hub's role
+    /// order (the chief of staff first), as the console draws it. A
+    /// reports_to that names no role is the owner.
     private func orgRows(_ ps: [Thread], under boss: String, depth: Int) -> [(Thread, Int)] {
         let keys = Set(ps.compactMap(\.persona))
         let kids = ps.filter { p in
             let r = p.reports_to ?? ""
             return (keys.contains(r) ? r : "") == boss
-        }.sorted { $0.title < $1.title }
+        }
         return kids.flatMap { [($0, depth)] + orgRows(ps, under: $0.persona ?? "", depth: depth + 1) }
     }
 

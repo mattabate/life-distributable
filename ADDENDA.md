@@ -1316,3 +1316,8 @@ Entry format:
 - For: everyone with team mode on
 - Change: the top of the org chart on Configuration is the name hub.json's `owner_name` gives (add-0182), in the console, on the phone and on the desktop app. With no name set it still says "You".
 - How: same merge as add-0008 (after add-0182), then `make webcheck` and reload the console; `make ship` for the app. By hand: `hub/internal/server/web/views/config.js`, `hub/internal/server/web/test/config.test.js`, `app/Life/Sources/ConfigView.swift`, `app/Life/Sources/HubClient.swift`.
+
+## add-0184 · 2026-11-08 · The desktop team chart lists roles in the hub's order
+- For: everyone with team mode on who uses the desktop app
+- Change: the org chart on the desktop app's Configuration lists roles in the order the hub gives them (the chief of staff first, then by role key), as the console does, instead of sorting them by name. The two charts now match.
+- How: same merge as add-0008, then `make ship` for the app. By hand: `app/Life/Sources/ConfigView.swift`.
