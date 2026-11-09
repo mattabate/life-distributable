@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -261,6 +262,10 @@ type Queue struct {
 	// card (freeShell). main sets read-only ones; nil = every shell run is
 	// gated.
 	FreeShell []string
+	// Repeatable: free commands that may run again within the week with no
+	// hold (sameCommand), as a listing does no work twice; nil = every
+	// repeat is the owner's to approve.
+	Repeatable []string
 	// LsRoots: the folders a free ls may name (lsInRoots); nil = none, so
 	// every ls is the owner's to approve.
 	LsRoots []string
@@ -754,8 +759,16 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 	if p.ExecType == "relay" {
 		gated = true // never auto-runs, whatever the proposer says
 	}
+	repeatable := false
 	switch p.ExecType {
 	case "claude":
+		var cp struct {
+			Prompt string `json:"prompt"`
+		}
+		json.Unmarshal(p.ExecPayload, &cp)
+		if strings.TrimSpace(cp.Prompt) == "" {
+			return Action{}, errors.New(`a claude card needs {"project":"…","prompt":"…"} in the payload`)
+		}
 		gated = true
 	case "shell":
 		var sp struct {
@@ -763,8 +776,27 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 			Dir string `json:"dir"`
 		}
 		json.Unmarshal(p.ExecPayload, &sp)
+		// Found here, not after the owner's Approve: a card with no
+		// command, or one run in "/" because it named no dir (relative
+		// ops/ paths not found), could only fail.
+		if strings.TrimSpace(sp.Cmd) == "" {
+			return Action{}, errors.New(`a shell card needs its command in the payload: --payload '{"cmd":"…","dir":"…"}' (words after the flags are not read)`)
+		}
+		if sp.Dir == "" && q.Checkout != "" {
+			sp.Dir = q.Checkout
+			p.ExecPayload, _ = json.Marshal(map[string]string{"cmd": sp.Cmd, "dir": sp.Dir})
+		}
 		if !freeShell(q.FreeShell, sp.Cmd) || !lsInRoots(q.LsRoots, sp.Cmd, sp.Dir) {
 			gated = true
+		} else {
+			repeatable = freeShell(q.Repeatable, sp.Cmd)
+		}
+		// Only a card that reaches the owner: a free or standing run fails
+		// with no card and the session reads why.
+		if gated && strings.TrimSpace(p.Standing) == "" {
+			if err := preflight(sp.Cmd, sp.Dir); err != nil {
+				return Action{}, err
+			}
 		}
 	}
 	if gated && p.ExecType == "none" {
@@ -773,8 +805,9 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 		}
 	}
 	// A retry of a command that already ran, or may have, is the owner's to
-	// approve: the card says which run it repeats.
-	if same := q.sameCommand(p.Kind, p.ExecType, p.ExecPayload); same != "" {
+	// approve: the card says which run it repeats. A Repeatable free command
+	// runs again.
+	if same := q.sameCommand(p.Kind, p.ExecType, p.ExecPayload); same != "" && !repeatable {
 		p.Detail = strings.TrimRight(p.Detail, "\n") + "\n\n" + same
 		gated = true
 	}
@@ -1298,6 +1331,114 @@ func runShell(c *exec.Cmd, live io.Writer) (string, error) {
 	return buf.String(), err
 }
 
+// preflight: what a shell card would fail on the moment it ran, told to the
+// session before the card reaches the owner: a command bash cannot parse, a
+// dir that is not there, and a script it names (`bash x.sh`,
+// `ops/py.sh x.py`) that is missing or does not parse. A path holding $, ~
+// or a quote is the shell's to read and is left alone.
+func preflight(cmd, dir string) error {
+	if out, err := exec.Command("/bin/bash", "-n", "-c", cmd).CombinedOutput(); err != nil {
+		return fmt.Errorf("the command does not parse in bash, so the owner's Approve would only fail: %s", strings.TrimSpace(string(out)))
+	}
+	if dir != "" {
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+			return fmt.Errorf("dir %s is not a folder on the hub's Mac", dir)
+		}
+	}
+	resolve := func(p string) (string, bool) {
+		if p == "" || strings.HasPrefix(p, "-") || strings.ContainsAny(p, "$~'\"`*?") {
+			return "", false
+		}
+		if !filepath.IsAbs(p) {
+			if dir == "" {
+				return "", false
+			}
+			p = filepath.Join(dir, p)
+		}
+		return p, true
+	}
+	missing := func(p string) error {
+		return fmt.Errorf("%s is not there (dir %q), so the owner's Approve would only fail; write it first or fix the path", p, dir)
+	}
+	f := strings.Fields(cmd)
+	for i := 0; i+1 < len(f); i++ {
+		switch w := f[i]; {
+		case w == "bash" || w == "sh" || w == "/bin/bash" || w == "/bin/sh":
+			p, ok := resolve(f[i+1])
+			if !ok {
+				continue
+			}
+			if _, err := os.Stat(p); err != nil {
+				return missing(p)
+			}
+			if n, bad := syntaxLine(p, "/bin/bash", "-n", p); bad {
+				return fmt.Errorf("%s does not parse in bash (line %d), so the owner's Approve would only fail", p, n)
+			}
+		case strings.HasSuffix(w, "py.sh") && strings.HasSuffix(f[i+1], ".py"):
+			sh, ok := resolve(w)
+			if !ok {
+				continue
+			}
+			if _, err := os.Stat(sh); err != nil {
+				return missing(sh)
+			}
+			p := filepath.Join(filepath.Dir(sh), f[i+1])
+			if _, err := os.Stat(p); err != nil {
+				return missing(p)
+			}
+			// The interpreter compiles it and runs nothing: a fixed program,
+			// the path an argument, -I so no ast.py beside the hub's cwd or
+			// on PYTHONPATH is imported in its place.
+			if py, err := exec.LookPath("python3"); err == nil {
+				if n, bad := syntaxLine(p, py, "-I", "-c", pyParse, p); bad {
+					return fmt.Errorf("%s does not parse in python (line %d), so the owner's Approve would only fail", p, n)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+const pyParse = "import ast,sys\ntry: ast.parse(open(sys.argv[1],'rb').read(),'x')\nexcept SyntaxError as e: print(e.lineno or 0); sys.exit(1)"
+
+var lineNo = regexp.MustCompile(`line (\d+)`)
+
+// syntaxLine: a parse-only check, run as the hub's user, on a file a session
+// names; bad when it fails. Only the line number comes back, never the
+// checker's words: those quote the failing line, so a session could read a
+// file it cannot open itself, one line per card. A FIFO, device or file over
+// 1 MB is not read (a FIFO would hold the propose call open for good), and a
+// checker still going after 5 s is killed.
+func syntaxLine(p, name string, args ...string) (int, bool) {
+	fi, err := os.Stat(p)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() > 1<<20 {
+		return 0, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	if err == nil || ctx.Err() != nil {
+		return 0, false
+	}
+	n := 0
+	if m := lineNo.FindSubmatch(out); m != nil {
+		n, _ = strconv.Atoi(string(m[1]))
+	} else {
+		n, _ = strconv.Atoi(strings.TrimSpace(string(out)))
+	}
+	return n, true
+}
+
+func envGet(env []string, k string) string {
+	v := ""
+	for _, e := range env {
+		if strings.HasPrefix(e, k+"=") {
+			v = e[len(k)+1:]
+		}
+	}
+	return v
+}
+
 // shellEnv: the hub's environment plus the action's own dir as a git
 // safe.directory. A session user's clone (config session_user) belongs to that
 // user and the hub runs as the owner's, so git refuses an approved command
@@ -1305,6 +1446,12 @@ func runShell(c *exec.Cmd, live io.Writer) (string, error) {
 // that one command; git's guard stays on everywhere else.
 func shellEnv(env []string, dir string) []string {
 	out := append([]string{}, env...)
+	// The hub's own bin dir (ops/bin, lifectl beside it) first on PATH:
+	// launchd's PATH has none, so a script calling lifectl failed after the
+	// owner's Approve.
+	if exe, err := os.Executable(); err == nil {
+		out = append(out, "PATH="+filepath.Dir(exe)+":"+envGet(env, "PATH"))
+	}
 	if dir != "" {
 		out = append(out, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0="+dir)
 	}

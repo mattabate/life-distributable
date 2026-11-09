@@ -1006,6 +1006,45 @@ func TestTheMessageIsTheReply(t *testing.T) {
 			t.Errorf("cardFromReply(%q) =\n %q / %q / %q, want\n %q / %q / %q", c.in, title, detail, say, c.title, c.detail, c.say)
 		}
 	}
+	// The greeting is a whole greeting, never the front of a word.
+	for in, want := range map[string]string{
+		"Hi-res photos are up. Done.": "Hi-res photos are up",
+		"Hello-world runs now.":       "Hello-world runs now",
+		"Okay-ish results came back.": "Okay-ish results came back",
+		"Hey, Alex - the post is up.": "The post is up",
+		"Hey Alex, the post is up.":   "The post is up",
+		"Hey Alex's build is up.":     "Hey Alex's build is up",
+		"Hi Alex.":                    "Hi Alex",
+	} {
+		if got := sayTitle(in); got != want {
+			t.Errorf("sayTitle(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// A reply that opens with its own greeting and no "Say:" label is spoken
+	// whole (every paragraph before the steps) and opened once.
+	in := "Hey Alex, the post is up.\n\nIt reads well.\n\n1. Read it."
+	if title, detail, say := cardFromReply(in, "Recs"); title != "The post is up" || detail != "1. Read it." || say != "Hey Alex, the post is up. It reads well." {
+		t.Errorf("greeting-led cardFromReply = %q / %q / %q", title, detail, say)
+	}
+	in = "Hey Alex,\n\nThe post is up.\n\nIt reads well.\n\n1. Read it."
+	if _, detail, say := cardFromReply(in, "Recs"); detail != "1. Read it." || say != "Hey Alex, The post is up. It reads well." {
+		t.Errorf("opener on its own line: %q / %q", detail, say)
+	}
+	// A card titled as spoken (no --say) is said once, not opened twice.
+	if got := spokenFallback("read", "", "Hey Alex, the PR is merged.", "Recs"); got != "Hey Alex, the PR is merged." {
+		t.Errorf("spokenFallback doubled the opener: %q", got)
+	}
+	// A reply that asks the owner something is their decision, not a read.
+	for _, c := range []struct{ say, detail, kind string }{
+		{"Hey Alex, both suggestions can close quietly.", "1. Reply \"close them\" and I'll close both?", "decision"},
+		{"Hey Alex, should the contributor get credit?", "", "decision"},
+		{"Hey Alex, the PR is merged.", "- [PR](https://github.com/x/y/pull/1?tab=files)", "read"},
+		{"Hey Alex, the port is up.", "```\nls ?\n```", "read"},
+	} {
+		if got := replyKind(c.say, c.detail); got != c.kind {
+			t.Errorf("replyKind(%q, %q) = %s, want %s", c.say, c.detail, got, c.kind)
+		}
+	}
 }
 
 // A card nobody wrote a sentence for is still one message to the owner, never

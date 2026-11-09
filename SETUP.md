@@ -75,6 +75,15 @@ limit is left, and what this month has cost, live.
 If they chose only `web`, skip the Apple Developer row and steps 1.1, 7
 and 8.
 
+3. Ask one more choice now, in these words: *"One more choice now, because
+   it changes how safe the rest is. By default a session runs as you, so it
+   can do anything your Mac account can, the hub token and the decider
+   code's hash included: the approval step is then a rule sessions follow,
+   not a wall. An optional step runs sessions as a second Mac user instead
+   (about ten minutes after the hub is up; you type a few commands and your
+   Mac password, and sign Claude in once more). Want it?"* Remember the
+   answer as `--session-user yes|no`. Default: no.
+
 ## 1. Start the two slow things now
 
 1. **Apple Developer enrollment** ($99/yr; Apple reviews it, usually within
@@ -192,7 +201,7 @@ over Tailscale, which only their own devices can join.
 7. **The decider code**: a second password that only they hold, needed to
    approve anything that spends money, deletes, contacts someone, shares
    data or pushes code (a local commit needs no approval). With sessions run
-   as a separate user (step 10) no session can approve its own request;
+   as a separate user (the step 0 choice) no session can approve its own request;
    without it a session runs as the owner's account and could reach the
    code's hash, so the gate is a rule it follows, not a wall. You
    open `bash ops/decider-set.sh` in its own window. Tell them: "The window
@@ -214,6 +223,10 @@ over Tailscale, which only their own devices can join.
    microphone: click **Allow**. Click **Mic** again to stop." If they
    clicked Don't Allow: **System Settings → Privacy & Security → Microphone**,
    switch it on, then `ops/hub.sh restart`.
+10. **Separate user, if they said yes in step 0.** Follow "Optional: run
+    sessions as a separate user" below now, before the console's first
+    session and the apps: the move is cheapest with no sessions open. If
+    they said no, skip this.
 
 **Verify:** `ops/hub.sh status` shows `state = running` and `ok`; the owner
 says the console shows **Sessions**. Tell them this is the first
@@ -384,19 +397,16 @@ It takes one message.
    --team no --force`, which changes only `team_mode` and keeps the rest,
    the push key included). Plain sessions as well as roles:
    `lifectl settings set plain_sessions true`. Both apply without a restart.
-6. **Separate user, once.** Ask, in these words: *"Right now a session
-   runs as you, so it can do anything your Mac account can, the hub token
-   and the decider code's hash included. There is an optional step that
-   runs sessions as a second Mac user instead; you type a few commands in
-   Terminal. Want it?"* If yes, follow "Optional: run sessions
-   as a separate user" below. Whatever they answer, do not ask again.
+6. **Separate user, never re-asked.** If they said no in step 0, say once
+   that sessions run as them and that running sessions as a separate user
+   can still be turned on later by asking. Do not ask again.
 
 ## Optional: run sessions as a separate user
 
 Off by default, and nothing in steps 0 to 10 needs it. Without it, a
 session runs as the owner's own macOS user and can do anything that account
 can, the hub token and the decider hash included: the decider code is then
-a rule sessions follow, not a wall. Setup offers it once (step 10). With
+a rule sessions follow, not a wall. Setup offers it once (step 0). With
 `session_user` set, every session runs as
 a second macOS user (`life-agent` here) in a clone of its own, so a session
 cannot write the main checkout, read `ops/secrets/` (the hub token, the

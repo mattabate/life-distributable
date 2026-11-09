@@ -1906,9 +1906,11 @@ func splitSay(text string) (rest, say string) {
 }
 
 // sayGreeting is the opening a spoken message wears and a card title does
-// not: "Hey Sam," / "Hi Sam." / "Hey,". A greeting word and its punctuation
-// are both required, so "Okay the build is up." keeps its first word.
-var sayGreeting = regexp.MustCompile(`(?i)^(?:hey|hi|hello|ok|okay)(?:\s+[\p{L}'’-]+)?\s*[,.!—-]+\s*`)
+// not: "Hey Sam," / "Hi Sam." / "Hey, Sam -" / "Hey,".A greeting word and its punctuation
+// are both required, so "Okay the build is up." keeps its first word. Only a
+// whole greeting comes off, never the front of a word: the punctuation must
+// end at a space or the end, so "Hi-res photos are up." keeps "Hi-res".
+var sayGreeting = regexp.MustCompile(`(?i)^(?:hey|hi|hello|ok|okay)(?:[\s,]+[\p{L}'’-]+)?\s*[,.!—-]+(?:\s+|$)`)
 
 // sayTitle is the card title a spoken message implies: its first sentence,
 // less the greeting, capitalised, cut at a word past replyCardTitleMax. The
@@ -1995,6 +1997,16 @@ func cardFromReply(text, thread string) (title, detail, say string) {
 		say, body = unlinkSay(say, strings.TrimSpace(body))
 		return sayTitle(say), body, say
 	}
+	// A reply that opens with its own greeting ("Hey Alex, ...") is a Say with
+	// the label left off: the message is every paragraph before the steps,
+	// spoken as written and opened once (an opener alone on its line was the
+	// whole message, opened a second time, with the rest left unspoken).
+	if prose, steps := proseThenSteps(text); spokenOpener.MatchString(prose) {
+		if say := spokenReply(prose); strings.TrimSpace(sayGreeting.ReplaceAllString(say, "")) != "" && !strings.HasSuffix(say, "…") {
+			say, steps = unlinkSay(say, steps)
+			return sayTitle(say), steps, say
+		}
+	}
 	para, rest := firstParagraph(text)
 	msg := spokenReply(para)
 	if msg == "" { // the first paragraph was a code block or a table
@@ -2007,6 +2019,40 @@ func cardFromReply(text, thread string) (title, detail, say string) {
 		rest = text
 	}
 	return sayTitle(msg), rest, spokenFallback("read", "", msg, thread)
+}
+
+// replyKind: a reply that asks the owner something is their decision, not a
+// read (a read card's one tap closes the question unanswered and wakes
+// nothing). A sentence ending "?" in the message or the steps asks; a fenced
+// block or a link target does not count.
+func replyKind(say, detail string) string {
+	s := fencedBlock.ReplaceAllString(say+"\n"+detail, " ")
+	s = mdLink.ReplaceAllString(s, "$1")
+	if questionEnd.MatchString(s) {
+		return "decision"
+	}
+	return "read"
+}
+
+var questionEnd = regexp.MustCompile(`\?(?:["'”’)]*)(?:\s|$)`)
+
+// spokenOpener: a reply that opens as a spoken message does, a greeting
+// word, an optional name, then its punctuation ("Hey Alex," / "Hi,").
+var spokenOpener = regexp.MustCompile(`(?i)^(?:hey|hi|hello)(?:[\s,]+[\p{L}'’-]+)?\s*[,.!—-]+(?:\s|$)`)
+
+// listItem opens a numbered or bulleted line: the owner's steps.
+var listItem = regexp.MustCompile(`^\s*(?:\d+[.)]|[-*•])\s`)
+
+// proseThenSteps splits text at its first list, fence or table: the prose
+// before it, and the rest.
+func proseThenSteps(text string) (prose, steps string) {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	for i, l := range lines {
+		if t := strings.TrimSpace(l); listItem.MatchString(l) || strings.HasPrefix(t, "```") || strings.HasPrefix(t, "|") {
+			return strings.TrimSpace(strings.Join(lines[:i], "\n")), strings.TrimSpace(strings.Join(lines[i:], "\n"))
+		}
+	}
+	return strings.TrimSpace(text), ""
 }
 
 // firstParagraph splits text at its first blank line (a fenced block counts
@@ -2196,7 +2242,7 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 			var tname string
 			m.db.QueryRow(`SELECT title FROM threads WHERE id=?`, threadID).Scan(&tname)
 			title, detail, say := cardFromReply(text, tname)
-			if a, err := m.AddAskSaid(threadID, r.id, title, detail, "read", "", "", say); err == nil {
+			if a, err := m.AddAskSaid(threadID, r.id, title, detail, replyKind(say, detail), "", "", say); err == nil {
 				fresh = append(fresh, a)
 			}
 		} else {

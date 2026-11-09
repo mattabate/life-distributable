@@ -107,6 +107,11 @@ func main() {
 		thread := fs.String("thread", os.Getenv("LIFE_THREAD_ID"), "proposing session id (default $LIFE_THREAD_ID); the decision is sent back to it")
 		say := fs.String("say", "", "the message the headphones speak when the card lands and the card leads with (≤700 chars); none = the hub writes one")
 		fs.Parse(os.Args[2:])
+		// A command written as a word after the flags was dropped and the
+		// card went to the owner empty.
+		if fs.NArg() > 0 {
+			die(fmt.Sprintf("propose: %q is not a flag; a command goes in --payload '{\"cmd\":\"…\",\"dir\":\"…\"}'", fs.Arg(0)))
+		}
 		// A card that reaches the owner carries a session's own words: the
 		// hub's stand-in reads the title back, and a title of paths and flags
 		// is a card they cannot read.

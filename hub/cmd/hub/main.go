@@ -139,6 +139,8 @@ func main() {
 	// Read-only runs that need no card (actions.freeShell); anything else a
 	// shell proposal runs is the owner's to approve.
 	acts.FreeShell = []string{"ls"}
+	// A listing does no work twice: no repeat-in-a-week hold.
+	acts.Repeatable = []string{"ls"}
 	sch.SetActions(acts)
 	gs, err := goals.New(db)
 	if err != nil {

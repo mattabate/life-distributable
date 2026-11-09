@@ -120,7 +120,10 @@ case "${1:-}" in
            fi
            launchctl kickstart -k "gui/$UID_/com.life.hub"; sleep 1; "$SELF" status ;;
   stop)    launchctl bootout "gui/$UID_/com.life.hub" ;;
-  status)  launchctl print "gui/$UID_/com.life.hub" | grep -E "state|pid" | head -3; curl -fsS --max-time 3 "https://$HOST/healthz" && echo ;;
+  status)  launchctl print "gui/$UID_/com.life.hub" | grep -E "state|pid" | head -3
+           su_=$(plutil -extract session_user raw -o - hub.json 2>/dev/null || true)
+           if [[ -n $su_ ]]; then echo "sessions run as: $su_"; else echo "sessions run as: $(id -un) (the owner: the gate is a rule, not a wall)"; fi
+           curl -fsS --max-time 3 "https://$HOST/healthz" && echo ;;
   logs)    tail -f logs/hub.log ;;
   # A session user has only its own token (LIFE_SESSION_TOKEN): the console
   # opens as that session, so browse.js and web-smoke.sh work from its clone.

@@ -38,6 +38,9 @@ struct SessionCell: Identifiable, Hashable {
     /// A job running for the session (a hub-run action or the turn's helper):
     /// a grey "running" cell with its bar — the console's `jobCells`.
     var job: TurnTask? = nil
+    /// The card being spoken keeps its own kind here (read, needs, install):
+    /// the desktop sidebar draws its speaker in that colour, never green.
+    var under: String? = nil
 
     /// The session's running jobs as cells, ahead of its cards (the owner
     /// 2026-11-05 00:43, mock B: "have a running be the highest priority…
@@ -66,7 +69,7 @@ struct SessionCell: Identifiable, Hashable {
         return SessionCell(id: "sub " + k.id, title: k.title,
                            verb: c?.verb ?? (k.status == "running" ? "running" : "idle"),
                            tone: c?.tone ?? "quiet", step: false,
-                           sub: k, subFirst: b.first[k.id].flatMap { $0.isEmpty ? nil : $0 })
+                           sub: k, subFirst: b.first[k.id].flatMap { $0.isEmpty ? nil : $0 }, under: c?.under)
     }
 
     /// The bundle as cells: approvals first (the session is stopped on them),
@@ -85,10 +88,11 @@ struct SessionCell: Identifiable, Hashable {
             ?? (floor ? s.asks.first { !($0.said ?? "").isEmpty }?.id : nil)
         let asks = (s.asks + (s.steps ?? [])).enumerated().map { i, a in
             let k = a.kind
-            if a.id == voiced { return SessionCell(id: a.id, title: a.title, verb: "speaking", tone: "speaking", step: false) }
+            let tone = k == "read" ? "read" : k == "install" ? "install" : k == "error" ? "error" : "needs"
+            if a.id == voiced { return SessionCell(id: a.id, title: a.title, verb: "speaking", tone: "speaking", step: false, under: tone) }
             return SessionCell(id: a.id, title: a.title,
                                verb: a.verb ?? "for you",  // the hub's word (store.AskVerb)
-                               tone: k == "read" ? "read" : k == "install" ? "install" : k == "error" ? "error" : "needs",
+                               tone: tone,
                                step: i >= s.asks.count)
         }
         return acts + asks
@@ -159,22 +163,24 @@ func sessionFootWords(_ t: Thread) -> String {
 
 /// One open card under a name on the desktop sidebar (the owner 2026-11-06,
 /// sidebar 3): a coloured dot and its whole title — red do, blue read, teal
-/// install, green in his ears, grey a quiet sub-session ("dots… a little
+/// install, a speaker in its kind colour while spoken, grey a quiet sub-session ("dots… a little
 /// teeny bit smaller": 8pt). A running job is its bar and what it is doing.
 /// A click lands the chat on that card.
 struct SideItem: View {
     let c: SessionCell
     let tap: () -> Void
+    /// The card's kind colour; the card being spoken keeps its own.
     var dot: Color {
-        switch c.tone {
+        switch c.tone == "speaking" ? c.under ?? "needs" : c.tone {
         case "read": Web.accent
         case "install": Web.install
-        case "speaking": Web.green
         case "error": Web.muted
         case "quiet": Web.muted
         default: Web.red
         }
     }
+    /// The width the marker sits in, so every title starts at one x.
+    static let lead: CGFloat = 13
     var body: some View {
         Button(action: tap) {
             Group {
@@ -183,18 +189,24 @@ struct SideItem: View {
                 // dots… background processes and subagents").
                 if let k = c.job {
                     VStack(alignment: .leading, spacing: 3) {
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Circle().fill(Web.muted).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 0.5 }
+                        HStack(alignment: .firstTextBaseline, spacing: 0) {
+                            marker(Circle().fill(Web.muted).frame(width: 6, height: 6))
                             Text(md(c.title)).font(.zoomed(size: 13.5)).foregroundStyle(Web.muted).lineLimit(1)
                         }
-                        if k.total ?? 0 > 0 { JobProgress(k: k).padding(.leading, 13) }
+                        if k.total ?? 0 > 0 { JobProgress(k: k).padding(.leading, Self.lead) }
                     }
                 } else {
                     // 13.5 under a 15 name, a 6pt dot (the owner 2026-11-06
                     // 02:01: "the text should be smaller here… this dot is
-                    // like too big").
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Circle().fill(dot).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 0.5 }
+                    // like too big"). The card being spoken is a small
+                    // speaker in its own colour, the dot's size.
+                    HStack(alignment: .firstTextBaseline, spacing: 0) {
+                        if c.tone == "speaking" {
+                            marker(Image(systemName: "speaker.wave.2.fill").font(.system(size: 8 * Zoom.scale, weight: .semibold))
+                                .foregroundStyle(dot))
+                        } else {
+                            marker(Circle().fill(dot).frame(width: 6, height: 6))
+                        }
                         Text(md(c.title)).font(.zoomed(size: 13.5)).foregroundStyle(Web.fg).multilineTextAlignment(.leading)
                         Spacer(minLength: 0)
                     }
@@ -205,6 +217,24 @@ struct SideItem: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+    /// The dot (or speaker) centred on the middle of the first line's
+    /// capitals, not sat on its baseline.
+    private func marker(_ v: some View) -> some View {
+        let mid = UIFont.systemFont(ofSize: 13.5 * Zoom.scale).capHeight / 2
+        return v.frame(width: Self.lead, alignment: .leading)
+            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + mid }
+    }
+}
+
+/// The one audio pill by a name, one state at a time: green speaking, else
+/// orange waiting to speak (the web Sessions list's audioPill).
+struct AudioSlot: View {
+    var pills: [Pill] = []
+    var body: some View {
+        if let p = pills.first(where: { $0.tone == "speaking" }) ?? pills.first(where: { $0.tone == "waiting" }) {
+            PillChip(pill: p).fixedSize()
+        }
     }
 }
 
@@ -331,19 +361,15 @@ struct ThreadRow: View {
     }
 
     var macCard: some View {
-        let voiced = cells.contains { $0.tone == "speaking" } || subs.contains { $0.tone == "speaking" }
-        let live = pills.filter { ["speaking", "waiting"].contains($0.tone) && !(voiced && $0.tone == "speaking") }
-        return VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 7) {
                 // The chat head's 15 (the owner 02:02: "the text is
                 // smaller").
                 Text(md(t.title)).font(.zoomed(size: 15, weight: t.unread > 0 ? .bold : .semibold))
                     .foregroundStyle(Web.fg).lineLimit(1)
-                // Speaking / waiting to speak sits by the name like the chat
-                // head's state chip, never a line of its own (the owner
-                // 2026-11-07 02:35: "the speaking card appears below… like up
-                // here"); the job gives way to it.
-                ForEach(live, id: \.self) { PillChip(pill: $0).fixedSize() }
+                // Only audio sits by a name, one pill: speaking, else
+                // waiting (AudioSlot), never a line of its own.
+                AudioSlot(pills: pills)
                 Spacer(minLength: 8)
                 if let role = t.role, !role.isEmpty {
                     Text(role).font(.zoomed(size: 13)).foregroundStyle(Web.muted).lineLimit(1)
