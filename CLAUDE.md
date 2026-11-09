@@ -122,7 +122,11 @@ nothing from it lands without the owner's yes.
 
 The weekly check is the read-only `addenda-check` job; how to apply an entry
 is in the header of `ADDENDA.md`. No session merges upstream itself (add-0102):
-when the owner just asks to update, show them
-`git log --oneline HEAD..upstream/main` and ask them to run
-`git merge upstream/main` in Terminal; then resolve any conflicts in favour
-of their own changes and run `make check`.
+when the owner just asks to update, pin it to one commit, the newest
+release tag's: `git fetch upstream --tags`, then
+`git log -1 --tags --format='%h %D'` gives the tag and its sha. Check
+`git merge-base --is-ancestor <sha> upstream/main` (a sha not on upstream's
+main stops), show them `git log --oneline HEAD..<sha>` and
+`git diff --stat HEAD <sha>`, and ask them to run `git merge <sha>` in
+Terminal, never `git merge upstream/main`; then resolve any conflicts in
+favour of their own changes and run `make check`.

@@ -2,6 +2,8 @@ package actions
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -26,8 +28,14 @@ func TestProposeRefusesACardItsSessionCannotCarryOut(t *testing.T) {
 			t.Fatalf("%q: %v", d, err)
 		}
 	}
+	// A card that reaches the owner must name a dir and script that are
+	// there (preflight).
+	repo := t.TempDir()
+	os.MkdirAll(filepath.Join(repo, "ops"), 0o755)
+	os.WriteFile(filepath.Join(repo, "ops", "upload.sh"), []byte("echo ok\n"), 0o755)
+	pay, _ := json.Marshal(map[string]string{"cmd": "bash ops/upload.sh put a b", "dir": repo})
 	if _, err := q.Propose(Proposal{Title: "File it", Kind: "share", ExecType: "shell",
-		ExecPayload: json.RawMessage(`{"cmd":"bash ops/upload.sh put a b","dir":"/srv/life"}`), Detail: "bash ops/upload.sh put a b"}); err != nil {
+		ExecPayload: pay, Detail: "bash ops/upload.sh put a b"}); err != nil {
 		t.Fatal(err)
 	}
 	// Ungated: nothing waits on an Approve, so nothing to refuse.

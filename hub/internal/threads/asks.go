@@ -443,6 +443,11 @@ func spokenFallback(kind, class, title, thread string) string {
 	if t := installTarget(kind, title); t != "" && kind == "install" {
 		return notify.InstallSpoken(t, askBuild(kind, title))
 	}
+	// A read titled as already spoken ("Hey Alex, ...") keeps its own opener
+	// and is said once, not opened a second time.
+	if p := plainTitle(title); kind == "read" && spokenOpener.MatchString(p) {
+		return p
+	}
 	return notify.Spoken(kind, class, plainTitle(title), plainTitle(thread))
 }
 
