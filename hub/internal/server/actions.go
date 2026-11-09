@@ -163,9 +163,13 @@ func (s *Server) deciderOK(w http.ResponseWriter, r *http.Request, id, what, via
 		log.Printf("actions: %s of %s via %s — decider code accepted ua=%q", what, id, via, r.UserAgent())
 		return true
 	}
-	s.acts.Refused(id, via)
-	log.Printf("actions: refused %s of %s via %s — %s decider code ua=%q",
-		what, id, via, map[bool]string{true: "missing", false: "wrong"}[code == ""], r.UserAgent())
+	tampered := d.Tampered()
+	s.acts.Refused(id, via, tampered)
+	if tampered {
+		log.Printf("decider: TAMPERED — decider.hash differs from the hash the hub armed with; every decision is refused until ops/decider-set.sh runs in a terminal")
+	}
+	log.Printf("actions: refused %s of %s via %s — %s decider code tampered=%v ua=%q",
+		what, id, via, map[bool]string{true: "missing", false: "wrong"}[code == ""], tampered, r.UserAgent())
 	jsonErr(w, 403, "this needs your decider code, which the hub token does not carry: "+
 		"the phone sends it automatically (Settings → Decider code), the console asks you for it once. "+
 		"Set or reset it with ops/decider-set.sh in a Terminal.")

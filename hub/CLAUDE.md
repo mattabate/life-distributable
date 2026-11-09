@@ -93,7 +93,9 @@ shows a model under "Unpriced models".
   Edit/Write/MultiEdit/NotebookEdit on `ops/secrets/**` and `.git/**`, jobs
   are also denied Read of `ops/secrets/**`, and each calls the hub with its own session
   token (`session_tokens`, shared/api.md Auth), never the hub token. The decider fails closed once armed
-  (an emptied `decider.hash` refuses every approval).
+  (an emptied `decider.hash` refuses every approval, and so does one that
+  no longer matches the hash the hub pinned; only `ops/decider-set.sh`
+  moves the pin).
 - **No `python3`, `sqlite3` or `curl` on either list**: each is
   one line past every other control. Use `lifectl api
   METHOD /api/v1/…` (hub only), `ops/db.sh "select …"` (`sqlite3 -readonly`,

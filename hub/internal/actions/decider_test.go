@@ -81,6 +81,34 @@ func TestDeciderFailsClosedOnceArmed(t *testing.T) {
 	}
 }
 
+// A session that rewrites the hash file with the hash of a code it chose
+// (no session_user: it runs as the owner and can write the file) is refused,
+// and the refusal says why (#182). decider-set.sh moves the pin, so a real
+// rotation works.
+func TestDeciderRefusesAHashRewrittenAfterArming(t *testing.T) {
+	q, _, _ := setup(t)
+	path := filepath.Join(t.TempDir(), "decider.hash")
+	owner, _ := NewSecret()
+	q.Decider(path).Arm(owner)
+	mine, _ := NewSecret()
+	NewDecider(path).Arm(mine) // a plain file write, as a session's Write would be
+	d := q.Decider(path)
+	if !d.Tampered() || d.Verify(mine) || d.Verify(owner) {
+		t.Fatal("a hash file rewritten outside decider-set.sh must refuse every code")
+	}
+	q.db.SetSetting(pinKey, d.hash()) // what decider-set.sh does before replacing the file
+	if d.Tampered() || !d.Verify(mine) {
+		t.Fatal("after decider-set.sh moves the pin the new code works")
+	}
+	// A hub armed before the pin existed pins the file it sees at start.
+	q2, _, _ := setup(t)
+	p2 := filepath.Join(t.TempDir(), "decider.hash")
+	NewDecider(p2).Arm(owner)
+	if !q2.Decider(p2).Armed() || q2.db.Setting(pinKey) == "" || !q2.Decider(p2).Verify(owner) {
+		t.Fatal("an armed hub with no pin pins the file it sees")
+	}
+}
+
 func TestNewSecretIsTypeableAndUnguessable(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 50; i++ {

@@ -54,19 +54,41 @@ func (q *Queue) Decider(hashPath string) *Decider {
 
 const armedKey = "decider_armed"
 
+// pinKey holds the hash the hub first saw, beside the latch: a file a session
+// rewrote with the hash of a code of its own no longer matches it, so every
+// decision is refused and logged as tampering (#182: with no session_user a
+// session runs as the owner and can write the file).
+// Only ops/decider-set.sh moves it, from a terminal, with the new file.
+const pinKey = "decider_hash"
+
 // Armed reports whether a decider secret has been set. Never armed = the old
 // behaviour, so a fresh hub works before the owner runs ops/decider-set.sh.
 // Armed once = armed for good: a missing or empty file then refuses every
 // decision (Verify has no hash to match) until decider-set.sh writes a new
 // one.
 func (d *Decider) Armed() bool {
-	if d.hash() != "" {
-		if d.db != nil && d.db.Setting(armedKey) == "" {
-			d.db.SetSetting(armedKey, time.Now().UTC().Format(time.RFC3339))
+	if h := d.hash(); h != "" {
+		if d.db != nil {
+			now := time.Now().UTC().Format(time.RFC3339)
+			if d.db.Setting(armedKey) == "" {
+				d.db.SetSetting(armedKey, now)
+			}
+			if d.db.Setting(pinKey) == "" {
+				d.db.SetSetting(pinKey, h)
+			}
 		}
 		return true
 	}
 	return d.db != nil && d.db.Setting(armedKey) != ""
+}
+
+// Tampered: the hash file no longer holds the hash the hub pinned.
+func (d *Decider) Tampered() bool {
+	if d == nil || d.db == nil {
+		return false
+	}
+	pin := d.db.Setting(pinKey)
+	return pin != "" && d.hash() != pin
 }
 
 func (d *Decider) hash() string {
@@ -99,7 +121,7 @@ func (d *Decider) SetAt() time.Time {
 // Verify is constant-time and never logs the secret.
 func (d *Decider) Verify(secret string) bool {
 	want := d.hash()
-	if want == "" || secret == "" {
+	if want == "" || secret == "" || d.Tampered() {
 		return false
 	}
 	sum := sha256.Sum256([]byte(strings.TrimSpace(secret)))
@@ -114,14 +136,25 @@ func (d *Decider) Arm(secret string) error {
 		return errors.New("decider secret must be at least 16 characters")
 	}
 	sum := sha256.Sum256([]byte(secret))
-	return os.WriteFile(d.path, []byte(hex.EncodeToString(sum[:])+"\n"), 0o600)
+	h := hex.EncodeToString(sum[:])
+	if err := os.WriteFile(d.path, []byte(h+"\n"), 0o600); err != nil {
+		return err
+	}
+	if d.db != nil {
+		return d.db.SetSetting(pinKey, h)
+	}
+	return nil
 }
 
 // Refused records an approve/deny that arrived without a valid decider code.
 // It belongs in the action's own audit trail: a session trying to approve its
 // own proposal is the exact event this whole mechanism exists to catch.
-func (q *Queue) Refused(id, via string) {
-	q.event(id, "refused", via, "approve/deny without a valid decider code")
+func (q *Queue) Refused(id, via string, tampered bool) {
+	note := "approve/deny without a valid decider code"
+	if tampered {
+		note = "refused: decider.hash differs from the hash the hub armed with (rewritten outside decider-set.sh)"
+	}
+	q.event(id, "refused", via, note)
 }
 
 // NewSecret returns 100 bits of randomness in Crockford-ish base32, grouped
