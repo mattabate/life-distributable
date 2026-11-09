@@ -1348,11 +1348,13 @@ Entry format:
 - For: new installs, and everyone running `ops/hub.sh status`
 - Change: SETUP.md step 0 asks whether sessions should run as a separate Mac user (default no) and step 5 makes that move before the apps when the answer is yes; step 10.6 mentions it once and never asks again. `ops/hub.sh status` prints which user sessions run as.
 - How: same merge as add-0008. By hand: `SETUP.md`, `ops/hub.sh`.
+- Thanks @nickrusso350 for the review.
 
 ## add-0189 · 2026-11-09 · Updates are pinned to the commit you were shown
 - For: everyone who pulls updates
 - Change: the weekly `addenda-check` card ends with `apply <id> from upstream at <sha>`, and applying an entry, or updating when asked, works at that one commit: it must be on upstream's main, you see its log and diff stat, and you run `git merge <sha>`, never `git merge upstream/main`. A plain update pins to the newest release tag.
 - How: same merge as add-0008, then `ops/hub.sh restart` (the job's prompt and tool grant). By hand: `ops/schedule.json`, this file's header, `CLAUDE.md`.
+- Thanks @nickrusso350 for the review.
 
 ## add-0190 · 2026-11-09 · A rewritten decider hash refuses every approval
 - For: everyone, most of all installs without `session_user`
