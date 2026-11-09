@@ -23,6 +23,10 @@ download. **You need** a Mac that stays on, a
 [Apple Developer membership][apple-dev] ($99 a year, only for the iPhone and
 desktop apps).
 
+*Note: everything below is a starting point and subject to change. The agents
+maintain their own code, so they can change the app's front end or back end in
+whichever way suits you.*
+
 ## Install with one prompt
 
 Open Claude Code on your Mac and paste this:
@@ -38,12 +42,12 @@ in [ADDENDA.md](ADDENDA.md) every week, and your agent brings each one to you.
 
 <table>
 <tr>
-<td width="50%" valign="top"><img src="docs/img/sessions.png" alt="The life desktop app's Sessions list: under Your turn, one row per agent with its title and open cards: Rachel, head of wellness, a sleep log; Jules, head of AI, a local model that can route messages; Justin, head of strategy, how to open a pitch; Grace, chief technology officer, nightly tests and when to ship the desktop build; Diane, executive assistant, a dinner night to pick; Charlotte, marketing manager, a build thread to post on X. Under Working, Herbert, chief of staff. Under Idle, Fred, Brahms, Randy, Choppy, Lothar and Owen"></td>
-<td width="50%" valign="top"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: Powered by Claude Code with how much of the 7 day limits is left; Devices, the Mac hub and a phone; the Team org chart: Charlotte, marketing manager; Diane, executive assistant, over Choppy the wedding planner; Fred, chief financial officer; Grace, chief technology officer, over Owen, Randy and Tim; Herbert, chief of staff; Jules, head of AI, over Brahms the composer and Lothar the mathematician; Justin, head of strategy; Rachel, head of wellness; each card marked with the goals it owns; seven goals in Entrepreneurial, Social and Lifestyle; and data sources by goal, like GitHub, Search Console and YouTube for the audience"></td>
+<td width="50%" valign="top"><img src="docs/img/sessions.png" alt="The life desktop app's Sessions list: under Your turn, one row per agent with its open card: Charlotte, marketing manager, a build thread to post on X; Diane, executive assistant, dinner with friends on Friday or Saturday; Jules, head of AI, a local model that can route messages; Grace, chief technology officer, passing on work Tim finished; Fred, chief financial officer, two subscriptions for the same thing; Rachel, head of wellness, a sleep log. Under Working, Randy, whose chat is open on the right with a photo backup running and its progress bar. Under Idle, Herbert, chief of staff, and the rest of the team"></td>
+<td width="50%" valign="top"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: Powered by Claude Code with how much of the 7 day limits is left; Devices, the Mac hub and a phone; the Team org chart under you: Herbert, chief of staff, Rachel, head of wellness, and Fred, chief financial officer; then Grace, chief technology officer, over Randy, Owen and Tim, Jules, head of AI, over Brahms the composer and Lothar the mathematician, and Diane, executive assistant, over Choppy the wedding planner; then Charlotte, marketing manager, and Justin, head of strategy; each card marked with the goals it owns; seven goals in Work, Social and Lifestyle; and the data sources for each goal with their logos"></td>
 </tr>
 <tr>
-<td align="center"><strong>Sessions.</strong> Every agent, and what each needs from you.</td>
-<td align="center"><strong>Configuration.</strong> Your team, goals, devices, and data sources.</td>
+<td align="center"><strong>Sessions.</strong> Agents tell you when they need you.</td>
+<td align="center"><strong>Configuration.</strong> Your team, goals, devices, and data.</td>
 </tr>
 </table>
 
@@ -51,33 +55,37 @@ in [ADDENDA.md](ADDENDA.md) every week, and your agent brings each one to you.
 
 You don't need to be technical.
 
-1. Open **Terminal**: press **Cmd-Space**, type `Terminal`, press **Return**.
-2. If you don't have Claude Code yet, install it with
+1. If you don't have Claude Code yet, install it with
    [Anthropic's guide][claude-code-setup].
+2. Open **Terminal**: press **Cmd-Space**, type `Terminal`, press **Return**.
 3. In Terminal, type `claude` and press **Return**. Sign in with your
    Claude account if it asks.
-4. Paste the sentence above and press **Return**.
-5. From here, the agent leads. Do what it says, click where it points.
+4. Give Claude the following prompt and press **Return**:
+   ```
+   Clone github.com/mattabate/life-distributable and set up my life agent. Follow its SETUP.md.
+   ```
+5. Follow the instructions the agent gives you. It will ask what features
+   you want at the start.
 
 ## How it works
 
-- **Calendar.** The agents keep a calendar that stores what they need to do for you, and what you need to do for them.
+- **Calendar.** The agents keep a calendar of what they need to do for you, and you for them.
 - **Roles.** Each agent is a long-running Claude Code session with a role, like chief of staff or CTO.  They pass tasks between one another when some part of their task requires know-how from a different part of the swarm.
 - **Cards, not chat.** By default the chat history isn't displayed. You can only see what the agent needs you to do or wants to tell you in that moment.
 
-All of this is a starting point and subject to change. The agents maintain their own code, so if you don't like how something looks or works, just ask and they can change it from one prompt.
+*All of this is a starting point and subject to change. The agents maintain their own code, so if you don't like how something looks or works, just ask and they can change it from one prompt.*
 
 ## Example app layout
 
 ### Desktop app
 
-| **Approvals.** The agent proposes, you approve. | **Sessions.** It asks one clear question at a time. |
+| **Calendar.** Your steps and the agents' runs. | **Roles.** Agents hand work to each other. |
 |---|---|
-| ![Charlotte, the marketing manager, in the life desktop app: an approval card to post this week's build thread on X, with the first post quoted, tagged share, with Approve, Deny, Reply and Dismiss, a rec she filed, and a search rankings check coming up below](docs/img/approval.png) | ![Grace, the chief technology officer, in the life desktop app: two cards for the Build agent goal, whether to ship the desktop build tonight or after the calendar fix, and a read that the nightly tests are all green, with the 5 PM build run coming up below](docs/img/chat.png) |
+| ![The life desktop app's Calendar on the week of November 8: a morning routine every day, piano harmony homework in the evening, a proof to read, plants to water, a build thread to post, lunch with a friend, a demo to record, the weekly team review, the app update Grace ships on Monday, her release notes to read on Tuesday, the music service to pick and gym days, with overdue, due, do soon and sessions waiting lists](docs/img/calendar.png) | ![Grace, the chief technology officer, in the life desktop app, speaking aloud: a card telling you Tim, one of her engineers, finished the bigger calendar text and it is in tomorrow's update, with the 5 PM app update coming up below](docs/img/chat.png) |
 
-| **Recs.** Suggestions with evidence and a price. | **Calendar.** Your steps and the agent's runs. |
+| **Cards.** The agent proposes, you approve. | **Cards.** A running job shows its progress. |
 |---|---|
-| ![The Recs page of the life desktop app: Rachel's blackout curtains for $89, Jules's switch to a free local model for routing, Justin's demo at a spring AI builders night, each naming who filed it, with its reason and Accept, Decline or a reply to that agent](docs/img/recs.png) | ![The life desktop app's Calendar on a week: a morning routine every day, piano harmony homework each evening, a proof to read every other morning, plants to water, a build thread to post, a demo to record, the desktop build to ship, a weekly team review, a pitch at an AI meetup and gym days, with overdue, due, do soon and sessions waiting lists](docs/img/calendar.png) |
+| ![Charlotte, the marketing manager, in the life desktop app: an approval card to post this week's build thread on X, with the first post quoted, tagged share, with Approve, Deny, Reply and Dismiss, a rec she filed, and a search rankings check coming up below](docs/img/approval.png) | ![The life desktop app's Sessions list with Randy's chat open: an approved backup of 4,210 photos to cloud storage, running, its progress bar past halfway](docs/img/sessions.png) |
 
 ### iPhone app
 
@@ -88,9 +96,9 @@ All of this is a starting point and subject to change. The agents maintain their
 <th align="left"><strong>Calendar.</strong> Your day at a glance.</th>
 </tr>
 <tr>
-<td valign="top"><img src="docs/img/phone-approval.png" alt="The life iPhone app: Charlotte, the money manager, in chat with an approval card to buy $500 of VTI on Thursday, cash staying above a $2,000 floor, with Approve, Deny, Reply and Dismiss buttons"></td>
-<td valign="top"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions tab: Your turn, 5 cards in 4 sessions, one row per agent: Sam's water filter to swap, Rachel's Lisbon hotels to read, Fred's sleep log and long run day, Charlotte's buy to approve, and Diane booking a dentist cleaning"></td>
-<td valign="top"><img src="docs/img/phone-calendar.png" alt="The life iPhone app Calendar tab on the Day view: an easy run at 7, the farmers market at 10, a water filter swap, reviewing the month's spending at 4 and picking up dry cleaning"></td>
+<td valign="top"><img src="docs/img/phone-approval.png" alt="The life iPhone app: Charlotte, the marketing manager, in chat with an approval card to post this week's build thread on X, the first post quoted, tagged share, with Approve, Deny, Reply and Dismiss buttons, a rec she filed, and a search rankings check coming up"></td>
+<td valign="top"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions tab: Your turn, 6 cards in 6 sessions, one row per agent: Charlotte's build thread to approve, Diane's dinner night to decide, Jules's local model to read, Grace speaking Tim's finished work aloud, and Fred's two subscriptions below"></td>
+<td valign="top"><img src="docs/img/phone-calendar.png" alt="The life iPhone app Calendar tab on November 8: the passport to renew, overdue, then seven items due today: the morning routine, plants to water at 9, the build thread to post at 11, lunch with a friend at 12:30, the demo to record at 3, a piano harmony exercise at 7 and lights out at 11"></td>
 </tr>
 </table>
 
@@ -100,13 +108,13 @@ The screenshots are the real apps on a demo hub with made-up people and plans.
 
 Every cost below goes to an outside service. Nothing goes to me.
 
-| What | Cost | Needed for |
-|---|---|---|
-| [Claude Pro or Max][claude-pricing] | $20, $100 or $200 a month | Everything. Max is better for an always-on agent |
-| [Apple Developer Program][apple-dev] | $99 a year | Only the iPhone app and the desktop app. Web only? Skip it |
-| [Tailscale](https://tailscale.com/pricing) | free | Reaching your hub privately from your phone and laptops |
-| [Backblaze B2](https://www.backblaze.com/cloud-storage/pricing) | cents a month | Nightly encrypted backup |
-| A Mac on macOS 15 or later | the one you own | The hub |
+| What | Necessary? | Cost | Needed for |
+|---|---|---|---|
+| [Claude Pro or Max][claude-pricing] | Required | $20, $100 or $200 a month | Everything. Max is better for an always-on agent |
+| A Mac on macOS 15 or later | Required | the one you own | The hub |
+| [Tailscale](https://tailscale.com/pricing) | Required | free | Reaching your hub privately from your phone and laptops |
+| [Apple Developer Program][apple-dev] | Optional | $99 a year | Only the iPhone app and the desktop app. Web only? Skip it |
+| [Backblaze B2](https://www.backblaze.com/cloud-storage/pricing) | Recommended | cents a month | Nightly encrypted backup |
 
 ## Setup, in order
 
