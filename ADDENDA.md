@@ -1353,3 +1353,8 @@ Entry format:
 - For: everyone who pulls updates
 - Change: the weekly `addenda-check` card ends with `apply <id> from upstream at <sha>`, and applying an entry, or updating when asked, works at that one commit: it must be on upstream's main, you see its log and diff stat, and you run `git merge <sha>`, never `git merge upstream/main`. A plain update pins to the newest release tag.
 - How: same merge as add-0008, then `ops/hub.sh restart` (the job's prompt and tool grant). By hand: `ops/schedule.json`, this file's header, `CLAUDE.md`.
+
+## add-0190 · 2026-11-09 · A rewritten decider hash refuses every approval
+- For: everyone, most of all installs without `session_user`
+- Fix: the hub pins the decider hash in its database the first time it sees `ops/secrets/decider.hash`, and refuses every Approve and Deny while the file differs from that pin. Without `session_user` a session runs as you and could write the file with the hash of a code it chose; the old check only caught an emptied or deleted file (#182). The refusal goes on the action's record, and `hub.log` gets a `decider: TAMPERED` line. `ops/decider-set.sh`, run in a terminal, moves the pin before it replaces the file, so a rotation works, and if the database is locked it changes nothing and says so. A hub armed before this pins the file it finds.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/actions/decider.go`, `decider_test.go`, `hub/internal/server/actions.go`, `ops/decider-set.sh`, `hub/CLAUDE.md`.

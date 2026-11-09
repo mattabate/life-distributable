@@ -29,16 +29,37 @@ fi
 mkdir -p secrets
 
 python3 - <<'PY'
-import hashlib, os, secrets
+import datetime, hashlib, json, os, secrets, sqlite3
 
 ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"   # no I, L, O, U — typed by hand
 groups = ["".join(secrets.choice(ALPHABET) for _ in range(5)) for _ in range(4)]
 code = "-".join(groups)
 
 path = "secrets/decider.hash"
+digest = hashlib.sha256(code.encode()).hexdigest()
 fd = os.open(path + ".new", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 with os.fdopen(fd, "w") as f:
-    f.write(hashlib.sha256(code.encode()).hexdigest() + "\n")
+    f.write(digest + "\n")
+
+# The hub refuses every decision while the file differs from the hash it
+# pinned in its database (#182: a session that rewrote the file trips it).
+# This terminal is the one place that moves the pin, and it moves it before
+# the file: a database still locked after 30 s leaves the old code working
+# and nothing changed, not a new file every Approve refuses.
+try:
+    db = os.path.expanduser(json.load(open("hub.json")).get("db_path") or "../data/life.db")
+except OSError:
+    db = "../data/life.db"
+if os.path.exists(db):
+    try:
+        c = sqlite3.connect(db, timeout=30)
+        c.execute("INSERT INTO settings (key,value,updated_at) VALUES ('decider_hash',?,?) "
+                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                  (digest, datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")))
+        c.commit(); c.close()
+    except sqlite3.Error as e:
+        os.remove(path + ".new")
+        raise SystemExit(f"  The hub's database refused the new code ({e}). Nothing changed: your old code still works. Run this again.")
 os.replace(path + ".new", path)
 
 print()
