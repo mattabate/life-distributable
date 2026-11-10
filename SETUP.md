@@ -10,6 +10,14 @@ Tell them up front, in these words: *"This takes about two hours, and most
 of it is waiting on Apple and on a big download. I run everything in the
 Terminal. Your part is clicking where I tell you."*
 
+Then, before step 0, say this in these words and go on only once they say
+OK: *"One thing first. life is free, open source software, provided as is
+with no warranty. Its agents act for you, so they can spend money, send
+messages, delete files and share data. The approval step is there to catch
+that, and keeping it on is up to you. You're responsible for what your copy
+does, and nothing the agents tell you is legal, financial or medical advice.
+OK to go on?"*
+
 The order is set by the clock. Apple's developer enrollment and the Xcode
 download are the two slow things, so both start in step 1, and everything
 else happens while they run.
