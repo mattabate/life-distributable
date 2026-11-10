@@ -992,6 +992,13 @@ func (m *Manager) ResolveAsk(id, state, by, note string) (Ask, error) {
 	if by == "owner" && a.Kind == "read" {
 		return m.GetAsk(id)
 	}
+	// …and Dismiss with no words is silent too: it puts the card out of the
+	// owner's sight and wakes nobody. Before, it queued a "Won't do" prompt
+	// and the agent read it as a decline. Won't do is its own button, sent
+	// through Queue with outcome wont; a dismissal with words still carries them.
+	if by == "owner" && state == "dismissed" && strings.TrimSpace(note) == "" {
+		return m.GetAsk(id)
+	}
 	if by == "owner" && (state == "done" || state == "dismissed") {
 		outcome := "done"
 		text := "Done: " + a.Title

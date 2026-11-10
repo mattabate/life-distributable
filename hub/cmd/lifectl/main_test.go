@@ -89,6 +89,25 @@ func TestActor(t *testing.T) {
 
 // Lists print one line per row: a 400 KB recs dump was clipped by the
 // agent's tool anyway.
+// `asks --checkable` keeps the verifier's list small enough to read inline:
+// open, hinted, not a decision, five fields.
+func TestCheckableAsks(t *testing.T) {
+	var all []map[string]any
+	json.Unmarshal([]byte(`[
+		{"id":"a1","state":"open","kind":"physical","title":"T","thread_id":"th","check_hint":"file exists","detail":"long","said":"x"},
+		{"id":"a2","state":"open","kind":"read","check_hint":""},
+		{"id":"a3","state":"answered","kind":"physical","check_hint":"h"},
+		{"id":"a4","state":"open","kind":"decision","check_hint":"h"}]`), &all)
+	b, _ := json.Marshal(checkable(all))
+	want := `[{"check_hint":"file exists","id":"a1","kind":"physical","thread_id":"th","title":"T"}]`
+	if string(b) != want {
+		t.Fatalf("got %s", b)
+	}
+	if b, _ := json.Marshal(checkable(nil)); string(b) != "[]" {
+		t.Fatalf("none: %s", b)
+	}
+}
+
 func TestPrintRows(t *testing.T) {
 	var v any
 	json.Unmarshal([]byte(`{"open":[{"id":"rec-1","state":"open","goal_id":"g","title":"Try X\nlong detail","detail":"skip me"}],"done":[],"thread":{"id":"th-1","status":"idle","title":"T"}}`), &v)

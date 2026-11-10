@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -402,7 +403,19 @@ func main() {
 			state = os.Args[2]
 		}
 		thread := threadFlag("")
-		c.list("/api/v1/asks?" + url.Values{"state": {state}, "thread": {thread}}.Encode())
+		path := "/api/v1/asks?" + url.Values{"state": {state}, "thread": {thread}}.Encode()
+		if slices.Contains(os.Args, "--checkable") {
+			// The ask verifier's list: only what it may close, five fields
+			// each. The whole board as --json outgrew the CLI's inline size,
+			// was saved to a file, and every hour the job tried `cd …; grep`
+			// on it, which its grant refuses.
+			var all []map[string]any
+			c.fetch(path, &all)
+			b, _ := json.Marshal(checkable(all))
+			fmt.Println(string(b))
+			return
+		}
+		c.list(path)
 	case "ask":
 		// lifectl ask add "title" [--detail ...] [--kind decision|access|physical|read|install|other] [--surface mobile|web|any] [--check ...] [--thread id] [--on YYYY-MM-DD [--at HH:MM]] [--replaces id,id]
 		// lifectl ask <id>                      show
@@ -985,6 +998,20 @@ func main() {
 type client struct {
 	base, token string
 	json        bool // --json: list commands print the raw JSON
+}
+
+// checkable: the open asks with a check_hint that are not decisions (only
+// the owner or the thread closes those), as id/title/kind/thread_id/check_hint.
+func checkable(asks []map[string]any) []map[string]any {
+	out := []map[string]any{}
+	for _, a := range asks {
+		hint, _ := a["check_hint"].(string)
+		if strings.TrimSpace(hint) == "" || a["state"] != "open" || a["kind"] == "decision" {
+			continue
+		}
+		out = append(out, map[string]any{"id": a["id"], "title": a["title"], "kind": a["kind"], "thread_id": a["thread_id"], "check_hint": hint})
+	}
+	return out
 }
 
 // list GETs a list route and prints one line per row: id, state, day, kind,

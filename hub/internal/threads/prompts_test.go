@@ -165,9 +165,25 @@ func TestPromptReferenceIsValidated(t *testing.T) {
 	}
 }
 
-// Dismissing an ask used to be recorded and nothing else: the session waited
-// forever on an answer that was never coming. Now "won't do" is a prompt.
-func TestDismissReachesTheAgent(t *testing.T) {
+// A bare Dismiss puts the card away and wakes nobody; the Won't do button is
+// a prompt with outcome wont, and a dismissal with words carries them.
+func TestBareDismissIsSilent(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Plan the trip.", "", "", nil)
+	complete(t, m, th.ID, "Waiting on the owner.")
+	a, _ := m.AddAsk(th.ID, "", "Email the venue about the rain plan.", "", "other", "")
+	before, _ := m.Messages(th.ID, 50)
+	b, err := m.ResolveAsk(a.ID, "dismissed", "owner", "")
+	if err != nil || b.State != "dismissed" {
+		t.Fatalf("%+v %v", b, err)
+	}
+	after, _ := m.Messages(th.ID, 50)
+	if len(after) != len(before) {
+		t.Fatalf("a bare Dismiss reached the session: %+v", after[len(after)-1])
+	}
+}
+
+func TestDismissWithWordsReachesTheAgent(t *testing.T) {
 	m, _, _ := setup(t)
 	th, _ := m.Create("", "life", "", "Set up the sync.", "", "", nil)
 	complete(t, m, th.ID, "Waiting on the token.")
