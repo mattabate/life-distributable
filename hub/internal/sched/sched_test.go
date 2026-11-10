@@ -168,8 +168,10 @@ func TestAskVerifierPromptNamesWhatItsGrantRefuses(t *testing.T) {
 				t.Errorf("ask-verifier's grant refuses %s and its prompt does not say so", refused)
 			}
 		}
-		if !strings.Contains(j.Prompt, "never pipe") || !strings.Contains(j.Prompt, "Gmail") {
-			t.Errorf("ask-verifier's prompt must say to read `lifectl asks --json` unpiped and to leave Gmail hints: %s", j.Prompt)
+		// `lifectl asks --json` outgrew the inline result, was saved to a
+		// file, and each hour the job tried `cd …; grep` on it.
+		if !strings.Contains(j.Prompt, "never pipe") || !strings.Contains(j.Prompt, "Gmail") || !strings.Contains(j.Prompt, "`lifectl asks --checkable`") {
+			t.Errorf("ask-verifier's prompt must say to read `lifectl asks --checkable` unpiped and to leave Gmail hints: %s", j.Prompt)
 		}
 		return
 	}

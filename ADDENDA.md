@@ -1361,3 +1361,13 @@ Entry format:
 - Fix: the hub pins the decider hash in its database the first time it sees `ops/secrets/decider.hash`, and refuses every Approve and Deny while the file differs from that pin. Without `session_user` a session runs as you and could write the file with the hash of a code it chose; the old check only caught an emptied or deleted file (#182). The refusal goes on the action's record, and `hub.log` gets a `decider: TAMPERED` line. `ops/decider-set.sh`, run in a terminal, moves the pin before it replaces the file, so a rotation works, and if the database is locked it changes nothing and says so. A hub armed before this pins the file it finds.
 - How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/actions/decider.go`, `decider_test.go`, `hub/internal/server/actions.go`, `ops/decider-set.sh`, `hub/CLAUDE.md`.
 - Reported by @ponponpon888 (#182).
+
+## add-0191 · 2026-11-10 · Dismiss with no words wakes nobody
+- For: everyone
+- Fix: Dismiss on a card with no words typed closes it and wakes no session. Before, it queued a "Won't do" prompt and started the agent, which read it as a decline and could note never to raise the thing again. Won't do stays its own button for when you mean to tell the agent something, and a dismissal with words still carries them. On the phone's calendar the swipe reads Dismiss, never Won't do.
+- How: same merge as add-0008, then `make check`, `ops/hub.sh restart` and `make ship` for the app. By hand: `hub/internal/threads/asks.go`, `prompts_test.go`, `app/Life/Sources/CalendarView.swift`.
+
+## add-0192 · 2026-11-10 · The ask verifier reads a short list
+- For: everyone with the hourly `ask-verifier` job on
+- Fix: `lifectl asks --checkable` prints only the open asks the verifier may close (a check hint, not a decision), five fields each, and the job's prompt now reads that instead of `lifectl asks --json`. On a busy board the whole list outgrew a session's inline result, was saved to a file, and every run tried `cd` and `grep` on it, which its grant refuses.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart` (the job's prompt). By hand: `hub/cmd/lifectl/main.go`, `main_test.go`, `hub/internal/sched/sched_test.go`, `ops/schedule.json`.

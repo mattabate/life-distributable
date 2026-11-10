@@ -704,7 +704,9 @@ struct CalendarView: View {
                 // Homework is a tick: the hub's Did it / Skip, nothing to say;
                 // a reminder (no outcomes) is Read; any other open row, Done / Dismiss.
                 Button { Task { await resolve(e, "done") } } label: { Label(e.outcomeLabel("done") ?? (e.isNote ? "Read" : "Done"), systemImage: "checkmark") }.tint(.green)
-                Button { Task { await resolve(e, "dismissed") } } label: { Label(e.outcomeLabel("wont") ?? "Dismiss", systemImage: "xmark") }.tint(.gray)
+                // A bare dismissal wakes nobody, so it never wears "Won't do",
+                // the button that sends words; Skip and Drop keep theirs.
+                Button { Task { await resolve(e, "dismissed") } } label: { Label(e.outcomeLabel("wont").flatMap { $0 == "Won't do" ? nil : $0 } ?? "Dismiss", systemImage: "xmark") }.tint(.gray)
             } else if e.isItem && e.isClosed {
                 // Closed by mistake → flip it back. Reopen alone, as on the
                 // console: a closed step of the owner's re-closes with words, never a bare Dismiss.
