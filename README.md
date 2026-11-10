@@ -37,6 +37,13 @@ Clone github.com/mattabate/life-distributable and set up my life agent. Follow i
 
 The agent walks you through setup from there.
 
+**Use it at your own risk.** life is free, open source software, provided as
+is with no warranty (see the [LICENSE](LICENSE)). The agents act for you, so
+they can spend money, send messages, delete files and share data. The approval
+step is there to catch that, and keeping it on is up to you. You are
+responsible for what your copy does, and nothing it tells you is legal,
+financial or medical advice.
+
 ⭐ **[Star it][repo]** to get developer addenda: new features and fixes land
 in [ADDENDA.md](ADDENDA.md) every week, and your agent brings each one to you.
 
