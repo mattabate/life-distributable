@@ -74,6 +74,14 @@ You don't need to be technical.
 5. Follow the instructions the agent gives you. It will ask what features
    you want at the start.
 
+## What people use it for
+
+- Plan your week
+- Track spending, and stick to an investing plan
+- Keep up with your health and your errands
+- Practice an instrument
+- Grow an audience, or ship a side project
+
 ## How it works
 
 - **Calendar.** The agents keep a calendar of what they need to do for you, and you for them.
