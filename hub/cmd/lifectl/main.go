@@ -671,14 +671,40 @@ func main() {
 			c.call("POST", "/api/v1/calendar/"+id+"/resolve", map[string]string{"state": state, "by": by, "note": note})
 			return
 		}
+		// lifectl cal [from] [to] [--all]: a repeat prints on its first day
+		// only, and the day's log (done actions, answered cards) is left out;
+		// --all prints everything (a busy month runs past the 30 KB a
+		// session's tool reads).
+		var days []string
+		all := false
+		for _, a := range os.Args[2:] {
+			if a == "--all" {
+				all = true
+			} else {
+				days = append(days, a)
+			}
+		}
 		from, to := "", ""
-		if len(os.Args) > 2 {
-			from = os.Args[2]
+		if len(days) > 0 {
+			from = days[0]
 		}
-		if len(os.Args) > 3 {
-			to = os.Args[3]
+		if len(days) > 1 {
+			to = days[1]
 		}
-		c.list("/api/v1/calendar?from=" + from + "&to=" + to)
+		path := "/api/v1/calendar?from=" + from + "&to=" + to
+		if c.json || all {
+			c.list(path)
+			return
+		}
+		var v any
+		c.fetch(path, &v)
+		repeats, log := onceEach(v)
+		if printRows(os.Stdout, "", v) == 0 {
+			fmt.Println("(none)")
+		}
+		if repeats+log > 0 {
+			fmt.Printf("(not shown: %d later days of repeating items, %d done actions and answered cards; --all prints them)\n", repeats, log)
+		}
 	case "recs":
 		// lifectl recs [open|all|deferred|accepted|declined|expired] [--domain d] [--kind k] [--goal g] [--due YYYY-MM-DD] [--under N] [--model id]
 		// lifectl recs stats                            the track record
@@ -775,20 +801,35 @@ func main() {
 				"note": strings.Join(os.Args[4:], " ")})
 		}
 	case "threads":
-		// lifectl threads                       every non-archived session (JSON)
+		// lifectl threads [--all] [--json]      the sessions not done and the standing
+		//   ones, one line each (--all adds the rest)
 		// lifectl threads --q <words> [--archived]   the sessions whose title, goal,
 		//   standing prompt, last message or cards carry every word — one line each:
 		//   the way to find the session with experience before `lifectl relay`.
 		fs := flag.NewFlagSet("threads", flag.ExitOnError)
 		q := fs.String("q", "", "words to match (all of them, any case)")
 		archived := fs.Bool("archived", false, "include archived sessions")
+		all := fs.Bool("all", false, "include the done sessions")
 		fs.Parse(os.Args[2:])
 		query := ""
 		if *archived {
 			query = "&archived=1"
 		}
 		if *q == "" {
-			c.list("/api/v1/threads?" + strings.TrimPrefix(query, "&"))
+			path := "/api/v1/threads?" + strings.TrimPrefix(query, "&")
+			if c.json || *all {
+				c.list(path)
+				return
+			}
+			var v []any
+			c.fetch(path, &v)
+			v, done := notDone(v)
+			if printRows(os.Stdout, "", v) == 0 {
+				fmt.Println("(none)")
+			}
+			if done > 0 {
+				fmt.Printf("(%d done sessions not shown; --all prints them, --q finds one)\n", done)
+			}
 			return
 		}
 		var rows []struct {
@@ -1014,6 +1055,58 @@ func checkable(asks []map[string]any) []map[string]any {
 	return out
 }
 
+// onceEach drops every calendar day's entry of a repeating item or run after
+// its first day (keyed by ref: a run's id changes each day, its ref does
+// not), and the day's log (action: and did: rows), and says how many of
+// each it dropped.
+func onceEach(v any) (repeats, log int) {
+	m, _ := v.(map[string]any)
+	days, _ := m["days"].([]any)
+	seen := map[string]bool{}
+	for _, d := range days {
+		dm, ok := d.(map[string]any)
+		if !ok {
+			continue
+		}
+		entries, _ := dm["entries"].([]any)
+		kept := []any{}
+		for _, e := range entries {
+			o, _ := e.(map[string]any)
+			key := scalar(o["ref"])
+			if key == "" {
+				key = scalar(o["id"])
+			}
+			if id := scalar(o["id"]); strings.HasPrefix(id, "action:") || strings.HasPrefix(id, "did:") {
+				log++
+				continue
+			}
+			if o != nil && scalar(o["repeat"]) != "" && key != "" {
+				if seen[key] {
+					repeats++
+					continue
+				}
+				seen[key] = true
+			}
+			kept = append(kept, e)
+		}
+		dm["entries"] = kept
+	}
+	return repeats, log
+}
+
+// notDone keeps the sessions whose status is not done, and every standing
+// one: a role or a scheduled session rests at done between its turns.
+func notDone(rows []any) ([]any, int) {
+	kept := []any{}
+	for _, r := range rows {
+		if o, ok := r.(map[string]any); ok && o["status"] == "done" && scalar(o["persona"]) == "" && scalar(o["schedule"]) == "" {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept, len(rows) - len(kept)
+}
+
 // list GETs a list route and prints one line per row: id, state, day, kind,
 // goal, title. A full calendar or recs dump is hundreds of KB, clipped by the
 // calling session's tool anyway. `lifectl <id>` still shows one row whole;
@@ -1033,7 +1126,7 @@ func (c client) list(path string) {
 
 // rowFields: what a row line carries, in order; title last. from/until are an
 // away span's days.
-var rowFields = []string{"id", "status", "state", "kind", "day", "cal_day", "from", "until", "at", "window", "schedule_label", "goal_id", "thread_title"}
+var rowFields = []string{"id", "status", "state", "kind", "day", "cal_day", "from", "until", "at", "repeat", "window", "schedule_label", "goal_id", "thread_title"}
 
 // printRows prints every object found in v as one line, a nested array of
 // objects under a "key:" heading, and returns how many rows it printed.
