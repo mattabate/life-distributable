@@ -1371,3 +1371,8 @@ Entry format:
 - For: everyone with the hourly `ask-verifier` job on
 - Fix: `lifectl asks --checkable` prints only the open asks the verifier may close (a check hint, not a decision), five fields each, and the job's prompt now reads that instead of `lifectl asks --json`. On a busy board the whole list outgrew a session's inline result, was saved to a file, and every run tried `cd` and `grep` on it, which its grant refuses.
 - How: same merge as add-0008, then `make check` and `ops/hub.sh restart` (the job's prompt). By hand: `hub/cmd/lifectl/main.go`, `main_test.go`, `hub/internal/sched/sched_test.go`, `ops/schedule.json`.
+
+## add-0193 · 2026-11-11 · lifectl threads and cal print a short list
+- For: everyone
+- Fix: `lifectl threads` leaves out finished sessions (the standing ones, a role or a scheduled check-in, stay listed), and `lifectl cal` prints a repeating item or scheduled run on its first day only and leaves out the day's log of done actions and answered cards. Each says how many it left out, and `--all` prints everything; `--json` is unchanged. A calendar line now shows the item's repeat. After a few months both lists ran past the 30 KB a session's tool reads, so the session saw a clipped list.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/cmd/lifectl/main.go`, `main_test.go`.

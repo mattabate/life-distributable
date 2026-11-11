@@ -135,6 +135,34 @@ func TestPrintRowsCalendarDays(t *testing.T) {
 	}
 }
 
+// `cal` prints a repeating item or run on its first day only and leaves the
+// day's log out; a one-off stays on its day.
+func TestCalOnceEach(t *testing.T) {
+	var v any
+	json.Unmarshal([]byte(`{"days":[
+		{"day":"2026-11-11","entries":[{"id":"cal-1","ref":"cal:cal-1","repeat":"daily","title":"Vitamins"},{"id":"run:g:1","ref":"thread:g","repeat":"daily@04:00","title":"Sweep"}]},
+		{"day":"2026-11-12","entries":[{"id":"cal-1","ref":"cal:cal-1","repeat":"daily","coming":true,"title":"Vitamins"},{"id":"run:g:2","ref":"thread:g","repeat":"daily@04:00","title":"Sweep"},{"id":"cal-2","title":"Dentist"},{"id":"action:20261112-1","title":"Land 1 commit(s) on main"},{"id":"did:ask:ask-1","title":"Read it"}]}]}`), &v)
+	if r, l := onceEach(v); r != 2 || l != 2 {
+		t.Fatalf("hid %d repeats, %d log; want 2, 2", r, l)
+	}
+	var b strings.Builder
+	printRows(&b, "", v)
+	want := "days:\n2026-11-11\n  cal-1  daily  Vitamins\n  run:g:1  daily@04:00  Sweep\n2026-11-12\n  cal-2  Dentist\n"
+	if b.String() != want {
+		t.Fatalf("got\n%q\nwant\n%q", b.String(), want)
+	}
+}
+
+// `threads` leaves the done sessions out, but keeps the standing ones.
+func TestThreadsNotDone(t *testing.T) {
+	var v []any
+	json.Unmarshal([]byte(`[{"id":"a","status":"done"},{"id":"b","status":"idle"},{"id":"c","status":"needs_you"},{"id":"s","status":"done","persona":"staff"},{"id":"w","status":"done","schedule":"weekly@Mon 09:00"}]`), &v)
+	kept, done := notDone(v)
+	if done != 1 || len(kept) != 4 {
+		t.Fatalf("kept %v, done %d", kept, done)
+	}
+}
+
 // An away span's line says which days it covers.
 func TestPrintRowsAwaySpan(t *testing.T) {
 	var v any
