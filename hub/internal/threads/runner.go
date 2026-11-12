@@ -54,6 +54,10 @@ const (
 	// (heldResult) becomes the reply anyway after this long with no output —
 	// the task's notification never came, and the text should not be lost.
 	holdTTL = 15 * time.Minute
+	// bgIdleTTL: an idle process with a background task pending is kept this
+	// long instead of idleTTL, so its wakes land in it, not in a second
+	// process beside it; a task that never notifies still cannot leak it.
+	bgIdleTTL = 3 * time.Hour
 	// hangTTL: a turn in flight with no background task pending that printed
 	// nothing for this long has a tool call that will never return (for
 	// example a shell call waiting on an OS permission prompt nobody can
@@ -425,7 +429,9 @@ func (m *Manager) runRef(id, author, role, kind, text string, attachments []stri
 			// idle CAPPED process (a check-in wake's dollar cap) when what
 			// arrives runs uncapped: the owner's message must not run under a
 			// check-in's cap and leave half the plan queued as a later wake.
-			if r.busy == 0 {
+			// Not one with a background task pending: closed, it lives on for
+			// the task beside the next process (see Poll's idle case).
+			if r.busy == 0 && r.tasks == 0 {
 				want := m.resolve(t, kind)
 				if r.model != "" && want.Model != "" && want.Model != r.model {
 					log.Printf("thread %s: %s wake wants %s, process is on %s: closing it", id, kind, want.Model, r.model)
@@ -1235,10 +1241,34 @@ func (m *Manager) Poll() {
 			m.tmux("kill-session", "-t", m.tmuxSession(r.thread, r.id))
 			os.WriteFile(r.out+".err", []byte(hangText), 0o600)
 			m.finishProcess(r)
-		case r.busy == 0 && r.eof == 0 && now.Sub(r.lastOutput) > idleTTL:
+		case r.busy == 0 && r.eof == 0 && now.Sub(r.lastOutput) > idleTTL && (r.tasks == 0 || now.Sub(r.lastOutput) > bgIdleTTL):
+			// Not while a background task is pending: the closed process
+			// lives on for its task, the next wake launches a second one
+			// beside it, and when the task notifies, the old one opens a turn
+			// of its own that never saw the open cards, so each progress line
+			// became a new read card.
 			m.sendEOF(r)
 		}
 	}
+}
+
+// updateCard: the open read card a reply-minted read card rewords instead of
+// standing beside: the chat's newest, raised since the owner's last message
+// there. With nothing from the owner in between, the next reply is the same
+// update moving on, not a new one. A card from before the owner's newest
+// message stays: the reply answers what they said.
+func (m *Manager) updateCard(threadID, kind string, open []Ask) (Ask, bool) {
+	if kind != "read" {
+		return Ask{}, false
+	}
+	for i := len(open) - 1; i >= 0; i-- {
+		a := open[i]
+		if a.Kind != "read" || a.State != "open" || a.Step() || a.CalID != "" {
+			continue
+		}
+		return a, !m.WroteSince(threadID, a.CreatedAt)
+	}
+	return Ask{}, false
 }
 
 // ofProcess matches a process's messages: its first turn is run_id = r.id,
@@ -2242,7 +2272,12 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 			var tname string
 			m.db.QueryRow(`SELECT title FROM threads WHERE id=?`, threadID).Scan(&tname)
 			title, detail, say := cardFromReply(text, tname)
-			if a, err := m.AddAskSaid(threadID, r.id, title, detail, replyKind(say, detail), "", "", say); err == nil {
+			kind := replyKind(say, detail)
+			if prev, ok := m.updateCard(threadID, kind, raised); ok {
+				if a, err := m.RewordAsk(prev.ID, title, detail, say, "hub"); err == nil {
+					fresh = append(fresh, a)
+				}
+			} else if a, err := m.AddAskSaid(threadID, r.id, title, detail, kind, "", "", say); err == nil {
 				fresh = append(fresh, a)
 			}
 		} else {
@@ -2260,12 +2295,15 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 	// A turn on the owner's message that ended with no words at all - not even
 	// the sentinel a finished session ends on - and no card answered nothing:
 	// it runs once more, told so; a second silent end is a red card (retry.go
-	// silentEnd).
+	// silentEnd). A quiet [end] after the owner's question, with nothing
+	// touched or handed on, re-runs once too; a re-run that still ends on
+	// [end] judged no answer owed, so no card.
 	silent, noAnswer := "", false
-	if ok == 1 && streamed == "" && len(fresh) == 0 {
-		if said, retried := m.silentEnd(threadID, turn); said != "" && !retried {
+	ended := isEndSentinel(streamed)
+	if ok == 1 && (streamed == "" || ended) && len(fresh) == 0 {
+		if said, retried := m.silentEnd(threadID, turn, ended); said != "" && !retried {
 			silent = said
-		} else if retried {
+		} else if retried && !ended {
 			if a, err := m.AddAsk(threadID, r.id, "No answer", "The session ended twice on your message without a reply or a card. Restart runs it again.", "error", ""); err == nil {
 				fresh, noAnswer = append(fresh, a), true
 			}

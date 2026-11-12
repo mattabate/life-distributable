@@ -606,7 +606,15 @@ func (m *Manager) CancelPrompt(id string) (Prompt, error) {
 	if p.State != "queued" {
 		return p, errors.New("prompt is already " + p.State)
 	}
-	m.db.Exec(`UPDATE prompts SET state='cancelled' WHERE id=?`, id)
+	// Only while still queued: a delivery that claimed it since the read wins.
+	res, err := m.db.Exec(`UPDATE prompts SET state='cancelled' WHERE id=? AND state='queued'`, id)
+	if err != nil {
+		return p, err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		cur, _ := m.GetPrompt(id)
+		return cur, errors.New("prompt is already " + cur.State)
+	}
 	if p.Repeat != "" && !strings.HasPrefix(p.Target, "job:") {
 		if _, err := m.Get(p.Target); err == nil {
 			m.postScheduleCard(p.Target, "", "")
@@ -643,6 +651,14 @@ func (m *Manager) Standing(target string) (Prompt, bool) {
 func (m *Manager) StandingRepeat(target string) (string, bool) {
 	p, ok := m.Standing(target)
 	return p.Repeat, ok
+}
+
+// SetStandingText rewords target's standing row in place, so a job whose
+// prompt changed but whose cadence did not keeps its not_before (#191: the
+// agenda kept the old first line).
+func (m *Manager) SetStandingText(target, text string) error {
+	_, err := m.db.Exec(`UPDATE prompts SET text=? WHERE target=? AND state='queued' AND repeat!='' AND text!=?`, text, target, text)
+	return err
 }
 
 // StandingTargets lists every target with a standing row under prefix
@@ -834,7 +850,25 @@ func (m *Manager) fireStanding(p Prompt, now time.Time) {
 
 // sendPrompt hands one to a session: the named one if it is still there,
 // otherwise (target new / new-or) a fresh one carrying the same text.
+//
+// The row is claimed first, queued → delivered, and only the caller that moved
+// it sends: Queue's inline send and the minute tick could both read a just-due
+// row as queued and each deliver it, and a cancel in that gap was overwritten
+// by the stamp (#190). Claiming as 'delivered' rather than a new state keeps
+// every reader of the states as it was; a failure below moves it to failed,
+// and a crash mid-send leaves it delivered with no thread, never sent twice.
 func (m *Manager) sendPrompt(p Prompt) (Prompt, error) {
+	res, err := m.db.Exec(`UPDATE prompts SET state='delivered', delivered_at=? WHERE id=? AND state='queued'`, ts(time.Now()), p.ID)
+	if err != nil {
+		return p, fmt.Errorf("claim: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		cur, err := m.GetPrompt(p.ID)
+		if err != nil {
+			return p, err
+		}
+		return cur, nil // another caller has it, or it was cancelled: not ours to send
+	}
 	fail := func(err error) (Prompt, error) {
 		m.db.Exec(`UPDATE prompts SET state='failed', error=? WHERE id=?`, err.Error(), p.ID)
 		p.State, p.Error = "failed", err.Error()
@@ -866,9 +900,12 @@ func (m *Manager) sendPrompt(p Prompt) (Prompt, error) {
 	} else if err := m.runRef(threadID, p.Author, role, kind, p.Text, p.Attachments, p.Replies, ""); err != nil {
 		return fail(err)
 	}
-	m.db.Exec(`UPDATE prompts SET state='delivered', delivered_at=?, delivered_thread=? WHERE id=?`, ts(time.Now()), threadID, p.ID)
-	p.State, p.DeliveredThread = "delivered", threadID
 	now := time.Now()
+	if _, err := m.db.Exec(`UPDATE prompts SET delivered_at=?, delivered_thread=? WHERE id=?`, ts(now), threadID, p.ID); err != nil {
+		// Sent and still claimed, so never re-sent; only the thread link is lost.
+		log.Printf("prompt %s: delivered to %s, stamp failed: %v", p.ID, threadID, err)
+	}
+	p.State, p.DeliveredThread = "delivered", threadID
 	p.DeliveredAt = &now
 	if m.OnDelivered != nil {
 		m.OnDelivered(p, threadID)

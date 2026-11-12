@@ -3,6 +3,7 @@ package threads
 import (
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -62,6 +63,62 @@ func TestSelfPromptWaitsForItsTime(t *testing.T) {
 	m.DuePrompts(time.Now().Add(2 * time.Hour))
 	if q, _ = m.GetPrompt(q.ID); q.State != "cancelled" {
 		t.Fatalf("%+v", q)
+	}
+}
+
+// A due one-shot has one delivery: Queue's inline send and the minute tick
+// both hold a queued copy of the row, and only the one that claims it sends
+// (#190). A cancel that lands first stops a copy read before it.
+func TestDuePromptIsDeliveredOnce(t *testing.T) {
+	m, _, _ := setup(t)
+	th, err := m.Create("", "life", "", "Ship the build.", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete(t, m, th.ID, "Kicked off the build.")
+	count := func(text string) int {
+		msgs, _ := m.Messages(th.ID, 100)
+		n := 0
+		for _, x := range msgs {
+			if x.Text == text {
+				n++
+			}
+		}
+		return n
+	}
+
+	p, err := selfPrompt(m, th.ID, "Check once.", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() { defer wg.Done(); m.sendPrompt(p) }()
+	}
+	wg.Add(1)
+	go func() { defer wg.Done(); m.DuePrompts(time.Now().Add(2 * time.Hour)) }()
+	wg.Wait()
+	if n := count("Check once."); n != 1 {
+		t.Fatalf("one due prompt became %d messages", n)
+	}
+	if got, _ := m.GetPrompt(p.ID); got.State != "delivered" || got.DeliveredThread != th.ID {
+		t.Fatalf("%+v", got)
+	}
+	if _, err := m.CancelPrompt(p.ID); err == nil {
+		t.Fatal("cancelled a prompt that was already delivered")
+	}
+
+	// Read as queued, cancelled, then the stale copy is sent: nothing goes out.
+	q, _ := selfPrompt(m, th.ID, "Never mind.", time.Now().Add(time.Hour))
+	if _, err := m.CancelPrompt(q.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := m.sendPrompt(q); err != nil || got.State != "cancelled" {
+		t.Fatalf("stale copy of a cancelled prompt: %+v %v", got, err)
+	}
+	if n := count("Never mind."); n != 0 {
+		t.Fatalf("a cancelled prompt was delivered %d times", n)
 	}
 }
 

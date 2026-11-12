@@ -33,11 +33,15 @@ RESULT="$ROOT/app/build/ui.xcresult"
 # screen recording and no screenshots). Queue instead of racing.
 LOCK="$ROOT/app/build/.ui-lock"
 mkdir -p "$ROOT/app/build"
+got=""
 for i in $(seq 1 240); do
-  mkdir "$LOCK" 2>/dev/null && break
+  mkdir "$LOCK" 2>/dev/null && { got=1; break; }
   [ "$i" = 1 ] && echo "app-ui: another walk holds the Simulator — waiting"
   sleep 5
 done
+# Twenty minutes and still held: stop. Walking on unlocked wipes the other
+# walk's pictures, and the trap would remove a lock that is not ours.
+[ -n "$got" ] || { echo "app-ui: $LOCK still held after 20 min (a dead walk? rmdir it)" >&2; exit 1; }
 trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 
 rm -rf "$OUT" "$RESULT"; mkdir -p "$OUT"

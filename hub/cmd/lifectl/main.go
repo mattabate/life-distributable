@@ -417,9 +417,9 @@ func main() {
 		}
 		c.list(path)
 	case "ask":
-		// lifectl ask add "title" [--detail ...] [--kind decision|access|physical|read|install|other] [--surface mobile|web|any] [--check ...] [--thread id] [--on YYYY-MM-DD [--at HH:MM]] [--replaces id,id]
+		// lifectl ask add "title" [--detail ...] [--kind decision|access|physical|read|install|other] [--surface mobile|web|any] [--check ...] [--thread id] [--on YYYY-MM-DD [--at HH:MM]] [--replaces id,id] [--new-topic]
 		// lifectl ask <id>                      show
-		// lifectl ask <id> done|dismiss|reopen ["what happened"]
+		// lifectl ask <id>[,<id>…] done|dismiss|reopen ["what happened"]
 		// lifectl ask <id> surface mobile|web|any
 		// lifectl ask <id> kind decision|access|physical|read|install|other
 		// lifectl ask <id> set [--title t] [--say s] [--detail d|@file]   reword an open card in place
@@ -439,6 +439,7 @@ func main() {
 			on := fs.String("on", "", "YYYY-MM-DD: hold it off the board until that day (it becomes an ask that morning)")
 			at := fs.String("at", "", "HH:MM with --on (default 08:00)")
 			replaces := fs.String("replaces", "", "id,id: this session's open cards the new one folds in (closed as it lands)")
+			newTopic := fs.Bool("new-topic", false, "a read card on a topic none of this session's open read cards cover (else the hub refuses it: update that card instead)")
 			fs.Parse(os.Args[4:])
 			if *thread == "" {
 				die("ask add: --thread required outside a session")
@@ -461,7 +462,7 @@ func main() {
 					"detail": text(*detail), "thread_id": *thread, "source": src, "ask_kind": *kind, "check_hint": *check, "surface": *surface, "say": *say})
 				return
 			}
-			c.call("POST", "/api/v1/asks", map[string]any{"thread_id": *thread, "run_id": os.Getenv("LIFE_RUN_ID"), "title": titleArg(os.Args[3]), "detail": text(*detail), "kind": *kind, "check": *check, "surface": *surface, "say": *say, "replaces": folded})
+			c.call("POST", "/api/v1/asks", map[string]any{"thread_id": *thread, "run_id": os.Getenv("LIFE_RUN_ID"), "title": titleArg(os.Args[3]), "detail": text(*detail), "kind": *kind, "check": *check, "surface": *surface, "say": *say, "replaces": folded, "new_topic": *newTopic})
 			return
 		}
 		id := os.Args[2]
@@ -500,7 +501,13 @@ func main() {
 		if len(os.Args) > 4 {
 			note = strings.Join(os.Args[4:], " ")
 		}
-		c.call("POST", "/api/v1/asks/"+id+"/resolve", map[string]string{"state": state, "by": by, "note": note})
+		if !strings.Contains(id, ",") {
+			c.call("POST", "/api/v1/asks/"+id+"/resolve", map[string]string{"state": state, "by": by, "note": note})
+			return
+		}
+		if !c.resolveMany(os.Stdout, id, state, by, note) {
+			os.Exit(1)
+		}
 	case "calendar", "cal":
 		// lifectl cal [from] [to]                      agenda (default today → +60d)
 		// lifectl cal add "title" --on YYYY-MM-DD [--at HH:MM] [--kind owner|homework|agent|note] [--detail d] [--goal g] [--thread id] [--repeat daily|weekly|monthly|yearly] [--nag minutes]
@@ -1240,7 +1247,40 @@ func (c client) fetch(path string, out any) {
 	}
 }
 
+// resolveMany closes or reopens several cards in one call (`ask a,b,c
+// dismiss note`), one line per card, so folding a pile is one command, not
+// one per card. False when any of them failed.
+func (c client) resolveMany(w io.Writer, ids, state, by, note string) bool {
+	ok := true
+	for _, one := range strings.Split(ids, ",") {
+		if one = strings.TrimSpace(one); one == "" {
+			continue
+		}
+		code, out := c.send("POST", "/api/v1/asks/"+one+"/resolve", map[string]string{"state": state, "by": by, "note": note})
+		if code >= 300 {
+			ok = false
+			fmt.Fprintf(w, "%s: %d %s\n", one, code, strings.TrimSpace(string(out)))
+			continue
+		}
+		fmt.Fprintf(w, "%s: %s\n", one, state)
+	}
+	return ok
+}
+
 func (c client) call(method, path string, body any) {
+	code, out := c.send(method, path, body)
+	var pretty bytes.Buffer
+	if json.Indent(&pretty, out, "", "  ") == nil {
+		out = pretty.Bytes()
+	}
+	fmt.Println(string(out))
+	if code >= 300 {
+		os.Exit(1)
+	}
+}
+
+// send is call without the printing: the status and the raw body.
+func (c client) send(method, path string, body any) (int, []byte) {
 	var rd io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -1266,14 +1306,7 @@ func (c client) call(method, path string, body any) {
 	}
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(resp.Body)
-	var pretty bytes.Buffer
-	if json.Indent(&pretty, out, "", "  ") == nil {
-		out = pretty.Bytes()
-	}
-	fmt.Println(string(out))
-	if resp.StatusCode >= 300 {
-		os.Exit(1)
-	}
+	return resp.StatusCode, out
 }
 
 // raw GETs a path and prints the body as it is (a workspace file is text,
@@ -1493,7 +1526,9 @@ asks      asks [active|all|open|answered|done|dismissed] [--thread id]
           ask add "title" [--detail d] [--kind decision|access|physical|read|install|other]
             [--surface mobile|web|any] [--check c] [--say "…"] [--thread id] [--on YYYY-MM-DD [--at HH:MM]]
             [--replaces id,id]   one card for one topic: closes this session's open cards it folds in
+            [--new-topic]        a read card beside an open one: only for a different topic (else update it: ask <id> set)
           ask <id> [done|dismiss|reopen [note] | surface mobile|web|any | kind k]
+          ask <id,id,…> done|dismiss|reopen [note]   close a pile in one call
 calendar  cal [from] [to]
           cal add "title" [--on YYYY-MM-DD] [--at HH:MM] [--kind owner|homework|agent|note|waiting] [--due on|by]
             [--detail d] [--goal g] [--thread id] [--repeat daily|weekly|monthly|yearly|every<N>d] [--nag min]

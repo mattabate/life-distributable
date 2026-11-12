@@ -1,6 +1,7 @@
 package threads
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -396,7 +397,7 @@ func TestPrunedTranscriptStartsLean(t *testing.T) {
 	th, _ := m.Create("", "life", "", "Do a thing.", "", "", nil)
 	complete(t, m, th.ID, "[end]")
 	m.Transcripts = t.TempDir()
-	if err := m.Send(th.ID, "still there?"); err != nil {
+	if err := m.Send(th.ID, "keep going"); err != nil {
 		t.Fatal(err)
 	}
 	if c := (*cmds)[len(*cmds)-1]; strings.Contains(c, "'--resume'") {
@@ -454,6 +455,50 @@ func TestSilentTurnRerunsOnceThenCards(t *testing.T) {
 	m.Poll()
 	if msgs, _ = m.Messages(th.ID, 50); msgs[len(msgs)-1].Role != "claude" {
 		t.Fatalf("a turn that touched a card was re-run: %+v", msgs[len(msgs)-1])
+	}
+}
+
+// A quiet [end] is an answer to a command, not to a question: the owner's
+// question that ended on [end] with nothing touched or handed on re-runs
+// once; a second [end] judged no answer owed, so no card.
+func TestEndAfterQuestionRerunsOnce(t *testing.T) {
+	end := `{"type":"result","subtype":"success","is_error":false,"result":"[end]","total_cost_usd":0.02,"session_id":"s"}` + "\n"
+	m, _, _ := setup(t)
+	cmd, _ := m.Create("", "life", "", "Archive the old drafts.", "", "", nil)
+	appendOut(t, pendingOut(t, m, cmd.ID), end)
+	m.Poll()
+	if msgs, _ := m.Messages(cmd.ID, 50); msgs[len(msgs)-1].Role != "claude" {
+		t.Fatalf("a command done quietly was re-run: %+v", msgs[len(msgs)-1])
+	}
+
+	th, _ := m.Create("", "life", "", "Where does the migration stand?", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	appendOut(t, out, end)
+	m.Poll()
+	msgs, _ := m.Messages(th.ID, 50)
+	if note := msgs[len(msgs)-1]; note.Role != "system" || !strings.HasPrefix(note.Text, noAnswerTag) {
+		t.Fatalf("question ended on [end] not re-run: %+v", msgs)
+	}
+	appendOut(t, out, end)
+	m.Poll()
+	if asks, _ := m.ListAsks("active", th.ID, 10); len(asks) != 0 {
+		t.Fatalf("a second [end] raised a card: %+v", asks)
+	}
+	if msgs, _ = m.Messages(th.ID, 50); msgs[len(msgs)-1].Role != "claude" {
+		t.Fatalf("re-ran twice: %+v", msgs[len(msgs)-1])
+	}
+
+	// Handed on (a relay or a wake): that answered.
+	h, _ := m.Create("", "life", "", "Can the other session fix the row?", "", "", nil)
+	hout := pendingOut(t, m, h.ID)
+	time.Sleep(5 * time.Millisecond)
+	if _, err := m.db.Exec(`INSERT INTO prompts (id, created_at, author, target, text) VALUES ('p-x',?,?,'other','fix the row')`, ts(time.Now()), "claude:thread:"+h.ID); err != nil {
+		t.Fatal(err)
+	}
+	appendOut(t, hout, end)
+	m.Poll()
+	if msgs, _ := m.Messages(h.ID, 50); msgs[len(msgs)-1].Role != "claude" {
+		t.Fatalf("a hand-off was re-run: %+v", msgs[len(msgs)-1])
 	}
 }
 
@@ -1328,6 +1373,76 @@ func TestSessionTokenEnv(t *testing.T) {
 	m.SessionToken = func(id string) string { return "tok-" + id }
 	if got := m.sessionTokenEnv("th-1"); got != " LIFE_SESSION_TOKEN='tok-th-1'" {
 		t.Fatalf("on: %q", got)
+	}
+}
+
+// A reply with no card, while the chat's read card from the last reply is
+// still open and the owner has said nothing since, rewords that card instead
+// of raising a second. After the owner's next message the reply is a new
+// card: it answers them.
+func TestReplyUpdatesTheOpenReadCard(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Archive the old repos.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	reply := func(s string) {
+		b, _ := json.Marshal(s)
+		appendOut(t, out, `{"type":"result","subtype":"success","is_error":false,"result":`+string(b)+`,"total_cost_usd":0.01,"session_id":"s"}`+"\n")
+		m.Poll()
+		time.Sleep(5 * time.Millisecond)
+	}
+	reads := func() []Ask {
+		var out []Ask
+		asks, _ := m.ListAsks("active", th.ID, 50)
+		for _, a := range asks {
+			if a.Kind == "read" {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
+	time.Sleep(5 * time.Millisecond)
+	reply("Say: The third archive batch has started.\n\nBatch 3 of 4 is running.")
+	reply("Say: The archive job is done.\n\nAll four batches finished.")
+	if r := reads(); len(r) != 1 || !strings.Contains(r[0].Said+r[0].Detail, "done") {
+		t.Fatalf("second reply raised a second card: %+v", r)
+	}
+	if err := m.Send(th.ID, "thanks, now the forks"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	reply("Say: The forks are archived too.")
+	if r := reads(); len(r) != 2 {
+		t.Fatalf("a reply to the owner's new message folded into the old card: %+v", r)
+	}
+}
+
+// A process with a background task pending is not closed at idleTTL (it
+// would live on for the task beside the next process); past bgIdleTTL it is.
+func TestIdleProcessWithBackgroundTaskStaysOpen(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		quiet time.Duration
+		tasks int
+		eof   bool
+	}{
+		{"idle", idleTTL + time.Minute, 0, true},
+		{"task pending", idleTTL + time.Minute, 1, false},
+		{"task never notified", bgIdleTTL + time.Minute, 1, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m, _, _ := setup(t)
+			th, _ := m.Create("", "life", "", "Archive the old repos.", "", "", nil)
+			out := pendingOut(t, m, th.ID)
+			appendOut(t, out, `{"type":"result","subtype":"success","is_error":false,"result":"[end]","total_cost_usd":0.01,"session_id":"s"}`+"\n")
+			m.Poll()
+			m.db.Exec(`UPDATE thread_runs SET last_output=?, bg_tasks=?, held='' WHERE thread_id=? AND finished_at IS NULL`, ts(time.Now().Add(-c.quiet)), c.tasks, th.ID)
+			m.Poll()
+			var eof int
+			m.db.QueryRow(`SELECT eof FROM thread_runs WHERE thread_id=? ORDER BY rowid DESC LIMIT 1`, th.ID).Scan(&eof)
+			if (eof == 1) != c.eof {
+				t.Fatalf("eof=%d, want %v", eof, c.eof)
+			}
+		})
 	}
 }
 

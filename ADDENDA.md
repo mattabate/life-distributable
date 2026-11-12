@@ -1376,3 +1376,86 @@ Entry format:
 - For: everyone
 - Fix: `lifectl threads` leaves out finished sessions (the standing ones, a role or a scheduled check-in, stay listed), and `lifectl cal` prints a repeating item or scheduled run on its first day only and leaves out the day's log of done actions and answered cards. Each says how many it left out, and `--all` prints everything; `--json` is unchanged. A calendar line now shows the item's repeat. After a few months both lists ran past the 30 KB a session's tool reads, so the session saw a clipped list.
 - How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/cmd/lifectl/main.go`, `main_test.go`.
+
+## add-0194 · 2026-11-12 · Ranged files are never gzipped, and a 304 takes any If-None-Match form
+- For: everyone
+- Fix: the gzip layer compresses only a plain 200 with no Content-Range and no Content-Encoding of its own. A ranged read of a static file or a blob answers 206 with a Content-Range in the file's own offsets, and gzipping that slice sent bytes the header did not describe, so a resumed download or a seek in a media file broke. A JSON GET now also answers 304 when If-None-Match is `*`, a comma list holding the tag, or the tag weakened with `W/` by a proxy; before, only the exact tag on its own matched.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/server/gzip.go`, `etag.go`, `gzip_test.go`.
+- Thanks @antongrizli (#176).
+
+## add-0195 · 2026-11-12 · A due prompt is sent once, a job's edited prompt shows, and agent runs never share a minute
+- For: everyone
+- Fix: three races in the hub's clock and calendar. A one-shot prompt that came due is now claimed (queued to delivered) before it is sent, and only the caller that claimed it sends: the inline send and the minute tick could both send it, and a cancel in that gap was overwritten; a cancel now only cancels a row that is still queued (#190). Editing a scheduled job's prompt without changing its cadence rewords its standing row in place, so the agenda shows the new first line and the next run time is kept (#191). Two agent items added at the same moment for one day each get their own wake minute: the minute is picked and written under one lock, where before both could read the first slot free (#192).
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/prompts.go`, `prompts_test.go`, `standing_test.go`, `hub/internal/sched/sched.go`, `sched_test.go`, `hub/internal/calendar/calendar.go`, `calendar_test.go`.
+- Thanks @jlsajfj (#190, #191, #192).
+
+## add-0196 · 2026-11-12 · The calendar refuses a same-day twin under another goal
+- For: everyone with team mode or several sessions filing calendar items
+- Fix: the near-duplicate guard also refuses a session's new item when an open item sits on the same day, under any goal or none, and most of the title words are shared. Before, the guard compared words only inside one goal, so two sessions could file the same event under two goals. Items that cite different rec or cal ids still never collide, and `--distinct "why"` still files it.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/calendar/calendar.go`, `calendar_test.go`.
+
+## add-0197 · 2026-11-12 · Dismissing a merge keeper as a duplicate of its own merged item is refused
+- For: everyone with several sessions tidying the calendar
+- Fix: when one session merges item A into B and another then dismisses B as "duplicate of A", both were gone and the day had no item. A session's dismissal of a keeper whose note names an item already merged into it is now refused with the reason; a keeper closed for any other reason still closes, and the owner's own Dismiss is never refused. A near-duplicate test that used a fixed 2026 date now uses 2030, so it does not break on that day.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/calendar/calendar.go`, `calendar_test.go`.
+
+## add-0198 · 2026-11-12 · A question answered with a bare [end] runs once more
+- For: everyone
+- Fix: a turn on the owner's message that asked a question (it holds a "?") and ended on `[end]`, with no card touched and nothing handed on (no wake or relay queued, no proposal made), now re-runs once, told it ended without an answer, the same way a turn with no words at all already did. A command done quietly still ends quietly, and a re-run that ends on `[end]` again is taken as "no answer owed" and raises no card. The re-run note now says so.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/retry.go`, `runner.go`, `runner_test.go`.
+
+## add-0199 · 2026-11-12 · An app walk stops when another holds the Simulator too long
+- For: everyone who runs `make app-ui`
+- Fix: `ops/app-ui.sh` waits up to 20 minutes for another walk's lock, then stops with a message naming the lock. Before, it walked on without the lock, wiped the other walk's pictures, and its exit trap removed a lock it did not own.
+- How: same merge as add-0008. By hand: `ops/app-ui.sh`.
+- Thanks @jlsajfj (#194).
+
+## add-0200 · 2026-11-12 · A hub restart never treats a failed read as no running actions
+- For: everyone
+- Fix: `ops/hub.sh restart` waits for running actions before it restarts the hub. A failed database read used to count as zero, so a locked database let the restart kill actions in flight. A failed read is now retried, and after 10 in a row the restart refuses and says so (`--now` still forces it).
+- How: same merge as add-0008. By hand: `ops/hub.sh`.
+- Thanks @jlsajfj (#195).
+
+## add-0201 · 2026-11-12 · The app never sends a message twice after a dropped connection
+- For: everyone with the phone or desktop app
+- Fix: when a connection drops mid-answer the app retried any request, so a Send that the hub had already handled (a Wi-Fi to cellular hand-off, say) could post the message twice and start two turns. A dropped connection is now retried only for GET, HEAD and PUT; a refused connect, which never reached the hub, still retries any request.
+- How: same merge as add-0008, then `make check` and `make ship` for the app. By hand: `app/Life/Sources/HubClient.swift`.
+- Thanks @jlsajfj (#196).
+
+## add-0202 · 2026-11-12 · The calendar turns its page at the hub's midnight
+- For: everyone with the phone or desktop app, most of all when the device is in another time zone than the hub
+- Fix: the app's calendar now reloads at midnight in the hub's time zone, so today's ring moves when the hub's day changes, and the device's own day-change notice asks the hub for today instead of guessing it from the device clock. Before, a phone in another time zone kept the hub's yesterday ringed.
+- How: same merge as add-0008, then `make check` and `make ship` for the app. By hand: `app/Life/Sources/CalendarView.swift`.
+- Thanks @jlsajfj (#198).
+
+## add-0203 · 2026-11-12 · api.md matches the code on owner-only routes, clock tasks and `lifectl run`
+- For: anyone reading `shared/api.md`
+- Fix: the owner-only list no longer says a session is refused a dismiss (it may dismiss its own proposal) and now names `PATCH /api/v1/settings`, the mic and the voice routes. The clock task table lists the tasks the hub really registers (quota, prompts, calendar, recs, usage, cert, backup-age, and badge and install with APNs only) instead of connector syncs that do not ship. `lifectl job run`, which does not exist, is `lifectl run <job>` there and in `hub/internal/sched/sched.go`'s comments.
+- How: same merge as add-0008. By hand: `shared/api.md`, `hub/internal/sched/sched.go`.
+- Thanks @jlsajfj (#197).
+
+## add-0204 · 2026-11-12 · The app says when the hub stops answering
+- For: everyone with the phone or desktop app
+- Fix: on a link that looks up but passes no traffic (a Wi-Fi sign-in page in front of Tailscale, say) no request fails for minutes, so the status dot stayed green over a stale Sessions list. If the board refresh gets no answer in 20 seconds the app now shows the error (the red dot and the Sessions banner), and the next answer clears it.
+- How: same merge as add-0008, then `make check` and `make ship` for the app. By hand: `app/Life/Sources/BoardStore.swift`.
+
+## add-0205 · 2026-11-12 · lifectl ask closes several cards in one call
+- For: everyone
+- Change: `lifectl ask <id>,<id>,… done|dismiss|reopen [note]` resolves each card with the same state and note and prints one line per card; a card that fails says why, the rest still go, and the command exits 1. A session folding a pile of cards into one makes one call instead of one per card.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/cmd/lifectl/main.go`, `main_test.go`.
+
+## add-0206 · 2026-11-12 · A helpers-only session's card is counted once
+- For: everyone
+- Fix: a session whose own turn is over but whose helpers (a shell, a subagent) still run, holding a card for you, sits under Your turn; its card was also still counted under Working, so the two headings' numbers ("· 1 working", "· 1 for you") added up to more cards than you had. The card now counts under Your turn only.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/attention/attention.go`, `attention_test.go`.
+- Thanks @jlsajfj (#193).
+
+## add-0207 · 2026-11-12 · One read card per topic, held by the hub
+- For: everyone
+- Fix: a session running a long background job raised a fresh read card for every step of it. The cause: the idle reaper closed its process while the task was pending, the CLI lived on, each wake started another process beside it, and the old one's task-done turn never saw the open cards. Now an idle process with a background task pending stays up to 3 hours and a wake does not close it; a reply with no card rewords the chat's newest open read card when you have written nothing there since (after your next message the reply is a new card); and a session's read card raised beside one of its open read cards is refused (409, naming the open card) unless `--replaces` folds it in or `--new-topic` says it is a separate topic. Decision cards and the hub's own cards are not gated. The session preamble says progress and finished work need no card.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/server/asks.go`, `server_test.go`, `hub/internal/threads/runner.go`, `runner_test.go`, `threads.go`, `hub/cmd/lifectl/main.go`, `shared/api.md`.
+
+## add-0208 · 2026-11-12 · A video in a card plays in place
+- For: everyone
+- Fix: a link to a video blob (mp4, mov, m4v, webm) in a card or reply is a player in place, not a link that took the desktop app's whole window or a chip that fetched the whole file into Quick Look. The console draws a `<video>` with Full screen and Download under it (saved under the link's text). The phone and desktop app stream the hub's blob URL into a player behind a frame of the video and a play button, with Full screen (on the Mac the window goes full screen with it), Download with its percent (the Mac saves to Downloads, the phone offers the Files sheet) and, on the Mac, Open in QuickTime. WebM has no player in the app: Download only. A read card whose detail links a video blob wears the word `watch` and the button "Watched it", and is a read card in every other rule.
+- How: same merge as add-0008, then `make check`, `make webcheck`, `ops/hub.sh restart` and `make ship` for the app. By hand: `hub/internal/server/web/ui.js`, `app.css`, `test/ui.test.js`, `hub/internal/store/close.go`, `close_test.go`, `hub/internal/threads/asks.go`, `shared/api.md`, `app/Life/Sources/Attachments.swift`, `StyledText.swift`, `MacShot.swift`.

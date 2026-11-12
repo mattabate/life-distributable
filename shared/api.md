@@ -16,11 +16,13 @@ in place of the hub token. It is `s1.<id>.<hex HMAC-SHA256 of the id under
 the hub token>`, so nothing is stored. With it the hub sets `X-Life-Thread`
 to that session whatever the caller sent, and writes the session as `by` and
 `author` into every JSON object body. It is refused (403) on the owner-only
-routes: the approve/deny/dismiss/reopen of an action, `POST
-/api/v1/spend/budget/clear`, `PUT /api/v1/spend/model`, `PUT /api/v1/usage`,
-`POST /api/v1/threads/{id}/messages`, `POST /api/v1/devices`, `POST
-/api/v1/app/install`, `POST /api/v1/app/mac` and `POST
-/api/v1/recs/{id}/reply`; on observations with source `app`, `health` or
+routes: the approve/deny/reopen of an action (a session may dismiss only
+its own open proposal; another session's answers 403), `POST
+/api/v1/spend/budget/clear`, `PUT /api/v1/spend/model`, `PATCH
+/api/v1/settings`, `PUT /api/v1/usage`, `POST /api/v1/threads/{id}/messages`,
+`POST /api/v1/devices`, `POST /api/v1/app/install`, `POST /api/v1/app/mac`,
+`POST /api/v1/recs/{id}/reply`, `POST` and `GET /api/v1/mic`, `POST
+/api/v1/voice` and `POST /api/v1/voice/hush`; on observations with source `app`, `health` or
 `phone`; and on `POST /api/v1/threads` from a job (a session's own new one is
 its sub-session). The hub token is the owner's and passes all of them.
 Errors: `{"error": "..."}` with a 4xx/5xx status.
@@ -212,7 +214,7 @@ Every Action carries `outcomes: [{value, label, hint?}]` — the buttons on its 
 Every Ask, Action and Rec row also carries where it stands with the owner (`store/close.go` AskStanding / ActionStanding / RecStanding — review-primitives step 7; the clients' own state lists are deleted):
 - `open` bool — the owner's move: their buttons show (an ask `open`; a proposal `proposed`; a rec `proposed`).
 - `closed` bool — finished: ✓/✕, no buttons. An `answered` ask is neither open nor closed (the owner's words went in, the card waits on its session), and so is a `deferred` rec (parked: it keeps its buttons, off the open list).
-- `folded` string, omitted when empty — a silent close drawn as one grey line with Reopen: `dismissed` (a dismissed ask or proposal; a rec `expired` with the note `dismissed`), or `read` (a read ask closed with its own button, resolution "Read it").
+- `folded` string, omitted when empty — a silent close drawn as one grey line with Reopen: `dismissed` (a dismissed ask or proposal; a rec `expired` with the note `dismissed`), or `read` (a read ask closed with its own button, resolution "Read it", or "Watched it" on a read ask whose detail links a video blob, which also carries verb `watch`).
 - `lane` string — whose colour: `mine` | `chores` (a step of a dated item no session is behind that is owed `on` its day or repeats, 2026-09-27; a sessionless one-off `by` step is `mine`, 2026-10-19) | `homework` (a practice ask) | `recs` (every rec) | `agents` (a closed row an agent, the hub or the gate closed).
 - `window` string (2026-09-27, the `items` table) — when it is owed: `now` (an ask, a proposal) | `on` (its day only) | `by` (owed until its day, overdue after) | `soon` (no day: an undated to-do, every rec). A calendar item carries it too, and so does every agenda entry that is an item (omitted on a run or a job).
 - `reopen` bool, omitted when false — a closed card that carries Reopen: every closed ask but an `install` or `superseded` one (an ask → `open`), every closed rec but a `superseded` one (→ `proposed`), and a `dismissed` proposal (a decided one already ran or was refused).
@@ -242,7 +244,7 @@ Re-reads ops/schedule.json → Table. 400 on a bad table (old one stays).
 Fires the job now → 202 `{job, status:"started"}`. 404 unknown job.
 
 ### GET /api/v1/runs
-Query `job`, `limit`. → `[{id, job, started_at, finished_at?, ok?, summary?, output?, error?, cost_usd, session_id?, prompt_id?}]` newest first. `prompt_id` names the wake (child prompt row) a scheduled run answered; absent for `lifectl job run` and runs before 2026-08-28.
+Query `job`, `limit`. → `[{id, job, started_at, finished_at?, ok?, summary?, output?, error?, cost_usd, session_id?, prompt_id?}]` newest first. `prompt_id` names the wake (child prompt row) a scheduled run answered; absent for `lifectl run <job>` and runs before 2026-08-28.
 
 ### GET /api/v1/runs/{id}
 → the Run above + `text` (the prose the model wrote before its JSON envelope, if any), `findings: [{kind, title, detail, exec_type, exec_payload}]`, `needs_you: [string]` (both `[]` when the output did not parse). A proposal from a scheduled job has no session; its `run_id` is this id, and both surfaces open the card on this read. 404 for an unknown id.
@@ -258,11 +260,11 @@ it; absent (an older hub, or a Mac whose zone has no findable name) they use
 the device's own zone.
 
 ClockTask: `{name, every, next_due, last_start?, last_end?, running, last_error?, runs, errors, syncer?}` —
-`syncer` marks a task registered with `clock.Sync` (it pulls from outside; each run lands in `sync_runs`) —
+`syncer` marks a task registered with `clock.Sync` (it pulls from outside; each run lands in `sync_runs`; none ships, a source an agent builds registers one) —
 one row per housekeeping loop on the hub's one ticker (`internal/clock`, 2026-08-28):
-`prompts` (the wake, 1m), `calendar` (asks + nags, 1m), `install` (1m), `quota`
-(10m), `recs` (6h), `finance`/`audience`/`mail`/`prices` (6h), `statements`
-(24h). `every` is human ("1m", "6h"); `last_error` is the last run's error and
+`quota` (10m), `prompts` (the wake, 1m), `calendar` (asks + nags, 1m), `recs`
+(6h), `usage` (the opt-in heartbeat, 7d), `cert` (24h), `backup-age` (6h), and,
+only with APNs configured, `badge` (1m) and `install` (1m). `every` is human ("1m", "6h"); `last_error` is the last run's error and
 is cleared by the next success; `errors` counts failed runs since boot. A task
 never overlaps itself: still running when due → skipped, due again on the
 first tick after it finishes. Both Settings screens print the table.
@@ -497,7 +499,7 @@ Body `{author?=owner, target|new, text, in_reply_to?, outcome?, replies?: [{ref,
 Query `state` (default `active` = open+answered; `all`; or one state), `thread`, `limit` (default 200). The newest `limit`, oldest first. No per-ask web page (removed 2026-09-15): the chat card shows the whole detail.
 
 ### POST /api/v1/asks
-Body `{thread_id, title, detail?, kind?=other, surface?, check?, run_id?, say?, replaces?}` → 201 Ask, plus `note` when the new card is a read card and the thread holds other open read cards: it names them and says how to fold, so a session folds by topic while raising; a nudge, nothing is closed. 400 on bad kind / unknown thread. `replaces` (`lifectl ask add --replaces id,id`) lists the same thread's open cards the new one folds in: each is closed `dismissed` with "folded into <new id>" once the new card exists; any id that is not an open card on this thread is a 400 and nothing is raised. `say` (`lifectl ask add --say`) is the sentence the push SPEAKS in place of "To read — title" (≤400 chars, else the label form goes out); it is said, never stored. `surface` omitted or unrecognised = inferred from the text. `run_id` omitted (lifectl reads it from `LIFE_RUN_ID`) = **the thread's run in flight**, so a card raised mid-turn is still cut into that turn's tool chain (`/threads/{id}/steps` segments) and linked to its reply at turn end; only a card raised while the session is idle keeps none.
+Body `{thread_id, title, detail?, kind?=other, surface?, check?, run_id?, say?, replaces?, new_topic?}` → 201 Ask, plus `note` when the new card is a read card and the thread holds other open read cards: it names them and says how to fold, so a session folds by topic while raising; a nudge, nothing is closed. 400 on bad kind / unknown thread. **409** when a session raises a read card while it holds an open read card that `replaces` does not fold and `new_topic` (`lifectl ask add --new-topic`) is not set: the error names those cards and says to update one (`lifectl ask <id> set`), fold it with `replaces`, or mark a separate topic; nothing is raised. Hub and app callers are not gated. `replaces` (`lifectl ask add --replaces id,id`) lists the same thread's open cards the new one folds in: each is closed `dismissed` with "folded into <new id>" once the new card exists; any id that is not an open card on this thread is a 400 and nothing is raised. `say` (`lifectl ask add --say`) is the sentence the push SPEAKS in place of "To read — title" (≤400 chars, else the label form goes out); it is said, never stored. `surface` omitted or unrecognised = inferred from the text. `run_id` omitted (lifectl reads it from `LIFE_RUN_ID`) = **the thread's run in flight**, so a card raised mid-turn is still cut into that turn's tool chain (`/threads/{id}/steps` segments) and linked to its reply at turn end; only a card raised while the session is idle keeps none.
 
 ### GET /api/v1/asks/{id}
 

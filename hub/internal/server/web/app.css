@@ -465,6 +465,9 @@ textarea { resize: vertical; }
 .att-thumb { width: 260px; height: 160px; overflow: hidden; border-radius: 6px; border: 1px solid var(--line); background: #fff; pointer-events: none; }
 .att-thumb iframe { width: 900px; height: calc(900px * 160 / 260); border: 0; transform: scale(calc(260 / 900)); transform-origin: top left; pointer-events: none; }
 .att-html-row { display: flex; gap: 12px; margin-top: 2px; }
+/* a video blob (ui.js attachHTML): played in place, Full screen and Download under it */
+.att-video { display: block; width: min(560px, 100%); }
+.att-video video { display: block; width: 100%; border-radius: 6px; border: 1px solid var(--line); background: #000; }
 
 .working { display: flex; align-items: center; gap: 7px; padding: 4px 8px 10px; }
 /* The turn's tool chain (threads.js chainHTML): the count on the working

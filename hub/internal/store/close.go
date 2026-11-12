@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 )
 
@@ -57,6 +58,15 @@ func AskOutcomes(kind string) []Outcome {
 	}
 	return append([]Outcome{}, o...)
 }
+
+// A watch card is a read card whose detail links a video blob. It is a read
+// in every rule; only its button and its word say what the owner does.
+var WatchOutcome = oc("done", "Watched it")
+
+var videoBlob = regexp.MustCompile(`(?i)/api/v1/blobs/\S+?\.(mp4|mov|m4v|webm)\b`)
+
+// IsWatch: a read card that carries a video.
+func IsWatch(kind, detail string) bool { return kind == "read" && videoBlob.MatchString(detail) }
 
 // askVerbs: what an ask wants from the owner, in one word — the chat card's head
 // line and the Sessions cell's corner, on both surfaces.
@@ -264,7 +274,7 @@ func AskStanding(kind, class, state, resolution, by string, chore bool) Standing
 	switch {
 	case state == "dismissed":
 		s.Folded = "dismissed"
-	case kind == "read" && state == "done" && resolution == AskOutcomes("read")[0].Label:
+	case kind == "read" && state == "done" && (resolution == AskOutcomes("read")[0].Label || resolution == WatchOutcome.Label):
 		s.Folded = "read"
 	// A done install or decision says its whole story in its title: one
 	// line in the chat, the body behind a click.

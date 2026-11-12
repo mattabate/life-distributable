@@ -80,11 +80,23 @@ struct CalendarView: View {
                 #endif
             }
             .task(id: modeRaw + anchor) { await load() }
-            // Midnight turns the page: the day-change notice re-guesses today,
-            // the anchor moves, and the load's answer is the hub's day. A page
-            // left open overnight kept yesterday's today until the next step
-            // or pull.
-            .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in today = dayString(Date()) }
+            // Midnight turns the page: the hub's midnight, not the device's (a
+            // phone in another time zone kept the hub's yesterday ringed). A
+            // sleep to the next midnight in the hub's zone reloads, and the
+            // load's answer moves today (and restarts this task); the device's
+            // day-change notice asks the hub too, never guesses. A page left
+            // open overnight kept yesterday's today until the next step or pull.
+            .task(id: today) {
+                while !Task.isCancelled {
+                    var c = Calendar(identifier: .gregorian)
+                    c.timeZone = Fmt.easternDay.timeZone
+                    let next = c.date(byAdding: .day, value: 1, to: c.startOfDay(for: .now)) ?? .now.addingTimeInterval(3600)
+                    try? await Task.sleep(for: .seconds(next.timeIntervalSinceNow + 5))
+                    if Task.isCancelled { return }
+                    await load()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in Task { await load() } }
             #if !targetEnvironment(macCatalyst)
             // The desktop draws the panel inside the page (`macPanel`), never
             // as a sheet.

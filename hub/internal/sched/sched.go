@@ -136,7 +136,7 @@ type Scheduler struct {
 	Gate func(gate string, last time.Time) bool
 	// Allow is the budget guard for unattended runs (kind "job", id = name):
 	// a refused wake is recorded as a skipped run so it is not retried every
-	// minute. nil = always. `lifectl job run` (via api|cli) is never gated.
+	// minute. nil = always. `lifectl run <job>` (via api|cli) is never gated.
 	Allow func(kind, id string) (bool, string)
 	// clock is the hub's one clock (threads.Manager): a job's cadence is a
 	// standing prompt row with target job:<name>, reconciled from the table.
@@ -233,7 +233,7 @@ CREATE INDEX IF NOT EXISTS runs_job ON runs(job, started_at);
 CREATE TABLE IF NOT EXISTS digest (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, text TEXT NOT NULL, flushed_at TEXT);`,
 	`DROP TABLE IF EXISTS digest`,
 	// prompt_id: the wake (a child prompt row) this run answers — '' for
-	// `lifectl job run` and runs made before the column existed.
+	// `lifectl run <job>` and runs made before the column existed.
 	`ALTER TABLE runs ADD COLUMN prompt_id TEXT NOT NULL DEFAULT ''`,
 	// pgid: the process group of the run's claude (runGroup), so the next hub
 	// can kill a run the last one left open (life-distributable#61).
@@ -244,6 +244,7 @@ CREATE TABLE IF NOT EXISTS digest (id INTEGER PRIMARY KEY, created_at TEXT NOT N
 type Clock interface {
 	SetStanding(author, target, repeat, text string, last time.Time) error
 	StandingRepeat(target string) (string, bool)
+	SetStandingText(target, text string) error
 	StandingTargets(prefix string) []string
 }
 
@@ -260,8 +261,8 @@ func (s *Scheduler) SetClock(c Clock) {
 // Reconcile makes the standing rows match the table: one queued row per
 // enabled clock job (target job:<name>, repeat = when), none for manual or
 // disabled jobs, none for jobs no longer in the table. An unchanged cadence
-// is left alone, so its not_before survives a reload; a changed one counts
-// from the job's last run.
+// keeps its row (only the text is refreshed), so its not_before survives a
+// reload; a changed one counts from the job's last run.
 func (s *Scheduler) Reconcile() error {
 	if s.clock == nil {
 		return nil
@@ -290,6 +291,13 @@ func (s *Scheduler) Reconcile() error {
 	for target, w := range want {
 		have, _ := s.clock.StandingRepeat(target)
 		if have == w {
+			// Same cadence: only the first line may have changed (an edited
+			// prompt), reworded in place so not_before survives (#191).
+			if w != "" {
+				if err := s.clock.SetStandingText(target, text[target]); err != nil && firstErr == nil {
+					firstErr = err
+				}
+			}
 			continue
 		}
 		if err := s.clock.SetStanding("hub", target, w, text[target], s.lastRun(strings.TrimPrefix(target, "job:"))); err != nil && firstErr == nil {
@@ -522,7 +530,7 @@ type Run struct {
 	CostUSD    float64    `json:"cost_usd"`
 	SessionID  string     `json:"session_id,omitempty"`
 	// PromptID: the wake this run answered (a child prompt row of the job's
-	// standing row); empty for `lifectl job run`.
+	// standing row); empty for `lifectl run <job>`.
 	PromptID string `json:"prompt_id,omitempty"`
 }
 

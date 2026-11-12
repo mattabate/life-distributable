@@ -76,6 +76,28 @@ enum MacApp {
         CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
+    /// The key window into macOS full screen and back (`toggleFullScreen:`,
+    /// the green button's call). Returns whether it was full screen before,
+    /// so the caller puts it back as it found it.
+    @MainActor @discardableResult static func fullScreen(_ on: Bool) -> Bool {
+        guard let win = shared?.value(forKey: "keyWindow") as? NSObject,
+              let mask = (win.value(forKey: "styleMask") as? NSNumber)?.uintValue else { return on }
+        let was = mask & (1 << 14) != 0  // NSWindowStyleMaskFullScreen
+        if was != on { _ = win.perform(NSSelectorFromString("toggleFullScreen:"), with: nil) }
+        return was
+    }
+
+    /// A file opened in a named app (`NSWorkspace openFile:withApplication:`):
+    /// a video goes to QuickTime Player even when another player owns .mp4.
+    /// false = AppKit or the app not in reach.
+    @MainActor static func open(_ file: URL, in appName: String) -> Bool {
+        guard let ws = (NSClassFromString("NSWorkspace") as? NSObject.Type)?.value(forKey: "sharedWorkspace") as? NSObject else { return false }
+        let sel = NSSelectorFromString("openFile:withApplication:")
+        guard ws.responds(to: sel), let imp = ws.method(for: sel) else { return false }
+        typealias Fn = @convention(c) (NSObject, Selector, NSString, NSString) -> Bool
+        return unsafeBitCast(imp, to: Fn.self)(ws, sel, file.path as NSString, appName as NSString)
+    }
+
     /// Every visible NSWindow's frame, the main window's first, each in the
     /// main window's own y-down points: where a screenshot run draws a sheet,
     /// which Catalyst hosts in a window of its own (2026-09-30). Neither

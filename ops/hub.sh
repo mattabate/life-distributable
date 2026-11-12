@@ -111,9 +111,17 @@ case "${1:-}" in
   restart) build; rotate
            if [[ "${2:-}" != "--now" ]]; then
              q="select count(*) from items where src='action' and state='running' and id<>'${LIFE_ACTION:-}'"
+             bad=0
              for i in $(seq 1 1860); do
-               n=$("$ROOT/ops/db.sh" "$q" 2>/dev/null || echo 0)
-               [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 )) || break
+               # A read that fails is not zero: retry it, and after 10 in a
+               # row refuse rather than kill an action we could not see.
+               n=$("$ROOT/ops/db.sh" "$q" 2>/dev/null) || n=""
+               if ! [[ "$n" =~ ^[0-9]+$ ]]; then
+                 (( ++bad < 10 )) || { echo "✘ cannot read running actions; not restarting (--now forces it)" >&2; exit 1; }
+                 sleep 1; continue
+               fi
+               bad=0
+               (( n > 0 )) || break
                (( i % 60 == 1 )) && echo "▶ waiting on $n running action(s) before the restart"
                sleep 1
              done

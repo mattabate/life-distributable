@@ -535,6 +535,7 @@ function mdCopy(btn) {
 // drawn grid) is a picture too (2026-10-20: "Svgs don't open").
 const isImageRef = r => /\.(png|jpe?g|gif|webp|heic|heif|avif|svg)$/i.test(String(r || ''));
 const isAudioRef = r => /\.(m4a|mp3|wav|aac|caf)$/i.test(String(r || ''));
+const isVideoRef = r => /\.(mp4|mov|webm)$/i.test(String(r || ''));
 const isHTMLRef = r => /\.html?$/i.test(String(r || ''));
 // The file an .html blob downloads as: the link's text with the extension
 // ("life, day by day.html"), else the blob's own name (its hash).
@@ -545,6 +546,15 @@ function attachHTML(ref, caption) {
   const name = esc(String(ref).split('/').pop());
   // A voice sample plays in place (2026-10-17: "give me players for the voices").
   if (isAudioRef(ref)) return `<audio controls preload="none" src="${url}"></audio>`;
+  // A video plays in place too, with Full screen and Download under it: a
+  // plain link to it took the desktop app's whole window, with no way back.
+  // The Swift twin is BlobVideo (Attachments.swift).
+  if (isVideoRef(ref)) {
+    const file = esc(String(caption || '').trim() ? String(caption).trim().replace(/[\/\\:]/g, '-') + '.' + String(ref).split('.').pop() : String(ref).split('/').pop());
+    return `<div class="att-video"><video controls playsinline preload="metadata" src="${url}"></video>`
+      + `<div class="att-html-row"><a href="#" onclick="event.preventDefault();const v=this.closest('.att-video').querySelector('video');v.play();v.requestFullscreen?v.requestFullscreen():v.webkitEnterFullscreen()" class="small att-file">Full screen</a>`
+      + `<a href="${url}" download="${file}" class="small att-file">Download</a></div></div>`;
+  }
   // An .html page is a FILE, never a viewer inside the app
   // (2026-10-26 02:08, on a role's HTML report): a thumbnail of its top
   // (a scaled, script-less, untouchable frame), then Download — saved under

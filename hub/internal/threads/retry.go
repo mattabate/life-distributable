@@ -142,19 +142,22 @@ const noAnswerTag = "[no answer]"
 // empty when the turn was a check-in or a card they answered, and when the
 // session touched any card this turn (closed, reworded, proposed, dated: its
 // own item_events), which is an answer too. retried: the turn was already the
-// re-run. Caller holds m.mu.
-func (m *Manager) silentEnd(threadID, turn string) (said string, retried bool) {
-	rows, err := m.db.Query(`SELECT role, text, COALESCE(NULLIF(delivered_at,''), ts) FROM thread_messages WHERE run_id=? AND role IN ('owner','system') AND queued=0 ORDER BY id`, turn)
+// re-run. ended: the turn ended on EndSentinel, a deliberate quiet end, which
+// counts only when the owner's message asked a question and the session
+// handed nothing on (a command done quietly is the right end). Caller holds
+// m.mu.
+func (m *Manager) silentEnd(threadID, turn string, ended bool) (said string, retried bool) {
+	rows, err := m.db.Query(`SELECT role, kind, text, COALESCE(NULLIF(delivered_at,''), ts) FROM thread_messages WHERE run_id=? AND role IN ('owner','system') AND queued=0 ORDER BY id`, turn)
 	if err != nil {
 		return "", false
 	}
-	start := ""
+	start, saidKind := "", ""
 	for rows.Next() {
-		var role, text, at string
-		rows.Scan(&role, &text, &at)
+		var role, kind, text, at string
+		rows.Scan(&role, &kind, &text, &at)
 		switch {
 		case role == "owner":
-			said = text
+			said, saidKind = text, kind
 		case strings.HasPrefix(text, noAnswerTag):
 			retried = true
 		default:
@@ -173,7 +176,29 @@ func (m *Manager) silentEnd(threadID, turn string) (said string, retried bool) {
 	if touched > 0 {
 		return "", false
 	}
+	if ended {
+		if saidKind != "message" || !asksQuestion(said) {
+			return "", retried
+		}
+		// A wake or relay queued, or a proposal made (actions is the actions
+		// package's table: absent in this package's tests).
+		var woke, acted int
+		m.db.QueryRow(`SELECT COUNT(*) FROM prompts WHERE author=? AND created_at>=?`, "claude:thread:"+threadID, start).Scan(&woke)
+		m.db.QueryRow(`SELECT COUNT(*) FROM actions WHERE thread_id=? AND created_at>=?`, threadID, start).Scan(&acted)
+		if woke+acted > 0 {
+			return "", retried
+		}
+	}
 	return strings.TrimSpace(said), retried
+}
+
+// asksQuestion: the owner's typed or spoken words (not the hub's spoken-input
+// suffix, not a card's button text) hold a question mark.
+func asksQuestion(said string) bool {
+	if i := strings.Index(said, "[Spoken, not typed"); i >= 0 {
+		said = said[:i]
+	}
+	return !strings.HasPrefix(said, "[The owner marked") && strings.Contains(said, "?")
 }
 
 // noAnswerNote queues the re-run of a turn that ended without answering the
@@ -181,7 +206,7 @@ func (m *Manager) silentEnd(threadID, turn string) (said string, retried bool) {
 func (m *Manager) noAnswerNote(threadID, said string) {
 	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, queued) VALUES (?,?,?,?,?,1)`,
 		threadID, ts(time.Now()), "system", "message",
-		fmt.Sprintf("%s Your last turn ended without answering them: no reply and no card. Their message was: %q. Answer it now, as a card.", noAnswerTag, firstLine(said, 300)))
+		fmt.Sprintf("%s Your last turn ended without answering them: no reply and no card. Their message was: %q. Answer it now, as a card; if it truly needs no answer, end on [end] again.", noAnswerTag, firstLine(said, 300)))
 	log.Printf("thread %s: turn ended without an answer, re-running once", threadID)
 }
 

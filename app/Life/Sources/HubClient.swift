@@ -217,7 +217,12 @@ final class HubClient {
     /// (0.25 … 4 s, ~8 s in all) instead of showing an error at a Send.
     /// Refused/dropped before an answer only — a graceful drain
     /// finishes in-flight requests, so a handled POST is never sent twice.
+    /// A refused connect never reached the hub, so any method retries it; a
+    /// connection lost mid-answer may follow a committed write (a Wi-Fi to
+    /// cellular hand-off after Send: two messages, two turns), so only a
+    /// replayable read or whole-value PUT retries that.
     nonisolated private static func dataRetryingRestart(_ req: URLRequest) async throws -> (Data, URLResponse) {
+        let replayable = ["GET", "HEAD", "PUT"].contains(req.httpMethod ?? "GET")
         var attempt = 0
         let waiter = WaitCanceller()
         while true {
@@ -233,7 +238,7 @@ final class HubClient {
                 try await Task.sleep(nanoseconds: UInt64(250_000_000) << UInt64(attempt))
                 attempt += 1
             } catch let e as URLError
-                where attempt < 5 && [.cannotConnectToHost, .networkConnectionLost].contains(e.code) {
+                where attempt < 5 && (e.code == .cannotConnectToHost || (replayable && e.code == .networkConnectionLost)) {
                 try await Task.sleep(nanoseconds: UInt64(250_000_000) << UInt64(attempt))
                 attempt += 1
             }

@@ -67,6 +67,15 @@ final class BoardStore {
     /// unconditional reassignment re-rendered every card each tick.
     func refresh(_ hub: HubClient) async {
         guard hub.isConfigured else { return }
+        // A link that is up but passes no traffic (a Wi-Fi sign-in page in
+        // front of Tailscale) fails no request for minutes: each try hangs in
+        // connect, then waits for connectivity, and the dot stayed green over
+        // a stale list. No answer in 20 s is said; the next answer clears it.
+        let quiet = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            if !Task.isCancelled { self?.error = "No answer from the hub. Check the internet here." }
+        }
+        defer { quiet.cancel() }
         do {
             async let t = hub.threads(); async let g = hub.goals(); async let b = hub.board()
             let (freshThreads, freshGoals, freshBoard) = try await (t, g, b)
