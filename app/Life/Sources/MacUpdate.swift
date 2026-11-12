@@ -62,6 +62,9 @@ final class MacUpdate {
     }
 
     private func check() {
+        // A screenshot copy never shows or applies the installed app's
+        // staged build: the README shots wore its Update pill.
+        guard ProcessInfo.processInfo.environment["LIFE_SHOT"] == nil else { staged = nil; return }
         let plist = dir.appending(path: "next/life.app/Contents/Info.plist")
         guard let info = NSDictionary(contentsOf: plist),
               let n = Int(info["CFBundleVersion"] as? String ?? ""),
