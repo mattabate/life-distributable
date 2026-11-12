@@ -2,9 +2,11 @@ package calendar
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -703,15 +705,52 @@ func TestNearDuplicateGuard(t *testing.T) {
 	if _, err := c.Add(Item{Title: "Plan the Saturday long park route", Day: "2026-10-15", Kind: "agent", GoalID: "other", Source: ses}); err != nil {
 		t.Fatalf("another goal is another thing: %v", err)
 	}
-	a, _ := c.Add(Item{Title: "Score rec-1a2b3c4d (review dates)", Day: "2026-11-11", Kind: "agent", GoalID: g, Source: ses})
-	if _, err := c.Add(Item{Title: "Score rec-5e6f7a8b (review dates)", Day: "2026-11-11", Kind: "agent", GoalID: g, Source: ses}); err != nil {
+	a, _ := c.Add(Item{Title: "Score rec-1a2b3c4d (review dates)", Day: "2030-11-11", Kind: "agent", GoalID: g, Source: ses})
+	if _, err := c.Add(Item{Title: "Score rec-5e6f7a8b (review dates)", Day: "2030-11-11", Kind: "agent", GoalID: g, Source: ses}); err != nil {
 		t.Fatalf("different recs are different runs: %v", err)
 	}
-	if _, err := c.Add(Item{Title: "Check the merge verb", Detail: "for rec-1a2b3c4d", Day: "2026-11-12", Kind: "agent", GoalID: g, Source: ses}); err == nil || !strings.Contains(err.Error(), a.ID) {
+	if _, err := c.Add(Item{Title: "Check the merge verb", Detail: "for rec-1a2b3c4d", Day: "2030-11-12", Kind: "agent", GoalID: g, Source: ses}); err == nil || !strings.Contains(err.Error(), a.ID) {
 		t.Fatalf("same rec cited: want near-duplicate of %s, got %v", a.ID, err)
 	}
 	if _, err := c.Add(Item{Title: "Water the plants", Day: "2026-10-21", Kind: "owner", Source: "hub:learn"}); err != nil {
 		t.Fatalf("hub items are not checked: %v", err)
+	}
+	// The same day under two goals: most words shared is one thing filed twice.
+	reunion, _ := c.Add(Item{Title: "Away: family reunion, lakeside park", Day: "2030-06-14", Kind: "note", GoalID: "plan-the-reunion", Source: ses})
+	if _, err := c.Add(Item{Title: "Family reunion - lakeside park, upstate", Day: "2030-06-14", Kind: "note", GoalID: "family", Source: "claude:thread:y"}); err == nil || !strings.Contains(err.Error(), reunion.ID) {
+		t.Fatalf("same day, other goal, most words shared: want near-duplicate of %s, got %v", reunion.ID, err)
+	}
+	if _, err := c.Add(Item{Title: "Family reunion - lakeside park, upstate", Day: "2030-06-15", Kind: "note", GoalID: "family", Source: "claude:thread:y"}); err != nil {
+		t.Fatalf("another goal on another day is another thing: %v", err)
+	}
+}
+
+// Timeless agent items added at once for one day each get their own minute:
+// two creates racing used to both read the first slot free (#192).
+func TestConcurrentAgentAddsGetDistinctMinutes(t *testing.T) {
+	c, _, _ := newTest(t)
+	d := day(ahead(20, 0, 0))
+	const n = 8
+	ats := make([]string, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			it, err := c.Add(Item{Title: fmt.Sprintf("Run %d", i), Day: d, Kind: "agent", Detail: "x", Source: "owner"})
+			if err != nil {
+				t.Error(err)
+			}
+			ats[i] = it.At
+		}(i)
+	}
+	wg.Wait()
+	seen := map[string]bool{}
+	for _, at := range ats {
+		if at == "" || seen[at] {
+			t.Fatalf("minutes: %v", ats)
+		}
+		seen[at] = true
 	}
 }
 
@@ -779,6 +818,13 @@ func TestMerge(t *testing.T) {
 	}
 	if _, err := c.Merge(keep.ID, keep.ID, "owner"); err == nil {
 		t.Fatal("an item cannot merge into itself")
+	}
+	// Two sessions folding one pair both ways must not drop both.
+	if _, err := c.Resolve(keep.ID, "dismissed", "claude:thread:y", "duplicate of "+dup.ID); err == nil || !strings.Contains(err.Error(), "drop both") {
+		t.Fatalf("dismissing a keeper as the dup of its merged item: want refusal, got %v", err)
+	}
+	if k, _ := c.Resolve(keep.ID, "dismissed", "claude:thread:y", "the autopay moved banks"); k.State != "dismissed" {
+		t.Fatalf("a keeper closed for its own reason still closes: %s", k.State)
 	}
 }
 

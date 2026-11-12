@@ -545,15 +545,18 @@ struct FileStrip: View {
                             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1)))
                     } else if isAudioRef(f.ref) {
                         BlobAudio(ref: f.ref)
+                    } else if isVideoRef(f.ref) {
+                        // A video plays in place, Download under it.
+                        BlobVideo(ref: f.ref, title: f.caption)
                     } else if isHTMLRef(f.ref) {
                         // A page is a file for a browser, never a viewer here.
                         BlobHTML(ref: f.ref, title: f.caption)
                     } else {
                         BlobDocument(ref: f.ref, title: f.caption)
                     }
-                    if !f.caption.isEmpty && (isImageRef(f.ref) || isAudioRef(f.ref) || isHTMLRef(f.ref)) {
+                    if !f.caption.isEmpty && (isImageRef(f.ref) || isAudioRef(f.ref) || isHTMLRef(f.ref) || isVideoRef(f.ref)) {
                         Text(f.caption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            .frame(maxWidth: Self.tile.width, alignment: .leading)
+                            .frame(maxWidth: isVideoRef(f.ref) ? BlobVideo.width : Self.tile.width, alignment: .leading)
                     }
                 }
             }

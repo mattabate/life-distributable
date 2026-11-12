@@ -94,7 +94,7 @@ func (c *condWriter) finish() {
 		h.Write(c.buf.Bytes())
 		tag := `"` + hex.EncodeToString(h.Sum(nil)) + `"`
 		c.Header().Set("ETag", tag)
-		if c.r.Header.Get("If-None-Match") == tag {
+		if noneMatch(c.r.Header.Get("If-None-Match"), tag) {
 			c.Header().Del("Content-Type")
 			c.ResponseWriter.WriteHeader(http.StatusNotModified)
 			return
@@ -104,6 +104,20 @@ func (c *condWriter) finish() {
 	if c.buf.Len() > 0 {
 		c.ResponseWriter.Write(c.buf.Bytes())
 	}
+}
+
+// noneMatch reports whether an If-None-Match header names tag: `*`, or any
+// entry of a comma list, compared weakly (a W/ prefix is ignored), which is
+// the comparison RFC 9110 asks of If-None-Match. A proxy that weakens our tag
+// would otherwise defeat every 304 (#176).
+func noneMatch(header, tag string) bool {
+	for _, t := range strings.Split(header, ",") {
+		t = strings.TrimSpace(t)
+		if t == "*" || strings.TrimPrefix(t, "W/") == tag {
+			return true
+		}
+	}
+	return false
 }
 
 // maybeETag wraps w for GET requests; other methods are handed through and

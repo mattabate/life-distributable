@@ -66,10 +66,16 @@ func (g *gzipWriter) Write(p []byte) (int, error) {
 }
 
 // decide writes the status line and flushes whatever is buffered, gzipping
-// from here on when the body is big enough and of a compressible type.
+// from here on when the body is big enough and of a compressible type. Only a
+// plain 200 is compressed: a 206 from ServeContent (a ranged /static or /blobs
+// read) carries a Content-Range in the file's own offsets, which a gzipped
+// slice would no longer match (#176), and a body that already has a
+// Content-Encoding is someone else's bytes.
 func (g *gzipWriter) decide(big bool) error {
 	g.decided = true
-	if big && compressible(g.Header().Get("Content-Type")) {
+	h := g.Header()
+	if big && g.code == http.StatusOK && h.Get("Content-Range") == "" && h.Get("Content-Encoding") == "" &&
+		compressible(h.Get("Content-Type")) {
 		g.Header().Set("Content-Encoding", "gzip")
 		g.Header().Add("Vary", "Accept-Encoding")
 		g.Header().Del("Content-Length") // no longer the byte count on the wire

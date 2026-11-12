@@ -94,3 +94,61 @@ func TestGzipResponses(t *testing.T) {
 		t.Fatalf("204 = %d, %d bytes", w.Code, w.Body.Len())
 	}
 }
+
+// A ranged read of a static file answers 206 with the plain slice: gzipping
+// it would leave Content-Range describing bytes that are not on the wire (#176).
+func TestGzipLeavesRangedResponsesAlone(t *testing.T) {
+	s := newTest(t)
+	r := httptest.NewRequest("GET", "/static/app.js", nil)
+	r.Header.Set("Authorization", "Bearer secret")
+	r.Header.Set("Accept-Encoding", "gzip")
+	r.Header.Set("Range", "bytes=0-1999")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != http.StatusPartialContent {
+		t.Fatalf("ranged GET = %d, want 206", w.Code)
+	}
+	if ce := w.Header().Get("Content-Encoding"); ce != "" {
+		t.Fatalf("206 went out with Content-Encoding %q", ce)
+	}
+	if !strings.HasPrefix(w.Header().Get("Content-Range"), "bytes 0-1999/") || w.Body.Len() != 2000 {
+		t.Fatalf("Content-Range %q with a %d-byte body", w.Header().Get("Content-Range"), w.Body.Len())
+	}
+	// The same file unranged is still gzipped, so the check above is the status, not the type.
+	r.Header.Del("Range")
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != 200 || w.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("full GET = %d, Content-Encoding %q", w.Code, w.Header().Get("Content-Encoding"))
+	}
+}
+
+// If-None-Match matches our tag as `*`, inside a comma list, or weakened by a
+// proxy; a different tag still gets the full body.
+func TestIfNoneMatchForms(t *testing.T) {
+	tag := `"abc123"`
+	for _, h := range []string{tag, "*", `"zzz", "abc123"`, `W/"abc123"`, `"x" ,W/"abc123"`} {
+		if !noneMatch(h, tag) {
+			t.Errorf("If-None-Match %q did not match %s", h, tag)
+		}
+	}
+	for _, h := range []string{"", `"abc"`, `"abc1234"`, `W/"zzz"`} {
+		if noneMatch(h, tag) {
+			t.Errorf("If-None-Match %q matched %s", h, tag)
+		}
+	}
+	body := func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"ok": "yes"}) }
+	r := httptest.NewRequest("GET", "/x", nil)
+	w := httptest.NewRecorder()
+	cw, done := maybeETag(w, r)
+	body(cw, r)
+	done()
+	r.Header.Set("If-None-Match", `"other", W/`+w.Header().Get("ETag"))
+	w = httptest.NewRecorder()
+	cw, done = maybeETag(w, r)
+	body(cw, r)
+	done()
+	if w.Code != http.StatusNotModified {
+		t.Fatalf("weak tag in a list = %d, want 304", w.Code)
+	}
+}

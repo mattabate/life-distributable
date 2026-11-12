@@ -129,3 +129,14 @@ func TestOutcomeSets(t *testing.T) {
 		t.Error("ask did verbs")
 	}
 }
+
+// A read card with a video in it is a watch card; a watched one folds as read.
+func TestWatchCard(t *testing.T) {
+	vid := "[garden tour](https://hub:8443/api/v1/blobs/sha256/87/8782.mp4)\n\nWhat changed"
+	if !IsWatch("read", vid) || IsWatch("decision", vid) || IsWatch("read", "[shot](/api/v1/blobs/sha256/1/2.png)") {
+		t.Error("IsWatch")
+	}
+	if s := AskStanding("read", "read", "done", WatchOutcome.Label, "owner", false); s.Folded != "read" {
+		t.Errorf("a watched card folds as read: %+v", s)
+	}
+}

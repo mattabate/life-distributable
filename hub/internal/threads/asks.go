@@ -688,6 +688,9 @@ func scanAsk(r scanner) (Ask, error) {
 	a.CalID, a.CalDay = calID.String, calDay.String
 	a.ThreadRunning = tStatus.String == "running"
 	a.Outcomes, a.Verb = OutcomesFor(a.Kind), store.AskVerb(a.Kind)
+	if store.IsWatch(a.Kind, a.Detail) {
+		a.Outcomes, a.Verb = []Outcome{store.WatchOutcome}, "watch"
+	}
 	a.Target = installTarget(a.Kind, a.Title)
 	if a.Class = class.String; a.Class == "" {
 		a.Class = ClassFor(a.Kind)

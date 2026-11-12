@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -171,5 +174,40 @@ func TestPrintRowsAwaySpan(t *testing.T) {
 	printRows(&b, "", v)
 	if want := "away:\naway-1  on  2030-05-31  2030-06-12  Trip\n"; b.String() != want {
 		t.Fatalf("got\n%q\nwant\n%q", b.String(), want)
+	}
+}
+
+// `ask a,b,c dismiss note` resolves each card with the same state and note,
+// prints one line per card, skips empty ids, and reports a failure without
+// stopping the rest.
+func TestResolveMany(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]string
+		json.NewDecoder(r.Body).Decode(&b)
+		got = append(got, r.Method+" "+r.URL.Path+" "+b["state"]+" "+b["note"])
+		if strings.Contains(r.URL.Path, "/missing/") {
+			http.Error(w, `{"error":"no such ask"}`, 404)
+			return
+		}
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	var out bytes.Buffer
+	ok := client{base: srv.URL, token: "t"}.resolveMany(&out, "a1, missing,,b2", "dismissed", "x", "folded")
+	if ok {
+		t.Fatal("a failed card must make the call fail")
+	}
+	want := []string{
+		"POST /api/v1/asks/a1/resolve dismissed folded",
+		"POST /api/v1/asks/missing/resolve dismissed folded",
+		"POST /api/v1/asks/b2/resolve dismissed folded",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("requests: %q", got)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 || lines[0] != "a1: dismissed" || !strings.HasPrefix(lines[1], "missing: 404 ") || lines[2] != "b2: dismissed" {
+		t.Fatalf("output: %q", out.String())
 	}
 }

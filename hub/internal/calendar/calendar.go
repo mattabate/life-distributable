@@ -711,6 +711,10 @@ type Calendar struct {
 	// spawnMu: spawnNext's check-then-insert (see there). Never held across a
 	// call that can take mu.
 	spawnMu sync.Mutex
+	// slotMu: an agent wake minute (agentSlot) and the write that takes it.
+	// Add cannot use mu (spawnNext calls it under mu); a leaf lock, so never
+	// held across anything that takes mu or spawnMu.
+	slotMu sync.Mutex
 	// firing: items whose ask is being raised outside mu (fire); a second
 	// tick skips them.
 	firing map[string]bool
@@ -836,9 +840,6 @@ func (c *Calendar) Add(it Item) (Item, error) {
 	if it.NagMin < 0 {
 		it.NagMin = 0
 	}
-	if it.Kind == "agent" && it.At == "" {
-		it.At = c.agentSlot(it.Day, "")
-	}
 	if it.Due != "" && it.Due != "on" && it.Due != "by" {
 		return Item{}, errors.New("due must be on (its day only) or by (any time up to its day)")
 	}
@@ -871,9 +872,16 @@ func (c *Calendar) Add(it Item) (Item, error) {
 	}
 	now := c.Now()
 	it.ID, it.CreatedAt, it.UpdatedAt, it.State = newID(), now, now, "scheduled"
+	// The minute and the row that takes it go in under slotMu, or two Adds
+	// for one day both read the first slot free (#192).
+	c.slotMu.Lock()
+	if it.Kind == "agent" && it.At == "" {
+		it.At = c.agentSlot(it.Day, "")
+	}
 	_, err := c.setItem(it.ID, it.Source, "", `INSERT INTO items (id,src,created_at,updated_at,title,detail,kind,day,at,repeat,goal_id,thread_id,source,state,nag_min,prev_id,ask_kind,check_hint,surface,say,due)
 		VALUES (?,'cal',?,?,?,?,?,?,?,?,?,?,?,'scheduled',?,?,?,?,?,?,?)`,
 		it.ID, ts(now), ts(now), it.Title, strings.TrimSpace(it.Detail), it.Kind, it.Day, it.At, it.Repeat, nullable(it.GoalID), nullable(it.ThreadID), it.Source, it.NagMin, nullable(it.PrevID), it.AskKind, it.CheckHint, it.Surface, strings.TrimSpace(it.Say), it.Due)
+	c.slotMu.Unlock()
 	if err != nil {
 		return Item{}, err
 	}
@@ -895,17 +903,19 @@ var (
 
 // nearDuplicate: the exact guard misses reworded twins. A session's new item
 // is a near-duplicate of an open one, of any kind, within 3 days of it (or
-// both soon) when the titles match, or when both sit under the same goal and
-// either cite the same rec-/cal- id or share at least half their words. Two
+// both soon) when the titles match, when both fall on the same day and share
+// at least half their words (any goal, or none), or when both sit under the
+// same goal and either cite the same rec-/cal- id or share at least half
+// their words. Two
 // items citing only different ids are never duplicates. Hub-sourced items
 // never reach here, and a chain's next occurrence (spawnNext) comes with its
 // reason.
 func (c *Calendar) nearDuplicate(it Item) string {
-	q := `SELECT id, title, COALESCE(goal_id,''), detail FROM items WHERE src='cal' AND state IN ('scheduled','open') AND day=''`
+	q := `SELECT id, title, COALESCE(goal_id,''), detail, day FROM items WHERE src='cal' AND state IN ('scheduled','open') AND day=''`
 	args := []any{}
 	if it.Day != "" {
 		d, _ := time.ParseInLocation("2006-01-02", it.Day, time.Local)
-		q = `SELECT id, title, COALESCE(goal_id,''), detail FROM items WHERE src='cal' AND state IN ('scheduled','open') AND day BETWEEN ? AND ?`
+		q = `SELECT id, title, COALESCE(goal_id,''), detail, day FROM items WHERE src='cal' AND state IN ('scheduled','open') AND day BETWEEN ? AND ?`
 		args = append(args, d.AddDate(0, 0, -3).Format("2006-01-02"), d.AddDate(0, 0, 3).Format("2006-01-02"))
 	}
 	rows, err := c.db.Query(q+` ORDER BY day, at, id`, args...)
@@ -916,17 +926,22 @@ func (c *Calendar) nearDuplicate(it Item) string {
 	title := strings.ToLower(it.Title)
 	refs, words := itemRefs(it.Title+" "+it.Detail), titleWords(it.Title)
 	for rows.Next() {
-		var id, t, goal, detail string
-		if rows.Scan(&id, &t, &goal, &detail) != nil {
+		var id, t, goal, detail, day string
+		if rows.Scan(&id, &t, &goal, &detail, &day) != nil {
 			continue
 		}
 		if strings.ToLower(t) == title {
 			return id
 		}
+		theirs := itemRefs(t + " " + detail)
+		// The same day under another goal (or none): most words shared is the
+		// same thing, filed twice by two sessions under two goals.
+		if it.Day != "" && day == it.Day && !(len(refs) > 0 && len(theirs) > 0) && jaccard(words, titleWords(t)) >= 0.5 {
+			return id
+		}
 		if it.GoalID == "" || goal != it.GoalID {
 			continue
 		}
-		theirs := itemRefs(t + " " + detail)
 		if len(refs) > 0 && len(theirs) > 0 {
 			for r := range refs {
 				if theirs[r] {
@@ -1142,8 +1157,11 @@ func (c *Calendar) stampAgentSlots() {
 	}
 	rows.Close()
 	for _, it := range items {
+		c.slotMu.Lock()
 		slot := c.agentSlot(it.Day, it.ID)
-		if _, err := c.db.Exec(`UPDATE items SET at=?, updated_at=? WHERE id=?`, slot, ts(c.Now()), it.ID); err != nil {
+		_, err := c.db.Exec(`UPDATE items SET at=?, updated_at=? WHERE id=?`, slot, ts(c.Now()), it.ID)
+		c.slotMu.Unlock()
+		if err != nil {
 			continue
 		}
 		it.At = slot
@@ -1862,6 +1880,15 @@ func (c *Calendar) Resolve(id, state, by, note string) (Item, error) {
 		c.mu.Unlock()
 		return it, err
 	}
+	// A keeper dismissed as the duplicate of an item already merged into it
+	// drops both: two sessions folding one pair in opposite directions left
+	// the day with no item at all.
+	if state == "dismissed" && by != "owner" {
+		if m := c.mergedInto(id, note); m != "" {
+			c.mu.Unlock()
+			return it, fmt.Errorf("%s was already merged into %s: dismissing %s would drop both; keep it, or reopen %s first", m, id, id, m)
+		}
+	}
 	// Only a step a session waits on closes with words (and a soon to-do, whose
 	// words stay on its row). Homework, and any dated step no session is
 	// behind, is a completion — "I did this" — ticked from the row, or closed
@@ -2034,6 +2061,24 @@ func (c *Calendar) resolveLocked(it Item, state, by, note string, quiet bool) {
 		}
 	}
 	log.Printf("calendar: %s %s → %s by %s", id, it.State, state, by)
+}
+
+// mergedInto: the merged item that note cites, or "" (a keeper's merged-in
+// items are the dismissed ones whose superseded_by is its id).
+func (c *Calendar) mergedInto(id, note string) string {
+	rows, err := c.db.Query(`SELECT id FROM items WHERE superseded_by=? AND state='dismissed'`, id)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	note = strings.ToLower(note)
+	for rows.Next() {
+		var m string
+		if rows.Scan(&m) == nil && strings.Contains(note, m) {
+			return m
+		}
+	}
+	return ""
 }
 
 // Merge folds one open item into another: the keeper's detail gains a MERGED

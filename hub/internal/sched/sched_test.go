@@ -258,16 +258,31 @@ func TestWhenParsing(t *testing.T) {
 
 // fakeClock stands in for threads.Manager: the standing rows by target.
 type fakeClock struct {
-	rows map[string]string // target → repeat
-	sets []string
+	rows  map[string]string // target → repeat
+	texts map[string]string // target → text
+	sets  []string
 }
 
 func (c *fakeClock) SetStanding(author, target, repeat, text string, last time.Time) error {
 	c.sets = append(c.sets, target+"="+repeat)
+	if c.texts == nil {
+		c.texts = map[string]string{}
+	}
 	if repeat == "" {
 		delete(c.rows, target)
+		delete(c.texts, target)
 	} else {
 		c.rows[target] = repeat
+		c.texts[target] = text
+	}
+	return nil
+}
+func (c *fakeClock) SetStandingText(target, text string) error {
+	if _, ok := c.rows[target]; ok {
+		if c.texts == nil {
+			c.texts = map[string]string{}
+		}
+		c.texts[target] = text
 	}
 	return nil
 }
@@ -320,6 +335,28 @@ func TestReconcileTableIntoStandingRows(t *testing.T) {
 	}
 	if len(c.sets) != 0 {
 		t.Fatal(c.sets)
+	}
+}
+
+// An edited prompt with the same cadence rewords the standing row in place:
+// the agenda reads its first line, and not_before must survive (#191).
+func TestReconcileRewordsEditedPrompt(t *testing.T) {
+	s, _, _ := setup(t, `{"jobs":[{"name":"sweep","project":"life","when":"daily@07:00","prompt":"Old line\nmore"}]}`)
+	c := &fakeClock{rows: map[string]string{}}
+	s.SetClock(c)
+	if c.texts["job:sweep"] != "Old line" {
+		t.Fatalf("text: %q", c.texts["job:sweep"])
+	}
+	os.WriteFile(s.tablePath, []byte(`{"jobs":[{"name":"sweep","project":"life","when":"daily@07:00","prompt":"New line\nmore"}]}`), 0o644)
+	c.sets = nil
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if c.texts["job:sweep"] != "New line" {
+		t.Fatalf("edited prompt not on the row: %q", c.texts["job:sweep"])
+	}
+	if len(c.sets) != 0 {
+		t.Fatalf("unchanged cadence was rewritten: %v", c.sets)
 	}
 }
 

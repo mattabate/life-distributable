@@ -257,6 +257,11 @@ test('md: a line that is only a hub file draws the file; anywhere else it is a l
   assert.ok(md('![grid](https://h/api/v1/blobs/sha256/00/g.svg)').includes('<img src="/api/v1/blobs/sha256/00/g.svg"'));
   // A sound: a player in place.
   assert.ok(md('[af_heart](https://h/api/v1/blobs/sha256/00/v.m4a)').includes('<audio controls preload="none" src="/api/v1/blobs/sha256/00/v.m4a"></audio>'));
+  // A video: a player in place, Full screen, Download named by the link's text.
+  const vid = md('[garden tour](https://h/api/v1/blobs/sha256/33/3305.mp4)');
+  assert.ok(vid.includes('<video controls playsinline preload="metadata" src="/api/v1/blobs/sha256/33/3305.mp4"></video>'), vid);
+  assert.ok(vid.includes('download="garden tour.mp4"'), vid);
+  assert.ok(vid.includes('>Full screen</a>'), vid);
   // An .html page is a file to download or open in a browser, never a viewer
   // in the app (2026-10-26): a thumbnail of its top, Download named by
   // the link's text, Open in browser in its own tab.

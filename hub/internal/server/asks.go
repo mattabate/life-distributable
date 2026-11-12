@@ -38,6 +38,9 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 		// Replaces: this thread's open cards the new one folds in, closed as it
 		// lands, so one topic stays one card.
 		Replaces []string `json:"replaces"`
+		// NewTopic: this read card is about something none of the session's
+		// open read cards cover (readGate).
+		NewTopic bool `json:"new_topic"`
 	}
 	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
@@ -73,6 +76,12 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if s.caller(r) != "" && !in.NewTopic && threads.ClassFor(in.Kind) == threads.ClassRead {
+		if msg := s.readGate(in.ThreadID, in.Replaces); msg != "" {
+			jsonErr(w, 409, msg)
+			return
+		}
+	}
 	a, err := s.thr.AddAskSaid(in.ThreadID, in.RunID, in.Title, in.Detail, in.Kind, in.Check, in.Surface, in.Say)
 	if err != nil {
 		jsonErr(w, 400, err.Error())
@@ -85,6 +94,32 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 		threads.Ask
 		Note string `json:"note,omitempty"`
 	}{a, s.readPile(a)})
+}
+
+// readGate refuses a session's new read card while it still holds an open
+// one it did not fold in: the readPile note was only a nudge, and a session
+// running a long batch job still raised a fresh read card for every batch.
+// The session updates the open card, folds it with --replaces, or says this
+// is a separate topic with --new-topic: several topics are still several
+// cards.
+func (s *Server) readGate(thread string, replaces []string) string {
+	open, _ := s.thr.ListAsks("active", thread, 0)
+	folded := map[string]bool{}
+	for _, id := range replaces {
+		folded[id] = true
+	}
+	var b strings.Builder
+	for _, o := range open {
+		if o.Class != threads.ClassRead || o.State != "open" || folded[o.ID] {
+			continue
+		}
+		fmt.Fprintf(&b, "\n  %s %q", o.ID, o.Title)
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "not raised: this session already holds an open read card, and the owner wants the fewest cards on their screen:" + b.String() +
+		"\nSame topic (a later step, a batch, a correction): update that card with the whole story, `lifectl ask <id> set --title … --say …`, or fold it into this one with `--replaces <id>`. A separate topic: add `--new-topic`. Finished work the owner asked for needs no card at all: end the turn with [end]. Stale cards: `lifectl ask <id> dismiss \"<why>\"`."
 }
 
 // readPile: the session's other open read cards, said back to it the moment

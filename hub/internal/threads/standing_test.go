@@ -476,3 +476,18 @@ func TestOneQueryListsEveryWake(t *testing.T) {
 		t.Fatalf("%v %+v", kinds, ps)
 	}
 }
+
+// SetStandingText rewords the standing row in place: same id, same
+// not_before, new text (#191).
+func TestSetStandingTextKeepsNotBefore(t *testing.T) {
+	m, _, _ := setup(t)
+	m.SetStanding("hub", "job:sweep", "every@1h", "Old line", time.Time{})
+	before, _ := m.Standing("job:sweep")
+	if err := m.SetStandingText("job:sweep", "New line"); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := m.Standing("job:sweep")
+	if after.ID != before.ID || !after.NotBefore.Equal(before.NotBefore) || after.Text != "New line" {
+		t.Fatalf("before %+v after %+v", before, after)
+	}
+}

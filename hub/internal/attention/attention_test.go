@@ -409,4 +409,12 @@ func TestHelpersOnlyWithCardIsYourTurn(t *testing.T) {
 	if p := b.Pills["scout"]; len(p) == 0 || p[0].Word != "running" {
 		t.Fatalf("scout pills %+v", p)
 	}
+	// Scout's card is Your turn's alone: Working's "for you" is busy's one,
+	// and the two add up to Count (#193).
+	if b.Count != 2 || b.Working != 1 {
+		t.Fatalf("count %d working %d", b.Count, b.Working)
+	}
+	if h := b.Headings; h[0].Count != "1 in 1 session · 1 working" || h[1].Count != "1 · 1 for you" {
+		t.Fatalf("headings %+v", h)
+	}
 }

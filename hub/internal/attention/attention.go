@@ -227,6 +227,11 @@ func (b *Board) headings(ths []threads.Thread) {
 			b.Section[t.ID] = "your_turn"
 			turnN++
 			turnCards += n
+			if running {
+				// The tally counted its cards as Working (it is live); filed
+				// here, they are Your turn's, or both headings count them (#193).
+				b.Working -= n
+			}
 		case t.Speaking || t.WaitingToSpeak:
 			// A card replayed after it was closed still names its session on
 			// the list while it plays.

@@ -1742,6 +1742,49 @@ func TestReadCardNamesTheOpenPile(t *testing.T) {
 	}
 }
 
+// A session's second read card while its first is open is refused, naming
+// the open one; it lands when it folds that card in or says it is a new
+// topic. A decision card, and the hub's own callers, are not gated.
+func TestSessionReadCardBesideAnOpenOneIsRefused(t *testing.T) {
+	s := newTest(t)
+	s.cfg.SessionTokens = true
+	var th struct{ ID string }
+	json.Unmarshal(s.do(t, "POST", "/api/v1/threads", map[string]string{"prompt": "Archive the old repos."}).Body.Bytes(), &th)
+	tok := SessionToken(s.token, th.ID)
+	add := func(body map[string]any) (int, string) {
+		body["thread_id"] = th.ID
+		b, _ := json.Marshal(body)
+		r := httptest.NewRequest("POST", "/api/v1/asks", strings.NewReader(string(b)))
+		r.Header.Set("Authorization", "Bearer "+tok)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w.Code, w.Body.String()
+	}
+	code, body := add(map[string]any{"title": "Third archive batch started", "kind": "read"})
+	var first struct{ ID string }
+	json.Unmarshal([]byte(body), &first)
+	if code != 201 {
+		t.Fatalf("first read card: %d %s", code, body)
+	}
+	if code, body := add(map[string]any{"title": "Third archive batch is halfway", "kind": "read"}); code != 409 || !strings.Contains(body, first.ID) || !strings.Contains(body, "set --title") {
+		t.Fatalf("second read card: %d %s", code, body)
+	}
+	if code, body := add(map[string]any{"title": "Archive more repos?", "kind": "decision"}); code != 201 {
+		t.Fatalf("decision card: %d %s", code, body)
+	}
+	if code, body := add(map[string]any{"title": "Garden site is up", "kind": "read", "new_topic": true}); code != 201 {
+		t.Fatalf("new topic: %d %s", code, body)
+	}
+	code, body = add(map[string]any{"title": "Archive job done", "kind": "read", "replaces": []string{first.ID}})
+	if code != 409 || strings.Contains(body, first.ID) || !strings.Contains(body, "Garden site") {
+		t.Fatalf("folding one card must still name the other: %d %s", code, body)
+	}
+	if code := s.do(t, "POST", "/api/v1/asks", map[string]any{"thread_id": th.ID, "title": "Hub note", "kind": "read"}).Code; code != 201 {
+		t.Fatalf("hub caller gated: %d", code)
+	}
+}
+
 // The per-ask web page is gone: the chat shows the whole
 // card, so an ask carries no `url` and /a/… is not a route.
 func TestNoAskPage(t *testing.T) {

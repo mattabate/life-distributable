@@ -6,6 +6,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import QuickLook
 import AVFoundation
+import AVKit
 import WebKit
 
 /// A document (a PDF, a CSV, an export) attached to a message, as opposed to
@@ -583,6 +584,7 @@ struct BlobAttachment: View {
     var maxHeight: CGFloat = 240
     var body: some View {
         if isImageRef(ref) { BlobImage(ref: ref, maxHeight: maxHeight) }
+        else if isVideoRef(ref) { BlobVideo(ref: ref) }
         else if isHTMLRef(ref) { BlobHTML(ref: ref) }
         else { BlobDocument(ref: ref) }
     }
@@ -805,6 +807,209 @@ struct BlobAudio: View {
         guard let url = await blobTempFile(ref, hub: hub), let p = try? AVAudioPlayer(contentsOf: url) else { failed = true; return }
         player = p
         p.play(); playing = true
+    }
+}
+
+func isVideoRef(_ ref: String) -> Bool {
+    ["mp4", "mov", "m4v", "webm"].contains((ref as NSString).pathExtension.lowercased())
+}
+
+/// A video blob plays in place, with Full screen, Open in QuickTime (the
+/// Mac) and Download under it: as a document chip it fetched the whole file
+/// under a short timeout and then went to Quick Look, so a click showed
+/// nothing. The player streams the hub's URL with the token (the hub serves
+/// ranges), so it starts at once, behind a frame of the video and a play
+/// button until pressed (the player alone draws a blank box until it plays).
+/// AVFoundation has no WebM: that one is Download only. The console's twin is
+/// `attachHTML`'s `<video>` in ui.js.
+struct BlobVideo: View {
+    @Environment(HubClient.self) private var hub
+    let ref: String
+    /// The link's [text] when it has one: the file's name on disk.
+    var title: String = ""
+    @State private var player: AVPlayer?
+    @State private var aspect: CGFloat = 16.0 / 9
+    @State private var poster: UIImage?
+    @State private var started = false
+    @State private var progress: Double?
+    @State private var saved: URL?
+    @State private var failed = false
+    @State private var exporting = false
+    @State private var job: URLSessionDownloadTask?
+    @State private var full = false
+    /// The download was Open in QuickTime's: open the file once it lands.
+    @State private var openAfter = false
+
+    var ext: String { (ref as NSString).pathExtension.lowercased() }
+    var playable: Bool { ext != "webm" }
+    var fileName: String {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        return t.isEmpty ? String(ref.split(separator: "/").last ?? "video.\(ext)") : t + "." + ext
+    }
+    #if targetEnvironment(macCatalyst)
+    static let width: CGFloat = 560   // the console's .att-video
+    static let savedLabel = "Saved to Downloads"
+    #else
+    static let width: CGFloat = 300   // inside a FlowRow, so a fixed width
+    static let savedLabel = "Downloaded"
+    #endif
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if playable {
+                ZStack {
+                    if let player { VideoPlayer(player: player) }
+                    if !started {
+                        if let poster { Image(uiImage: poster).resizable().scaledToFill() } else { Color.black }
+                        Button { started = true; player?.play() } label: {
+                            Image(systemName: "play.circle.fill").font(.system(size: 54))
+                                .symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.45))
+                        }
+                        .buttonStyle(.plain).disabled(player == nil)
+                        .accessibilityLabel("Play \(fileName)")
+                    }
+                }
+                .frame(width: Self.width, height: (Self.width / aspect).rounded())
+                .clipped()
+                .background(Color.black)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1)))
+            }
+            HStack(spacing: 8) {
+                if playable {
+                    Button("Full screen") { started = true; full = true; player?.play() }
+                        .disabled(player == nil)
+                }
+                #if targetEnvironment(macCatalyst)
+                Button(openAfter ? progressLabel : "Open in QuickTime") { openInQuickTime() }
+                    .disabled(progress != nil)
+                #endif
+                Button(failed ? "Download failed, try again" : saved != nil ? Self.savedLabel
+                       : openAfter ? "Download" : progressLabel) { download() }
+                    .disabled(progress != nil || saved != nil)
+                if !playable, progress == nil, saved == nil {
+                    Text(fileName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            .font(.caption.weight(.semibold)).buttonStyle(.bordered)
+            if let progress {
+                ProgressView(value: progress).frame(width: Self.width)
+            }
+        }
+        .task(id: ref) { await load() }
+        // The cover takes the card off screen: the video plays on in it.
+        .onDisappear { if !full { player?.pause() } }
+        .fullScreenCover(isPresented: $full) {
+            if let player { VideoFullScreen(player: player) { full = false } }
+        }
+        #if !targetEnvironment(macCatalyst)
+        .fileExporter(isPresented: $exporting, item: saved, contentTypes: [.movie], defaultFilename: fileName) { _ in }
+        #endif
+    }
+
+    private var progressLabel: String { progress.map { "Downloading \(Int($0 * 100))%" } ?? "Download" }
+
+    #if targetEnvironment(macCatalyst)
+    /// The file in ~/Downloads (fetched first if it is not there yet), opened
+    /// in QuickTime Player; the Mac's own player for the type if QuickTime is gone.
+    private func openInQuickTime() {
+        guard let saved else { openAfter = true; download(); return }
+        if !MacApp.open(saved, in: "QuickTime Player") { Task { _ = await UIApplication.shared.open(saved) } }
+    }
+    #endif
+
+    private var url: URL? { URL(string: hub.baseURL + "/api/v1/blobs/" + ref) }
+
+    private func load() async {
+        guard playable, player == nil, let url else { return }
+        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer \(hub.token)"]])
+        player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+        if let track = try? await asset.loadTracks(withMediaType: .video).first,
+           let (size, t) = try? await track.load(.naturalSize, .preferredTransform) {
+            let s = size.applying(t)
+            if abs(s.width) > 0, abs(s.height) > 0 { aspect = abs(s.width) / abs(s.height) }
+        }
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: Self.width * 2, height: Self.width * 2)
+        // 4 s in, past a fade from blank that many videos open with.
+        let dur = (try? await asset.load(.duration).seconds) ?? 0
+        let at = dur > 8 ? 4 : dur / 2
+        if let frame = try? await gen.image(at: CMTime(seconds: at, preferredTimescale: 600)).image {
+            poster = UIImage(cgImage: frame)
+        }
+    }
+
+    /// The whole file, with its percent on the button: the Mac saves it to
+    /// ~/Downloads under the link's text, the phone offers the Files sheet.
+    private func download() {
+        guard let url, job == nil else { return }
+        var req = URLRequest(url: url, timeoutInterval: 600)
+        req.setValue("Bearer \(hub.token)", forHTTPHeaderField: "Authorization")
+        failed = false; progress = 0
+        let name = fileName
+        let task = URLSession.shared.downloadTask(with: req) { tmp, resp, _ in
+            var dest: URL?
+            if let tmp, (resp as? HTTPURLResponse)?.statusCode == 200 {
+                #if targetEnvironment(macCatalyst)
+                let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                #else
+                let dir: URL? = FileManager.default.temporaryDirectory.appendingPathComponent("blobs", isDirectory: true)
+                #endif
+                if let dir {
+                    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    var d = dir.appendingPathComponent(name)
+                    let stem = d.deletingPathExtension().lastPathComponent, e = d.pathExtension
+                    var n = 2
+                    while FileManager.default.fileExists(atPath: d.path) {
+                        d = dir.appendingPathComponent("\(stem) \(n).\(e)"); n += 1
+                    }
+                    if (try? FileManager.default.moveItem(at: tmp, to: d)) != nil { dest = d }
+                }
+            }
+            Task { @MainActor in
+                job = nil; progress = nil
+                #if targetEnvironment(macCatalyst)
+                if let dest, openAfter { saved = dest; openAfter = false; openInQuickTime(); return }
+                openAfter = false
+                #endif
+                if let dest { saved = dest; exporting = true } else { failed = true }
+            }
+        }
+        job = task
+        task.resume()
+        Task { @MainActor in
+            while job === task {
+                progress = task.progress.fractionCompleted
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+    }
+}
+
+/// A card's video over the whole screen, the same player going on where the
+/// card left it; Done or Esc goes back. On the Mac the window goes into macOS
+/// full screen with it and back out after. It reads no environment: Catalyst
+/// builds a cover before the app's environment reaches it.
+struct VideoFullScreen: View {
+    let player: AVPlayer
+    let done: () -> Void
+    @State private var wasFull = true
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            VideoPlayer(player: player).ignoresSafeArea()
+            Button("Done", action: done)
+                .font(.callout.weight(.semibold)).buttonStyle(.borderedProminent).tint(.black.opacity(0.6))
+                .keyboardShortcut(.cancelAction)
+                .padding(16)
+        }
+        #if targetEnvironment(macCatalyst)
+        .onAppear { wasFull = MacApp.fullScreen(true) }
+        .onDisappear { if !wasFull { MacApp.fullScreen(false) } }
+        #endif
     }
 }
 
