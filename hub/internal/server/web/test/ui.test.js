@@ -189,6 +189,21 @@ test('mdInline: bare URL sheds trailing punctuation, keeps balanced parens', () 
     '<a href="https://g.test/pull/82" target="_blank" rel="noopener">PR</a>, then');
 });
 
+test('a link into the hub blobs downloads; a picture in a file strip has Full screen and Download', () => {
+  assert.equal(mdInline('[Download the picture](https://hub.test/api/v1/blobs/ab/shot.png)'),
+    '<a href="https://hub.test/api/v1/blobs/ab/shot.png" download>Download the picture</a>');
+  const pic = pictureHTML('ab/shot.png', 'Home: before');
+  assert.match(pic, /<img src="\/api\/v1\/blobs\/ab\/shot\.png"/);
+  assert.match(pic, /<a href="\/api\/v1\/blobs\/ab\/shot\.png" onclick="return !openImage\(this\.href\)" class="small att-file">Full screen<\/a>/);
+  assert.match(pic, /<a href="\/api\/v1\/blobs\/ab\/shot\.png" download="Home- before\.png" class="small att-file">Download<\/a>/);
+  // No caption: the file keeps the blob's own name.
+  assert.match(pictureHTML('ab/shot.png'), /download="shot\.png"/);
+  // The strip gives a picture the row, and leaves any other file as it was.
+  const strip = filesHTML([{ ref: 'ab/shot.png', caption: 'One' }, { ref: 'ab/notes.pdf', caption: '' }]);
+  assert.equal((strip.match(/>Full screen</g) || []).length, 1);
+  assert.match(strip, /📎 notes\.pdf/);
+});
+
 test('md: bullets, numbers, headings, paragraphs', () => {
   assert.equal(md('- a\n- **b**\n\n1. one\n2) two\n# Head\nplain'),
     '<ul><li>a</li><li><strong>b</strong></li></ul><ol><li>one</li><li>two</li></ol><h3>Head</h3><p>plain</p>');

@@ -755,18 +755,21 @@ const chatState = { id: null, lastMsgID: 0, lastAsks: '', lastActs: '', lastProm
 let armedReply = null;
 
 async function openThread(id, focus) {
-  if (chatState.id !== id) chatState.about = null;
+  // The same session again (a click on one of its card lines in the list):
+  // the words and pictures in its box stay.
+  const same = chatState.id === id;
+  if (!same) chatState.about = null;
   chatState.id = id; chatState.lastMsgID = 0; chatState.lastActs = ''; chatState.open = new Map();
   chatState.focus = focus || ''; chatState.focusAct = undefined; chatState.actIDs = ''; chatState.lastPrompts = ''; chatState.lastRecs = '';
   chatState.lastAsks = ''; chatState.cards = {}; chatState.full = false; chatState.chain = newChain(); chatState.liveRun = '';
   // The chat's composer state IS chatState.send (composer.js keeps it across
   // the 5s redraws); a new session starts it empty.
-  chatState.send = composerReset('chat');
+  chatState.send = same ? composerState('chat') : composerReset('chat');
   // An ask carried over from another page (openRespond), or a ready-made
   // strip entry (openApprove: a calendar row's Approve/Deny).
   if (armedReply && armedReply.thread_id === id) chatState.send.re = armedReply.re;
   armedReply = null;
-  clearDraft('chat');
+  if (!same) clearDraft('chat');
   const el = document.getElementById('chat');
   // The board's copy of this session's open cards stands in while the
   // thread's own reads land (the phone's seedCards), so a card he opened the
@@ -842,7 +845,10 @@ async function refreshThread(id, first) {
   const ids = acts.map(a => a.id).join(',');
   if (ids !== chatState.actIDs) { chatState.actIDs = ids; chatState.focusAct = undefined; }
   if (chatState.focus && chatState.focusAct === undefined) {
-    chatState.focusAct = await get('/actions/' + encodeURIComponent(chatState.focus)).catch(() => null);
+    const got = await get('/actions/' + encodeURIComponent(chatState.focus)).catch(() => null);
+    // Another session was opened meanwhile: this answer is not its card.
+    if (chatState.id !== id || gen !== route.gen) return;
+    chatState.focusAct = got;
   }
   const fa = chatState.focusAct;
   if (fa && fa.thread_id === id) {
@@ -902,7 +908,12 @@ async function refreshThread(id, first) {
     return;
   }
 
-  const askByMsg = {}, askById = {}, tailAsks = [];
+  const askByMsg = {}, askById = {}, headAsks = [], tailAsks = [];
+  // A live card OLDER than every loaded message (its own message is past the
+  // loaded window) heads the chat, where its time puts it: it used to fall to
+  // the tail, so an old open card drew under newer ones. The phone widens its
+  // window to the card's row instead.
+  const firstTs = ordered.length ? Math.min(...ordered.map(m => +new Date(m.ts))) : Infinity;
   // A dismissed card folds to one grey line where it was, with Reopen inside
   // (2026-09-15: dismiss is "I don't want to reply", "but sometimes I do
   // want to reply" — it used to leave the chat entirely, 2026-08-28).
@@ -926,6 +937,7 @@ async function refreshThread(id, first) {
       for (const m of ordered) if (+new Date(m.ts) <= at) host = m.id;
     }
     if (host) (askByMsg[host] ||= []).push(a);
+    else if (activeAsk(a) && +new Date(a.created_at) < firstTs) headAsks.push(a);
     else if (activeAsk(a)) tailAsks.push(a); // newer than every message: the turn is still in flight
     // A resolved card with no home stays hidden: it is history, and it was
     // never drawn in this chat anyway.
@@ -940,12 +952,13 @@ async function refreshThread(id, first) {
   // these Thursday messages… I don't know why these are hanging down here").
   // Oldest first, as the phone does: the hub lists them newest first
   // (11-01 10:25: "these are presented backwards").
-  const actByMsg = {}, tail = [];
+  const actByMsg = {}, headActs = [], tail = [];
   for (const a of [...acts].sort((x, y) => +new Date(x.created_at) - +new Date(y.created_at))) {
     const at = +new Date(a.created_at);
     let host = null;
     for (const m of ordered) if (+new Date(m.ts) <= at) host = m;
     if (host) (actByMsg[host.id] ||= []).push(a);
+    else if ((a.open || a.id === chatState.focus) && ordered.length) headActs.push(a);
     else if (a.open || !ordered.length || a.id === chatState.focus) tail.push(a);
   }
   // A rec sits under the reply that filed it — the hub names it
@@ -989,6 +1002,7 @@ async function refreshThread(id, first) {
     for (const a of cs) groups.push(['action:' + a.id, chatActionHTML(a)]);
     for (const r of rs) groups.push(['rec:' + r.id, recNoticeHTML(r)]);
   };
+  tails(headAsks, headActs, []);
   if (full) {
     for (const m of ordered) groups.push(['msg:' + m.id, msgHTML(m, askByMsg[m.id], actByMsg[m.id], recByMsg[m.id], askById, recById)]);
     tails(tailAsks, tail, tailRecs);
@@ -1941,8 +1955,11 @@ async function chatSendNow(p, re) {
 // `note` is the resolution written on an ask: the read card's white Read
 // button sends the hub's own word for its one outcome ("Read it"), so the
 // closed card says what he did and the hub folds it like a dismissed one.
-async function cardMove(path, body, word) {
-  return act(() => post(path, body), word, async () => { await refreshThread(chatState.id, true); refreshBadges(); });
+async function cardMove(path, body, word, id) {
+  const ok = await act(() => post(path, body), word, async () => { await refreshThread(chatState.id, true); refreshBadges(); });
+  // A refused close: the redraw may keep the same node, so the grey comes off here.
+  if (!ok && id) document.getElementById('ask-card-' + id)?.classList.remove('closing');
+  return ok;
 }
 // The card folds at the press, like the desktop's, not after the thread's
 // seven reads come back; a refused close redraws it open again.
@@ -1950,7 +1967,7 @@ const resolveAsk = (id, state, note) => {
   const el = document.getElementById('ask-card-' + id);
   if (el && state !== 'open') el.classList.add('closing');
   if (state !== 'open') composerForget('chat', 'ask', id);
-  return cardMove(`/asks/${id}/resolve`, note ? { state, note } : { state }, note || 'ask ' + state);
+  return cardMove(`/asks/${id}/resolve`, note ? { state, note } : { state }, note || 'ask ' + state, id);
 };
 // cardFold: THE Dismiss (back=false) and Reopen (back=true) of every chat
 // card — one call, the endpoint per card kind in this one table (three
@@ -1964,7 +1981,7 @@ const cardFold = (ref, id, back) => {
   const el = document.getElementById('ask-card-' + id);
   if (el && !back) el.classList.add('closing');
   if (!back) composerForget('chat', ref, id);
-  return cardMove(...CARD_FOLD[ref](id, back));
+  return cardMove(...CARD_FOLD[ref](id, back), id);
 };
 
 // ---- the chat's own wiring ----

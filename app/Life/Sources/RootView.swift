@@ -240,13 +240,18 @@ struct RootView: View {
 }
 
 /// The app's one link opener, built once: a `life://` link is ours, anything
-/// else is still iOS's. A fresh `OpenURLAction` on every pass of RootView
-/// (each board refresh) was a changed environment value, so every page that
-/// reads `openURL` redrew whole on every refresh.
+/// else is still iOS's, except a link into the hub's blobs, which a browser
+/// cannot open without the token (`openBlobLink`). A fresh `OpenURLAction`
+/// on every pass of RootView (each board refresh) was a changed environment
+/// value, so every page that reads `openURL` redrew whole on every refresh.
 @MainActor final class LifeLinks {
     private var nav: RefNav?
     private var hub: HubClient?
     private lazy var opener = OpenURLAction { [weak self] url in
+        if let ref = hubBlobRef(url), let hub = self?.hub {
+            Task { await openBlobLink(ref, hub: hub) }
+            return .handled
+        }
         guard url.scheme == "life" else { return .systemAction }
         guard let self, let nav = self.nav, let hub = self.hub else { return .discarded }
         Task { await nav.open(url, hub: hub) }

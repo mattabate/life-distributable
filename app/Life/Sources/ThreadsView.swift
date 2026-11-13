@@ -225,7 +225,11 @@ struct ThreadsView: View {
             Divider().ignoresSafeArea()
             if let s = selected {
                 NavigationStack(path: $path) {
-                    ThreadDetail(thread: s.thread, focusMessage: s.message, focusCard: s.card, armOnOpen: s.arm).id(s)
+                    ThreadDetail(thread: s.thread, focusMessage: s.message, focusCard: s.card, armOnOpen: s.arm)
+                        // Keyed on the session, not the card: another card of the
+                        // open session keeps the chat (draft, scroll, armed replies);
+                        // ThreadDetail lands the new card itself.
+                        .id(s.thread.id)
                         .navigationDestination(for: OpenAsk.self) { ThreadDetail(thread: $0.thread, focusMessage: $0.message, focusCard: $0.card, armOnOpen: $0.arm) }
                 }
             } else {

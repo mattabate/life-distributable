@@ -138,11 +138,21 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
                 completionHandler(.newData)
                 return
             }
-            if application.applicationState != .active, let line = Self.spokenLine(userInfo) {
+            if application.applicationState != .active, let line = Self.spokenLine(userInfo), Self.firstSaying(line) {
                 Speaker.shared.announce(line, thread: userInfo["thread"] as? String ?? "", state: "background", sentAt: Self.sentAt(userInfo))
             }
             completionHandler(.noData)
         }
+    }
+
+    /// One push reaches both handlers while the app is in front but inactive
+    /// (Control Centre down, a call banner): the second within a few seconds
+    /// with the same line is the same push, not said again.
+    @MainActor private static var lastSaid: (line: String, at: Date)?
+    @MainActor static func firstSaying(_ line: String) -> Bool {
+        if let l = lastSaid, l.line == line, Date().timeIntervalSince(l.at) < 10 { return false }
+        lastSaid = (line, Date())
+        return true
     }
 
     /// What the push says: the card's spoken line is the whole alert body; the
@@ -181,7 +191,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
             let said = line
             let thread = info["thread"] as? String ?? ""
             let at = Self.sentAt(info)
-            Task { @MainActor in Speaker.shared.announce(said, thread: thread, sentAt: at) }
+            Task { @MainActor in if Self.firstSaying(said) { Speaker.shared.announce(said, thread: thread, sentAt: at) } }
         }
         completionHandler(read ? [.list] : [.banner, .sound, .list])
     }
