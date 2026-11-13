@@ -694,13 +694,7 @@ struct BlobHTML: View {
         guard let local else { return }
         _ = await UIApplication.shared.open(local)
         #else
-        // No hub, no code: Safari could not reach the page either.
-        guard let code = try? await hub.loginCode() else { return }
-        var c = URLComponents(string: hub.baseURL)
-        c?.path = "/"
-        c?.queryItems = [URLQueryItem(name: "code", value: code), URLQueryItem(name: "next", value: "/api/v1/blobs/" + ref)]
-        guard let url = c?.url else { return }
-        _ = await UIApplication.shared.open(url)
+        await openBlobInSafari(ref, hub: hub)
         #endif
     }
 }
@@ -814,20 +808,20 @@ func isVideoRef(_ ref: String) -> Bool {
     ["mp4", "mov", "m4v", "webm"].contains((ref as NSString).pathExtension.lowercased())
 }
 
-/// A video blob plays in place, with Full screen, Open in QuickTime (the
-/// Mac) and Download under it: as a document chip it fetched the whole file
-/// under a short timeout and then went to Quick Look, so a click showed
+/// A video blob plays in place on the app's own player (VideoStage): a click
+/// on the picture plays and pauses, the play bar stays up, the arrow keys
+/// step half a second, and Full screen and Download sit in the picture's top
+/// corners, before it is played too. As a document chip it fetched the whole
+/// file under a short timeout and then went to Quick Look, so a click showed
 /// nothing. The player streams the hub's URL with the token (the hub serves
-/// ranges), so it starts at once, behind a frame of the video and a play
-/// button until pressed (the player alone draws a blank box until it plays).
-/// AVFoundation has no WebM: that one is Download only. The console's twin is
-/// `attachHTML`'s `<video>` in ui.js.
+/// ranges), so it starts at once. AVFoundation has no WebM: that one is
+/// Download only. The console's twin is `attachHTML`'s `<video>` in ui.js.
 struct BlobVideo: View {
     @Environment(HubClient.self) private var hub
     let ref: String
     /// The link's [text] when it has one: the file's name on disk.
     var title: String = ""
-    @State private var player: AVPlayer?
+    @State private var model: VideoModel?
     @State private var aspect: CGFloat = 16.0 / 9
     @State private var poster: UIImage?
     @State private var started = false
@@ -837,16 +831,10 @@ struct BlobVideo: View {
     @State private var exporting = false
     @State private var job: URLSessionDownloadTask?
     @State private var full = false
-    /// The download was Open in QuickTime's: open the file once it lands.
-    @State private var openAfter = false
 
     var ext: String { (ref as NSString).pathExtension.lowercased() }
     var playable: Bool { ext != "webm" }
-    var fileName: String {
-        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-        return t.isEmpty ? String(ref.split(separator: "/").last ?? "video.\(ext)") : t + "." + ext
-    }
+    var fileName: String { blobFileName(ref, title: title) }
     #if targetEnvironment(macCatalyst)
     static let width: CGFloat = 560   // the console's .att-video
     static let savedLabel = "Saved to Downloads"
@@ -858,73 +846,52 @@ struct BlobVideo: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if playable {
-                ZStack {
-                    if let player { VideoPlayer(player: player) }
-                    if !started {
-                        if let poster { Image(uiImage: poster).resizable().scaledToFill() } else { Color.black }
-                        Button { started = true; player?.play() } label: {
-                            Image(systemName: "play.circle.fill").font(.system(size: 54))
-                                .symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.45))
-                        }
-                        .buttonStyle(.plain).disabled(player == nil)
-                        .accessibilityLabel("Play \(fileName)")
+                VideoStage(model: model, poster: poster, started: $started) {
+                    VideoNub(symbol: "arrow.up.left.and.arrow.down.right", label: "Full screen") {
+                        if !started { started = true; model?.toggle() }
+                        full = true
                     }
+                    .disabled(model == nil)
+                    Spacer()
+                    VideoNub(symbol: failed ? "exclamationmark.arrow.circlepath" : saved != nil ? "checkmark" : "arrow.down.to.line",
+                             text: progress.map { "\(Int($0 * 100))%" },
+                             label: failed ? "Download failed, try again" : saved != nil ? Self.savedLabel : "Download") { download() }
+                        .disabled(progress != nil || saved != nil)
                 }
                 .frame(width: Self.width, height: (Self.width / aspect).rounded())
                 .clipped()
                 .background(Color.black)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1)))
-            }
-            HStack(spacing: 8) {
-                if playable {
-                    Button("Full screen") { started = true; full = true; player?.play() }
-                        .disabled(player == nil)
+            } else {
+                HStack(spacing: 8) {
+                    Button(failed ? "Download failed, try again" : saved != nil ? Self.savedLabel
+                           : progress.map { "Downloading \(Int($0 * 100))%" } ?? "Download") { download() }
+                        .disabled(progress != nil || saved != nil)
+                    if progress == nil, saved == nil {
+                        Text(fileName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
-                #if targetEnvironment(macCatalyst)
-                Button(openAfter ? progressLabel : "Open in QuickTime") { openInQuickTime() }
-                    .disabled(progress != nil)
-                #endif
-                Button(failed ? "Download failed, try again" : saved != nil ? Self.savedLabel
-                       : openAfter ? "Download" : progressLabel) { download() }
-                    .disabled(progress != nil || saved != nil)
-                if !playable, progress == nil, saved == nil {
-                    Text(fileName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            .font(.caption.weight(.semibold)).buttonStyle(.bordered)
-            if let progress {
-                ProgressView(value: progress).frame(width: Self.width)
+                .font(.caption.weight(.semibold)).buttonStyle(.bordered)
             }
         }
         .task(id: ref) { await load() }
         // The cover takes the card off screen: the video plays on in it.
-        .onDisappear { if !full { player?.pause() } }
+        .onDisappear { if !full { model?.player.pause() } }
         .fullScreenCover(isPresented: $full) {
-            if let player { VideoFullScreen(player: player) { full = false } }
+            if let model { VideoFullScreen(model: model) { full = false } }
         }
         #if !targetEnvironment(macCatalyst)
         .fileExporter(isPresented: $exporting, item: saved, contentTypes: [.movie], defaultFilename: fileName) { _ in }
         #endif
     }
 
-    private var progressLabel: String { progress.map { "Downloading \(Int($0 * 100))%" } ?? "Download" }
-
-    #if targetEnvironment(macCatalyst)
-    /// The file in ~/Downloads (fetched first if it is not there yet), opened
-    /// in QuickTime Player; the Mac's own player for the type if QuickTime is gone.
-    private func openInQuickTime() {
-        guard let saved else { openAfter = true; download(); return }
-        if !MacApp.open(saved, in: "QuickTime Player") { Task { _ = await UIApplication.shared.open(saved) } }
-    }
-    #endif
-
     private var url: URL? { URL(string: hub.baseURL + "/api/v1/blobs/" + ref) }
 
     private func load() async {
-        guard playable, player == nil, let url else { return }
+        guard playable, model == nil, let url else { return }
         let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["Authorization": "Bearer \(hub.token)"]])
-        player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+        model = VideoModel(player: AVPlayer(playerItem: AVPlayerItem(asset: asset)))
         if let track = try? await asset.loadTracks(withMediaType: .video).first,
            let (size, t) = try? await track.load(.naturalSize, .preferredTransform) {
             let s = size.applying(t)
@@ -935,6 +902,8 @@ struct BlobVideo: View {
         gen.maximumSize = CGSize(width: Self.width * 2, height: Self.width * 2)
         // 4 s in, past a fade from blank that many videos open with.
         let dur = (try? await asset.load(.duration).seconds) ?? 0
+        // The bar's length before the first play (the player's clock has not ticked yet).
+        if dur.isFinite, dur > 0 { model?.duration = dur }
         let at = dur > 8 ? 4 : dur / 2
         if let frame = try? await gen.image(at: CMTime(seconds: at, preferredTimescale: 600)).image {
             poster = UIImage(cgImage: frame)
@@ -951,29 +920,12 @@ struct BlobVideo: View {
         let name = fileName
         let task = URLSession.shared.downloadTask(with: req) { tmp, resp, _ in
             var dest: URL?
-            if let tmp, (resp as? HTTPURLResponse)?.statusCode == 200 {
-                #if targetEnvironment(macCatalyst)
-                let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-                #else
-                let dir: URL? = FileManager.default.temporaryDirectory.appendingPathComponent("blobs", isDirectory: true)
-                #endif
-                if let dir {
-                    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                    var d = dir.appendingPathComponent(name)
-                    let stem = d.deletingPathExtension().lastPathComponent, e = d.pathExtension
-                    var n = 2
-                    while FileManager.default.fileExists(atPath: d.path) {
-                        d = dir.appendingPathComponent("\(stem) \(n).\(e)"); n += 1
-                    }
-                    if (try? FileManager.default.moveItem(at: tmp, to: d)) != nil { dest = d }
-                }
+            if let tmp, (resp as? HTTPURLResponse)?.statusCode == 200, let dir = blobSaveDir() {
+                let d = freeFileURL(in: dir, name: name)
+                if (try? FileManager.default.moveItem(at: tmp, to: d)) != nil { dest = d }
             }
             Task { @MainActor in
                 job = nil; progress = nil
-                #if targetEnvironment(macCatalyst)
-                if let dest, openAfter { saved = dest; openAfter = false; openInQuickTime(); return }
-                openAfter = false
-                #endif
                 if let dest { saved = dest; exporting = true } else { failed = true }
             }
         }
@@ -988,23 +940,206 @@ struct BlobVideo: View {
     }
 }
 
+/// One video's player and where it stands, for the stage's bar: the time, the
+/// length and whether it plays, kept by the player's own clock.
+@MainActor @Observable
+final class VideoModel {
+    let player: AVPlayer
+    var time: Double = 0
+    var duration: Double = 0
+    var playing = false
+    /// An arrow key's hop: short enough to land on one wanted frame.
+    static let step = 0.5
+
+    init(player: AVPlayer) {
+        self.player = player
+        _ = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] t in
+            MainActor.assumeIsolated { self?.tick(t.seconds) }
+        }
+    }
+
+    private func tick(_ t: Double) {
+        if t.isFinite { time = t }
+        if let d = player.currentItem?.duration.seconds, d.isFinite, d > 0 { duration = d }
+        playing = player.timeControlStatus != .paused
+    }
+
+    /// Play or pause; play at the end starts over.
+    func toggle() {
+        if playing { player.pause(); playing = false; return }
+        if duration > 0, time >= duration - 0.05 { seek(to: 0) }
+        player.play(); playing = true
+    }
+
+    /// To the exact frame: the default tolerance snaps to a keyframe, which
+    /// can be seconds away from a half-second hop.
+    func seek(to s: Double) {
+        time = max(0, duration > 0 ? min(s, duration) : s)
+        player.seek(to: CMTime(seconds: time, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    func hop(_ d: Double) { seek(to: time + d) }
+}
+
+/// The player's picture, and the keys once it has been clicked: left and
+/// right hop half a second, space plays and pauses.
+struct VideoSurface: UIViewRepresentable {
+    let model: VideoModel
+    /// Goes up by one each time the stage is clicked: take the keys.
+    var focus = 0
+
+    func makeUIView(context: Context) -> VideoSurfaceView { VideoSurfaceView() }
+    func updateUIView(_ v: VideoSurfaceView, context: Context) {
+        v.model = model
+        v.playerLayer.player = model.player
+        if v.focus != focus { v.focus = focus; v.wantsKeys = true; _ = v.becomeFirstResponder() }
+    }
+}
+
+final class VideoSurfaceView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    var model: VideoModel?
+    var focus = 0
+    var wantsKeys = false
+
+    override var canBecomeFirstResponder: Bool { true }
+    // The full-screen cover asks for the keys before it has a window.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil, wantsKeys { DispatchQueue.main.async { [weak self] in _ = self?.becomeFirstResponder() } }
+    }
+    override var keyCommands: [UIKeyCommand]? {
+        [(UIKeyCommand.inputLeftArrow, #selector(back)), (UIKeyCommand.inputRightArrow, #selector(forward)), (" ", #selector(space))].map {
+            let c = UIKeyCommand(input: $0.0, modifierFlags: [], action: $0.1)
+            c.wantsPriorityOverSystemBehavior = true
+            return c
+        }
+    }
+    @objc private func back() { model?.hop(-VideoModel.step) }
+    @objc private func forward() { model?.hop(VideoModel.step) }
+    @objc private func space() { model?.toggle() }
+}
+
+/// A video with the app's own controls over it: a click anywhere on the
+/// picture plays and pauses, `top` sits along its top edge (the card's Full
+/// screen and Download, the cover's Done), and the bar along the bottom never
+/// hides. A frame of the video and a play button stand in until it is
+/// started: the player alone is a blank box until it plays.
+struct VideoStage<Top: View>: View {
+    let model: VideoModel?
+    let poster: UIImage?
+    @Binding var started: Bool
+    /// The full-screen cover: the keys are its own from the start.
+    var keysAtOnce = false
+    @ViewBuilder var top: () -> Top
+    @State private var focus = 0
+
+    var body: some View {
+        ZStack {
+            if let model {
+                VideoSurface(model: model, focus: focus + (keysAtOnce ? 1 : 0))
+                    .contentShape(Rectangle())
+                    .onTapGesture { touched(); model.toggle() }
+            }
+            if !started {
+                Group {
+                    if let poster { Image(uiImage: poster).resizable().scaledToFill() } else { Color.black }
+                }
+                .allowsHitTesting(false)
+                Button { touched(); model?.toggle() } label: {
+                    Image(systemName: "play.circle.fill").font(.system(size: 54))
+                        .symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.45))
+                }
+                .buttonStyle(.plain).disabled(model == nil)
+                .accessibilityLabel("Play")
+            }
+            VStack(spacing: 0) {
+                HStack(spacing: 8, content: top).padding(8)
+                Spacer(minLength: 0)
+                if let model { VideoBar(model: model, touched: touched) }
+            }
+        }
+    }
+
+    private func touched() { started = true; focus += 1 }
+}
+
+/// The play bar: play or pause, 15 s back and on, the time, the scrubber and
+/// the length.
+struct VideoBar: View {
+    let model: VideoModel
+    let touched: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button { touched(); model.toggle() } label: {
+                Image(systemName: model.playing ? "pause.fill" : "play.fill").frame(width: 16)
+            }
+            .accessibilityLabel(model.playing ? "Pause" : "Play")
+            Button { touched(); model.hop(-15) } label: { Image(systemName: "gobackward.15") }
+                .accessibilityLabel("Back 15 seconds")
+            Button { touched(); model.hop(15) } label: { Image(systemName: "goforward.15") }
+                .accessibilityLabel("Forward 15 seconds")
+            Text(Self.clock(model.time)).monospacedDigit()
+            Slider(value: Binding(get: { model.time }, set: { touched(); model.seek(to: $0) }),
+                   in: 0...max(model.duration, 0.1))
+            Text(Self.clock(model.duration)).monospacedDigit()
+        }
+        .font(.caption.weight(.semibold)).foregroundStyle(.white).buttonStyle(.plain).tint(.white)
+        .padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 8)
+        .background(LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
+            .allowsHitTesting(false))
+    }
+
+    static func clock(_ s: Double) -> String {
+        let t = Int(s.isFinite ? max(0, s) : 0)
+        return String(format: "%d:%02d", t / 60, t % 60)
+    }
+}
+
+/// A round button on a video's corner: Full screen, Download (its percent
+/// beside the arrow while the file comes down).
+struct VideoNub: View {
+    let symbol: String
+    var text: String?
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: symbol)
+                if let text { Text(text).monospacedDigit() }
+            }
+            .font(.caption.weight(.bold)).foregroundStyle(.white)
+            .padding(.horizontal, text == nil ? 0 : 9)
+            .frame(minWidth: 28, minHeight: 28)
+            .background(.black.opacity(0.55), in: Capsule())
+        }
+        .buttonStyle(.plain).help(label).accessibilityLabel(label)
+    }
+}
+
 /// A card's video over the whole screen, the same player going on where the
 /// card left it; Done or Esc goes back. On the Mac the window goes into macOS
 /// full screen with it and back out after. It reads no environment: Catalyst
 /// builds a cover before the app's environment reaches it.
 struct VideoFullScreen: View {
-    let player: AVPlayer
+    let model: VideoModel
     let done: () -> Void
     @State private var wasFull = true
+    @State private var started = true
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             Color.black.ignoresSafeArea()
-            VideoPlayer(player: player).ignoresSafeArea()
-            Button("Done", action: done)
-                .font(.callout.weight(.semibold)).buttonStyle(.borderedProminent).tint(.black.opacity(0.6))
-                .keyboardShortcut(.cancelAction)
-                .padding(16)
+            VideoStage(model: model, poster: nil, started: $started, keysAtOnce: true) {
+                Button("Done", action: done)
+                    .font(.callout.weight(.semibold)).buttonStyle(.borderedProminent).tint(.black.opacity(0.6))
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+            }
         }
         #if targetEnvironment(macCatalyst)
         .onAppear { wasFull = MacApp.fullScreen(true) }
@@ -1026,6 +1161,126 @@ func blobTempFile(_ ref: String, hub: HubClient) async -> URL? {
     guard let d = try? await pictureBlob(ref, hub: hub) else { return nil }
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     return (try? d.write(to: url, options: .atomic)) != nil ? url : nil
+}
+
+/// The name a blob is saved under: the link's [text] with the blob's
+/// extension, else the blob's own name (its hash).
+func blobFileName(_ ref: String, title: String) -> String {
+    let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+    let own = String(ref.split(separator: "/").last ?? "file")
+    return t.isEmpty ? own : t + "." + (own as NSString).pathExtension
+}
+
+/// Where a Download lands: ~/Downloads on the Mac, a temp folder the Files
+/// sheet saves from on the phone.
+func blobSaveDir() -> URL? {
+    #if targetEnvironment(macCatalyst)
+    return FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+    #else
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("saved", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
+    #endif
+}
+
+/// `name` in `dir`, or "name 2.ext", "name 3.ext" and so on when it is taken.
+func freeFileURL(in dir: URL, name: String) -> URL {
+    var url = dir.appendingPathComponent(name)
+    let stem = url.deletingPathExtension().lastPathComponent, ext = url.pathExtension
+    var n = 2
+    while FileManager.default.fileExists(atPath: url.path) {
+        url = dir.appendingPathComponent(ext.isEmpty ? "\(stem) \(n)" : "\(stem) \(n).\(ext)"); n += 1
+    }
+    return url
+}
+
+/// A card's Download for a picture or a linked file: the blob fetched with
+/// the token and kept under `name` (a browser sent to the link has no token
+/// and shows the hub's "unauthorized").
+@MainActor
+func saveBlob(_ ref: String, as name: String, hub: HubClient) async -> URL? {
+    guard let d = try? await hub.blob(ref), let dir = blobSaveDir() else { return nil }
+    let url = freeFileURL(in: dir, name: name)
+    return (try? d.write(to: url, options: .withoutOverwriting)) != nil ? url : nil
+}
+
+/// The ref of a link into the hub's blobs (`…/api/v1/blobs/<ref>`), else nil.
+func hubBlobRef(_ url: URL) -> String? {
+    guard url.scheme == "https" || url.scheme == "http",
+          let r = url.path.range(of: "/api/v1/blobs/") else { return nil }
+    let ref = String(url.path[r.upperBound...])
+    return ref.isEmpty || ref.contains("..") ? nil : ref
+}
+
+/// A link to a hub blob, clicked in a card. A browser has no token, so it
+/// never goes there bare: the Mac saves it to ~/Downloads and opens it in
+/// the Mac's own app for the type; the phone sends Safari the hub's URL with
+/// a one-minute login code that sets the cookie (`/?code=…&next=`).
+@MainActor
+func openBlobLink(_ ref: String, hub: HubClient) async {
+    #if targetEnvironment(macCatalyst)
+    guard let file = await saveBlob(ref, as: blobFileName(ref, title: ""), hub: hub) else { return }
+    _ = await UIApplication.shared.open(file)
+    #else
+    await openBlobInSafari(ref, hub: hub)
+    #endif
+}
+
+/// Safari on the hub's own URL for a blob, logged in on the way with a
+/// one-minute code, never the token.
+@MainActor
+func openBlobInSafari(_ ref: String, hub: HubClient) async {
+    // No hub, no code: Safari could not reach the file either.
+    guard let code = try? await hub.loginCode() else { return }
+    var c = URLComponents(string: hub.baseURL)
+    c?.path = "/"
+    c?.queryItems = [URLQueryItem(name: "code", value: code), URLQueryItem(name: "next", value: "/api/v1/blobs/" + ref)]
+    guard let url = c?.url else { return }
+    _ = await UIApplication.shared.open(url)
+}
+
+/// Under a picture an agent put in a card: Full screen and Download, one
+/// standard way a picture is shown (inline, full screen, one-click
+/// download). Full screen is the lightbox on the Mac, Quick Look on the
+/// phone; Download is ~/Downloads on the Mac, the Files sheet on the phone.
+/// The console's twin is `pictureHTML` in ui.js.
+struct PictureActions: View {
+    @Environment(HubClient.self) private var hub
+    let ref: String
+    var title: String = ""
+    @State private var saving = false
+    @State private var saved: URL?
+    @State private var failed = false
+    @State private var exporting = false
+    @State private var full: URL?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button("Full screen") {
+                #if targetEnvironment(macCatalyst)
+                MacLightbox.open(ref: ref, hub: hub)
+                #else
+                Task { full = await blobTempFile(ref, hub: hub) }
+                #endif
+            }
+            Button(failed ? "Download failed, try again" : saved != nil ? BlobVideo.savedLabel
+                   : saving ? "Downloading" : "Download") {
+                Task {
+                    saving = true; failed = false
+                    saved = await saveBlob(ref, as: blobFileName(ref, title: title), hub: hub)
+                    saving = false
+                    if saved == nil { failed = true } else { exporting = true }
+                }
+            }
+            .disabled(saving || saved != nil)
+        }
+        .font(.caption.weight(.semibold)).buttonStyle(.bordered)
+        #if !targetEnvironment(macCatalyst)
+        .quickLookPreview($full)
+        .fileExporter(isPresented: $exporting, item: saved, contentTypes: [.image], defaultFilename: blobFileName(ref, title: title)) { _ in }
+        #endif
+    }
 }
 
 /// A face: the same authenticated, cached blob fetch as `BlobImage`, drawn as a

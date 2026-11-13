@@ -431,7 +431,11 @@ function mdInline(src, links = true) {
   // A link's URL may hold one level of balanced parens, as CommonMark's does.
   const MD_LINK = /\[([^\]]+)\]\((https?:\/\/(?:[^\s()\u0000\u0001]|\([^\s()\u0000\u0001]*\))+)\)/g;
   s = links
-    ? s.replace(MD_LINK, (_, t, u) => hold(`<a href="${u}" target="_blank" rel="noopener">${emph(t)}</a>`))
+    // A link into the hub's blobs downloads, as the app's does: it used to
+    // open a tab instead.
+    ? s.replace(MD_LINK, (_, t, u) => hold(/\/api\/v1\/blobs\//.test(u)
+        ? `<a href="${u}" download>${emph(t)}</a>`
+        : `<a href="${u}" target="_blank" rel="noopener">${emph(t)}</a>`))
        .replace(/(^|[\s(])(https?:\/\/[^\s<\]\u0000\u0001]+)/g, (_, pre, u) => {
          const [link, rest] = trimBareURL(u);
          return `${pre}${hold(`<a href="${link}" target="_blank" rel="noopener">${link}</a>`)}${rest}`;
@@ -603,7 +607,18 @@ const blobLineRef = l => blobLine(l)?.ref ?? null;
 // by side… small attachment cards, like one, two, three, four").
 function filesHTML(files) {
   return `<div class="md-files">${files.map(f =>
-    `<figure>${attachHTML(f.ref, f.caption)}${f.caption ? `<figcaption>${esc(f.caption)}</figcaption>` : ''}</figure>`).join('')}</div>`;
+    `<figure>${isImageRef(f.ref) ? pictureHTML(f.ref, f.caption) : attachHTML(f.ref, f.caption)}${f.caption ? `<figcaption>${esc(f.caption)}</figcaption>` : ''}</figure>`).join('')}</div>`;
+}
+// A picture an agent put in a card: the tile, then Full screen (the lightbox)
+// and Download, the row a video has. The Swift twin is PictureActions
+// (Attachments.swift).
+function pictureHTML(ref, caption) {
+  const url = '/api/v1/blobs/' + esc(ref);
+  const own = String(ref).split('/').pop();
+  const file = esc(String(caption || '').trim() ? String(caption).trim().replace(/[\/\\:]/g, '-') + '.' + own.split('.').pop() : own);
+  return attachHTML(ref, caption)
+    + `<div class="att-html-row"><a href="${url}" onclick="return !openImage(this.href)" class="small att-file">Full screen</a>`
+    + `<a href="${url}" download="${file}" class="small att-file">Download</a></div>`;
 }
 
 function md(src) {

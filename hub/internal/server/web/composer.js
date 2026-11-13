@@ -192,7 +192,7 @@ function composerHTML(key, spec) {
 // over an empty box does not send — it renames itself and waits for a second
 // press. Typing anything disarms it, because then there is a note and one
 // press is the whole gesture.
-const SEND_ARM = ' send';
+const SEND_ARM = '\0send';
 function composerActionsHTML(key) {
   const st = composerState(key), spec = st.spec || {}, d = cdom(key), k = esc(key);
   if (!spec.actions) {
@@ -448,7 +448,8 @@ async function composerSend(key, action) {
   if (st.sending) return;
   const d = cdom(key);
   const box = document.getElementById(d + '-draft');
-  const text = (box ? box.value : st.text).trim();
+  const raw = box ? box.value : st.text;
+  const text = raw.trim();
   const refs = draftRefs(key);
   if (refs === null) { composerShowErr(key, 'Still uploading — a moment.'); return; }
   // With `actions`, the button pressed IS the outcome — there is no lit chip.
@@ -510,14 +511,17 @@ async function composerSend(key, action) {
   try {
     await spec.send(payload);
     // The box empties only when the hub took it.
-    st.text = ''; st.at = ''; st.when = 'now'; st.target = 'this'; st.also = [];
-    if (st.re && !st.re.fixed) st.re = null;
-    else if (st.re) st.re.outcome = spec.defaultOutcome || '';
-    clearDraft(key);
     // Re-read the element: `send` may already have redrawn the page, in which
     // case the `box` above is a detached node and blanking it does nothing.
     const live = document.getElementById(d + '-draft');
-    if (live) { live.value = ''; autoGrow(live); }
+    // What was typed after the press, while the hub held it, stays in the box
+    // (the mic's own words are micSent's, below).
+    const typed = live && !mark && live.value.length > raw.length && live.value.startsWith(raw) ? live.value.slice(raw.length).replace(/^\s+/, '') : '';
+    st.text = typed; st.at = ''; st.when = 'now'; st.target = 'this'; st.also = [];
+    if (st.re && !st.re.fixed) st.re = null;
+    else if (st.re) st.re.outcome = spec.defaultOutcome || '';
+    clearDraft(key);
+    if (live) { live.value = typed; autoGrow(live); }
     if (typeof micSent === 'function') micSent(key, mark);
     composerDrawRe(key);
     composerDrawActions(key);

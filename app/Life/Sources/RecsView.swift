@@ -482,7 +482,9 @@ struct RecDecisionSheet: View {
                     busy = false
                     return
                 }
-                let thread = try await hub.thread(session)
+                // The decision is posted: a failed read of its session must
+                // not leave the sheet up to send it a second time.
+                let thread = try? await hub.thread(session)
                 let ids = attachments.assetIDs
                 dismiss()
                 await PhotoCleanup.offerDeletingScreenshots(ids)

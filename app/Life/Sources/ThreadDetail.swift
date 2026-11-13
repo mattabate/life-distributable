@@ -37,6 +37,11 @@ struct ThreadDetail: View {
     /// it has none — at the end of the transcript.
     @State private var asksByMessage: [Int: [Ask]] = [:]
     @State private var tailAsks: [Ask] = []
+    /// Live cards OLDER than every loaded message head the chat, where their
+    /// time puts them: they used to fall to the tail, so an old open card
+    /// drew under a newer one. The console's headAsks/headActs (threads.js).
+    @State private var headAsks: [Ask] = []
+    @State private var headActions: [Action] = []
     /// This session's pending approvals, drawn the same way as asks. A proposal has no message of its own, so each sits under
     /// the last message written before it — the turn that proposed it — or
     /// at the end when it is newer than everything (reply not landed yet).
@@ -227,6 +232,8 @@ struct ThreadDetail: View {
         var out: [OpenCell] = []
         let live = liveStarters
         let notice = { (r: Rec) in !r.isClosed && (r.seen_at ?? "").isEmpty }
+        for a in headAsks where !a.isClosed { out.append(.ask(a, 0)) }
+        for a in headActions where a.open == true { out.append(.action(a, 0)) }
         for m in rows {
             if live.contains(m.id) { out.append(.message(m)) }
             for a in asksByMessage[m.id] ?? [] where !a.isClosed { out.append(.ask(a, leadCost(m, "ask:" + a.id))) }
@@ -325,8 +332,9 @@ struct ThreadDetail: View {
         if let p = StepCardShot.posed, !all.contains(where: { $0.id == p.id }) { all.append(p) }
         #endif
         asks = all
-        var by: [Int: [Ask]] = [:], tail: [Ask] = []
+        var by: [Int: [Ask]] = [:], head: [Ask] = [], tail: [Ask] = []
         let order = ordered
+        let first = order.map(\.ts).min()
         let active = { (a: Ask) in !a.isClosed }
         for a in all.sorted(by: { $0.created_at < $1.created_at }) {
             // Dismissed — or a read marked Read — folds to one grey line
@@ -339,6 +347,8 @@ struct ThreadDetail: View {
             } else if let host = order.last(where: { $0.ts <= a.created_at }), active(a) {
                 by[host.id, default: []].append(a)
                 widen(toRow: host.id)
+            } else if active(a), let first, a.created_at < first {
+                head.append(a)
             } else if active(a) {
                 tail.append(a)  // newer than every message: the turn is still in flight
             }
@@ -346,6 +356,7 @@ struct ThreadDetail: View {
             // was never drawn here anyway.
         }
         asksByMessage = by
+        headAsks = head
         tailAsks = tail
     }
 
@@ -361,7 +372,7 @@ struct ThreadDetail: View {
     /// chat loads a newer window.
     func placeActions(_ pending: [Action]) {
         actions = pending
-        var by: [Int: [Action]] = [:], tail: [Action] = []
+        var by: [Int: [Action]] = [:], head: [Action] = [], tail: [Action] = []
         let order = ordered
         // Oldest first: the hub lists them newest first, so three approvals
         // under one message drew backwards.
@@ -369,11 +380,14 @@ struct ThreadDetail: View {
             if let host = order.last(where: { $0.ts <= a.created_at }) {
                 by[host.id, default: []].append(a)
                 if a.open == true || a.id == focusCard { widen(toRow: host.id) }
+            } else if (a.open == true || a.id == focusCard), !order.isEmpty {
+                head.append(a)
             } else if a.open == true || a.id == focusCard || order.isEmpty {
                 tail.append(a)
             }
         }
         actionsByMessage = by
+        headActions = head
         tailActions = tail
     }
 
@@ -729,6 +743,10 @@ struct ThreadDetail: View {
                                         .font(.caption).foregroundStyle(.secondary)
                                 }.buttonStyle(.plain).padding(.horizontal)
                             }
+                            ForEach(headAsks) { a in
+                                AskCard(a: a, goals: goals, reload: { await load() }).id(a.id)
+                            }
+                            ForEach(headActions) { approvalCell($0) }
                             ForEach(visible(rows)) { m in
                                 messageRow(m).id(m.id)
                                 ForEach(asksByMessage[m.id] ?? []) { a in
@@ -825,6 +843,25 @@ struct ThreadDetail: View {
                     // Opened on a reply (an ask card's "sent by"): the full
                     // chat, so the row is there to land on.
                     if let f = focusMessage, messages.contains(where: { $0.id == f }) { full = true }
+                    let (target, anchor) = openingTarget()
+                    widen(toRow: target as? Int)
+                    Task { @MainActor in
+                        for delay in [0, 120, 400] {
+                            try? await Task.sleep(for: .milliseconds(delay))
+                            proxy.scrollTo(target, anchor: anchor)
+                        }
+                    }
+                }
+                // Another card of the session already open (the Mac's list,
+                // ThreadsView: the chat is kept, with its draft and armed
+                // replies, not rebuilt): land on it as an open would.
+                .onChange(of: [focusMessage.map { String($0) }, focusCard]) { _, _ in
+                    let hasMsg = focusMessage.map { f in messages.contains { $0.id == f } } ?? false
+                    let hasCard = focusCard.map { f in asks.contains { $0.id == f } || actions.contains { $0.id == f } } ?? false
+                    // Not read yet: the next load lands it (focusLanded).
+                    guard hasMsg || hasCard else { if focusCard != nil { focusLanded = false }; return }
+                    if hasMsg || asks.contains(where: { $0.id == focusCard && $0.isClosed }) || actions.contains(where: { $0.id == focusCard && $0.open != true }) { full = true }
+                    if hasCard { placeActions(actions) }
                     let (target, anchor) = openingTarget()
                     widen(toRow: target as? Int)
                     Task { @MainActor in
@@ -959,6 +996,8 @@ struct ThreadDetail: View {
             poseStepCard()
             #endif
         }
+        // A second Respond into the chat already open (see focusCard above).
+        .onChange(of: armOnOpen) { _, r in if let r { armedOnOpen = true; arm(r) } }
         // Back from the background: the change loop may be parked on a
         // request the OS froze, so read the session now (as RootView does).
         .onChange(of: scenePhase) { _, p in

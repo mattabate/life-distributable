@@ -1459,3 +1459,33 @@ Entry format:
 - For: everyone
 - Fix: a link to a video blob (mp4, mov, m4v, webm) in a card or reply is a player in place, not a link that took the desktop app's whole window or a chip that fetched the whole file into Quick Look. The console draws a `<video>` with Full screen and Download under it (saved under the link's text). The phone and desktop app stream the hub's blob URL into a player behind a frame of the video and a play button, with Full screen (on the Mac the window goes full screen with it), Download with its percent (the Mac saves to Downloads, the phone offers the Files sheet) and, on the Mac, Open in QuickTime. WebM has no player in the app: Download only. A read card whose detail links a video blob wears the word `watch` and the button "Watched it", and is a read card in every other rule.
 - How: same merge as add-0008, then `make check`, `make webcheck`, `ops/hub.sh restart` and `make ship` for the app. By hand: `hub/internal/server/web/ui.js`, `app.css`, `test/ui.test.js`, `hub/internal/store/close.go`, `close_test.go`, `hub/internal/threads/asks.go`, `shared/api.md`, `app/Life/Sources/Attachments.swift`, `StyledText.swift`, `MacShot.swift`.
+
+## add-0209 · 2026-11-13 · The chat box keeps your words
+- For: everyone
+- Fix: On the console, opening the session you already had open (a click on one of its card lines in the list) wiped the words and pictures in its box. Words typed while a send was still in flight were wiped too when the send landed. Both now stay in the box.
+- How: same merge as add-0008, then `make check`, `make webcheck` and `ops/hub.sh restart`. By hand: `hub/internal/server/web/views/threads.js`, `hub/internal/server/web/composer.js`.
+
+## add-0210 · 2026-11-13 · An old open card heads the chat
+- For: everyone
+- Fix: An open card older than every loaded message fell to the end of the chat, so it drew under newer cards and the order did not follow the time each was raised. It now sits at the top of the chat, where its time puts it, on the console and in the app.
+- How: same merge as add-0008, then `make check`, `make webcheck`, `ops/hub.sh restart` and `make ship` for the app. By hand: `hub/internal/server/web/views/threads.js`, `app/Life/Sources/ThreadDetail.swift`.
+
+## add-0211 · 2026-11-13 · A picture in a card has Full screen and Download
+- For: everyone
+- Fix: A picture a session put in a card had no buttons under it, and a markdown link to a hub file opened a browser tab that could not read it. A picture in a card's file strip now has Full screen and Download, as a video has, on the console and in the app, and a link into `/api/v1/blobs/` downloads the file.
+- How: same merge as add-0008, then `make check`, `make webcheck`, `ops/hub.sh restart` and `make ship` for the app. By hand: `hub/internal/server/web/ui.js`, `hub/internal/server/web/test/ui.test.js`, `app/Life/Sources/Attachments.swift`, `app/Life/Sources/StyledText.swift`, `app/Life/Sources/RootView.swift`.
+
+## add-0212 · 2026-11-13 · Small console fixes
+- For: everyone
+- Fix: A card whose close the hub refused stayed grey until a reload: the grey now comes off at once. The dictation box could show the same phrase twice when a slow poll answered after a newer one: polls now run one at a time. A card opened by link could be drawn in the wrong chat when another session was opened before its answer came back: the late answer is now dropped. The raw NUL byte in `composer.js` is now the escape `'\0send'` (same value), so the file reads as text in grep and diff.
+- How: same merge as add-0008, then `make check`, `make webcheck` and `ops/hub.sh restart`. By hand: `hub/internal/server/web/views/threads.js`, `hub/internal/server/web/mic.js`, `hub/internal/server/web/composer.js`.
+
+## add-0213 · 2026-11-13 · A card's video plays on the app's own player
+- For: everyone
+- Fix: A video in a card used the system player: a click on the picture did not always pause it, the play bar hid itself, and the arrow keys jumped too far. Now a click on the picture plays and pauses every time, the play bar stays up and shows the video's length before the first play, left and right step half a second, and space plays and pauses. Full screen and Download are round buttons on the picture's top corners; the row of buttons under the video, Open in QuickTime and AirPlay are gone.
+- How: same merge as add-0008, then `make check` and `make ship` for the app. By hand: `app/Life/Sources/Attachments.swift`, `app/Life/Sources/StyledText.swift`.
+
+## add-0214 · 2026-11-13 · Small app fixes: the open chat is kept, a rec sheet closes, a push is spoken once
+- For: everyone
+- Fix: On the desktop app, picking another card of the session already open rebuilt the chat and dropped the words typed in its box; the chat is now kept, lands on the new card and arms the new reply. A rec decision that was saved left its sheet up when the read of its session failed, so it could be sent twice; the sheet now closes. One push could be spoken twice when the app was in front but inactive; the same line within ten seconds is now said once.
+- How: same merge as add-0008, then `make check` and `make ship` for the app. By hand: `app/Life/Sources/ThreadsView.swift`, `app/Life/Sources/ThreadDetail.swift`, `app/Life/Sources/RecsView.swift`, `app/Life/Sources/Push.swift`.

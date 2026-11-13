@@ -277,6 +277,13 @@ async function micAdopt(guest) {
 
 async function micPoll() {
   if (!mic.on) { micStop(); return; }
+  // One poll at a time: a slow answer arriving after a newer one put the
+  // same phrases in the box twice.
+  if (mic.polling) return;
+  mic.polling = true;
+  try { await micPollOnce(); } finally { mic.polling = false; }
+}
+async function micPollOnce() {
   let v;
   try { v = await get('/mic'); } catch { return; }
   // Off with no take since boot and no reason: the hub restarted underneath

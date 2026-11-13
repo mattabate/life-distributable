@@ -543,10 +543,12 @@ struct FileStrip: View {
                             .frame(width: Self.tile.width, height: Self.tile.height)
                             .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
                             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1)))
+                        // Full screen and Download under the picture.
+                        PictureActions(ref: f.ref, title: f.caption)
                     } else if isAudioRef(f.ref) {
                         BlobAudio(ref: f.ref)
                     } else if isVideoRef(f.ref) {
-                        // A video plays in place, Download under it.
+                        // A video plays in place, Download on its corner.
                         BlobVideo(ref: f.ref, title: f.caption)
                     } else if isHTMLRef(f.ref) {
                         // A page is a file for a browser, never a viewer here.
@@ -906,10 +908,13 @@ private struct SelectableText: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var chat: ChatHook?
         /// A `life://` link (a hub id, Refs.swift) goes to the app's own
-        /// navigation; a text view on its own would hand it to iOS.
+        /// navigation; a text view on its own would hand it to iOS. So does a
+        /// link into the hub's blobs, which a browser opens as
+        /// {"error":"unauthorized"}.
         var open: OpenURLAction?
         func textView(_ tv: UITextView, primaryActionFor item: UITextItem, defaultAction: UIAction) -> UIAction? {
-            guard case .link(let url) = item.content, url.scheme == "life", let open else { return defaultAction }
+            guard case .link(let url) = item.content, url.scheme == "life" || hubBlobRef(url) != nil,
+                  let open else { return defaultAction }
             return UIAction { _ in open(url) }
         }
         /// What `sizeThatFits` has already worked out for the text this view
