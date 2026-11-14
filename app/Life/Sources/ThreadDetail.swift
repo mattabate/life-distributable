@@ -1487,6 +1487,12 @@ struct ThreadDetail: View {
             let mine: [Action]?
             if let early { mine = early } else { mine = (try? await p)?.filter(inChat) }
             if let mine, mine != actions || (msgsMoved && !mine.isEmpty) { placeActions(mine) }
+            // The same for an approval decided somewhere else: its pick
+            // leaves the bar instead of riding the next message to a refusal.
+            if let mine {
+                let shut = Set(mine.filter { $0.open == false }.map { "action:" + $0.id })
+                if replies.contains(where: { shut.contains($0.ref) }) { replies.removeAll { shut.contains($0.ref) } }
+            }
             if gotAsks != nil, mine != nil { cardsLoaded = true }
             // A rec moves under its reply when that lands, and changes
             // without a message when the owner decides it from the Recs page.

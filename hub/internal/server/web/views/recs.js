@@ -88,14 +88,15 @@ const recsPager = makePager('recs', 20);
 async function recsAll(view) {
   const draw = async () => {
     const recs = (await get(recsQuery())).recs || [];
-    if (!paint(view, `<div class="pane wide">
+    if (view.isConnected === false) return; // the page was left while the hub answered
+    const fresh = paint(view, `<div class="pane wide">
       <div class="small"><a href="#/recs">‹ Recommendations</a></div>
       <div class="spread" style="margin:6px 0 12px;gap:8px">
         <h2 style="margin:0">All recommendations <span class="muted">· ${recs.length}</span></h2>
         <input type="text" id="recs-q" placeholder="Find a rec…" value="${esc(recsAllQuery)}" style="max-width:240px" autocomplete="off">
       </div>
       <div class="card all-table" id="recs-table"></div>
-    </div>`)) return;
+    </div>`);
     const paintAll = recsPager.paint = () => {
       const el = document.getElementById('recs-table');
       if (!el) return;
@@ -117,6 +118,9 @@ async function recsAll(view) {
         </table>
         ${recsPager.html(rows.length, shown.length)}`;
     };
+    // The frame stayed (same count, same search): the rows are still read
+    // again, in the window that is open, so a rec decided elsewhere moves.
+    if (!fresh) { paintAll(); return; }
     const q = document.getElementById('recs-q');
     // A new search starts from the first twenty again.
     q.oninput = () => { recsAllQuery = q.value; recsPager.reset(); paintAll(); };

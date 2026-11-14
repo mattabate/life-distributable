@@ -444,6 +444,10 @@ INSERT INTO item_events (item_id,ts,actor,from_state,to_state,note)
 	SELECT action_id,ts,actor,COALESCE(LAG(st) OVER (PARTITION BY action_id ORDER BY id),''),st,note FROM
 	(SELECT id,action_id,ts,actor,note,CASE event WHEN 'ran' THEN 'done' WHEN 'reopened' THEN 'proposed' ELSE event END AS st FROM action_events) ORDER BY id;
 UPDATE items SET ` + store.ItemStampSet + ` WHERE src='action';`,
+	// pgid: the process group of a running shell or claude action (runShell),
+	// so the next hub can stop one the last hub left going (#205; sched's
+	// runs.pgid is the same idea).
+	`ALTER TABLE actions ADD COLUMN pgid INTEGER NOT NULL DEFAULT 0`,
 }
 
 // setState is the ONE writer of a proposal's state: move is the item's own
@@ -468,26 +472,42 @@ func New(db *store.DB, exec Executor, nfy Notifier) *Queue {
 	return q
 }
 
-// closeOrphans closes every action still 'running' at startup: its command
-// was a child of the hub that died, so nothing will ever record its result.
+// closeOrphans closes every action still 'running' at startup: the hub that
+// was reading its command is gone, so nothing will ever record its result.
 // It ends `uncertain`, not `failed` (nobody knows how far it got), and the
-// session that proposed it is told so (TellUncertain).
+// session that proposed it is told so (TellUncertain). The command runs in
+// its own process group, which outlives a hub restart, so the group is
+// killed first: uncertain then means stopped, never "maybe still going"
+// beside an approved retry (#205). A pgid number outlives its group, so only
+// a run younger than runTimeout is touched (sched.killOrphans).
 func (q *Queue) closeOrphans() {
-	rows, err := q.db.Query(`SELECT id FROM items WHERE src='action' AND state='running'`)
+	rows, err := q.db.Query(`SELECT i.id, i.updated_at, COALESCE(a.pgid,0) FROM items i LEFT JOIN actions a ON a.id=i.id WHERE i.src='action' AND i.state='running'`)
 	if err != nil {
 		log.Printf("actions: orphans: %v", err)
 		return
 	}
 	var ids []string
+	groups := map[string]int{}
 	for rows.Next() {
-		var id string
-		if rows.Scan(&id) == nil {
+		var id, at string
+		var pgid int
+		if rows.Scan(&id, &at, &pgid) == nil {
 			ids = append(ids, id)
+			if started, err := time.Parse(time.RFC3339Nano, at); err == nil && pgid > 0 && time.Since(started) < runTimeout+shellGrace {
+				groups[id] = pgid
+			}
 		}
 	}
 	rows.Close()
 	const why = "hub restarted mid-run"
 	for _, id := range ids {
+		if pgid := groups[id]; pgid > 0 && syscall.Kill(-pgid, 0) == nil {
+			if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
+				log.Printf("actions: orphan %s: killing group %d: %v", id, pgid, err)
+			} else {
+				log.Printf("actions: %s outlived the last hub; group %d killed", id, pgid)
+			}
+		}
 		now := ts(time.Now())
 		if _, err := q.setState(id, "hub", why,
 			stmt(`UPDATE items SET state=?, updated_at=? WHERE id=? AND src='action' AND state='running'`, Uncertain, now, id),
@@ -497,6 +517,20 @@ func (q *Queue) closeOrphans() {
 		}
 		q.event(id, Uncertain, "hub", why)
 		q.tellUncertain(id)
+	}
+	sweepOutputs(time.Now().Add(-runTimeout - shellGrace))
+}
+
+// sweepOutputs removes the output files of runs a dead hub left behind
+// (runShell removes its own only on return): one could hold a secret the
+// command printed. Only files last written before `before`, so a run another
+// hub on this machine still has going keeps its file.
+func sweepOutputs(before time.Time) {
+	old, _ := filepath.Glob(filepath.Join(os.TempDir(), "life-action-*.out"))
+	for _, p := range old {
+		if st, err := os.Stat(p); err == nil && st.ModTime().Before(before) {
+			os.Remove(p)
+		}
 	}
 }
 
@@ -1024,6 +1058,11 @@ func (q *Queue) run(id string) {
 	ctx, cancel := context.WithTimeout(progress.Start(context.Background(), a.ID), runTimeout)
 	defer cancel()
 	defer progress.End(a.ID)
+	ctx = context.WithValue(ctx, startedKey{}, func(pgid int) {
+		if _, err := q.db.Exec(`UPDATE actions SET pgid=? WHERE id=?`, pgid, a.ID); err != nil {
+			log.Printf("actions: %s pgid not recorded: %v", a.ID, err)
+		}
+	})
 	res, err := q.exec.Exec(ctx, a.ExecType, a.ExecPayload)
 	q.finish(id, res, err, cutOff(ctx, err))
 }
@@ -1299,36 +1338,79 @@ type DefaultExecutor struct {
 	ClaudeArgs func() []string
 }
 
-// shellGrace: how long an approved command's output pipe may stay open after
-// bash itself exited (or was killed) before the hub stops reading it.
+// shellGrace: slack past runTimeout before an open run's process group is
+// taken for someone else's (closeOrphans, sweepOutputs).
 var shellGrace = 10 * time.Second
+
+// startedKey: run's hook that records a started command's process group.
+type startedKey struct{}
 
 // runShell runs an approved shell command in its own process group.
 // CombinedOutput alone waits until every holder of the output pipe closes
 // it, and the run timeout killed only bash: a hung child of a compound
 // command or a script (`make`, a test, a background watchdog) kept the pipe
 // open, so the action stayed "running" for good and was never marked cut
-// off. Now the timeout kills the whole group and the pipe is dropped
-// shellGrace after bash ends. Unlike a scheduled job (sched.runGroup),
-// nothing is killed after a clean exit: an approved start script may leave
-// its daemon running.
+// off. Now the timeout kills the whole group. Unlike a scheduled job
+// (sched.runGroup), nothing is killed after a clean exit: an approved start
+// script may leave its daemon running.
+// The output goes to a file, not a pipe (#205): a pipe the hub closed (after
+// bash ended, or at a restart) killed such a daemon, or a command the hub no
+// longer read, with SIGPIPE at its next line. The run ends when bash does;
+// what a child prints later is not read.
 // live (may be nil) also sees the output as it comes: the action's newest
-// line on its session (progress.Lines).
-func runShell(c *exec.Cmd, live io.Writer) (string, error) {
-	var buf bytes.Buffer
-	var out io.Writer = &buf
-	if live != nil {
-		out = io.MultiWriter(&buf, live)
+// line on its session (progress.Lines). started (may be nil) is told the
+// group once it exists.
+func runShell(c *exec.Cmd, live io.Writer, started func(pgid int)) (string, error) {
+	f, err := os.CreateTemp("", "life-action-*.out")
+	if err != nil {
+		return "", err
 	}
-	c.Stdout, c.Stderr = out, out
+	defer os.Remove(f.Name())
+	defer f.Close()
+	c.Stdout, c.Stderr = f, f
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
-	c.WaitDelay = shellGrace
-	err := c.Run()
-	if errors.Is(err, exec.ErrWaitDelay) {
-		err = nil // bash exited 0; only a background child held the pipe
+	if err := c.Start(); err != nil {
+		return "", err
 	}
-	return buf.String(), err
+	if started != nil {
+		started(c.Process.Pid)
+	}
+	stop, tailed := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(tailed)
+		tailInto(f.Name(), live, stop)
+	}()
+	err = c.Wait()
+	close(stop)
+	<-tailed
+	out, rerr := os.ReadFile(f.Name())
+	if err == nil {
+		err = rerr
+	}
+	return string(out), err
+}
+
+// tailInto copies what is appended to the file at path into w until stop
+// closes, then whatever is left.
+func tailInto(path string, w io.Writer, stop <-chan struct{}) {
+	if w == nil {
+		return
+	}
+	r, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer r.Close()
+	for {
+		io.Copy(w, r)
+		select {
+		case <-stop:
+			io.Copy(w, r)
+			return
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
 }
 
 // preflight: what a shell card would fail on the moment it ran, told to the
@@ -1475,7 +1557,8 @@ func (e DefaultExecutor) Exec(ctx context.Context, typ string, payload json.RawM
 			// ops/hub.sh restart waits on running actions, never on this one
 			c.Env = append(c.Env, "LIFE_ACTION="+id)
 		}
-		return runShell(c, progress.Lines(ctx))
+		started, _ := ctx.Value(startedKey{}).(func(int))
+		return runShell(c, progress.Lines(ctx), started)
 	case "claude":
 		var p struct {
 			Project string `json:"project"`
@@ -1500,7 +1583,8 @@ func (e DefaultExecutor) Exec(ctx context.Context, typ string, payload json.RawM
 		// timeout killed only claude, so an approved claude action stayed
 		// running as long as that child lived (the same hang sched.runGroup
 		// fixed for jobs; life-distributable#58).
-		s, err := runShell(c, nil) // one JSON result at the end: no line to show
+		started, _ := ctx.Value(startedKey{}).(func(int))
+		s, err := runShell(c, nil, started) // one JSON result at the end: no line to show
 		out := []byte(s)
 		if err != nil {
 			return s, err

@@ -13,7 +13,7 @@
 // Not a pill — a wall of grey pills "looks bad"
 // (2026-08-27); on a white card the name alone carries it.
 function sourceChip(a) {
-  const label = a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.label)}</a>` : esc(a.label);
+  const label = a.url ? `<a href="${esc(safeHref(a.url))}" target="_blank" rel="noopener">${esc(a.label)}</a>` : esc(a.label);
   const bits = [];
   if (a.detail) bits.push(esc(a.detail));
   if (a.last) bits.push(esc(ago(a.last)));

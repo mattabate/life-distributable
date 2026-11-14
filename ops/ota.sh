@@ -42,6 +42,19 @@ cat > "$OTA/export.plist" <<EOF
 EOF
 N=$(git -C "$ROOT" rev-list --count HEAD)
 
+# Never a build that undoes a landed fix: the published build's commit must be
+# in this one (a checkout behind it, or on a branch without it, would ship an
+# older app over a newer one). OLDER=1 publishes an older tree on purpose (a
+# rollback).
+if [ -z "${OLDER:-}" ] && [ -f "$PUB/current.json" ]; then
+  WAS=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("commit",""))' "$PUB/current.json" 2>/dev/null || true)
+  if [ -n "$WAS" ] && git -C "$ROOT" cat-file -e "$WAS^{commit}" 2>/dev/null \
+     && ! git -C "$ROOT" merge-base --is-ancestor "$WAS" HEAD; then
+    echo "✖ the published build is from $WAS, which this tree does not hold: building here would undo it (OLDER=1 to roll back on purpose)" >&2
+    exit 5
+  fi
+fi
+
 # The build number is the repo's commit count, so a docs-only commit raises it
 # without changing a line of Swift — and shipping that mints a new build, a new
 # install card and two minutes of the owner's attention for an app byte-identical to

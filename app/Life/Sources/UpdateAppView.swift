@@ -19,6 +19,7 @@ struct UpdateAppSheet: View {
     @State private var installError: String?
     @State private var buildStartedAt: Date?
     @State private var logAt: Date?
+    @State private var watching: Task<Void, Never>?
     private var myBuild: Int { Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "") ?? 0 }
     private var update: AppUpdate { AppUpdate(ota: ota, mine: myBuild) }
 
@@ -66,6 +67,8 @@ struct UpdateAppSheet: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .task { await store.loadStatus(hub) }
             .refreshable { await store.loadStatus(hub) }
+            // The build goes on on the Mac; only the watching ends with the sheet.
+            .onDisappear { watching?.cancel() }
         }
     }
 
@@ -84,10 +87,12 @@ struct UpdateAppSheet: View {
         buildStartedAt = Date()
         installTail = []
         installError = nil
-        Task {
+        watching?.cancel()
+        watching = Task {
             do { try await hub.appInstall(lane: lane); installing = true } catch { installError = error.localizedDescription; return }
             while installing {
                 try? await Task.sleep(for: .seconds(4))
+                if Task.isCancelled { installing = false; return }
                 guard let s = try? await hub.appInstallStatus() else { continue }
                 installing = s.running; installTail = s.tail; logAt = s.log_at
                 if let o = s.ota { store.status?.ota = o }

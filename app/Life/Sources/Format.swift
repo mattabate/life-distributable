@@ -13,7 +13,9 @@ enum Fmt {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = .current
+        // Autoupdating: built once, and .current kept the zone the app
+        // launched in after the phone changed zones.
+        f.timeZone = .autoupdatingCurrent
         return f
     }()
     /// The hub's day / clock — what `POST /prompts` `on` + `at_time` take.
@@ -57,7 +59,7 @@ enum Fmt {
     private static func local(_ format: String) -> DateFormatter {
         let d = DateFormatter()
         d.locale = Locale(identifier: "en_US_POSIX")
-        d.timeZone = .current
+        d.timeZone = .autoupdatingCurrent
         d.dateFormat = format
         return d
     }
@@ -65,6 +67,9 @@ enum Fmt {
 
 func parseDay(_ s: String) -> Date? { Fmt.localDay.date(from: s) }
 func dayString(_ d: Date) -> String { Fmt.localDay.string(from: d) }
+/// The hub's day an instant falls on: its rows are keyed by its own days, so
+/// away from the hub's zone the device's day can be one the hub has not started.
+func hubDay(_ d: Date) -> String { Fmt.easternDay.string(from: d) }
 
 /// "Sep 8, 2025" from a hub day string — the console's `shortDay`, year
 /// included; the string itself when it is not one. Inside a chart or a chip,

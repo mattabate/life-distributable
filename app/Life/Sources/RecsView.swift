@@ -659,27 +659,33 @@ struct RecDetail: View {
                     Button("Reply") { deciding = RecDecisionRequest(rec: rec, way: .reply) }
                 }
             }
-            if !rec.isOpen {
+            // The desktop's gates and words, line for line (its body above).
+            if rec.status != "proposed" {
                 Section("Decision") {
-                    Text((rec.status == "deferred" ? "later — back on \(dayLabel(rec.review_on ?? ""))" : rec.status)
-                         + (rec.decided_at.map { " · " + $0.formatted(date: .abbreviated, time: .shortened) } ?? ""))
-                        .font(.callout.weight(.medium))
+                    Text(rec.status == "deferred" ? "later — back on \(dayLabel(rec.review_on ?? ""))" : rec.status).font(.callout.weight(.medium))
+                    + Text((rec.decided_at.map { " · " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "")
+                           + (rec.decided_by.map { $0.isEmpty ? "" : " · by \($0)" } ?? "")).font(.callout).foregroundColor(.secondary)
                     if let n = rec.decision_note, !n.isEmpty { StyledText(text: n) }
                 }
             }
 
-            Section("Outcome") {
-                if let o = rec.outcome, !o.isEmpty {
-                    Text("\(o)\(rec.outcome_at.map { " · " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "")")
-                        .font(.callout.weight(.medium))
-                    if let n = rec.outcome_note, !n.isEmpty { StyledText(text: n) }
-                } else if rec.status == "accepted" || rec.status == "done" {
-                    TextField("What actually happened (optional)", text: $scoreNote, axis: .vertical).lineLimit(1...5)
-                    ForEach([("worked", "It worked"), ("mixed", "Mixed"), ("failed", "It failed"), ("unclear", "Too early / unclear")], id: \.0) { o, label in
-                        Button(label) { Task { await score(o) } }
+            // Unscored and undecided: the review day is on the facts line.
+            if rec.outcome?.isEmpty == false || rec.status == "accepted" || rec.status == "done" {
+                Section("Outcome") {
+                    if let o = rec.outcome, !o.isEmpty {
+                        Text("\(o)\(rec.outcome_at.map { " · " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "")")
+                            .font(.callout.weight(.medium))
+                        if let n = rec.outcome_note, !n.isEmpty { StyledText(text: n) }
+                    } else {
+                        Text("Not scored yet" + (rec.review_on.map { " — due \(dayLabel($0))" } ?? "")).foregroundStyle(.secondary)
                     }
-                } else {
-                    Text("Not scored yet" + (rec.review_on.map { " — due \(dayLabel($0))" } ?? "")).foregroundStyle(.secondary)
+                    // A scored rec can be scored again, as on the desktop.
+                    if rec.status == "accepted" || rec.status == "done" {
+                        TextField("What actually happened (optional)", text: $scoreNote, axis: .vertical).lineLimit(1...5)
+                        ForEach([("worked", "It worked"), ("mixed", "Mixed"), ("failed", "It failed"), ("unclear", "Too early / unclear")], id: \.0) { o, label in
+                            Button(label) { Task { await score(o) } }
+                        }
+                    }
                 }
             }
 
@@ -690,7 +696,10 @@ struct RecDetail: View {
                 }
             }
             Section {
-                Text("\(rec.id) · filed \(rec.created_at.formatted(date: .abbreviated, time: .shortened)) by \(rec.source)"
+                if let prev = rec.prev_id, !prev.isEmpty {
+                    Text("Supersedes \(prev).").font(.caption2).foregroundStyle(.tertiary)
+                }
+                Text("\(rec.id) · filed \(rec.created_at.formatted(date: .abbreviated, time: .shortened)) by \(rec.source.isEmpty ? "unknown" : rec.source)"
                      + (rec.model.map { " · \($0)" } ?? ""))
                     .font(.caption2).foregroundStyle(.tertiary)
             }

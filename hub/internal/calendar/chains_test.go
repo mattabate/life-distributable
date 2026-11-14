@@ -44,6 +44,38 @@ func TestAgentItemWithCancelledWakeSkipsThisRun(t *testing.T) {
 	}
 }
 
+// A wake that failed at delivery is no wake: the tick queues a fresh one and
+// the chain goes on (#206).
+func TestAgentItemWithFailedWakeIsWokenAgain(t *testing.T) {
+	c, th, _ := newTest(t)
+	now := ahead(1, 7, 0)
+	c.Now = func() time.Time { return now }
+	tr, _ := th.Create("", "life", "", "Weekly review.", "", "", nil)
+	it, err := c.Add(Item{Title: "Weekly review", Day: day(ahead(2, 0, 0)), At: "09:00", Kind: "agent", Repeat: "weekly", ThreadID: tr.ID, Detail: "x", Source: "owner"})
+	if err != nil || it.PromptID == "" {
+		t.Fatalf("%+v %v", it, err)
+	}
+	if _, err := c.db.Exec(`UPDATE prompts SET state='failed', error='database is locked' WHERE id=?`, it.PromptID); err != nil {
+		t.Fatal(err)
+	}
+	now = ahead(2, 9, 0)
+	c.Tick()
+	got, _ := c.Get(it.ID)
+	if got.PromptID == it.PromptID {
+		t.Fatalf("a failed wake is replaced: %+v", got)
+	}
+	if p, _ := th.GetPrompt(got.PromptID); p.State != "queued" {
+		t.Fatalf("the fresh wake: %+v", p)
+	}
+	// Off the quarter hour a still-failing wake is left for the next one.
+	c.db.Exec(`UPDATE prompts SET state='failed' WHERE id=?`, got.PromptID)
+	now = ahead(2, 9, 1)
+	c.Tick()
+	if again, _ := c.Get(it.ID); again.PromptID != got.PromptID {
+		t.Fatalf("one retry a quarter hour: %+v", again)
+	}
+}
+
 // Two chains of one title on different weekdays (weekly Gym Monday and
 // Friday) both go on: the forked-chain guard only looks along the item's own
 // chain (life-distributable#88, eduelias). Monthly the same, by day of month.

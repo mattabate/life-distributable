@@ -126,7 +126,7 @@ private struct SourceWebPage: View {
         }
     }
 
-    private func day(_ d: Date) -> String { d.formatted(.iso8601.year().month().day()) }
+    private func day(_ d: Date) -> String { hubDay(d) }
 }
 #endif
 

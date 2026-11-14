@@ -569,6 +569,12 @@ function wireDrop(el, which, highlight) {
 document.addEventListener('paste', e => {
   const files = [...(e.clipboardData?.files || [])];
   if (!files.length) return;
+  // Cells from a spreadsheet or a paragraph from a word processor arrive as
+  // text AND a picture of it: the words are what was copied, so the box
+  // takes them as a plain paste. A screenshot has no text; a file from
+  // Finder has only its name.
+  const types = [...(e.clipboardData.types || [])];
+  if ((types.includes('text/html') || types.includes('text/rtf')) && e.clipboardData.getData('text/plain').trim()) return;
   const which = pasteTarget();
   if (!which) {
     // Several boxes on screen (the Recs page, a calendar day with two open
