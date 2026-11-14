@@ -13,6 +13,7 @@ pylint:
 	bash ops/sqlite-snap.sh --test
 	ops/py.sh doc-text.py --test
 	bash ops/xcode-shut.sh --test
+	bash ops/land-incoming-test.sh
 
 test:
 	cd hub && gofmt -l . | (! grep .) && go vet ./... && go test -timeout 180s ./...

@@ -98,11 +98,14 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, a)
 }
 
-// landProposal: the one action that fast-forwards main to sha. When hub/
-// changed, the hub is rebuilt and restarted after the action finishes (the
-// restart waits, or the hub would kill its own run).
+// landProposal: the one action that puts sha on main. ops/land-incoming.sh
+// runs make test on sha in a throwaway worktree first and fast-forwards main
+// only when it passes, so a red landing leaves main untouched and never
+// restarts the hub (#208). When hub/ changed, the hub is rebuilt and
+// restarted after the action finishes (the restart waits, or the hub would
+// kill its own run).
 func landProposal(thread, sha, log, stat, say, repo string, hub bool) actions.Proposal {
-	cmd := "git merge --ff-only " + sha
+	cmd := "bash ops/land-incoming.sh " + sha
 	if hub {
 		cmd += " && make build && (nohup sh -c 'sleep 3; bash ops/hub.sh restart' >/dev/null 2>&1 &)"
 	}
