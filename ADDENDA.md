@@ -1534,3 +1534,8 @@ Entry format:
 - For: everyone
 - Fix: The phone's Update app sheet kept polling the hub every 4 seconds after Done, and could open the install link with the sheet gone. It now stops watching when the sheet closes; the build itself goes on on the Mac. `ops/ota.sh` now refuses to publish a build from a tree that does not hold the commit of the build already published, so a checkout behind it cannot undo a landed fix; `OLDER=1` publishes an older tree on purpose, for a rollback.
 - How: same merge as add-0008, then `make check` and `make ship` for the app. By hand: `app/Life/Sources/UpdateAppView.swift`, `ops/ota.sh`.
+
+## add-0224 · 2026-11-14 · A landing is tested before it reaches main
+- For: everyone who runs sessions as a separate user
+- Fix: When a session landed its commits (`ops/land.sh`, with `session_user` set), the hub fast-forwarded main and, when `hub/` changed, built and restarted itself. `make test` never ran, so a red commit could reach main and the running hub (#208). The landing now goes through the new `ops/land-incoming.sh`: it checks the commit out in a throwaway worktree, runs `make test` there as the session user, and fast-forwards main only when it passes. A failing test or a conflict fails the action with main untouched and no restart. `ops/land-incoming-test.sh` pins that a commit with a failing test does not land; `make check` runs it. Without `session_user` there is no landing step: a session commits in the main checkout itself, and `make check` stays a rule the session follows. Thanks @abranchesia.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `ops/land-incoming.sh`, `ops/land-incoming-test.sh` (new), `hub/internal/server/land.go` (`landProposal`), `land_test.go`, `Makefile`.

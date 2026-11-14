@@ -107,7 +107,7 @@ func TestLandRunsOnStandingApproval(t *testing.T) {
 	json.Unmarshal([]byte(body), &a)
 	// Filed already approved on the standing yes: no card, nothing spoken.
 	if !a.Gated || a.Kind != "commit" || a.DecidedVia != "standing" || a.State == "proposed" || a.Said != "" ||
-		!strings.Contains(string(a.ExecPayload), "git merge --ff-only "+sha) || !strings.Contains(a.Detail, "the work") {
+		!strings.Contains(string(a.ExecPayload), "bash ops/land-incoming.sh "+sha) || !strings.Contains(a.Detail, "the work") {
 		t.Fatalf("%+v", a)
 	}
 	// Main moved underneath: the branch must rebase first.
