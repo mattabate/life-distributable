@@ -87,12 +87,15 @@ func TestSessionCloneAsSessionUser(t *testing.T) {
 		sudo + "mkdir -p " + filepath.Join(wt, "ops", "logs"),
 		sudo + "/brew/tmux new-session -d -s ",
 		"-c " + wt + " ",
-		"LIFE_SESSION_TOKEN='s1." + th.ID + "'",
+		`LIFE_SESSION_TOKEN="$(cat `,
 		"'/agent/claude'",
 	} {
 		if !strings.Contains(all, want) {
 			t.Errorf("missing %q in:\n%s", want, all)
 		}
+	}
+	if strings.Contains(all, "s1."+th.ID) {
+		t.Errorf("the session token is on a command line:\n%s", all)
 	}
 	for _, c := range cmds {
 		if strings.Contains(c, " ln ") && strings.Contains(c, "secrets") {

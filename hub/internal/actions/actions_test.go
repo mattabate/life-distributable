@@ -320,8 +320,8 @@ func TestProposeRefusesDuplicateKeyInPayload(t *testing.T) {
 	}
 }
 
-// A background child holding the output pipe ends the read shellGrace after
-// bash exits (the run is still done); a hung child of a compound command is
+// A background child still holding the output does not hold the run: it
+// ends when bash exits (the run is still done); a hung child of a compound command is
 // killed with bash when the timeout fires, so the run ends cut off instead
 // of staying "running".
 func TestShellDoesNotWaitOnItsChildren(t *testing.T) {
@@ -413,7 +413,7 @@ func TestPreMergeActionMovesToItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Migrate("actions", Schema[:len(Schema)-1]); err != nil {
+	if _, err := db.Migrate("actions", Schema[:len(Schema)-2]); err != nil { // before the merge and pgid
 		t.Fatal(err)
 	}
 	db.Exec(`INSERT INTO actions (id,created_at,updated_at,project,kind,title,gated,exec_type,exec_payload,state,decided_at,decided_via,result,note,source,said)
@@ -442,6 +442,63 @@ func TestPreMergeActionMovesToItems(t *testing.T) {
 	}
 	if evs, _ := q.Events(a.ID); len(evs) != 3 {
 		t.Fatalf("the run's own trail stays: %+v", evs)
+	}
+}
+
+// The command of a run the hub died under is in its own process group and
+// outlives the hub: the next hub kills it before it says uncertain, and a
+// daemon a finished command left behind can still print (#205).
+func TestRestartKillsTheOrphanedCommand(t *testing.T) {
+	q, ex, nf := setup(t)
+	a, err := q.Propose(Proposal{ThreadID: "t-1", Kind: "other", Title: "tidy", ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"true"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, q, a.ID, "done")
+	c := exec.Command("sleep", "30")
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	gone := make(chan struct{})
+	go func() { c.Wait(); close(gone) }()
+	q.db.Exec(`UPDATE items SET state='running', updated_at=? WHERE id=?`, ts(time.Now()), a.ID)
+	q.db.Exec(`UPDATE actions SET pgid=? WHERE id=?`, c.Process.Pid, a.ID)
+	// Output files the dead hub left: the old one goes, a fresh one stays.
+	stale, _ := os.CreateTemp("", "life-action-*.out")
+	fresh, _ := os.CreateTemp("", "life-action-*.out")
+	stale.Close()
+	fresh.Close()
+	defer os.Remove(fresh.Name())
+	long := time.Now().Add(-2 * runTimeout)
+	os.Chtimes(stale.Name(), long, long)
+	q = New(q.db, ex, nf)
+	if _, err := os.Stat(stale.Name()); err == nil {
+		os.Remove(stale.Name())
+		t.Fatal("a dead run's output file was left on disk")
+	}
+	if _, err := os.Stat(fresh.Name()); err != nil {
+		t.Fatal("a fresh output file was removed")
+	}
+	select {
+	case <-gone:
+	case <-time.After(5 * time.Second):
+		c.Process.Kill()
+		t.Fatal("the orphaned command was left running")
+	}
+	if got, _ := q.Get(a.ID); got.State != Uncertain {
+		t.Fatalf("after restart: %+v", got)
+	}
+
+	mark := filepath.Join(t.TempDir(), "alive")
+	var e DefaultExecutor
+	p, _ := json.Marshal(map[string]string{"cmd": "(sleep 0.5; echo late; touch " + mark + ") & echo started"})
+	if out, err := e.Exec(context.Background(), "shell", p); err != nil || strings.TrimSpace(out) != "started" {
+		t.Fatalf("got %q %v", out, err)
+	}
+	time.Sleep(1500 * time.Millisecond)
+	if _, err := os.Stat(mark); err != nil {
+		t.Fatal("the daemon died at its first line of output")
 	}
 }
 

@@ -1365,14 +1365,49 @@ func TestSessionsCannotWriteSecrets(t *testing.T) {
 }
 
 // A session process calls the hub with its own token when the hub hands one.
+// The token reaches the shell through a 0600 file that the shell empties.
 func TestSessionTokenEnv(t *testing.T) {
 	m := &Manager{}
-	if got := m.sessionTokenEnv("th-1"); got != "" {
+	base := filepath.Join(t.TempDir(), "th-1-run")
+	if got, _ := m.sessionTokenEnv(base, "th-1"); got != "" {
 		t.Fatalf("off: %q", got)
 	}
-	m.SessionToken = func(id string) string { return "tok-" + id }
-	if got := m.sessionTokenEnv("th-1"); got != " LIFE_SESSION_TOKEN='tok-th-1'" {
-		t.Fatalf("on: %q", got)
+	m.SessionToken = func(id string) string { return "s1." + id + ".fake" }
+	got, err := m.sessionTokenEnv(base, "th-1")
+	if err != nil || strings.Contains(got, "s1.") {
+		t.Fatalf("on: %q %v", got, err)
+	}
+	if fi, err := os.Stat(base + ".tok"); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("tok file: %v %v", fi, err)
+	}
+	// The shell gets the token and leaves the file empty.
+	out, err := exec.Command("/bin/bash", "-c", got[1:]+` sh -c 'printf %s "$LIFE_SESSION_TOKEN"'`).Output()
+	if err != nil || string(out) != "s1.th-1.fake" {
+		t.Fatalf("shell read %q %v", out, err)
+	}
+	if b, _ := os.ReadFile(base + ".tok"); len(b) != 0 {
+		t.Fatalf("tok file not emptied: %q", b)
+	}
+}
+
+// #204: the tmux command line, which any user's `ps` shows, never holds a
+// session's hub token.
+func TestLaunchKeepsTheTokenOffTheCommandLine(t *testing.T) {
+	m, _, cmds := setup(t)
+	m.SessionToken = func(id string) string { return "s1." + id + ".fake" }
+	th, err := m.Create("", "life", "", "Hello.", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*cmds) == 0 || !strings.Contains((*cmds)[0], "new-session") {
+		t.Fatalf("no launch: %q", *cmds)
+	}
+	if strings.Contains((*cmds)[0], "s1.") || !strings.Contains((*cmds)[0], "LIFE_SESSION_TOKEN=\"$(cat ") {
+		t.Fatalf("token on the command line: %s", (*cmds)[0])
+	}
+	toks, _ := filepath.Glob(filepath.Join(m.RunsDir, th.ID+"-*.tok"))
+	if len(toks) != 1 {
+		t.Fatalf("tok files %q", toks)
 	}
 }
 

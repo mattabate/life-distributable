@@ -2343,7 +2343,7 @@ func (c *Calendar) Tick() {
 			if it.Day == "" {
 				continue
 			}
-			if it.Kind == "agent" && it.PromptID != "" {
+			if it.Kind == "agent" && it.PromptID != "" && !c.failedWake(it, now) {
 				c.cancelledWake(it)
 				continue
 			}
@@ -2379,6 +2379,19 @@ func (c *Calendar) cancelledWake(it Item) {
 	c.resolveLocked(cur, "dismissed", "owner", "wake cancelled", true)
 }
 
+// failedWake: a wake that failed at delivery (the session row could not be
+// written, the session went between reach and run) will never be delivered
+// either, so the row sat scheduled for good and its repeat ended (#206). It
+// counts as no wake: the tick queues a fresh one, every 15 minutes while it
+// keeps failing, as it does for an item whose Queue failed.
+func (c *Calendar) failedWake(it Item, now time.Time) bool {
+	if now.Minute()%15 != 0 {
+		return false
+	}
+	p, err := c.thr.GetPrompt(it.PromptID)
+	return err == nil && p.State == "failed"
+}
+
 // waitingTick: a waiting item is the clock's while its look is queued. One
 // with no wake (its Queue failed) gets one. A look delivered and never
 // answered (the session ended its turn without came or raise) is moved a
@@ -2401,6 +2414,8 @@ func (c *Calendar) waitingTick(it Item, now time.Time) {
 	}
 	if it.PromptID != "" {
 		if p, err := c.thr.GetPrompt(it.PromptID); err == nil && p.State == "cancelled" {
+			it.PromptID = ""
+		} else if c.failedWake(it, now) {
 			it.PromptID = ""
 		}
 	}

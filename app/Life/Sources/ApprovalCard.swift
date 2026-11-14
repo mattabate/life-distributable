@@ -85,6 +85,9 @@ struct ApprovalCard: View {
             Button { UIPasteboard.general.string = a.id } label: { Label("Copy id", systemImage: "doc.on.doc") }
         }
         .navigationDestination(item: $openThread) { ThreadDetail(thread: $0, focusCard: a.id, armOnOpen: armOnOpen) }
+        // Back out of the session and the pick is spent: a later plain open
+        // of this card does not arrive armed with it.
+        .onChange(of: openThread?.id) { _, id in if id == nil { armOnOpen = nil } }
         .sheet(item: $openRun) { JobRunView(runID: $0.id, job: a.job ?? "") }
     }
 
@@ -172,7 +175,12 @@ struct ApprovalCard: View {
         do {
             let t = try await hub.thread(tid)
             if let open, armOnOpen == nil { open(OpenAsk(thread: t, message: nil, card: a.id)) } else { openThread = t }
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            // The pick dies with the open that failed: left set, the next
+            // plain open of this card arrived with it armed.
+            armOnOpen = nil
+            self.error = error.localizedDescription
+        }
     }
 
     /// A job's proposal, decided from the card (there is no session yet; an

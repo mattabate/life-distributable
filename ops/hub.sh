@@ -104,8 +104,8 @@ load() { # $1 = label
 case "${1:-}" in
   install) build; mkdir -p logs; rotate; for a in com.life.hub com.life.keepawake com.life.renewcert; do load $a; done; sleep 1; "$SELF" status ;;
   install-backup) mkdir -p logs; load com.life.backup ;;
-  # An approved action still running dies with the hub, and comes back
-  # "uncertain". Wait for those first, up to 31 min (the action timeout is
+  # An approved action still running is stopped by the next hub (its group
+  # outlives this one; closeOrphans kills it) and comes back "uncertain". Wait for those first, up to 31 min (the action timeout is
   # 30), never on the action this restart runs inside (LIFE_ACTION: a land's
   # own `make build && nohup … restart` inherits it). --now skips the wait.
   restart) build; rotate

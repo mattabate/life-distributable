@@ -35,6 +35,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"life/hub/internal/secrets"
 	"life/hub/internal/spend"
 	"life/hub/internal/store"
 )
@@ -360,6 +361,8 @@ func (m *Manager) runRef(id, author, role, kind, text string, attachments []stri
 	if len(replies) > 0 {
 		ref, outcome = replies[0].Ref, replies[0].Outcome
 	}
+	// A pasted key is never stored or handed on (secrets.Redact).
+	text = secrets.Redact(text)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, err := m.Get(id)
@@ -940,11 +943,15 @@ func (m *Manager) launch(t Thread) error {
 	// card on the board. Wait for the binary inside the tmux shell — never under
 	// m.mu — and only then start; past 90 s the old error is the right one.
 	claudeBin := m.sessionClaudeBin()
+	tokEnv, err := m.sessionTokenEnv(base, t.ID)
+	if err != nil {
+		return err
+	}
 	// The braces: `.done` lands the moment claude exits. Outside them the shell
 	// touched it only once `feed` also ended, and feed waits for its eof line,
 	// so a claude that crashed mid-turn sat "running" until the hang kill
 	// wrote over its stderr, or forever with a background task.
-	cmd := waitForBin(claudeBin) + shellQuote(m.feedBin()) + " feed " + shellQuote(base+".in") + " | { LIFE_THREAD_ID=" + shellQuote(t.ID) + " LIFE_RUN_ID=" + shellQuote(runID) + m.sessionTokenEnv(t.ID) + m.sessionUserEnv()
+	cmd := waitForBin(claudeBin) + shellQuote(m.feedBin()) + " feed " + shellQuote(base+".in") + " | { LIFE_THREAD_ID=" + shellQuote(t.ID) + " LIFE_RUN_ID=" + shellQuote(runID) + tokEnv + m.sessionUserEnv()
 	if m.AutoCompactWindow > 0 {
 		cmd += " CLAUDE_CODE_AUTO_COMPACT_WINDOW=" + strconv.Itoa(m.AutoCompactWindow)
 	}
@@ -1334,12 +1341,24 @@ func (m *Manager) deniedTools() []string {
 }
 
 // sessionTokenEnv is the session's own hub token, for lifectl and hublib
-// (server/sessiontoken.go); "" when the hub hands none.
-func (m *Manager) sessionTokenEnv(threadID string) string {
+// (server/sessiontoken.go); "" when the hub hands none. It goes through a
+// 0600 file beside the run's others (<base>.tok), which the session's shell
+// reads and then empties: inline in the tmux command, the value sat in the
+// argv of tmux and of the run's shell for the whole run, and `ps` shows any
+// user's argv (#204). The session user may write a run file but not delete
+// one, so the shell truncates it. The environment is still readable by other
+// processes of the same user: a separate session user walls sessions off from
+// the owner's account, not from each other.
+func (m *Manager) sessionTokenEnv(base, threadID string) (string, error) {
 	if m.SessionToken == nil {
-		return ""
+		return "", nil
 	}
-	return " LIFE_SESSION_TOKEN=" + shellQuote(m.SessionToken(threadID))
+	f := base + ".tok"
+	if err := os.WriteFile(f, []byte(m.SessionToken(threadID)), 0o600); err != nil {
+		return "", err
+	}
+	q := shellQuote(f)
+	return ` LIFE_SESSION_TOKEN="$(cat ` + q + `; : > ` + q + `)"`, nil
 }
 
 // toolsStale: a live process keeps the --allowedTools it launched with, so a
@@ -1536,6 +1555,7 @@ func (m *Manager) tail(r run) run {
 				m.db.Exec(`UPDATE threads SET status='running', updated_at=? WHERE id=?`, ts(now), r.thread)
 			}
 			for _, ev := range evs {
+				ev.Title, ev.Body, ev.Summary = secrets.Redact(ev.Title), secrets.Redact(ev.Body), secrets.Redact(ev.Summary)
 				res, _ := m.db.Exec(`INSERT INTO thread_events (thread_id, run_id, ts, kind, title, body, summary) VALUES (?,?,?,?,?,?,?)`, r.thread, r.turnID(), ts(now), ev.Kind, ev.Title, ev.Body, ev.Summary)
 				if ev.Kind == "tool_result" {
 					r.lastBoundary = now
@@ -2336,8 +2356,9 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 	// on the message row, or on the read card minted from it. Text that rode
 	// beside a card has no other home, so its fold line stays.
 	if !folded {
-		m.db.Exec(`DELETE FROM thread_events WHERE id = (SELECT MAX(id) FROM thread_events WHERE run_id=? AND kind='text') AND body=?`, turn, truncate(streamed, eventBodyMax))
+		m.db.Exec(`DELETE FROM thread_events WHERE id = (SELECT MAX(id) FROM thread_events WHERE run_id=? AND kind='text') AND body=?`, turn, secrets.Redact(truncate(streamed, eventBodyMax)))
 	}
+	text = secrets.Redact(text)
 	tok := h.Tok
 	res, _ := m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, cost_usd, tok_in, tok_out, tok_cache_read, tok_cache_write, run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		threadID, ts(now), role, kind, text, cost, tok.In, tok.Out, tok.CacheRead, tok.CacheWrite, turn)

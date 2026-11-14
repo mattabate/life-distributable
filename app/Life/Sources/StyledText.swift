@@ -88,7 +88,8 @@ struct StyledText: View {
         return bold ? plain.bolded() : plain
     }
 
-    private func build(_ text: String) -> NSAttributedString {
+    /// Not private: StyledTextTests lays the string out.
+    func build(_ text: String) -> NSAttributedString {
         let base = baseFont()
         let heading = base.bolded()
         let ui = UIColor(color)
@@ -144,9 +145,16 @@ struct StyledText: View {
             #endif
             let line = NSMutableAttributedString()
             if let mk = marker {
-                p.headIndent = indent + Self.hang
-                p.tabStops = [NSTextTab(textAlignment: .right, location: indent + Self.markerWidth),
-                              NSTextTab(textAlignment: .left, location: indent + Self.hang)]
+                // A marker wider than its column ("10.") ran past both
+                // stops, and a tab with no stop left ends the drawing: the
+                // text view kept its height and went blank from there down.
+                // The column is as wide as its marker needs.
+                let wide = max(Self.markerWidth, ceil((mk as NSString).size(withAttributes: [.font: font]).width))
+                let hang = wide + Self.hang - Self.markerWidth
+                p.headIndent = indent + hang
+                p.tabStops = [NSTextTab(textAlignment: .right, location: indent + wide),
+                              NSTextTab(textAlignment: .left, location: indent + hang)]
+                p.defaultTabInterval = hang
                 line.append(NSAttributedString(string: "\t\(mk)\t", attributes: [.font: font, .foregroundColor: ui]))
             } else {
                 p.headIndent = indent

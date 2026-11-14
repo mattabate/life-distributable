@@ -580,6 +580,7 @@ func New(db *store.DB, claudeBin, runsDir, prefix string, projDir func(string) (
 	m.Probe = m.probeModel
 	m.CLIVersion = m.cliVersion
 	m.boardSeen = map[string]boardSent{}
+	m.scrubStoredSecrets()
 	m.backfillStanding(freshPrompts)
 	m.backfillMessageAuthor(freshPrompts)
 	m.migrateLegacyNeedsYou()

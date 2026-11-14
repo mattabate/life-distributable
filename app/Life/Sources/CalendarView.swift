@@ -63,6 +63,8 @@ struct CalendarView: View {
     @State private var cadenceMove: CalCadenceMove?
     /// A drop on a repeating item asks: this one, or all future ones?
     @State private var repeatMove: CalRepeatMove?
+    /// Counts the loads, so a late answer knows a newer one was asked for.
+    @State private var loadGen = 0
 
     /// An install that last showed Week or Month has that word in its
     /// `@AppStorage` and there is no such mode any more, so it lands on
@@ -103,12 +105,15 @@ struct CalendarView: View {
             .sheet(item: $selected, onDismiss: { Task { await load() } }) { e in CalEntrySheet(entry: e, goals: goals) }
             #endif
             .sheet(item: $respondTo) { r in RespondSheet(subject: r.entry.isTickBox ? RespondSubject(homework: r.entry, first: r.outcome) : RespondSubject(cal: r.entry, first: r.outcome), reload: { await load() }) }
+            #if !targetEnvironment(macCatalyst)
+            // The desktop draws the popout in the page too (`macPanel`).
             .sheet(item: $group, onDismiss: {
                 if let e = pendingOpen { pendingOpen = nil; open(e) } else { Task { await load() } }
-            }) { g in groupSheet(g) }
+            }) { g in phoneGroupSheet(g) }
+            #endif
             .sheet(isPresented: $showFilters) { CalFiltersSheet(filters: filtersBinding) }
             .sheet(isPresented: $showAnytime) { anytimeSheet }
-            .onChange(of: nav.cal, initial: true) { _, e in if let e { nav.cal = nil; picked = e.day; open(e) } }
+            .onChange(of: nav.cal, initial: true) { _, e in if let e { nav.cal = nil; picked = e.day == today ? nil : e.day; open(e) } }
             .alert("Move every check-in?", isPresented: Binding(get: { cadenceMove != nil }, set: { if !$0 { cadenceMove = nil } })) {
                 Button("Cancel", role: .cancel) { cadenceMove = nil }
                 Button("Move them all") { if let m = cadenceMove { cadenceMove = nil; Task { await applyCadence(m) } } }
@@ -172,25 +177,38 @@ struct CalendarView: View {
     /// top bar included: with the panel in the page the top bar stays a
     /// click away while a card is open. A click on the ground or Esc closes;
     /// the agenda reloads either way, as a sheet's onDismiss did.
+    /// The "+N more" popout is drawn the same way: as a sheet it covered
+    /// the top bar too.
     @ViewBuilder private var macPanel: some View {
         if let e = selected {
-            ZStack(alignment: .top) {
-                Color.black.opacity(0.34)
-                    .contentShape(Rectangle())
-                    .onTapGesture { closePanel() }
+            panelGround(id: e.id) {
                 CalEntrySheet(entry: e, goals: goals, close: { closePanel() })
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Web.line))
-                    .shadow(color: .black.opacity(0.3), radius: 20, y: 12)
-                    .padding(.top, 48)
             }
-            .id(e.id)
-            .transition(.opacity)
+        } else if let g = group {
+            panelGround(id: g.id) {
+                macGroupPanel(g).frame(width: 420).frame(maxHeight: 560)
+            }
         }
+    }
+
+    private func panelGround<ID: Hashable, P: View>(id: ID, @ViewBuilder _ panel: () -> P) -> some View {
+        ZStack(alignment: .top) {
+            Color.black.opacity(0.34)
+                .contentShape(Rectangle())
+                .onTapGesture { closePanel() }
+            panel()
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Web.line))
+                .shadow(color: .black.opacity(0.3), radius: 20, y: 12)
+                .padding(.top, 48)
+        }
+        .id(id)
+        .transition(.opacity)
     }
 
     private func closePanel() {
         selected = nil
+        group = nil
         Task { await load() }
     }
     #endif
@@ -285,7 +303,11 @@ struct CalendarView: View {
         return
         #endif
         switch mode {
-        case .day: picked = calAddDays(anchor, n)
+        // Back on today is nil, as on the desktop: a picked today stayed
+        // yesterday's page past midnight.
+        case .day:
+            let to = calAddDays(anchor, n)
+            picked = to == today ? nil : to
         case .schedule: break
         }
     }
@@ -404,14 +426,6 @@ struct CalendarView: View {
 
     /// The popout behind a collapsed box: every member on its own line, in the
     /// order the box holds them (time order), each row opening its full card.
-    @ViewBuilder private func groupSheet(_ g: CalGroup) -> some View {
-        #if targetEnvironment(macCatalyst)
-        macGroupPanel(g)
-        #else
-        phoneGroupSheet(g)
-        #endif
-    }
-
     #if targetEnvironment(macCatalyst)
     /// The console's popout (`calGroupPanelHTML`, the owner 2026-09-29: the web's
     /// layout): the lane's swatch, the long day at 600 and "N recurring runs
@@ -423,8 +437,7 @@ struct CalendarView: View {
         let name = calGroupLabel(es)
         let what = es.allSatisfy({ calMinutes($0.at) == nil }) ? "\(es.count) all day"
             : name.badge.hasPrefix("+") ? "\(es.count) \(lane.label.lowercased()) in one box" : "\(name.badge) in \(name.title)"
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+        let panel = VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 10) {
                     RoundedRectangle(cornerRadius: 3).fill(lane.color).frame(width: 12, height: 12)
                     VStack(alignment: .leading, spacing: 1) {
@@ -433,14 +446,14 @@ struct CalendarView: View {
                         Text(what).font(.system(size: 12.5)).foregroundStyle(Web.muted)
                     }
                     Spacer()
-                    Button { group = nil } label: { Text("✕").font(.system(size: 15)) }
+                    Button { closePanel() } label: { Text("✕").font(.system(size: 15)) }
                         .buttonStyle(CalWebButtonStyle()).help("Close").keyboardShortcut(.cancelAction)
                 }
                 .padding(.vertical, 12).padding(.horizontal, 14)
                 Web.line.frame(height: 1)
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(es) { e in
-                        Button { pendingOpen = e; group = nil } label: {
+                        Button { group = nil; open(e) } label: {
                             HStack(spacing: 5) {
                                 Circle().fill(CalCals.shade(e)).frame(width: 7, height: 7)
                                 Text(e.at ?? "").monospacedDigit().opacity(0.7)
@@ -457,8 +470,9 @@ struct CalendarView: View {
                 }
                 .padding(.horizontal, 14).padding(.vertical, 8)
             }
-        }
-        .background(Web.panel)
+        // As tall as its rows; a pile past the panel's 560 scrolls.
+        return ViewThatFits(in: .vertical) { panel; ScrollView { panel } }
+            .background(Web.panel)
     }
     #endif
 
@@ -528,9 +542,10 @@ struct CalendarView: View {
                     // print it twice on one screen.
                     let overdue = showPast ? [] : v.overdue.filter { filters.shows($0) }
                     let due = showPast ? [] : (v.due ?? []).filter { filters.shows($0) }
-                    let anytime = v.anytime.filter { filters.shows($0) && $0.item == true }
-                    let waiting = v.anytime.filter { filters.shows($0) && $0.item != true }
-                    let soon = (v.soon ?? []).filter { filters.shows($0) }
+                    // Nor what is still ahead: Past is the days alone.
+                    let anytime = showPast ? [] : v.anytime.filter { filters.shows($0) && $0.item == true }
+                    let waiting = showPast ? [] : v.anytime.filter { filters.shows($0) && $0.item != true }
+                    let soon = showPast ? [] : (v.soon ?? []).filter { filters.shows($0) }
                     if !overdue.isEmpty {
                         Section {
                             ForEach(overdue) { row($0, day: $0.day, dated: true) }
@@ -760,7 +775,17 @@ struct CalendarView: View {
         // Goals and the tab's oval come from the store: a change here bumps
         // the hub's change feed and RootView's poll refreshes both, so a
         // board, threads and goals refetch on every step was three wasted calls.
-        await cal.run { try await hub.calendar(from: calAddDays(a, -pad), to: calAddDays(b, pad)) }
+        // The newest load wins: a slow answer for a range already left (Past
+        // then Upcoming, a reload after a move) is dropped as a cancelled one
+        // is, never written over the newer.
+        loadGen += 1
+        let gen = loadGen
+        await cal.run {
+            let v = try await hub.calendar(from: calAddDays(a, -pad), to: calAddDays(b, pad))
+            if gen != loadGen { throw CancellationError() }
+            return v
+        }
+        if gen != loadGen { return }
         if cal.error == nil { actionError = nil }
         // The hub's today decides; a wrong guess moves the range (and the
         // task id), which fetches again.

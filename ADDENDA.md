@@ -1489,3 +1489,48 @@ Entry format:
 - For: everyone
 - Fix: On the desktop app, picking another card of the session already open rebuilt the chat and dropped the words typed in its box; the chat is now kept, lands on the new card and arms the new reply. A rec decision that was saved left its sheet up when the read of its session failed, so it could be sent twice; the sheet now closes. One push could be spoken twice when the app was in front but inactive; the same line within ten seconds is now said once.
 - How: same merge as add-0008, then `make check` and `make ship` for the app. By hand: `app/Life/Sources/ThreadsView.swift`, `app/Life/Sources/ThreadDetail.swift`, `app/Life/Sources/RecsView.swift`, `app/Life/Sources/Push.swift`.
+
+## add-0215 · 2026-11-14 · An approved command survives the hub, and the next hub stops a stray run
+- For: everyone
+- Fix: An approved shell or claude command wrote to a pipe the hub read. A daemon a start script left running died at its next line of output once the hub stopped reading, and a run cut off by a hub restart could keep going while its card already said Unknown. The output now goes to a temp file, so a daemon keeps running. The run's process group is stored on the action, and the next hub kills a run the last hub left going before it marks it Unknown. The next hub also removes output files a dead hub left in the temp dir, since one could hold a secret the command printed. Thanks @alizici.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. The new `actions.pgid` column is added by the hub's own migration at start. By hand: `hub/internal/actions/actions.go`, `hub/internal/actions/actions_test.go`, `ops/hub.sh`.
+
+## add-0216 · 2026-11-14 · A calendar wake that failed is queued again
+- For: everyone
+- Fix: When an agent item's wake failed at delivery (the session row could not be written, or the session was gone), the item stayed scheduled for good and a repeating one never made its next run. The same held for a waiting item's look. A failed wake now counts as no wake: the hub queues a fresh one on the next quarter hour, and again each quarter hour while it keeps failing, so the item runs and its repeat goes on. Thanks @alizici.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/calendar/calendar.go`, `hub/internal/calendar/chains_test.go`.
+
+## add-0217 · 2026-11-14 · A session's hub token is off the command line
+- For: everyone
+- Fix: a session's own hub token (`LIFE_SESSION_TOKEN`) was written into the tmux command that starts the session, so it sat in the process list for the whole run and any user on the Mac could read it with `ps` (#204). The hub now writes the token to a 0600 run file beside the run's others, and the session's shell reads it and empties the file, so `ps` no longer shows it. Sessions still run as one user and can read each other's environment; SETUP.md now says so under "Optional: run sessions as a separate user". Thanks @evoleinik.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/runner.go`, `runner_test.go`, `runas_test.go`, `SETUP.md`.
+
+## add-0218 · 2026-11-14 · Keys are redacted before chat is stored
+- For: everyone
+- Fix: a key pasted into a chat, or one a tool printed, was stored whole in the hub's database, where any session could read it back with `ops/db.sh`. Now every message, run event and final reply a session writes has known key shapes (GitHub, Anthropic, OpenAI, Google, AWS, Slack, Tailscale, B2, a session token, a private key block, a login inside a URL) replaced with a label such as `[redacted GitHub token]`. On the first start after the update, the hub does the same once over the chat already stored and logs how many rows it changed. Backups made before still hold the old text, so rotate any key that was found.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/secrets/redact.go`, `redact_test.go` (new package), `hub/internal/threads/scrub.go`, `scrub_test.go` (new), `runner.go`, `threads.go`.
+
+## add-0219 · 2026-11-14 · A numbered list past 9 draws in full on the phone
+- For: everyone
+- Fix: In a card or reply on the phone, a numbered list with ten or more items went blank from "10." down: the box kept its full height but the words stopped. The marker "10." was wider than its column, so the text ran out of tab stops and stopped drawing. The marker column is now as wide as its marker, and a new unit test draws a 13 item list and checks it reaches the end.
+- How: same merge as add-0008, then `make check` and `make ship` for the app. By hand: `app/Life/Sources/StyledText.swift`, `app/LifeTests/StyledTextTests.swift` (run `make app-project` so the test target picks the new file up).
+
+## add-0220 · 2026-11-14 · Calendar days and clock follow the hub in the app
+- For: everyone
+- Fix: With the phone in another time zone than the hub, the red now line in Day view and on the desktop week sat hours off the plan; it now uses the hub's clock, as the blocks do. A source page's day range was in UTC and is now the hub's day. Day strings kept the zone the app launched in after the phone changed zones; they now follow the phone. In Day view, stepping back to today (or opening a today item from elsewhere) left the page pinned to that date, so past midnight it stayed on yesterday; it now follows today. Under Past, the undated, waiting and coming-soon lists no longer show; Past is the days alone. A slow calendar answer for a range already left (Past, then Upcoming) no longer paints over the newer one. On the desktop, the "+N more" popout is a panel over the dimmed page, like an item's own panel, instead of a sheet over the whole window; a click outside or Esc closes it.
+- How: same merge as add-0008, then `make check` and `make ship` for the app. By hand: `app/Life/Sources/CalendarView.swift`, `app/Life/Sources/CalendarGrid.swift`, `app/Life/Sources/CalendarWeek.swift`, `app/Life/Sources/Format.swift`, `app/Life/Sources/SourceDetail.swift`.
+
+## add-0221 · 2026-11-14 · Rec detail on the phone matches the desktop; stale approval picks clear
+- For: everyone
+- Fix: The phone's rec detail now follows the desktop's: the Decision section shows for every rec that is not still proposed, with its date and who decided it; Outcome shows only once there is one or the rec is accepted or done, and a scored rec can be scored again; the footer says what the rec supersedes and shows "unknown" for a rec with no filer. An approval pick made from a card outside its session stayed armed after backing out, or after the session failed to open, so the next plain open of that card arrived with it; it is now cleared. An approval decided somewhere else now leaves the chat's reply bar instead of riding the next message to a refusal.
+- How: same merge as add-0008, then `make check` and `make ship` for the app. By hand: `app/Life/Sources/RecsView.swift`, `app/Life/Sources/ApprovalCard.swift`, `app/Life/Sources/ThreadDetail.swift`.
+
+## add-0222 · 2026-11-14 · Console: cards wear the desktop look, and small fixes
+- For: everyone
+- Fix: Chat cards on the console now look like the desktop app's: a light wash and an outline in the card's colour, the verb in coloured caps, and the time at the right beside Play (the white card with a coloured rail is gone). Opening a chat now lands on its newest message instead of holding a seeded card in place. A turn in flight is found by time, not by text, so a message stamped on a whole second no longer reads as older. Queued messages sort by time. A pick sent with no words no longer shows a "sending" count that never ends. A new session that failed to start keeps what it was about for the retry. Pasting cells or a paragraph from another app pastes the words, not a picture of them. The All recommendations list rereads its rows on each refresh, so a rec decided elsewhere moves. A source's account link with a scheme other than http, https or mailto is no longer a live link.
+- How: same merge as add-0008, then `make webcheck` and `ops/hub.sh restart`. By hand: `hub/internal/server/web/skin.css`, `hub/internal/server/web/ui.js`, `hub/internal/server/web/composer.js`, `hub/internal/server/web/views/threads.js`, `hub/internal/server/web/views/recs.js`, `hub/internal/server/web/views/sources.js`.
+
+## add-0223 · 2026-11-14 · Update app stops watching when its sheet closes; no older phone build
+- For: everyone
+- Fix: The phone's Update app sheet kept polling the hub every 4 seconds after Done, and could open the install link with the sheet gone. It now stops watching when the sheet closes; the build itself goes on on the Mac. `ops/ota.sh` now refuses to publish a build from a tree that does not hold the commit of the build already published, so a checkout behind it cannot undo a landed fix; `OLDER=1` publishes an older tree on purpose, for a rollback.
+- How: same merge as add-0008, then `make check` and `make ship` for the app. By hand: `app/Life/Sources/UpdateAppView.swift`, `ops/ota.sh`.

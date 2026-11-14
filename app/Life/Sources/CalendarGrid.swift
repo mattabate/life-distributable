@@ -590,8 +590,9 @@ struct CalTimeGrid: View {
     private func hourLabel(_ h: Int) -> String { "\((h + 11) % 12 + 1) \(h < 12 ? "AM" : "PM")" }
 
     private func nowLine(colW: CGFloat) -> some View {
-        let c = Calendar.current.dateComponents([.hour, .minute], from: Date())
-        let mins = CGFloat((c.hour ?? 0) * 60 + (c.minute ?? 0))
+        // The hub's clock, as the blocks' `at` and `today` are: the device's
+        // put the line hours off the plan in another zone.
+        let mins = CGFloat(calMinutes(Fmt.easternClock.string(from: Date())) ?? 0)
         return ZStack(alignment: .leading) {
             Circle().fill(Color.red).frame(width: 7, height: 7)
             Rectangle().fill(Color.red).frame(height: 1.5).padding(.leading, 3)

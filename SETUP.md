@@ -450,3 +450,12 @@ Terminal; each `sudo` asks for their Mac password.
 To turn it off: `bash ops/session-user-move.sh --undo` (puts the
 transcripts back, empties `session_user`, restarts the hub). Commits left in
 the clones stay on their `th-` branches under that user's `~/worktrees`.
+
+What the separate user does not do: a session's own hub token
+(`LIFE_SESSION_TOKEN`) reaches its shell through a 0600 run file that the
+shell reads and then empties, never on the tmux command line where any
+user's `ps` could read it. But every session runs as the same session user,
+and macOS lets a process read the environment of another process of the
+same user, so one session could take another's token and act as it (the
+gate still needs the decider code). The separate user walls sessions off
+from the owner's account, not from each other.

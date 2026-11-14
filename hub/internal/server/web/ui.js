@@ -129,6 +129,16 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 // quote ended the string and the rest ran as code (#155). JS escapes first
 // (quotes, backslashes, line ends), then HTML.
 const escJS = s => esc(JSON.stringify(String(s ?? '')).slice(1, -1).replace(/'/g, "\\'"));
+// safeHref: a URL that came from outside (a source's account link) on its
+// way into an href. http, https, mailto and links with no scheme (relative,
+// #hash) pass; any other scheme (javascript:, data:) becomes '#'. The
+// browser drops spaces and control characters before it reads the scheme,
+// so the test does too. esc() still goes around it.
+function safeHref(u) {
+  const s = String(u ?? '').trim();
+  const scheme = /^[a-z][a-z0-9+.-]*:/i.exec(s.replace(/[\u0000- ]+/g, ''));
+  return !scheme || /^(https?|mailto):$/i.test(scheme[0]) ? s : '#';
+}
 
 // ---------- refs ----------
 // A ref is the typed pointer the hub sets on every row: `kind:<id>`. Where

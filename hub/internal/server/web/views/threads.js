@@ -701,7 +701,6 @@ function paintNewSending() {
 async function createSession(p) {
   const prompt = newAbout ? aboutPrompt(newAbout, p.text, newPlace)
     : newPlace ? placeBlock(newPlace) + '\n\n' + p.text : p.text;
-  newAbout = null;
   newSending = Date.now();
   paintNewSending();
   // via: the hub stamps the message with the minute and the trail query, so
@@ -713,6 +712,9 @@ async function createSession(p) {
     newSending = 0;
     paintNewSending();
   }
+  // Only once the hub took it: a failed Send keeps what it was about for the
+  // retry, as the box keeps its words.
+  newAbout = null;
   location.hash = '#/sessions/' + encodeURIComponent(t.id);
 }
 
@@ -777,6 +779,7 @@ async function openThread(id, focus) {
   const s = ((board && board.sessions) || []).find(x => x.id === id);
   const seed = s ? (s.asks || []).map(chatAskHTML).join('') + (s.actions || []).map(chatActionHTML).join('') : '';
   el.innerHTML = `<div class="chat-head"><span class="muted">Loading…</span></div><div class="msgs" id="msgs">${seed}</div>`;
+  el.dataset.thread = ''; // not drawn yet (refreshThread's anchor)
   await refreshThread(id, true);
   // Opening a chat reads it, as on the phone: its title stops being bold.
   post(`/threads/${id}/read`).catch(() => {});
@@ -798,10 +801,13 @@ function liveStarterMsgs(ordered) {
   const start = {}, replied = new Set();
   for (const m of ordered) {
     if (!m.run_id) continue;
-    if (!(m.run_id in start) || m.ts < start[m.run_id]) start[m.run_id] = m.ts;
+    // As times, not strings: the hub drops a whole second's ".000", and
+    // "...:05Z" sorts after "...:05.2Z" as text.
+    const ts = +new Date(m.ts);
+    if (!(m.run_id in start) || ts < start[m.run_id]) start[m.run_id] = ts;
     if (m.role === 'claude' || m.kind === 'error') replied.add(m.run_id);
   }
-  let answered = '';
+  let answered = 0;
   for (const r of replied) if (start[r] > answered) answered = start[r];
   return ordered.filter(m => m.run_id && m.role !== 'claude' && !replied.has(m.run_id) && start[m.run_id] > answered);
 }
@@ -861,7 +867,10 @@ async function refreshThread(id, first) {
   for (const a of acts) chatState.cards['action:' + a.id] = a;
 
   const msgsEl = document.getElementById('msgs');
-  const anchor = chatAnchor(msgsEl);
+  // No anchor until this chat has been drawn once: openThread's seeded cards
+  // have ids too, and holding one in place kept the chat off its newest
+  // message.
+  const anchor = el.dataset.thread === id ? chatAnchor(msgsEl) : null;
   const ordered = orderedMsgs(msgs);
   const newest = msgs.length ? Math.max(...msgs.map(m => m.id)) : 0;
   const running = t.status === 'running';
@@ -1710,7 +1719,7 @@ const wakeWhen = (iso, now) => {
 };
 function queuedHTML(prompts) {
   const ps = (prompts || []).filter(p => p.state === 'queued')
-    .sort((a, b) => (a.not_before || '').localeCompare(b.not_before || ''));
+    .sort((a, b) => (a.not_before ? +new Date(a.not_before) : 0) - (b.not_before ? +new Date(b.not_before) : 0));
   if (!ps.length) return '';
   const mine = p => p.author === OWNER ? 'you' : p.author === 'hub' ? 'the hub' : 'this session';
   const row = p => `<div class="row qrow">
@@ -1901,7 +1910,8 @@ async function chatSend(p) {
   // Anything going into THIS chat now counts "sending · N s" under the chat
   // until it lands (refreshThread ends it); a send the hub refused ends it
   // here.
-  const intoThisChat = p.when === 'now' && p.target !== 'new';
+  // A pick sent with no words leaves no message of the owner's to wait for.
+  const intoThisChat = p.when === 'now' && p.target !== 'new' && !!((p.text || '').trim() || (p.refs || []).length);
   if (intoThisChat) {
     chatState.sendingSince = Date.now(); chatState.sendingAfter = chatState.lastMsgID;
     paintWorking(chatState.running, chatState.thread);

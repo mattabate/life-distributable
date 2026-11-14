@@ -453,8 +453,8 @@ struct CalWeekGrid: View, Equatable {
     }
 
     private func nowLine(_ w: CGFloat) -> some View {
-        let c = Calendar.current.dateComponents([.hour, .minute], from: Date())
-        let mins = CGFloat((c.hour ?? 0) * 60 + (c.minute ?? 0))
+        // The hub's clock, as the blocks' `at` and `today` are.
+        let mins = CGFloat(calMinutes(Fmt.easternClock.string(from: Date())) ?? 0)
         // `.cal-now`: 2 of red, a 10 dot hanging off the column's left edge.
         return ZStack(alignment: .leading) {
             Rectangle().fill(calWebRed).frame(height: 2)
