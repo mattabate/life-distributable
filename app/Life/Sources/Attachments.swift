@@ -992,7 +992,14 @@ struct VideoSurface: UIViewRepresentable {
     func updateUIView(_ v: VideoSurfaceView, context: Context) {
         v.model = model
         v.playerLayer.player = model.player
-        if v.focus != focus { v.focus = focus; v.wantsKeys = true; _ = v.becomeFirstResponder() }
+        // The keys are taken after this update, never inside it: with an
+        // accessibility client attached (VoiceOver, a screen recorder) a
+        // first-responder change makes SwiftUI read its graph, which
+        // mid-update is a cycle that never ends and freezes the app.
+        if v.focus != focus {
+            v.focus = focus; v.wantsKeys = true
+            DispatchQueue.main.async { [weak v] in _ = v?.becomeFirstResponder() }
+        }
     }
 }
 

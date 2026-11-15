@@ -64,6 +64,13 @@ type Clock struct {
 	// run on 2026-09-13 while /sources still said "every 6h".
 	Last func(name string) time.Time
 	Ran  func(name string, at time.Time)
+	// Ended hears every run that returned, with its start; Cut reports that
+	// a task's last start never did (the hub was restarted under it). A cut
+	// syncer is due at once: its start was recorded, so a restart mid-run
+	// used to cost the whole interval. Syncers only: they pull, so a second
+	// run is safe; a housekeeping task may have done its one thing already.
+	Ended func(name string, start time.Time)
+	Cut   func(name string) bool
 	// Done hears every finished run of a Sync task (main writes it to the
 	// sync_runs log, which Sources health reads). Housekeeping tasks
 	// registered with Every are not reported.
@@ -102,6 +109,9 @@ func (c *Clock) add(name string, d time.Duration, atBoot, syncer bool, fn func()
 			next = now // never recorded: it may never have run at all
 		} else if last.Add(d).Before(next) {
 			next = last.Add(d)
+		}
+		if syncer && c.Cut != nil && c.Cut(name) {
+			next = now
 		}
 	}
 	c.tasks = append(c.tasks, &task{
@@ -150,6 +160,9 @@ func (c *Clock) run(t *task, start time.Time) {
 		c.Ran(t.Name, start)
 	}
 	err := t.fn()
+	if c.Ended != nil {
+		c.Ended(t.Name, start)
+	}
 	skipped := errors.Is(err, ErrSkip)
 	if skipped {
 		err = nil

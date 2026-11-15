@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"life/hub/internal/recs"
+	"life/hub/internal/threads"
 )
 
 // Recommendations: the ledger of what the agent told the owner to do
@@ -240,6 +241,15 @@ func (s *Server) SetRecs(rc *recs.Store) {
 	s.Recs = rc
 	if s.thr == nil {
 		return
+	}
+	s.thr.OnStarted = func(p threads.Prompt, threadID string) {
+		for _, r := range p.Replies {
+			if id, ok := strings.CutPrefix(r.Ref, "rec:"); ok && s.Recs != nil {
+				if _, err := s.Recs.Link(id, threadID); err != nil {
+					log.Printf("recs: link %s to session %s: %v", id, threadID, err)
+				}
+			}
+		}
 	}
 	s.thr.RecHeader = func(id, outcome string) string {
 		if s.Recs == nil {

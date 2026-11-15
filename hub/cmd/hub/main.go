@@ -209,6 +209,25 @@ func main() {
 		return t
 	}
 	ck.Ran = func(name string, at time.Time) { db.SetSetting("clock:"+name, at.UTC().Format(time.RFC3339Nano)) }
+	// A start with a different (older) end recorded was cut by a restart. No
+	// end at all is a task from before ends were kept: not cut.
+	// Three cuts in a row and it waits its interval like before: a run that
+	// brings the hub down must not do so at every start.
+	ck.Ended = func(name string, start time.Time) {
+		db.SetSetting("clockend:"+name, start.UTC().Format(time.RFC3339Nano))
+		if db.Setting("clockcut:"+name) != "" {
+			db.SetSetting("clockcut:"+name, "")
+		}
+	}
+	ck.Cut = func(name string) bool {
+		end := db.Setting("clockend:" + name)
+		if end == "" || end == db.Setting("clock:"+name) {
+			return false
+		}
+		cuts := db.Setting("clockcut:"+name) + "x"
+		db.SetSetting("clockcut:"+name, cuts)
+		return len(cuts) <= 3
+	}
 	// Every syncer (ck.Sync) run lands in one log, written only here; Sources
 	// health reads a connector's last run and failing streak from it.
 	runLog, err := syncruns.New(db)

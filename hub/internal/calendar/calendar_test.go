@@ -1492,7 +1492,7 @@ func TestDeliveredAndResolvedSpawnOneNext(t *testing.T) {
 		fin := make(chan struct{}, 2)
 		go func() {
 			<-start
-			c.OnDelivered(threads.Prompt{ID: "p-x", InReplyTo: "cal:" + it.ID}, "calendar")
+			c.OnDelivered(threads.Prompt{ID: it.PromptID, InReplyTo: "cal:" + it.ID}, "calendar")
 			fin <- struct{}{}
 		}()
 		go func() {

@@ -487,6 +487,29 @@ func TestRecDecisionGoesToAnAgent(t *testing.T) {
 	if msgs := s.do(t, "GET", "/api/v1/threads/"+out.SessionID+"/messages", nil).Body.String(); !strings.Contains(msgs, `"attachments":["sha256/ab/abc.png"]`) {
 		t.Fatal("the new session's first message lost the screenshot:", msgs)
 	}
+	// A reply for LATER to a new session waits as a prompt: no session starts
+	// before its time (#212), and the one that does start is linked to the
+	// rec.
+	id = newRec("Renew the passport", th.ID)
+	before := s.do(t, "GET", "/api/v1/threads", nil).Body.String()
+	w = s.do(t, "POST", "/api/v1/recs/"+id+"/reply", map[string]any{"deliver": "new", "note": "start on it tomorrow", "in": "24h"})
+	out = decision{}
+	json.Unmarshal(w.Body.Bytes(), &out)
+	if w.Code != 200 || out.Delivered != "new" || out.SessionID != "" {
+		t.Fatalf("%d %+v", w.Code, out)
+	}
+	if after := s.do(t, "GET", "/api/v1/threads", nil).Body.String(); strings.Count(after, `"id"`) != strings.Count(before, `"id"`) {
+		t.Fatal("a reply for tomorrow started a session now:", after)
+	}
+	if q := s.do(t, "GET", "/api/v1/prompts", nil).Body.String(); !strings.Contains(q, "start on it tomorrow") || !strings.Contains(q, "rec:"+id) {
+		t.Fatal("the reply for tomorrow is not waiting as a prompt:", q)
+	}
+	var started string
+	s.thr.OnDelivered = func(_ threads.Prompt, threadID string) { started = threadID }
+	s.thr.DuePrompts(time.Now().Add(25 * time.Hour))
+	if r := s.do(t, "GET", "/api/v1/recs/"+id, nil).Body.String(); started == "" || started == th.ID || !strings.Contains(r, started) {
+		t.Fatalf("the session the delayed reply started (%q) is not linked to the rec: %s", started, r)
+	}
 }
 
 // A job run reads back parsed: the prose the model wrote, the envelope's
