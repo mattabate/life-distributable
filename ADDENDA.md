@@ -1564,3 +1564,8 @@ Entry format:
 - For: everyone on the desktop app
 - Fix: The video player took the keyboard inside its own SwiftUI update. With an accessibility client attached (VoiceOver, a screen recorder) that could loop forever and freeze the app until it was quit. It now takes the keyboard on the next turn of the run loop, as the message box already does.
 - How: same merge as add-0008, then `make check` and `make mac` for the desktop app. By hand: `app/Life/Sources/Attachments.swift` (`VideoSurface.updateUIView`).
+
+## add-0230 · 2026-11-15 · The console sends the decider code only when it decides
+- For: everyone who uses the web console
+- Fix: The console put the decider code in a header on every request it made, reads included, though the hub reads it only on an approve or deny, a message that carries one, and the code check (#213). It now sends the code only on those requests, as the phone app already does. Nothing changes in how you approve. Thanks @muhammadusamahoyrr.
+- How: same merge as add-0008, then `make check`, `make webcheck` and `ops/hub.sh restart`. By hand: `hub/internal/server/web/app.js` (`api`, `post`), `views/asks.js` (`withDecider`, `decideAction`), `views/threads.js` (`chatSendNow`), `test/decider.test.js` (new).
