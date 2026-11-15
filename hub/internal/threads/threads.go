@@ -538,6 +538,15 @@ type Manager struct {
 	// done when its session has the words, never before. Called synchronously;
 	// it must not call back into a locked caller.
 	OnDelivered func(p Prompt, threadID string)
+	// OnStarted is told when a prompt started a NEW session (a rec answer the
+	// owner asked to be delivered later, with no session to take it): the
+	// server links that session to the rec the prompt answers. Same rules as
+	// above.
+	OnStarted func(p Prompt, threadID string)
+	// sent: messages written to a live process whose delivery stamp the
+	// database refused (stampSent).
+	sentMu sync.Mutex
+	sent   map[int64]sentStamp
 	// held: calendar wakes the budget guard refused this tick, so a paused
 	// day is one log line per item, not one per minute.
 	held map[string]bool

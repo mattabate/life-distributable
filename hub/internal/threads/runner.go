@@ -481,6 +481,61 @@ type queuedMsg struct {
 }
 
 func (m *Manager) queued(threadID string) ([]queuedMsg, error) {
+	out, err := m.queuedRows(threadID)
+	if err != nil {
+		return nil, err
+	}
+	// Never again a message the process already has (stampSent).
+	m.sentMu.Lock()
+	defer m.sentMu.Unlock()
+	if len(m.sent) == 0 {
+		return out, nil
+	}
+	keep := out[:0]
+	for _, q := range out {
+		s, ok := m.sent[q.id]
+		if !ok {
+			keep = append(keep, q)
+		} else if m.stampOne(q.id, s) == nil {
+			delete(m.sent, q.id)
+		}
+	}
+	return keep, nil
+}
+
+// sentStamp is what a delivered message's row is to say.
+type sentStamp struct {
+	run, at string
+	steered int
+}
+
+func (m *Manager) stampOne(id int64, s sentStamp) error {
+	_, err := m.db.Exec(`UPDATE thread_messages SET queued=0, run_id=?, delivered_at=?, steered=? WHERE id=?`, s.run, s.at, s.steered, id)
+	return err
+}
+
+// stampSent records that qs were written to the live process. The write has
+// happened and cannot be taken back, so a stamp the database refuses must not
+// leave the row queued: the next send read it as new and wrote it to the
+// process a second time (#210). A refused stamp is remembered here, kept out
+// of every later read of the queue, and tried again on each one. A hub
+// restart forgets it; so does the process's own input file, which a resumed
+// session does not replay.
+func (m *Manager) stampSent(qs []queuedMsg, s sentStamp) {
+	for _, q := range qs {
+		if err := m.stampOne(q.id, s); err != nil {
+			log.Printf("thread message %d: sent, delivery stamp failed (held out of the queue): %v", q.id, err)
+			m.sentMu.Lock()
+			if m.sent == nil {
+				m.sent = map[int64]sentStamp{}
+			}
+			m.sent[q.id] = s
+			m.sentMu.Unlock()
+		}
+	}
+}
+
+func (m *Manager) queuedRows(threadID string) ([]queuedMsg, error) {
 	rows, err := m.db.Query(`SELECT id, role, kind, text, attachments, in_reply_to, outcome, replies, ts, via FROM thread_messages WHERE thread_id=? AND queued=1 ORDER BY id`, threadID)
 	if err != nil {
 		return nil, err
@@ -841,9 +896,7 @@ func (m *Manager) deliver(t Thread, r run) error {
 		r.turns++
 		m.db.Exec(`UPDATE thread_runs SET turns=?, last_boundary=? WHERE id=?`, r.turns, ts(now), r.id)
 	}
-	for _, q := range qs {
-		m.db.Exec(`UPDATE thread_messages SET queued=0, run_id=?, delivered_at=?, steered=? WHERE id=?`, r.turnID(), ts(now), steered, q.id)
-	}
+	m.stampSent(qs, sentStamp{run: r.turnID(), at: ts(now), steered: steered})
 	m.db.Exec(`UPDATE thread_runs SET busy=1, last_output=? WHERE id=?`, ts(now), r.id)
 	m.db.Exec(`UPDATE threads SET status='running', updated_at=?, last_run_at=? WHERE id=?`, ts(now), ts(now), t.ID)
 	if midTurn {

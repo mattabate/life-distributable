@@ -117,6 +117,17 @@ func (f *Flow) Deliver(rec Rec, want, outcome, text string, at time.Time, starte
 			}
 		}
 	}
+	// A later delivery with no session to take it waits as a prompt for a new
+	// one; ToSession starts a session now, whatever time the owner picked
+	// (#212). The rec's frame is rendered when it fires, and the server links
+	// the session it starts (Manager.OnStarted).
+	if f.Thr != nil && at.After(time.Now()) {
+		if _, err := f.Thr.Queue(threads.Prompt{Author: "owner", Target: "new", InReplyTo: "rec:" + rec.ID,
+			Outcome: outcome, Text: text, NotBefore: at, GoalID: rec.GoalID, Attachments: attachments}); err != nil {
+			return "", "", err.Error()
+		}
+		return "new", "", ""
+	}
 	t := deliver.Target{Project: "life", GoalID: rec.GoalID, Starter: starter.Text(), Attachments: attachments}
 	id, how, err := f.deliverer().ToSession(t)
 	if err != nil {

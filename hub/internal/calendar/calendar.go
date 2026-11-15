@@ -1038,13 +1038,16 @@ func (c *Calendar) queueWake(it Item) {
 	if it.Kind == "waiting" {
 		text = waitingWake(it)
 	}
-	p, err := c.thr.Queue(threads.Prompt{Author: "hub", Target: target, NotBefore: c.fireAt(it), InReplyTo: "cal:" + it.ID,
-		Text: text, Title: it.Title, GoalID: it.GoalID})
-	if err != nil {
+	// The item names its wake BEFORE the wake is queued: a due wake is
+	// delivered inside Queue, and OnDelivered takes only the prompt the item
+	// names (#211).
+	wake := store.NewID("p")
+	c.db.Exec(`UPDATE items SET prompt_id=? WHERE id=?`, wake, it.ID)
+	if _, err := c.thr.Queue(threads.Prompt{ID: wake, Author: "hub", Target: target, NotBefore: c.fireAt(it), InReplyTo: "cal:" + it.ID,
+		Text: text, Title: it.Title, GoalID: it.GoalID}); err != nil {
 		log.Printf("calendar: %s wake: %v", it.ID, err)
-		return
+		c.db.Exec(`UPDATE items SET prompt_id='' WHERE id=? AND prompt_id=?`, it.ID, wake)
 	}
-	c.db.Exec(`UPDATE items SET prompt_id=? WHERE id=?`, p.ID, it.ID)
 }
 
 // waitingWake: the one look a waiting item gets on its day: what is owed,
@@ -1085,6 +1088,14 @@ func (c *Calendar) OnDelivered(p threads.Prompt, threadID string) {
 	if err != nil || it.State != "scheduled" {
 		return
 	}
+	// ONLY the item's current wake (queueWake names it on the row first). A
+	// reply that points at the item is words about it, and the wake of a time
+	// the item has since been moved off is obsolete: neither is the run (#211:
+	// a reply closed a future repeating item and minted its next; a held
+	// callback closed a moved one).
+	if p.ID == "" || p.ID != it.PromptID {
+		return
+	}
 	// ONLY an agent item, because only an agent item has a wake (queueWake is
 	// `Kind == "agent"`). A prompt pointed at one of the OWNER's steps is the
 	// owner talking about it — the Respond sheet's "Reply" — and answering a
@@ -1095,7 +1106,7 @@ func (c *Calendar) OnDelivered(p threads.Prompt, threadID string) {
 	// the session that took the look, until the session says came or raise
 	// (or Tick raises it the day after).
 	if it.Kind == "waiting" {
-		c.db.Exec(`UPDATE items SET thread_id=?, prompt_id=? WHERE id=? AND state='scheduled'`, threadID, p.ID, it.ID)
+		c.db.Exec(`UPDATE items SET thread_id=? WHERE id=? AND state='scheduled' AND prompt_id=?`, threadID, it.ID, p.ID)
 		log.Printf("calendar: %s (waiting) look delivered → %s", it.ID, threadID)
 		return
 	}
@@ -1103,8 +1114,8 @@ func (c *Calendar) OnDelivered(p threads.Prompt, threadID string) {
 		return
 	}
 	now := c.Now()
-	moved, err := c.setItem(it.ID, "hub", "agent run started", `UPDATE items SET state='done', fired_at=?, updated_at=?, resolved_at=?, resolved_by='hub', resolution='agent run started', thread_id=?, prompt_id=? WHERE id=? AND state='scheduled'`,
-		ts(now), ts(now), ts(now), threadID, p.ID, it.ID)
+	moved, err := c.setItem(it.ID, "hub", "agent run started", `UPDATE items SET state='done', fired_at=?, updated_at=?, resolved_at=?, resolved_by='hub', resolution='agent run started', thread_id=? WHERE id=? AND state='scheduled' AND prompt_id=?`,
+		ts(now), ts(now), ts(now), threadID, it.ID, p.ID)
 	if err != nil {
 		log.Printf("calendar: close %s after delivery: %v", it.ID, err)
 		return

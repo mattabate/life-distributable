@@ -897,6 +897,9 @@ func (m *Manager) sendPrompt(p Prompt) (Prompt, error) {
 			return fail(err)
 		}
 		threadID = t.ID
+		if m.OnStarted != nil {
+			m.OnStarted(p, threadID)
+		}
 	} else if err := m.runRef(threadID, p.Author, role, kind, p.Text, p.Attachments, p.Replies, ""); err != nil {
 		return fail(err)
 	}

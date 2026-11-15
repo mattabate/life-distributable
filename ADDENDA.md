@@ -1539,3 +1539,28 @@ Entry format:
 - For: everyone who runs sessions as a separate user
 - Fix: When a session landed its commits (`ops/land.sh`, with `session_user` set), the hub fast-forwarded main and, when `hub/` changed, built and restarted itself. `make test` never ran, so a red commit could reach main and the running hub (#208). The landing now goes through the new `ops/land-incoming.sh`: it checks the commit out in a throwaway worktree, runs `make test` there as the session user, and fast-forwards main only when it passes. A failing test or a conflict fails the action with main untouched and no restart. `ops/land-incoming-test.sh` pins that a commit with a failing test does not land; `make check` runs it. Without `session_user` there is no landing step: a session commits in the main checkout itself, and `make check` stays a rule the session follows. Thanks @abranchesia.
 - How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `ops/land-incoming.sh`, `ops/land-incoming-test.sh` (new), `hub/internal/server/land.go` (`landProposal`), `land_test.go`, `Makefile`.
+
+## add-0225 · 2026-11-15 · A message the session already has is never sent twice
+- For: everyone
+- Fix: When the hub wrote a message to a running session and the database then refused the row that marks it delivered, the message stayed queued, and the next send wrote it to the session a second time (#210). A sent message whose mark failed is now held out of the queue and marked as soon as the database takes it. Thanks @Swarneil1905.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/runner.go` (`stampSent`), `threads.go`, `stamp_test.go` (new).
+
+## add-0226 · 2026-11-15 · Only its own wake closes an agent calendar item
+- For: everyone
+- Fix: Any delivered message that pointed at a scheduled agent item closed it as run. A reply about a future repeating item marked it done and made its next occurrence before the task had run, and a late callback from the wake of a time the item had been moved off closed the moved item (#211). The item now names its wake before the wake is queued, and only that wake closes it. A reply leaves the item scheduled, and so does an old wake. Thanks @Swarneil1905.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/calendar/calendar.go` (`queueWake`, `OnDelivered`), `calendar_test.go`, `wake_test.go` (new).
+
+## add-0227 · 2026-11-15 · A rec answer set for later waits for its time
+- For: everyone
+- Fix: A decision or reply on a rec, set to be delivered later, started a new session at once when there was no session to take it (#212). It now waits as a queued prompt for a new session at the time picked, and the session it starts is linked to the rec. Thanks @Swarneil1905.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/recs/flow.go` (`Deliver`), `hub/internal/server/recs.go` (`SetRecs`), `hub/internal/threads/prompts.go`, `threads.go` (`OnStarted`), `server_test.go`.
+
+## add-0228 · 2026-11-15 · A sync cut by a restart runs again at start
+- For: everyone with a data source on the clock
+- Fix: The clock recorded when a sync started and nothing else, so a hub restart in the middle of a run cost the whole interval: a 6-hour sync cut 20 seconds in next ran 6 hours later. The clock now records when a run returns, and a sync whose last start never returned is due on the first tick after the hub starts. After three cut runs in a row it waits its interval as before, so a run that brings the hub down cannot do so at every start. Housekeeping tasks are unchanged.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/clock/clock.go` (`Ended`, `Cut`), `cut_test.go` (new), `hub/cmd/hub/main.go`.
+
+## add-0229 · 2026-11-15 · A click on a video can no longer freeze the desktop app
+- For: everyone on the desktop app
+- Fix: The video player took the keyboard inside its own SwiftUI update. With an accessibility client attached (VoiceOver, a screen recorder) that could loop forever and freeze the app until it was quit. It now takes the keyboard on the next turn of the run loop, as the message box already does.
+- How: same merge as add-0008, then `make check` and `make mac` for the desktop app. By hand: `app/Life/Sources/Attachments.swift` (`VideoSurface.updateUIView`).
