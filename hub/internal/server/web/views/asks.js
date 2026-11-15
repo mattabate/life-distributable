@@ -18,14 +18,16 @@
 // approve/deny — a card's pick in the composer (views/threads.js chatSend),
 // or a job proposal's direct Approve below — is refused (403) until the
 // decider code rides with it. This asks for the code once per browser, then
-// this browser remembers it (app.js `decider`, sent on every request). The
+// this browser remembers it (app.js `decider`). `send(d)` is handed `d`, the
+// option that makes api() carry the code: only these sends ever do. The
 // code is NOT cleared before asking (2026-08-30): it used to be, so
 // dismissing the box threw away a code that worked and asked again on the
 // next approval — half of why the code got copied back and forth. Only a code
 // actually retyped replaces the stored one.
 async function withDecider(send) {
+  const d = { decider: true };
   try {
-    return await send();
+    return await send(d);
   } catch (e) {
     if (e.status !== 403) throw e;
     const code = prompt(decider.get()
@@ -37,7 +39,7 @@ async function withDecider(send) {
     const c = await deciderCheck(code).catch(() => null);
     if (!c || !c.ok) { toast('The hub refused that code. Nothing was saved.'); throw e; }
     decider.set(code);
-    return await send();
+    return await send(d);
   }
 }
 
@@ -58,7 +60,7 @@ async function decideAction(id, approve) {
   if (approve && !confirm(`Approve · ${kind}?`)) return;
   card && card.querySelectorAll('button').forEach(b => b.disabled = true);
   try {
-    await withDecider(() => post(`/actions/${id}/${approve ? 'approve' : 'deny'}?via=web`, {}));
+    await withDecider(d => post(`/actions/${id}/${approve ? 'approve' : 'deny'}?via=web`, {}, d));
     toast(approve ? 'approved' : 'denied');
     render(); refreshBadges();
   } catch (e) {

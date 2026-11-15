@@ -1932,7 +1932,7 @@ async function chatSendNow(p, re) {
     // rec's ledger row exactly as /recs/{id}/decide would) and the session
     // gets one frame per card over his words. Always now, this session.
     const replies = [re, ...p.also].map(r => ({ ref: r.ref + ':' + r.id, outcome: r.outcome || '' }));
-    await withDecider(() => post('/prompts?via=web', { target: 'new-or:' + chatState.id, text: p.text, attachments: p.refs, replies }));
+    await withDecider(d => post('/prompts?via=web', { target: 'new-or:' + chatState.id, text: p.text, attachments: p.refs, replies }, d));
     toast(`sent — ${replies.length} cards`);
     refreshBadges();
     return;
@@ -1954,7 +1954,7 @@ async function chatSendNow(p, re) {
   // that — withDecider asks once and remembers it.
   const body = composerTiming({ target: p.target === 'new' ? 'new' : 'new-or:' + chatState.id, text: p.text, attachments: p.refs }, p);
   if (re) { body.in_reply_to = re.ref + ':' + re.id; body.outcome = p.outcome; if (p.target === 'new') body.title = re.title.slice(0, 80); }
-  await withDecider(() => post('/prompts?via=web', body));
+  await withDecider(d => post('/prompts?via=web', body, d));
   toast(p.when !== 'now' ? 'queued' : p.target === 'new' ? 'sent to a new session' : re && re.ref === 'action' && p.outcome ? p.outcome : 'sent');
   refreshBadges();
 }

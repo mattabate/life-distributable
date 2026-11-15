@@ -22,15 +22,18 @@
 // click apart from a session holding the same token. `ops/decider-set.sh`
 // prints it; withDecider() (views/asks.js) asks for it the first time the hub
 // refuses — on an approval sent from the composer or a job proposal's card.
+// It rides ONLY on a request that decides (`opts.decider`, which withDecider
+// hands its send), never on every read and write the page makes. The phone
+// sends it the same way (HubClient).
 const decider = {
   get: () => localStorage.getItem('life.decider') || '',
   set: v => localStorage.setItem('life.decider', (v || '').trim().toUpperCase()),
   clear: () => localStorage.removeItem('life.decider'),
 };
 
-async function api(path, opts = {}) {
+async function api(path, { decider: deciding, ...opts } = {}) {
   const headers = opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {};
-  if (decider.get()) headers['X-Life-Decider'] = decider.get();
+  if (deciding && decider.get())headers['X-Life-Decider'] = decider.get();
   // fetch() rejects (TypeError "Failed to fetch") only when no answer came
   // back — in practice a hub restart, a second or two of refused connections.
   // Retry through it quietly instead of toasting it at a Send (2026-09-18).
@@ -90,7 +93,7 @@ function seenBuild(b) {
 }
 
 const get = p => api(p);
-const post = (p, b) => api(p, { method: 'POST', body: b === undefined ? undefined : JSON.stringify(b) });
+const post = (p, b, o) => api(p, { method: 'POST', body: b === undefined ? undefined : JSON.stringify(b), ...o });
 const patch = (p, b) => api(p, { method: 'PATCH', body: JSON.stringify(b) });
 const put = (p, b) => api(p, { method: 'PUT', body: JSON.stringify(b) });
 // The hub's wall clock for easternFields (ui.js); New York until it answers.
