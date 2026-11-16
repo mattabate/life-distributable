@@ -2,6 +2,10 @@
 # Put a session's commits on main when sessions run as their own user
 # (session_user in ops/hub.json, SETUP.md "Run sessions as a separate user").
 #   bash ops/land.sh       from the session's clone, after ops/commit.sh
+#   bash ops/land.sh --say "I need your approval to change <what>, because <why>."
+#                          a landing that changes the approval gate is the owner's
+#                          card, and these words are that card: the hub refuses
+#                          one without them
 # That user cannot write the main checkout, so it works in a clone whose origin
 # is the main checkout. This refuses uncommitted tracked edits, rebases the
 # branch on main (on a conflict the rebase is left open: resolve, git add,
@@ -11,6 +15,8 @@
 # checkout itself there is nothing to land: its commits are already on main.
 set -euo pipefail
 die() { echo "land.sh: $*" >&2; exit 2; }
+say=
+if [ "${1:-}" = --say ]; then say=${2:-}; [ -n "$say" ] || die "--say needs the words"; fi
 
 top=$(git rev-parse --show-toplevel)
 origin=$(git remote get-url origin 2>/dev/null || true)
@@ -30,7 +36,11 @@ fi
 dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
 git bundle create --quiet "$dir/b" "origin/main..$branch"
-printf '{"branch":"%s","bundle_b64":"%s"}' "$branch" "$(base64 -i "$dir/b" | tr -d '\n')" > "$dir/body.json"
+# say is one line of words (the hub refuses control characters): escaping the
+# backslashes and quotes is all JSON needs, with no jq on older macOS.
+say=${say//\\/\\\\}
+say=${say//\"/\\\"}
+printf '{"branch":"%s","say":"%s","bundle_b64":"%s"}' "$branch" "$say" "$(base64 -i "$dir/b" | tr -d '\n')" > "$dir/body.json"
 if ! lifectl api POST /api/v1/land "@$dir/body.json" > "$dir/out.json"; then
   cat "$dir/out.json" >&2
   die "the hub refused the landing"

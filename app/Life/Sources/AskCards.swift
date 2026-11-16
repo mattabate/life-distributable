@@ -110,6 +110,7 @@ struct AskCard: View {
              // the one card, staged on the chat's bar until Send.
              extra: paused && !closed ? AnyView(PauseBar(from: a.created_at, to: a.resumes_at!))
                 : (a.steps ?? []).isEmpty ? nil : AnyView(CalStepsList(calID: a.cal_id, steps: a.steps ?? [], stage: stepStage)),
+             extraShown: true,
              line: a.resolution.flatMap { $0.isEmpty ? nil : $0 } ?? (a.state == "superseded" ? "replaced by a newer card" : ""),
              // Closed (done, dismissed, a read marked Read), it is its row,
              // Reopen inside (the console's askHTML `folded`).

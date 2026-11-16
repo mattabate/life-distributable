@@ -528,6 +528,8 @@ a.chain-w:hover, a.chain-w.on { color: var(--accent); }
 .ask.closing { --tint: var(--muted); opacity: .5; pointer-events: none; }
 /* The card in his ears, on a session row (2026-10-28 20:01). */
 .ask.speaking { --tint: var(--green); }
+/* A commit approval: green, not the red of a card that needs the owner. */
+.ask.commit { --tint: var(--green); }
 .ask.rec { --tint: var(--violet); }
 /* A rec in the open-cards view: one violet line until he dismisses it (2026-11-04). */
 .rec-notice { display: flex; align-items: center; gap: 6px; margin: 6px 0; padding: 6px 10px; font-size: 13px; border-radius: 10px;

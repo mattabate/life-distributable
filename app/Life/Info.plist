@@ -42,6 +42,8 @@
 	<string>Photos you take here are saved to your own hub.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Face ID unlocks the decider code that approves a gated action (money, delete, contact, share, commit), so you never type it. The code stays in this phone's Keychain.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>A video or picture you download from a card is saved to your Photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Pick photos for a session, and let the app offer to delete app screenshots once they are sent (iOS asks you each time).</string>
 	<key>UIBackgroundModes</key>
@@ -54,6 +56,8 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

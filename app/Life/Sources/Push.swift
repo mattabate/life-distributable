@@ -94,6 +94,13 @@ import UserNotifications
 /// commands land here.
 final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     static let push = PushState()
+    /// The phone turns only while a video is full screen; VideoFullScreen
+    /// widens it and puts it back.
+    @MainActor static var orientations: UIInterfaceOrientationMask = .portrait
+
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        MainActor.assumeIsolated { Self.orientations }
+    }
 
     #if targetEnvironment(macCatalyst)
     /// Edit ▸ Find is ours (MacFind): the system's Find menu answers only a
