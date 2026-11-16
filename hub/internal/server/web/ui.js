@@ -1010,6 +1010,16 @@ if (typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') 
   addEventListener('resize', queueFit);
 }
 const cardLongOpen = new Set();
+// A card's pictures lead it, as a strip above the detail: [the detail
+// without its picture lines, their strip]. The phone's `Card.split`.
+function splitPictures(detail) {
+  const pics = [], rest = [];
+  for (const l of String(detail || '').split('\n')) {
+    const f = blobLine(l);
+    if (f && isImageRef(f.ref)) pics.push(f); else rest.push(l);
+  }
+  return [rest.join('\n').trim(), pics.length ? filesHTML(pics) : ''];
+}
 function askBody(detail, key) {
   if (!isLongText(detail)) return md(detail);
   const open = cardLongOpen.has(key);
@@ -1092,11 +1102,11 @@ function cardHTML(c, opened) {
   // reread or Reopen.
   if (c.folded) {
     return rowHTML({ id: 'ask-card-' + id, key: c.ref + ':' + id, opened, k: c.folded, title: mdInline(c.title), when: at,
-      body: said + body + (c.meta ? `<div class="small muted">${c.meta}</div>` : '') + (acts ? `<div class="acts">${acts}</div>` : '') });
+      body: said + (c.pics || '') + body + (c.keep || '') + (c.meta ? `<div class="small muted">${c.meta}</div>` : '') + (acts ? `<div class="acts">${acts}</div>` : '') });
   }
   return `<div class="${['ask', c.tint].filter(Boolean).join(' ')}" id="ask-card-${id}">
       ${head}${titled ? `<div class="t">${mdInline(c.title)}</div>` : ''}
-      ${said}${body}
+      ${said}${c.pics || ''}${body}${c.keep || ''}
       ${c.meta ? `<div class="row small muted">${c.meta}</div>` : ''}
       <div class="acts">${acts}</div></div>`;
 }
@@ -1263,15 +1273,18 @@ function askHTML(a, opened, armed, cost) {
     // reply), each arming the composer with that pick, then Dismiss — the
     // silent close (2026-08-28: "once I read it, I can just dismiss it").
     : (a.outcomes && a.outcomes.length ? outcomeBtns(a.outcomes, v => `openRespond('${escJS(a.id)}','${escJS(v)}')`, armed) : [respond]).concat(dismiss);
+  const [text, pics] = splitPictures(install && !mac ? askDetailShown(a.detail) : (a.detail || ''));
   return cardHTML({
     ref: 'ask', id: a.id, title: a.title, verb: a.verb || 'for you',
     tint: paused && open ? 'paused' : err ? 'err-card' : read ? 'read' : install ? 'install' : '',
     mark: answered ? '⏳ ' : paused ? PAUSE_MARK + ' ' : err ? '⚠︎ ' : read ? '🔵 ' : install ? '📲 ' : '🔴 ',
-    // An item's steps (2026-10-18): each its own Did it · Skip · Reply, on the
-    // one card, staged on the chat's bar until Send (2026-10-23).
-    body: paused && open ? pauseBarHTML(a) : err ? '' : askBody(install && !mac ? askDetailShown(a.detail) : (a.detail || ''), 'ask:' + a.id)
-      + (a.steps && typeof calStepsHTML === 'function' ? calStepsHTML(a, typeof armStepReply === 'function'
-        ? { card: a.id, armed: n => chatArmed('step', (a.cal_id || a.id) + '.' + n) } : undefined) : ''),
+    body: paused && open || err ? '' : askBody(text, 'ask:' + a.id), pics: paused && open || err ? '' : pics,
+    // After the detail, just above the buttons: the pause bar, or an item's
+    // steps (each its own Did it · Skip · Reply, staged on the chat's bar
+    // until Send), which are its buttons.
+    keep: paused && open ? pauseBarHTML(a) : err ? ''
+      : a.steps && typeof calStepsHTML === 'function' ? calStepsHTML(a, typeof armStepReply === 'function'
+        ? { card: a.id, armed: n => chatArmed('step', (a.cal_id || a.id) + '.' + n) } : undefined) : '',
     said: a.said, thread: a.thread_id, waiting: open && a.waiting_to_speak, speaking: open && a.speaking, acts, cost,
     at: open ? a.created_at : a.resolved_at || a.created_at,
     folded: open ? '' : a.folded === 'dismissed' || a.state === 'dismissed' ? '✕ dismissed' : '✓ ' + esc(a.folded || a.state),
@@ -1312,17 +1325,23 @@ function actionHTML(a, opened, armed, cost) {
   const id = esc(a.id), job = actionJob(a);
   const open = a.open, no = a.state === 'denied' || a.state === 'failed';
   const payload = a.exec_payload && a.exec_type && a.exec_type !== 'none'
-    ? `<details style="margin:6px 0"><summary class="muted">What it runs</summary>
-       <pre class="io mono">${esc(typeof a.exec_payload === 'string' ? a.exec_payload : JSON.stringify(a.exec_payload, null, 2))}</pre></details>`
+    // Shown plainly: one toggle per card is enough.
+    ? `<div style="margin:6px 0"><div class="small muted">What it runs</div>
+       <pre class="io mono">${esc(typeof a.exec_payload === 'string' ? a.exec_payload : JSON.stringify(a.exec_payload, null, 2))}</pre></div>`
     : '';
   const arm = v => a.thread_id ? `armActionReply('${escJS(a.id)}','${escJS(v)}')` : `decideAction('${escJS(a.id)}',${v === 'approved'})`;
   const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('action','${escJS(a.id)}',true)` }] : []) : outcomeBtns(a.outcomes, arm, armed).concat({ label: 'Dismiss', js: `cardFold('action','${escJS(a.id)}')` });
+  // A commit is a quiet green card, not the red alarm of an approval; its
+  // kind is its word, so no kind pill.
+  const commit = a.kind === 'commit';
+  const [text, pics] = splitPictures(a.detail);
+  const meta = `${a.kind && a.kind !== 'other' && !commit ? pill(a.kind, kindPill[a.kind]) : ''} ${job ? pill('⚙ ' + job + ' job') : ''} ${a.project ? esc(a.project) : ''}`.trim();
   return cardHTML({
-    ref: 'action', id: a.id, title: a.title, tint: '', verb: 'approve',
-    mark: '🔴 ',
-    body: askBody(a.detail || '', 'action:' + a.id) + payload,
+    ref: 'action', id: a.id, title: a.title, tint: commit ? 'commit' : '', verb: commit ? 'commit' : 'approve',
+    mark: commit ? '' : '🔴 ',
+    body: askBody(text, 'action:' + a.id) + payload, pics,
     said: a.said, thread: a.thread_id, waiting: open && a.waiting_to_speak, speaking: open && a.speaking,
-    meta: `${a.kind && a.kind !== 'other' ? pill(a.kind, kindPill[a.kind]) : ''} ${job ? pill('⚙ ' + job + ' job') : ''} ${a.project ? esc(a.project) : ''}`,
+    meta,
     at: open ? a.created_at : a.decided_at || a.created_at,
     acts, cost, folded: open ? '' : a.folded === 'dismissed' || a.state === 'dismissed' ? '✕ dismissed'
       // Cut off mid-run (the hub restarted, or a kill): neither ✓ nor ✕.

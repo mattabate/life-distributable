@@ -139,6 +139,9 @@ struct Card: View {
     var hush: () -> Void = {}
     /// Between the body and the meta row (an approval's "will run" block).
     var extra: AnyView? = nil
+    /// `extra` holds the card's own buttons (a calendar item's steps) or a
+    /// state (a pause bar): drawn after the meta row, just above the buttons.
+    var extraShown = false
     var meta: AnyView? = nil
     /// The closed card's record in words: its note, what replaced it.
     var line: String = ""
@@ -178,9 +181,12 @@ struct Card: View {
             // paste-this string, an endpoint).
             if titled { StyledText(text: title, style: .body, color: .primary, bold: true) }
             if !said.isEmpty { saidLine }
-            if !text.isEmpty { bodyText }
-            if let extra { extra }
+            let (detail, pictures) = split
+            if !pictures.isEmpty { FileStrip(files: pictures) }
+            if !detail.isEmpty { bodyText(detail) }
+            if let extra, !extraShown { extra }
             if let meta { meta }
+            if let extra, extraShown { extra }
             if !buttons.isEmpty { buttonRow }
             if let trail { trail }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
@@ -190,6 +196,16 @@ struct Card: View {
         .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
         .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(tint.opacity(0.45), lineWidth: 1) }
         .padding(.horizontal)
+    }
+
+    /// The detail's pictures lead it, as a strip above the text: the detail
+    /// without its picture lines, and their strip. The console's `splitPictures`.
+    private var split: (text: String, pictures: [MdFile]) {
+        var pictures: [MdFile] = [], rest: [Substring] = []
+        for l in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            if let f = blobLine(String(l)), isImageRef(f.ref) { pictures.append(f) } else { rest.append(l) }
+        }
+        return (rest.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines), pictures)
     }
 
     /// Does the message already say the title? Compared plain (links to their
@@ -216,6 +232,8 @@ struct Card: View {
             Label("Speaking", systemImage: "circle.fill")
                 .labelStyle(.titleAndIcon).textCase(.uppercase).foregroundStyle(.green)
                 .symbolEffect(.pulse)
+                // One line always: the head's other text gives way first.
+                .lineLimit(1).fixedSize()
                 .frame(minHeight: 22).padding(.leading, 8).contentShape(Rectangle())
                 .onTapGesture(count: 2) { hushed = true; speaker.stop(); hush() }
                 .accessibilityLabel("Speaking").accessibilityHint("Double-tap to stop speaking")
@@ -223,6 +241,7 @@ struct Card: View {
         } else if waiting && !hushed {
             Label("Waiting to speak", systemImage: "circle.fill")
                 .labelStyle(.titleAndIcon).textCase(.uppercase).foregroundStyle(.orange)
+                .lineLimit(1).fixedSize()
                 .frame(minHeight: 22).padding(.leading, 8).contentShape(Rectangle())
                 .onTapGesture(count: 2) { hushed = true; hush() }
                 .accessibilityLabel("Waiting to speak").accessibilityHint("Double-tap to not speak this one")
@@ -251,7 +270,7 @@ struct Card: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder private var bodyText: some View {
+    @ViewBuilder private func bodyText(_ text: String) -> some View {
         if let lines {
             StyledText(text: text, style: .subheadline, color: .secondary, lines: lines, macSize: 13.5)
         } else if isLongText(text) {
@@ -302,7 +321,7 @@ struct Card: View {
         ChatRow(k: word, title: title, when: when) {
             if !said.isEmpty { saidLine }
             // The same body as the open card's: a long one is the window.
-            if !text.isEmpty { bodyText }
+            if !text.isEmpty { bodyText(text) }
             if !line.isEmpty { StyledText(text: line, style: .caption1, color: .secondary, macSize: 12) }
             if !buttons.isEmpty { buttonRow }
             if let trail { trail }

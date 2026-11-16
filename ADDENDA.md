@@ -1569,3 +1569,28 @@ Entry format:
 - For: everyone who uses the web console
 - Fix: The console put the decider code in a header on every request it made, reads included, though the hub reads it only on an approve or deny, a message that carries one, and the code check (#213). It now sends the code only on those requests, as the phone app already does. Nothing changes in how you approve. Thanks @muhammadusamahoyrr.
 - How: same merge as add-0008, then `make check`, `make webcheck` and `ops/hub.sh restart`. By hand: `hub/internal/server/web/app.js` (`api`, `post`), `views/asks.js` (`withDecider`, `decideAction`), `views/threads.js` (`chatSendNow`), `test/decider.test.js` (new).
+
+## add-0231 · 2026-11-16 · A landing that changes the approval gate waits for you
+- For: owners who run sessions as a separate user (`session_user` set)
+- Fix: every landing ran at once on the standing approval, including one that edited the gate itself (the decider check, the actions package, the tool list, the scripts the hub runs as you), so a misled session could loosen the gate and the hub would rebuild itself with it. Now a landing that touches any file on `gatePaths` is a card for you, titled "Change the approval gate", approved with your decider code; the session must say in plain words what it wants to change and why (`bash ops/land.sh --say "..."`), the hub refuses a gate landing without those words, and the commits and files sit in the card's detail. Every other landing still runs with no card.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/server/land.go` (`land`, `landProposal`, `gatePaths`), `hub/internal/server/land_test.go` (`TestLandRunsOnStandingApproval`, `TestGatePathsCoverTheDeciderCheck`), `ops/land.sh` (`--say`), `shared/api.md` (POST /api/v1/land), `SETUP.md` ("Optional: run sessions as a separate user").
+
+## add-0232 · 2026-11-16 · Cards lead with their pictures, steps sit above the buttons, commits go green
+- For: everyone on the phone app, web console and desktop app
+- Fix: a picture in a card's detail was buried in the text, an item's steps came before the meta row, an approval's "What it runs" hid behind its own toggle, and a commit approval looked like a red alarm. Now a card's pictures lead it as a strip above the detail, an item's steps and the pause bar sit just above the buttons, "What it runs" shows plainly, and a commit approval is a quiet green COMMIT card with no red mark and no kind pill.
+- How: same merge as add-0008, then `make check`, `make webcheck` and `ops/hub.sh restart` (and `make mac` for the desktop app). By hand: `hub/internal/server/web/ui.js` (`splitPictures`, `cardHTML` `pics`/`keep`, `askHTML`, `actionHTML`), `hub/internal/server/web/app.css` (`.ask.commit`), `app/Life/Sources/Card.swift` (`split`, `extraShown`, `bodyText(_:)`), `app/Life/Sources/AskCards.swift` (`AskCard` `extraShown: true`), `app/Life/Sources/ApprovalCard.swift` (`commit`, `payload`, `metaRow`).
+
+## add-0233 · 2026-11-16 · Speaking label stays on one line
+- For: everyone on the phone app
+- Fix: on a narrow phone a card's head could split "Speaking" or "Waiting to speak" across two lines. The label now stays on one line and the head's other text gives way.
+- How: same merge as add-0008, then `make check`. By hand: `app/Life/Sources/Card.swift` (`playButton`).
+
+## add-0234 · 2026-11-16 · Card picks leave the keyboard down
+- For: everyone on the phone app
+- Fix: tapping Did it, Skip or Reply on a card, or opening a new session, raised the keyboard over half the screen even when the answer was going to be spoken. The phone now leaves the keyboard down until you tap the box; the desktop app still focuses it.
+- How: same merge as add-0008, then `make check`. By hand: `app/Life/Sources/ThreadDetail.swift` (`arm`), `app/Life/Sources/NewThreadSheet.swift` (`onAppear` focus).
+
+## add-0235 · 2026-11-16 · Full-screen video turns with the phone, Download saves to Photos
+- For: everyone on the phone app
+- Fix: a full-screen video stayed upright when the phone was turned, and Download on a card's video or picture only offered the Files sheet. Now a full-screen video turns to landscape with the phone (the rest of the app stays portrait, and Done turns it back), and Download saves to Photos, falling back to the Files sheet only for what Photos cannot hold. The first save asks for add-only Photos access.
+- How: same merge as add-0008, then `make app-project` and `make check`. By hand: `app/Life/Sources/Attachments.swift` (`VideoFullScreen.turn`, `saveToPhotos`, `BlobVideo.download`, `PictureActions`), `app/Life/Sources/Push.swift` (`AppDelegate.orientations`, `supportedInterfaceOrientationsFor`), `app/project.yml` and `app/Life/Info.plist` (`NSPhotoLibraryAddUsageDescription`, landscape orientations).

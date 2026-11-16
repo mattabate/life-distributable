@@ -60,6 +60,10 @@ func TestLandRunsOnStandingApproval(t *testing.T) {
 	landGit(t, repo, "add", "a")
 	landGit(t, repo, "commit", "-m", "base")
 	s.cfg.Root = repo
+	// A gate landing is a real card, so Propose's preflight wants its script
+	// on disk (untracked here: the diffs never see it).
+	os.MkdirAll(filepath.Join(repo, "ops"), 0o755)
+	os.WriteFile(filepath.Join(repo, "ops", "land-incoming.sh"), []byte("#!/bin/sh\n"), 0o755)
 
 	clone := filepath.Join(root, "clone")
 	landGit(t, root, "clone", repo, clone)
@@ -72,8 +76,9 @@ func TestLandRunsOnStandingApproval(t *testing.T) {
 	landGit(t, clone, "bundle", "create", bundle, "origin/main..work")
 	raw, _ := os.ReadFile(bundle)
 
+	say := ""
 	post := func(from, branch, b64 string) (int, string) {
-		b, _ := json.Marshal(map[string]string{"branch": branch, "bundle_b64": b64})
+		b, _ := json.Marshal(map[string]string{"branch": branch, "bundle_b64": b64, "say": say})
 		return postAs(s, "/api/v1/land", from, string(b))
 	}
 	good := base64.StdEncoding.EncodeToString(raw)
@@ -110,6 +115,29 @@ func TestLandRunsOnStandingApproval(t *testing.T) {
 		!strings.Contains(string(a.ExecPayload), "bash ops/land-incoming.sh "+sha) || !strings.Contains(a.Detail, "the work") {
 		t.Fatalf("%+v", a)
 	}
+	// A landing that touches the gate's own files is the owner's card, not
+	// the standing yes, and its card is the session's plain words.
+	landGit(t, clone, "checkout", "-b", "gate")
+	os.MkdirAll(filepath.Join(clone, "ops"), 0o755)
+	os.WriteFile(filepath.Join(clone, "ops", "schedule.json"), []byte("{}"), 0o644)
+	landGit(t, clone, "add", "ops/schedule.json")
+	landGit(t, clone, "commit", "-m", "loosen the tool list")
+	gb := filepath.Join(root, "g.bundle")
+	landGit(t, clone, "bundle", "create", gb, "origin/main..gate")
+	graw, _ := os.ReadFile(gb)
+	gate := base64.StdEncoding.EncodeToString(graw)
+	if code, body := post("th-2", "gate", gate); code != 400 || !strings.Contains(body, "--say") {
+		t.Fatalf("gate land without say: %d %s", code, body)
+	}
+	say = "I need your approval to let scheduled jobs build, because the sweep needs it."
+	code, body = post("th-2", "gate", gate)
+	var g actions.Action
+	json.Unmarshal([]byte(body), &g)
+	if code != 201 || g.State != "proposed" || g.DecidedVia == "standing" || g.Title != "Change the approval gate" ||
+		!strings.Contains(g.Detail, "Changes the gate: ops/schedule.json") || !strings.Contains(g.Detail, "loosen the tool list") {
+		t.Fatalf("gate land: %d %+v", code, g)
+	}
+	say = ""
 	// Main moved underneath: the branch must rebase first.
 	os.WriteFile(filepath.Join(repo, "c"), []byte("3"), 0o644)
 	landGit(t, repo, "add", "c")
@@ -175,4 +203,23 @@ func TestSessionProposalGatesOtherDirs(t *testing.T) {
 			t.Errorf("%q: %v", dir, got)
 		}
 	}
+}
+
+// The hub's own decider check is on the gate list wherever it lives: a session
+// that made deciderOK return true would approve anything with the hub token
+// alone, so a landing that edits it must be the owner's card.
+func TestGatePathsCoverTheDeciderCheck(t *testing.T) {
+	files, _ := filepath.Glob("*.go")
+	for _, f := range files {
+		b, _ := os.ReadFile(f)
+		if !strings.HasSuffix(f, "_test.go") && strings.Contains(string(b), "func (s *Server) deciderOK(") {
+			for _, p := range gatePaths {
+				if p == "hub/internal/server/"+f {
+					return
+				}
+			}
+			t.Fatalf("%s holds deciderOK but is not in gatePaths", f)
+		}
+	}
+	t.Fatal("deciderOK not found in package server")
 }

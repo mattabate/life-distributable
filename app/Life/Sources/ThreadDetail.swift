@@ -424,10 +424,13 @@ struct ThreadDetail: View {
     }
 
     /// Arm a card without dropping the others; the same card again only
-    /// changes its pick.
+    /// changes its pick. The phone leaves the keyboard down: a pick is often
+    /// answered by voice, and only a tap on the box means typing is next.
     func arm(_ r: ArmedReply) {
         if let i = replies.firstIndex(where: { $0.ref == r.ref }) { replies[i].outcome = r.outcome } else { replies.append(r) }
+        #if targetEnvironment(macCatalyst)
         draft.focusRequest += 1
+        #endif
     }
 
 

@@ -113,8 +113,12 @@ struct NewThreadSheet: View {
                 for img in initialImages { attachments.add(img) }
                 for f in initialFiles { attachments.add(f) }
             }
-            // Focused on arrival, as the console's box is.
+            // Focused on arrival on the Mac, as the console's box is; the
+            // phone waits for a tap on the box (the keyboard only when the
+            // owner is about to type, not when they mean to talk).
+            #if targetEnvironment(macCatalyst)
             draft.focusRequest += 1
+            #endif
             Task {
                 guard let q = try? await hub.quota(), let model = q.next_model, !model.isEmpty else { return }
                 let reason = q.next_reason ?? ""

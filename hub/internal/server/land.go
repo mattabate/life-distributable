@@ -21,7 +21,9 @@ import (
 // action per landing however many commits it holds. A local commit is not
 // gated (CLAUDE.md), so the action is decided at once on that standing
 // approval (decided_via "standing") and runs with no card; ops/land.sh waits
-// for it and prints how it ended. Off (409) unless session_user is set.
+// for it and prints how it ended. A landing that changes the approval gate
+// (gatePaths) is the owner's card instead, in the session's own words (say).
+// Off (409) unless session_user is set.
 var landBranch = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 
 func (s *Server) land(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +92,16 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 	}
 	stat, _ := git("diff", "--stat", "main", sha)
 	hub, _ := git("diff", "--name-only", "main", sha, "--", "hub")
-	a, err := s.acts.Propose(landProposal(from, sha, log, stat, in.Say, repo, hub != ""))
+	gate, _ := git(append([]string{"diff", "--name-only", "main", sha, "--"}, gatePaths...)...)
+	// A gate landing is the owner's card, and the session's spoken words are
+	// that card (what it wants to change and why): no words, no card.
+	in.Say = strings.TrimSpace(in.Say)
+	if gate != "" && (in.Say == "" || len(in.Say) > 700 || strings.ContainsFunc(in.Say, func(c rune) bool { return c < 0x20 || c == 0x7f })) {
+		jsonErr(w, 400, "this changes the approval gate ("+strings.ReplaceAll(gate, "\n", ", ")+
+			"): land again with ops/land.sh --say \"I need your approval to change <what, in plain words>, because <why>.\" (one line, at most 700 characters, no file names or shas)")
+		return
+	}
+	a, err := s.acts.Propose(landProposal(from, sha, log, stat, in.Say, repo, hub != "", gate))
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
@@ -103,26 +114,60 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 // only when it passes, so a red landing leaves main untouched and never
 // restarts the hub (#208). When hub/ changed, the hub is rebuilt and
 // restarted after the action finishes (the restart waits, or the hub would
-// kill its own run).
-func landProposal(thread, sha, log, stat, say, repo string, hub bool) actions.Proposal {
+// kill its own run). gate lists the gatePaths files the landing changes:
+// non-empty = a proposed card for the owner, never the standing yes.
+func landProposal(thread, sha, log, stat, say, repo string, hub bool, gate string) actions.Proposal {
 	cmd := "bash ops/land-incoming.sh " + sha
 	if hub {
 		cmd += " && make build && (nohup sh -c 'sleep 3; bash ops/hub.sh restart' >/dev/null 2>&1 &)"
 	}
 	payload, _ := json.Marshal(map[string]string{"cmd": cmd, "dir": repo})
 	gated := true
-	return actions.Proposal{Kind: "commit", Gated: &gated, ThreadID: thread, Source: "claude:thread:" + thread,
+	p := actions.Proposal{Kind: "commit", Gated: &gated, ThreadID: thread, Source: "claude:thread:" + thread,
 		Title:    fmt.Sprintf("Land %d commit(s) on main", strings.Count(log, "\n")+1),
 		Detail:   log + "\n\n" + stat,
 		Say:      say,
 		ExecType: "shell", ExecPayload: payload, Standing: standingNote}
+	if gate = strings.TrimSpace(gate); gate != "" {
+		// The title is the action and the session's say is the what and why;
+		// the commits and files are the folded detail.
+		p.Standing = ""
+		p.Title = "Change the approval gate"
+		p.Detail += "\n\nChanges the gate: " + strings.ReplaceAll(gate, "\n", ", ")
+	}
+	return p
+}
+
+// gatePaths: the files that decide what a session may do without the owner,
+// and the ones the hub runs as the owner on every landing or build. A landing
+// that touches one is the owner's card (approved with the decider code), not
+// the standing yes, or a session fooled by a page or a mail could loosen the
+// gate and the hub would rebuild itself as the owner. Kept short on purpose:
+// a path joins only if it is the gate or runs as the owner on every landing.
+var gatePaths = []string{
+	"hub/internal/actions",                 // the gate, the decider code
+	"hub/internal/server/actions.go",       // deciderOK: where approve/deny checks the code
+	"hub/internal/server/land.go",          // this lane and this list
+	"hub/internal/server/sessionlimits.go", // the owner-only routes
+	"hub/internal/sched",                   // the tool-grant check
+	"hub/internal/threads/runner.go",       // how a session is started
+	"hub/cmd/hub/main.go",                  // the free-shell list, the wiring
+	"ops/schedule.json",                    // the tool list
+	"Makefile",                             // make test/build run as the owner
+	"ops/land-incoming.sh",
+	"ops/hub.sh",
+	"ops/ota.sh",
+	"ops/install-mac.sh",
+	"ops/decider-set.sh",
+	":(glob)ops/session-user-*",
 }
 
 // standingNote: why a landing or an app build ran with no card. Each route
 // files its row with Proposal.Standing = standingNote (decided_via
 // "standing"): approved as it is filed, never a proposed card first, so
 // nothing asks the owner to approve it. Every other proposal still waits for
-// the owner.
+// the owner. One exception: a landing that touches gatePaths is the owner's
+// card.
 const standingNote = "standing approval: a local commit and an app build need no card"
 
 var shipThread = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)

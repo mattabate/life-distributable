@@ -840,7 +840,7 @@ struct BlobVideo: View {
     static let savedLabel = "Saved to Downloads"
     #else
     static let width: CGFloat = 300   // inside a FlowRow, so a fixed width
-    static let savedLabel = "Downloaded"
+    static let savedLabel = "Saved"   // to Photos, else through the Files sheet
     #endif
 
     var body: some View {
@@ -911,7 +911,8 @@ struct BlobVideo: View {
     }
 
     /// The whole file, with its percent on the button: the Mac saves it to
-    /// ~/Downloads under the link's text, the phone offers the Files sheet.
+    /// ~/Downloads under the link's text, the phone puts it in Photos (the
+    /// Files sheet when Photos says no).
     private func download() {
         guard let url, job == nil else { return }
         var req = URLRequest(url: url, timeoutInterval: 600)
@@ -926,7 +927,7 @@ struct BlobVideo: View {
             }
             Task { @MainActor in
                 job = nil; progress = nil
-                if let dest { saved = dest; exporting = true } else { failed = true }
+                if let dest { saved = dest; Task { if !(await saveToPhotos(dest, video: true)) { exporting = true } } } else { failed = true }
             }
         }
         job = task
@@ -1151,8 +1152,41 @@ struct VideoFullScreen: View {
         #if targetEnvironment(macCatalyst)
         .onAppear { wasFull = MacApp.fullScreen(true) }
         .onDisappear { if !wasFull { MacApp.fullScreen(false) } }
+        #else
+        // Turn the phone and the video fills it; Done turns the app back
+        // upright.
+        .onAppear { Self.turn(.allButUpsideDown) }
+        .onDisappear { Self.turn(.portrait) }
         #endif
     }
+
+    #if !targetEnvironment(macCatalyst)
+    @MainActor static func turn(_ mask: UIInterfaceOrientationMask) {
+        AppDelegate.orientations = mask
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            scene.windows.forEach { $0.rootViewController?.presentedViewController?.setNeedsUpdateOfSupportedInterfaceOrientations() }
+            if mask == .portrait { scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) }
+        }
+    }
+    #endif
+}
+
+/// The phone's Download for a card's video or picture: into Photos, as one
+/// from the camera roll is. Asks for add-only access; false when it is
+/// refused or Photos cannot take the file (a WebM, an SVG), and the Files
+/// sheet offers it instead.
+@MainActor
+func saveToPhotos(_ file: URL, video: Bool) async -> Bool {
+    #if targetEnvironment(macCatalyst)
+    return false
+    #else
+    guard await PHPhotoLibrary.requestAuthorization(for: .addOnly) == .authorized else { return false }
+    return (try? await PHPhotoLibrary.shared().performChanges {
+        if video { _ = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: file) }
+        else { _ = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: file) }
+    }) != nil
+    #endif
 }
 
 /// A blob as a file Quick Look can open. Quick Look wants a file with the
@@ -1277,7 +1311,7 @@ struct PictureActions: View {
                     saving = true; failed = false
                     saved = await saveBlob(ref, as: blobFileName(ref, title: title), hub: hub)
                     saving = false
-                    if saved == nil { failed = true } else { exporting = true }
+                    if let saved { if !(await saveToPhotos(saved, video: false)) { exporting = true } } else { failed = true }
                 }
             }
             .disabled(saving || saved != nil)

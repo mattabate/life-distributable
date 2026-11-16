@@ -41,6 +41,15 @@ test('escJS: a quote in an id, label or outcome value stays data in an onclick (
   assert.deepEqual(dec.find(c => c[0] === 'cardFold'), ['cardFold', 'ask', 'ask-' + Q]);
 });
 
+test('a card picture leads its detail; steps sit above the buttons', () => {
+  const [text, pics] = splitPictures('Pick one.\n\n![mock](https://h:8443/api/v1/blobs/sha256/ab/abc.png)\n\nThen I build it.');
+  assert.equal(text, 'Pick one.\n\n\nThen I build it.');
+  assert.match(pics, /md-files/);
+  const card = askHTML({ id: 'ask-1', thread_id: 't1', title: 'A or B?', kind: 'decision', state: 'open', open: true,
+    detail: 'Pick one.\n![mock](/api/v1/blobs/sha256/ab/abc.png)', created_at: new Date().toISOString() });
+  assert.ok(card.indexOf('md-files') < card.indexOf('Pick one.'), 'the strip comes before the detail');
+});
+
 test('makePager: pages, Show all, reset, and a route change starts it over', () => {
   let painted = 0;
   const p = makePager('tpager', 2, () => painted++);
@@ -531,7 +540,7 @@ test('askHTML: an error is one line and Restart', () => {
 });
 
 const actOutcomes = [{ value: 'approved', label: 'Approve' }, { value: 'denied', label: 'Deny' }, { value: '', label: 'Reply' }];
-const action = { id: 'act-1a2b3c4d', thread_id: 't-1a2b3c4d', kind: 'commit', project: 'life', title: 'git commit',
+const action = { id: 'act-1a2b3c4d', thread_id: 't-1a2b3c4d', kind: 'share', project: 'life', title: 'git commit',
   detail: 'one plain commit', exec_type: 'shell', exec_payload: 'git commit -m x', state: 'proposed', open: true, closed: false,
   created_at: new Date().toISOString(), outcomes: actOutcomes };
 
@@ -545,8 +554,15 @@ test('actionHTML: the approval card in the chat', () => {
   // One time on the head line: when it was raised, the chat's own clock.
   assert.match(chat, /<div class="card-h">🔴 <span class="verb">approve<\/span><span class="at">today [^<]*<\/span><\/div><div class="t">git commit<\/div>/);
   assert.doesNotMatch(chat, /ago</);
-  assert.match(chat, /<span class="pill purple">commit<\/span>/);
-  assert.match(chat, /<summary class="muted">What it runs<\/summary>/);
+  assert.match(chat, /<span class="pill purple">share<\/span>/);
+  // Shown plainly, no toggle of its own.
+  assert.match(chat, /<div class="small muted">What it runs<\/div>/);
+  assert.doesNotMatch(chat, /<details/);
+  // A commit is a quiet green card: no red mark, no kind pill.
+  const commit = actionHTML({ ...action, kind: 'commit' });
+  assert.match(commit, /^<div class="ask commit" id="ask-card-act-1a2b3c4d">/);
+  assert.match(commit, /<div class="card-h"><span class="verb">commit<\/span>/);
+  assert.doesNotMatch(commit, /🔴|pill purple/);
   // "other" is no warning: no chip for it.
   assert.doesNotMatch(actionHTML({ ...action, kind: 'other' }), /pill[^>]*>other</);
   assert.match(chat, /<div class="acts"><button class="sm suggested" onclick="armActionReply\('act-1a2b3c4d','approved'\)">Approve<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d','denied'\)">Deny<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('action','act-1a2b3c4d'\)">Dismiss<\/button><\/div>/);

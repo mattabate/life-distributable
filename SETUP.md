@@ -420,7 +420,10 @@ a second macOS user (`life-agent` here) in a clone of its own, so a session
 cannot write the main checkout, read `ops/secrets/` (the hub token, the
 decider hash) or write the database. Its commits reach main through the hub
 (`bash ops/land.sh`), and app builds run as the owner (`make ship WHY="..."`,
-`make mac WHY="..."`), both with no card. The separate user keeps a
+`make mac WHY="..."`), both with no card, except a landing that changes the
+approval gate itself (`gatePaths` in `hub/internal/server/land.go`): that
+one is the owner's card, titled "Change the approval gate", in the
+session's own words (`bash ops/land.sh --say "..."`). The separate user keeps a
 session's own tools out of `ops/secrets/` and the database; code it lands
 is trusted like code the owner merges themselves: the landing builds and
 restarts the hub as the owner, and later app builds run it, so what lands

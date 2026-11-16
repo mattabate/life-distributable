@@ -48,7 +48,10 @@ targets:
         # generate` rewrites that one from here, so a key added there is
         # silently dropped at the next generate.
         NSFaceIDUsageDescription: Face ID unlocks the decider code that approves a gated action (money, delete, contact, share, commit), so you never type it. The code stays in this phone's Keychain.
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSPhotoLibraryAddUsageDescription: A video or picture you download from a card is saved to your Photos.
+        # Landscape only while a video is full screen (AppDelegate.orientations);
+        # every other screen stays portrait.
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
         CFBundleURLTypes:

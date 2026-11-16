@@ -51,7 +51,6 @@ struct ApprovalCard: View {
     @State private var openThread: Thread?
     /// The pick to arm in the session this card opens (the calendar copy).
     @State private var armOnOpen: ArmedReply?
-    @State private var payloadShown = false
     /// The audit trail (Phase 2b): `GET /actions/{id}` is the one read that
     /// carries events[], so only the card drawn in its own session reads it —
     /// one request per card — and the calendar's copy came with them already.
@@ -63,8 +62,13 @@ struct ApprovalCard: View {
     private var isOpen: Bool { a.open ?? false }
     private var dismissed: Bool { a.folded == "dismissed" }
 
+    /// A commit is its own quiet card: green, COMMIT, never the red alarm of
+    /// a card that needs the owner to act.
+    private var commit: Bool { a.kind == "commit" }
+
     var body: some View {
-        Card(tint: .red, mark: "hand.raised.fill", caption: "approval", right: shortAgo(a.created_at),
+        Card(tint: commit ? .green : .red, mark: commit ? "arrow.triangle.merge" : "hand.raised.fill",
+             caption: commit ? "commit" : "approval", right: shortAgo(a.created_at),
              cost: cost,
              title: a.title, text: a.detail, said: a.said ?? "", thread: a.thread_id ?? "",
              extra: payload, meta: AnyView(metaRow),
@@ -103,16 +107,16 @@ struct ApprovalCard: View {
         foldButton(.action, a.id, back: back, hub: hub, busy: $busy, error: $error, reload: onDecided)
     }
 
-    /// What it will run, folded: an approval is read before it is given.
+    /// What it will run, shown whole: an approval is read before it is given,
+    /// and one toggle per card is enough.
     private var payload: AnyView? {
         guard isOpen, let p = a.exec_payload, !p.text.isEmpty, !a.exec_type.isEmpty, a.exec_type != "none" else { return nil }
-        return AnyView(DisclosureGroup(isExpanded: $payloadShown) {
+        return AnyView(VStack(alignment: .leading, spacing: 4) {
+            // Plain words, not the exec type.
+            Text("What it runs").font(.caption).foregroundStyle(.secondary)
             Text(p.text).font(.caption.monospaced()).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8).background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-        } label: {
-            // Plain words, not the exec type.
-            Text("What it runs").font(.caption).foregroundStyle(.secondary)
         })
     }
 
@@ -121,7 +125,7 @@ struct ApprovalCard: View {
     private var metaRow: some View {
         HStack(spacing: 6) {
             // "other" says nothing; a real kind (money, delete...) is a warning.
-            if a.kind != "other" { Chip(a.kind, tint: kindColor, style: .kind) }
+            if a.kind != "other", !commit { Chip(a.kind, tint: kindColor, style: .kind) }
             if !a.project.isEmpty { Text(a.project).font(.caption).foregroundStyle(.secondary) }
             if let job = a.job {
                 Button { openRun = a.run_id.map { RunRef(id: $0) } } label: {
