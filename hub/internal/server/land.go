@@ -92,7 +92,7 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 	}
 	stat, _ := git("diff", "--stat", "main", sha)
 	hub, _ := git("diff", "--name-only", "main", sha, "--", "hub")
-	gate, _ := git(append([]string{"diff", "--name-only", "main", sha, "--"}, gatePaths...)...)
+	gate := gateTouched(git, "main", sha)
 	// A gate landing is the owner's card, and the session's spoken words are
 	// that card (what it wants to change and why): no words, no card.
 	in.Say = strings.TrimSpace(in.Say)
@@ -147,8 +147,10 @@ func landProposal(thread, sha, log, stat, say, repo string, hub bool, gate strin
 var gatePaths = []string{
 	"hub/internal/actions",                 // the gate, the decider code
 	"hub/internal/server/actions.go",       // deciderOK: where approve/deny checks the code
+	"hub/internal/server/prompts.go",       // deciderOK's call for an approval sent as a reply
 	"hub/internal/server/land.go",          // this lane and this list
-	"hub/internal/server/sessionlimits.go", // the owner-only routes
+	"hub/internal/server/sessionlimits.go", // the owner-only routes, the open-route list
+	"hub/internal/server/sessiontoken.go",  // auth: who the hub takes for the owner or a session
 	"hub/internal/sched",                   // the tool-grant check
 	"hub/internal/threads/runner.go",       // how a session is started
 	"hub/cmd/hub/main.go",                  // the free-shell list, the wiring
@@ -160,6 +162,18 @@ var gatePaths = []string{
 	"ops/install-mac.sh",
 	"ops/decider-set.sh",
 	":(glob)ops/session-user-*",
+}
+
+// gateTouched: the gatePaths files a range changes. A git error is not "none":
+// a diff that failed or timed out reads as the gate touched, so the landing is
+// the owner's card.
+func gateTouched(git func(...string) (string, error), rng ...string) string {
+	args := append(append([]string{"diff", "--name-only"}, rng...), "--")
+	out, err := git(append(args, gatePaths...)...)
+	if err != nil {
+		return "(the check of which gate files it changes failed)"
+	}
+	return out
 }
 
 // standingNote: why a landing or an app build ran with no card. Each route

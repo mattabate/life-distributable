@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -70,6 +71,28 @@ func (s *Server) sessionFromRequest(r *http.Request) string {
 		}
 	}
 	return sessionFromToken(s.token, got)
+}
+
+// openRoutes: the only routes served with no token. routes.go marks a route
+// open, but this list (a gatePaths file) decides: a route marked open and not
+// here is served behind auth anyway, so opening one is the owner's card, not a
+// line in routes.go.
+var openRoutes = map[string]bool{
+	"GET /healthz":            true,
+	"GET /":                   true,
+	"GET /ota/{token}/{file}": true,
+}
+
+// wrap is one route's handler as served: behind auth and sessionLimits unless
+// it is marked open AND listed in openRoutes.
+func (s *Server) wrap(r route) http.HandlerFunc {
+	if r.open && openRoutes[r.pattern] {
+		return r.h
+	}
+	if r.open {
+		log.Printf("route %s is marked open but is not in openRoutes: served behind auth", r.pattern)
+	}
+	return s.auth(s.sessionLimits(r.pattern, r.h))
 }
 
 // sessionLimits refuses a session what is the owner's, and writes its name over

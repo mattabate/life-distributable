@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -207,19 +209,62 @@ func TestSessionProposalGatesOtherDirs(t *testing.T) {
 
 // The hub's own decider check is on the gate list wherever it lives: a session
 // that made deciderOK return true would approve anything with the hub token
-// alone, so a landing that edits it must be the owner's card.
+// alone, so a landing that edits it must be the owner's card. The same holds
+// for every file that CALLS deciderOK (dropping the call skips the check as
+// surely as editing it), and for the token check, the route wrapper and the
+// open-route list.
 func TestGatePathsCoverTheDeciderCheck(t *testing.T) {
+	gated := map[string]bool{}
+	for _, p := range gatePaths {
+		gated[p] = true
+	}
 	files, _ := filepath.Glob("*.go")
+	found := map[string]bool{}
 	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
 		b, _ := os.ReadFile(f)
-		if !strings.HasSuffix(f, "_test.go") && strings.Contains(string(b), "func (s *Server) deciderOK(") {
-			for _, p := range gatePaths {
-				if p == "hub/internal/server/"+f {
-					return
+		for _, mark := range []string{"deciderOK(", "func (s *Server) auth(", "func (s *Server) authorized(", "func (s *Server) wrap(", "var openRoutes", "var ownerOnlyRoutes"} {
+			if strings.Contains(string(b), mark) {
+				found[mark] = true
+				if !gated["hub/internal/server/"+f] {
+					t.Errorf("%s holds %q but is not in gatePaths", f, mark)
 				}
 			}
-			t.Fatalf("%s holds deciderOK but is not in gatePaths", f)
 		}
 	}
-	t.Fatal("deciderOK not found in package server")
+	if len(found) != 6 {
+		t.Fatalf("a gate mark is no longer in package server: found %v", found)
+	}
+}
+
+// A route marked open in routes.go is served with no token only if the gate's
+// own list names it.
+func TestOpenRouteNeedsTheGateList(t *testing.T) {
+	s := newTest(t)
+	called := false
+	h := s.wrap(route{"POST /api/v1/actions/{id}/approve", func(http.ResponseWriter, *http.Request) { called = true }, true})
+	w := httptest.NewRecorder()
+	h(w, httptest.NewRequest("POST", "/api/v1/actions/x/approve", nil))
+	if called || w.Code != 401 {
+		t.Fatalf("an unlisted open route ran with no token: %d", w.Code)
+	}
+	for _, r := range s.routes() {
+		if r.open && !openRoutes[r.pattern] {
+			t.Errorf("%s is marked open but openRoutes does not list it", r.pattern)
+		}
+	}
+}
+
+// A failed gate diff is the gate touched, never "no gate files".
+func TestGateTouchedFailsClosed(t *testing.T) {
+	broken := func(...string) (string, error) { return "", errors.New("timeout") }
+	if gateTouched(broken, "main", "abc") == "" {
+		t.Fatal("a failed diff read as no gate files touched")
+	}
+	clean := func(...string) (string, error) { return "", nil }
+	if gateTouched(clean, "main", "abc") != "" {
+		t.Fatal("a clean diff read as the gate touched")
+	}
 }

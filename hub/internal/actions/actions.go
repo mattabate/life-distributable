@@ -771,7 +771,9 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 	if strings.TrimSpace(p.Title) == "" {
 		return Action{}, errors.New("title required")
 	}
-	if p.Kind == "" {
+	// One spelling of a kind: gatedKinds["Money"] was false, so "Money" filed
+	// ungated.
+	if p.Kind = strings.ToLower(strings.TrimSpace(p.Kind)); p.Kind == "" {
 		p.Kind = "other"
 	}
 	if p.ExecType == "" {

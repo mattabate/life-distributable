@@ -33,6 +33,11 @@ func (s *Server) calendarAdd(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "bad json")
 		return
 	}
+	// A session's item is its own, whatever source the body claims: the wake
+	// of an agent item reads as the owner's unless it names another session.
+	if id := s.caller(r); id != "" {
+		in.Source = "claude:thread:" + id
+	}
 	it, err := s.Cal.Add(in)
 	if err != nil {
 		jsonErr(w, 400, err.Error())

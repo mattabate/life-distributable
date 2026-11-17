@@ -47,6 +47,40 @@ func TestRunAsOnGoesThroughSudoAndNeverReadsTheToken(t *testing.T) {
 	}
 }
 
+// The session user may add files to the runs folder, so a run file's name may
+// already be its link to a file of the owner's: the hub refuses to write
+// through a symlink or a hard link, and leaves the target as it was.
+func TestRunFilesRefuseAPlantedLink(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "hub.token")
+	os.WriteFile(secret, []byte("owner-secret"), 0o600)
+	os.Symlink(secret, filepath.Join(dir, "sym.tok"))
+	os.Link(secret, filepath.Join(dir, "hard.tok"))
+	for _, name := range []string{"sym.tok", "hard.tok"} {
+		if err := writeRunFile(filepath.Join(dir, name), []byte("s1.th.mac")); err == nil {
+			t.Errorf("%s: written", name)
+		}
+		if f, err := openRunFile(filepath.Join(dir, name), os.O_APPEND); err == nil {
+			f.Close()
+			t.Errorf("%s: opened to append", name)
+		}
+	}
+	if b, _ := os.ReadFile(secret); string(b) != "owner-secret" {
+		t.Fatalf("target changed: %q", b)
+	}
+	// A plain file is created, then overwritten whole.
+	p := filepath.Join(dir, "ok.err")
+	if err := writeRunFile(p, []byte("a longer first text")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRunFile(p, []byte("short")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "short" {
+		t.Fatalf("plain file: %q", b)
+	}
+}
+
 // As the session user, a session of the main checkout starts in a clone of its
 // own on branch th-<id>, made and linked as that user, never with ops/secrets;
 // the process runs there through sudo with its own token. A session of

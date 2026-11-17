@@ -229,4 +229,10 @@ func TestSessionHeaderNamesTheActor(t *testing.T) {
 	if code, _ := call("POST", "/api/v1/observations", a, js, `{"source":"app","kind":"note","payload":{"count":3}}`); code != 201 {
 		t.Fatalf("a session logging for the owner with the header: %d", code)
 	}
+
+	// 7. An agent item A files for B is A's, whatever source it claims, so B's
+	// wake says another session set it.
+	if code, got := call("POST", "/api/v1/calendar", a, js, `{"title":"Do it","day":"2030-01-01","kind":"agent","thread_id":"`+b+`","source":"owner"}`); code != 201 || got["source"] != asA {
+		t.Fatalf("A's item for B: %d source=%v", code, got["source"])
+	}
 }

@@ -658,6 +658,14 @@ func TestGatedKindsAlwaysGated(t *testing.T) {
 	if len(nf.msgs) != 1 || nf.msgs[0][:6] != "needs:" {
 		t.Fatal(nf.msgs)
 	}
+	// Any spelling of a gated kind is that kind.
+	for _, k := range []string{"Money", " DELETE ", "Contact"} {
+		b, err := q.Propose(Proposal{Kind: k, Title: "x " + k, Gated: &f, ExecType: "shell", ExecPayload: json.RawMessage(`{"cmd":"true"}`)})
+		if err != nil || !b.Gated || b.State != "proposed" {
+			t.Fatalf("%q filed ungated: %+v %v", k, b, err)
+		}
+		q.Decide(b.ID, false, "app", "")
+	}
 	time.Sleep(50 * time.Millisecond)
 	if len(ex.calls) != 0 {
 		t.Fatal("executed without approval")

@@ -1,11 +1,37 @@
 package calendar
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"life/hub/internal/threads"
 )
+
+// A wake one session set for another reads as that session's words, never
+// the owner's; a session's wake for itself, or the owner's own, reads as
+// before.
+func TestAWakeSetByAnotherSessionSaysSo(t *testing.T) {
+	c, th, _ := newTest(t)
+	tr, err := th.Create("Receipts", "life", "", "p", "", "receipts", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	on := day(ahead(3, 0, 0))
+	for _, x := range []struct {
+		source string
+		framed bool
+	}{{"claude:thread:th-other", true}, {"claude:thread:" + tr.ID, false}, {"owner", false}} {
+		it, err := c.Add(Item{Title: "Run it " + x.source, Day: on, At: "09:00", Kind: "agent", Detail: "do the thing", ThreadID: tr.ID, Source: x.source, Distinct: "test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, _ := th.GetPrompt(it.PromptID)
+		if got := strings.HasPrefix(p.Text, "Scheduled by session th-other, not by the owner"); got != x.framed || !strings.Contains(p.Text, "do the thing") {
+			t.Fatalf("%s: %q", x.source, p.Text)
+		}
+	}
+}
 
 // Only the item's current wake is its run (#211). A reply that points at a
 // future repeating agent item is words about it; the wake of a time the item

@@ -56,14 +56,18 @@ func (m *Manager) taskTmp() string {
 	return "/tmp"
 }
 
-// tailFile: the last n bytes of a file, as the hub or else as the session user.
+// tailFile: the last n bytes of a file the session wrote. With a session user
+// it is read AS that user, never as the hub: the path sits in folders the
+// session owns, so a link it planted there (tasks/<id>.output to hub.token)
+// would be read with the owner's rights and handed back by the task-output
+// route.
 func (m *Manager) tailFile(path string, n int64) ([]byte, error) {
+	if m.RunAs.User != "" {
+		return m.asSession("/usr/bin/tail", "-c", strconv.FormatInt(n, 10), path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
-		if m.RunAs.User == "" {
-			return nil, err
-		}
-		return m.asSession("/usr/bin/tail", "-c", strconv.FormatInt(n, 10), path)
+		return nil, err
 	}
 	defer f.Close()
 	if st, err := f.Stat(); err == nil && st.Size() > n {

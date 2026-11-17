@@ -215,6 +215,10 @@ over Tailscale, which only their own devices can join.
    open `bash ops/decider-set.sh` in its own window. Tell them: "The window
    shows a code. Save it in the Passwords app with the title
    `life decider code`, then close the window." You never see it.
+   Then **the hub token**, which the apps on other devices paste in step 8:
+   you open `ops/hub.sh token` in its own window. Tell them: "The window
+   shows a long code. Save it in the Passwords app with the title
+   `life hub`, then close the window."
 8. **Open the console** (the web version of the app). You open
    `ops/hub.sh url` in its own Terminal window. It prints the console
    address with a sign-in code in it that works once, for one minute (the
@@ -288,7 +292,7 @@ Backblaze sign-in can delete a hide marker to bring a file back.
 **Verify:** `ops/b2.sh check` prints `SAFE`; the owner reports a snapshot
 listed and a restored `life.db` whose integrity check said `ok`. Once a month they run `ops/b2.sh prune`:
 add a monthly `--kind owner` calendar item for it
-(`lifectl cal add "Prune old backups (ops/b2.sh prune)" --on <next month> --kind owner --repeat monthly`).
+(`ops/bin/lifectl cal add "Prune old backups (ops/b2.sh prune)" --on <next month> --kind owner --repeat monthly`).
 
 ## 7. Apple team and Xcode
 
@@ -351,7 +355,7 @@ console shows.
    paste (`life decider code`). Allow notifications when asked.
 
 **Verify:** the Settings screen shows the token at full length and the
-Sessions tab loads; `lifectl ask add "Test push" --say "Hey <Name>, this is your hub." --kind read`
+Sessions tab loads; `ops/bin/lifectl ask add "Test push" --say "Hey <Name>, this is your hub." --kind read`
 buzzes the phone. Tell them: this is done.
 
 ## 9. First goals
@@ -360,7 +364,7 @@ An empty Goals block (on the Configuration tab) makes every session guess.
 Interview the owner, one
 question at a time, 3 to 5 goals: what they are working toward, by when,
 and how they would know it is going well. For each:
-`lifectl goal new "<short title>" "<one-paragraph statement in their words>" --horizon ongoing|year|quarter|month`.
+`ops/bin/lifectl goal new "<short title>" "<one-paragraph statement in their words>" --horizon ongoing|year|quarter|month`.
 
 Then offer connectors, each as "ask your Claude to add it"; none ships
 built in: bank balances (SimpleFIN, ~$15/yr), Apple Health, GitHub or X
@@ -401,10 +405,10 @@ It takes one message.
    you ask it for one (say \"I'd like a fitness coach\"). Each new message
    goes to the role that owns it. If you would rather start plain sessions
    too, or turn the team off, ask me: it is one switch."* Nothing to run: a new `ops/hub.json` has `"team_mode": true`. Off:
-   `lifectl settings set team_mode false` (or `ops/py.sh setup.py hub
+   `ops/bin/lifectl settings set team_mode false` (or `ops/py.sh setup.py hub
    --team no --force`, which changes only `team_mode` and keeps the rest,
    the push key included). Plain sessions as well as roles:
-   `lifectl settings set plain_sessions true`. Both apply without a restart.
+   `ops/bin/lifectl settings set plain_sessions true`. Both apply without a restart.
 6. **Separate user, never re-asked.** If they said no in step 0, say once
    that sessions run as them and that running sessions as a separate user
    can still be turned on later by asking. Do not ask again.

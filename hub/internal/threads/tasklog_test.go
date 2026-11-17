@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +37,26 @@ func TestShellTaskLogAndProgress(t *testing.T) {
 	m.fillTasks(&got)
 	if k := got.TurnTasks[0]; k.Doing != "files  30%|### | 3/10" || k.Done != 3 || k.Total != 10 {
 		t.Fatalf("%+v", k)
+	}
+}
+
+// With a session user the task file sits in folders the session owns, so the
+// hub reads it as that user: a link planted there to a file of the owner's is
+// never followed with the owner's rights.
+func TestTaskLogIsReadAsTheSessionUser(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "hub.token")
+	os.WriteFile(secret, []byte("owner-secret"), 0o600)
+	link := filepath.Join(dir, "bq1.output")
+	os.Symlink(secret, link)
+	var got string
+	m := &Manager{RunAs: RunAs{User: "life-agent"}, Run: func(n string, a ...string) ([]byte, error) {
+		got = strings.Join(append([]string{n}, a...), " ")
+		return []byte("as the session"), nil
+	}}
+	b, err := m.tailFile(link, taskTail)
+	if err != nil || string(b) != "as the session" || got != "/usr/bin/sudo -n -H -u life-agent /usr/bin/tail -c 65536 "+link {
+		t.Fatalf("%q %v ran %q", b, err, got)
 	}
 }
 

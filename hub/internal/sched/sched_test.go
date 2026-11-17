@@ -529,6 +529,17 @@ func TestFireAnswersTheClock(t *testing.T) {
 	if len(rs) != 1 || rs[0].PromptID != "p-2" || !strings.Contains(rs[0].Error, "budget paused") {
 		t.Fatalf("%+v", rs)
 	}
+	// A run asked for by hand (the API route a session may call) is held to the
+	// same guard: before, Run went straight to begin.
+	if _, err := s.Run("j", "api"); err == nil || !strings.Contains(err.Error(), "budget paused") {
+		t.Fatal("a hand-started run passed a paused budget:", err)
+	}
+	select {
+	case <-ran:
+		t.Fatal("the job ran while the budget was paused")
+	default:
+	}
+	s.db.Exec(`DELETE FROM runs WHERE job='j' AND prompt_id=''`)
 	s.Allow = nil
 	if st, _ := s.Fire("j", "p-3"); st != "started" {
 		t.Fatal(st)
