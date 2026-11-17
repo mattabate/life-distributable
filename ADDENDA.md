@@ -1684,3 +1684,8 @@ Entry format:
 - For: an install with `session_user` set that runs `ops/session-user-move.sh --undo`
 - Fix: the undo put back the transcripts parked before the move, so every turn a session took after the move was lost. It now brings back the copy the session kept writing after the move; the parked copy stays where it was. Thanks @tvtdev94.
 - How: same merge as add-0008, then `make check`. By hand: `ops/session-user-move.sh` (`undo_transcripts`), `ops/session-user-move-test.sh` (new), `Makefile` (`pylint` runs it).
+
+## add-0254 · 2026-11-17 · Console tests pass west of Eastern
+- For: anyone running `make webcheck` on a Mac at UTC-5 or further west
+- Fix: the source card test fed a 04:05 UTC instant and expected that day's date, but the card shows your local day, so the test failed west of Eastern (#224). The fixture's instants are now midday UTC. Test only; the console is unchanged. Thanks @dpc00.
+- How: same merge as add-0008, then `make webcheck`. By hand: `hub/internal/server/web/test/ui.test.js` (the `sources: a card opens the source's own page` case).
