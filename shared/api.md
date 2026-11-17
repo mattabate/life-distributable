@@ -495,6 +495,27 @@ Body `{author?=owner, target|new, text, in_reply_to?, outcome?, replies?: [{ref,
 ### POST /api/v1/prompts/{id}/cancel
 → 200 Prompt. 400 if it is not still `queued`.
 
+### GET /api/v1/meetings
+Meetings: several sessions talking in one file, woken by each other's posts and never by the clock. Query `state` (`open`|`closed`; empty = all), `thread` (the ones that session is in). Newest first, 100. → `[Meeting]` without posts: `{id, created_at, topic, opener, parent?, state, closed_at?, closed_by?, members:[{thread, name, state: in|left}]}`.
+
+### POST /api/v1/meetings
+Body `{topic, members: [session id | a role's name], parent?, text?}`. Only the owner opens a meeting (no `X-Life-Thread`): the room is their approval for its members to talk, as a relay card is for one hand-off. A session may open only a breakout (`parent`) of an open meeting it is in, with members of that meeting; it is a member itself and holds 4 open at once. At least two sessions, 16 at most, each one a relay could address. Every member but the poster is woken with the opening post. → 201 Meeting. 400 with the reason.
+
+### GET /api/v1/meetings/{id}
+→ Meeting with `posts: [{id, ts, author, name, text}]` and `file`, the whole meeting as one text (each post's body quoted line by line behind `> `). 404.
+
+### POST /api/v1/meetings/{id}/posts
+Body `{text}` (8000 characters at most). Appends one post and queues it, for now, to every other member still in: an idle one starts a turn, a busy one gets it when its turn ends. The wake is the hub's, stored as kind `relay`, and frames the words as another session's that the owner did not see. Members only (the owner posts into any); 40 posts a member a meeting, and a room that took 30 session posts in 10 minutes refuses the next. → 201 Meeting. 400 closed, not a member, over a cap.
+
+### POST /api/v1/meetings/{id}/join
+The calling session comes back into an open meeting it left. A session never put in it is refused. → 200 Meeting.
+
+### POST /api/v1/meetings/{id}/leave
+The calling session gets no more wakes from it; the room goes on. → 200 Meeting.
+
+### POST /api/v1/meetings/{id}/close
+Body `{text?}`: the outcome. Any one member (or the owner) ends it for everyone: the closing post is the last wake, and a breakout's is also posted into its parent. → 200 Meeting. 400 already closed, not a member.
+
 ### GET /api/v1/asks
 Query `state` (default `active` = open+answered; `all`; or one state), `thread`, `limit` (default 200). The newest `limit`, oldest first. No per-ask web page (removed 2026-09-15): the chat card shows the whole detail.
 

@@ -24,4 +24,7 @@ command -v tailscale >/dev/null && TS=tailscale
 echo "$(date -Iseconds) renewing cert for $HOST"
 "$TS" cert --cert-file "secrets/$HOST.crt" --key-file "secrets/$HOST.key" "$HOST"
 chmod 600 "secrets/$HOST.key"
-launchctl kickstart -k "gui/$(id -u)/com.life.hub" || true
+# hub.sh restart, not a bare kickstart: it waits for approved actions still
+# running (a kickstart kills them mid-run and they come back "uncertain")
+# (#220).
+./hub.sh restart || true

@@ -280,7 +280,7 @@ func main() {
 	} else if err := thr.PinTitle("hub", "Hub"); err != nil {
 		log.Printf("hub thread title: %v", err)
 	}
-	sch.Ask = func(job, text string) {
+	sch.Ask = func(job, text string) error {
 		// A title is capped: a longer line keeps all its words in the detail.
 		detail := "raised by the " + job + " job"
 		if len(text) > 200 {
@@ -288,7 +288,9 @@ func main() {
 		}
 		if _, err := thr.AddAskOn("hub", "", text, detail, "other", "", ""); err != nil {
 			log.Printf("sched: ask from %s: %v", job, err)
+			return err
 		}
+		return nil
 	}
 	thr.BackfillTitles()
 	// The owner's approve/deny (+ note) goes back to the session that proposed

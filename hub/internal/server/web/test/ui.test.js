@@ -555,14 +555,14 @@ test('actionHTML: the approval card in the chat', () => {
   assert.match(chat, /<div class="card-h">🔴 <span class="verb">approve<\/span><span class="at">today [^<]*<\/span><\/div><div class="t">git commit<\/div>/);
   assert.doesNotMatch(chat, /ago</);
   assert.match(chat, /<span class="pill purple">share<\/span>/);
-  // Shown plainly, no toggle of its own.
-  assert.match(chat, /<div class="small muted">What it runs<\/div>/);
-  assert.doesNotMatch(chat, /<details/);
-  // A commit is a quiet green card: no red mark, no kind pill.
+  // The raw command is shut until the owner opens it; nothing else folds.
+  assert.match(chat, /<details class="runs"><summary class="small muted">What it runs<\/summary>/);
+  assert.doesNotMatch(chat, /<details class="runs" open/);
+  assert.equal((chat.match(/<details/g) || []).length, 1);
+  // A commit is red like every approval, with its kind pill.
   const commit = actionHTML({ ...action, kind: 'commit' });
-  assert.match(commit, /^<div class="ask commit" id="ask-card-act-1a2b3c4d">/);
-  assert.match(commit, /<div class="card-h"><span class="verb">commit<\/span>/);
-  assert.doesNotMatch(commit, /🔴|pill purple/);
+  assert.match(commit, /^<div class="ask" id="ask-card-act-1a2b3c4d">\s*<div class="card-h">🔴 <span class="verb">approve<\/span>/);
+  assert.match(commit, /<span class="pill purple">commit<\/span>/);
   // "other" is no warning: no chip for it.
   assert.doesNotMatch(actionHTML({ ...action, kind: 'other' }), /pill[^>]*>other</);
   assert.match(chat, /<div class="acts"><button class="sm suggested" onclick="armActionReply\('act-1a2b3c4d','approved'\)">Approve<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d','denied'\)">Deny<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('action','act-1a2b3c4d'\)">Dismiss<\/button><\/div>/);

@@ -100,8 +100,8 @@ func TestFreshSchema(t *testing.T) {
 		}
 		return strings.Join(names, " ")
 	}
-	wantTables := "action_events actions ask_events asks away budget_days cal_events cal_items devices goal_notes goals item_events item_step_events item_step_plans item_steps items observations persona_defs prompts rec_events recs runs schema_migrations settings sync_runs thread_events thread_messages thread_runs threads voice_queue"
-	wantIndices := "action_events_action actions_state asks_state asks_thread away_days cal_events_item cal_items_day goal_notes_goal item_events_item item_step_events_step item_step_plans_item item_steps_item items_ask items_day items_src items_thread obs_ingested_at obs_source_kind_ts obs_supersedes obs_uniq persona_defs_key prompts_due prompts_target rec_events_rec recs_review recs_status runs_job sync_runs_name thread_events_run thread_events_thread thread_messages_run thread_messages_thread thread_runs_thread"
+	wantTables := "action_events actions ask_events asks away budget_days cal_events cal_items devices goal_notes goals item_events item_step_events item_step_plans item_steps items meeting_members meeting_posts meetings observations persona_defs prompts rec_events recs runs schema_migrations settings sync_runs thread_events thread_messages thread_runs threads voice_queue"
+	wantIndices := "action_events_action actions_state asks_state asks_thread away_days cal_events_item cal_items_day goal_notes_goal item_events_item item_step_events_step item_step_plans_item item_steps_item items_ask items_day items_src items_thread meeting_posts_meeting obs_ingested_at obs_source_kind_ts obs_supersedes obs_uniq persona_defs_key prompts_due prompts_target rec_events_rec recs_review recs_status runs_job sync_runs_name thread_events_run thread_events_thread thread_messages_run thread_messages_thread thread_runs_thread"
 	if got := inventory("table"); got != wantTables {
 		t.Errorf("tables:\n got %s\nwant %s", got, wantTables)
 	}
@@ -1626,6 +1626,38 @@ func TestRewordAskAndFindThreads(t *testing.T) {
 	json.Unmarshal(do("GET", "/api/v1/threads", "").Body.Bytes(), &found)
 	if len(found) != 2 {
 		t.Fatalf("%+v", found)
+	}
+}
+
+// The meeting routes answer; the room's rules are the package's
+// (threads.TestMeetingPostsWakeTheOthers).
+func TestMeetingsAPI(t *testing.T) {
+	s := newTest(t)
+	do := func(method, url, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, url, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer secret")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	if w := do("GET", "/api/v1/meetings?state=open", ""); w.Code != 200 || strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if w := do("POST", "/api/v1/meetings", `{"topic":"The plan","members":[]}`); w.Code != 400 || !strings.Contains(w.Body.String(), "at least two") {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if w := do("GET", "/api/v1/meetings/mtg-none", ""); w.Code != 404 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	for _, verb := range []string{"posts", "close"} {
+		if w := do("POST", "/api/v1/meetings/mtg-none/"+verb, `{"text":"x"}`); w.Code != 400 {
+			t.Fatalf("%s: %d %s", verb, w.Code, w.Body)
+		}
+	}
+	for _, verb := range []string{"join", "leave"} {
+		if w := do("POST", "/api/v1/meetings/mtg-none/"+verb, ""); w.Code != 400 {
+			t.Fatalf("%s: %d %s", verb, w.Code, w.Body)
+		}
 	}
 }
 

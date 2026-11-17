@@ -116,10 +116,11 @@ struct MiniCard: View {
     var body: some View {
         Button(action: tap) {
             VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .top, spacing: 6) {
+                // One line a card; the chat holds the whole title.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: c.mark).font(.caption2.weight(.semibold))
-                        .foregroundStyle(c.tone == "quiet" && c.sub?.status == "running" ? Color.accentColor : c.color).padding(.top, 3)
-                    Text(md(c.title)).font(.subheadline.weight(.medium)).multilineTextAlignment(.leading)
+                        .foregroundStyle(c.tone == "quiet" && c.sub?.status == "running" ? Color.accentColor : c.color)
+                    Text(md(c.title)).font(.subheadline.weight(.medium)).lineLimit(1)
                     Spacer(minLength: 4)
                     Text(c.verb).font(.caption2).foregroundStyle(c.color).layoutPriority(1)
                 }
@@ -440,29 +441,20 @@ struct ThreadRow: View {
                     Text(md(d)).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
                 }
             }
-            if t.status == "running" {
-                // Live: the turn's calls, clock and dollars — the console's
-                // `turnFacts`, not the raw step label (the owner 2026-10-07).
-                // Its dollars are the CostLabel in the chips below (2026-10-08).
-                let f = t.turnFacts(withCost: false)
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: "arrow.turn.down.right").font(.caption2.weight(.semibold)).foregroundStyle(.blue)
-                    Text(f.isEmpty ? "starting…" : f).font(.subheadline).foregroundStyle(.blue).monospacedDigit().lineLimit(2)
-                }
-            } else if t.last_message_kind == "error", let m = summaryLine(t.last_message) {
+            if t.status != "running", t.last_message_kind == "error", let m = summaryLine(t.last_message) {
                 // A dead turn is a fact about the session, not a description.
                 Text(md("Error: \(m)")).font(.subheadline).foregroundStyle(.red).lineLimit(2)
             }
-            ChipRow {
-                ForEach(pills, id: \.self) { PillChip(pill: $0) }
-                if let m = t.modelShort { Chip(m, icon: "cpu") }
-                if !t.schedule.isEmpty { Chip(scheduleChipLabel(t), icon: "clock") }
-                Spacer(minLength: 0)
-                // What this chat has cost so far, live while it runs
-                // (the owner 2026-08-25). Trailing and tertiary: it is a
-                // number to glance at, never the row's headline.
-                CostLabel(t.cost_usd)
-                if let d = t.last_message_at { Text(shortAgo(d)).font(.caption2).foregroundStyle(.tertiary).layoutPriority(1) }
+            // No foot: the model, cost, schedule and the live call count are
+            // the chat head's, as on the desktop sidebar; the row is the name
+            // and its cards. Only the audio pills stay, the one fact a cell
+            // cannot carry.
+            let live = pills.filter { ["speaking", "waiting"].contains($0.tone) }
+            if !live.isEmpty {
+                ChipRow {
+                    ForEach(live, id: \.self) { PillChip(pill: $0) }
+                    Spacer(minLength: 0)
+                }
             }
         }
         .padding(.vertical, 2)

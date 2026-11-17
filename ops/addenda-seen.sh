@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The last ADDENDA entry the weekly check carded. No argument prints it ("none"
-# before the first check); one argument, an entry id, records it. Nothing else:
-# this is the only thing the addenda-check job can write.
+# before the first check); one argument, an entry id, records it. Nothing else.
+# The addenda-check job only reads it: the hub records the run's mark here
+# once its cards exist (the job's after_cards in ops/schedule.json).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 seen=data/addenda-seen.txt

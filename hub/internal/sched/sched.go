@@ -52,6 +52,13 @@ type JobSpec struct {
 	// reads outside text, and an approved shell card runs as the owner.
 	// Default none.
 	ExecTypes []string `json:"exec_types"`
+	// AfterCards: a repo script (ops/<name>.sh) the hub runs with the run's
+	// `mark` as its one argument, once every needs_you line of that run has
+	// its card. A job that records what it has already shown (addenda-check)
+	// hands the record to the hub this way, so a run that times out, ends
+	// without its result block or fails to raise a card records nothing and
+	// the next run shows the same entries again (life-distributable#218).
+	AfterCards string `json:"after_cards"`
 }
 
 type Table struct {
@@ -126,8 +133,8 @@ type Scheduler struct {
 	// job has no session, so main.go points this at an idle "hub" thread —
 	// the same shape as calendar's fallback thread — so the line lands on
 	// Your turn like every other thing an agent needs from the owner, instead
-	// of in a digest nobody reads.
-	Ask       func(job, text string)
+	// of in a digest nobody reads. An error means no card was made.
+	Ask       func(job, text string) error
 	Now       func() time.Time
 	RunClaude func(ctx context.Context, dir, prompt string, tools []string) (Output, error)
 
@@ -161,7 +168,9 @@ type Output struct {
 	Summary  string    `json:"summary"`
 	Findings []Finding `json:"findings"`
 	NeedsYou []string  `json:"needs_you"`
-	Raw      string    `json:"-"`
+	// Mark: the argument for the job's after_cards script (empty = none).
+	Mark string `json:"mark,omitempty"`
+	Raw  string `json:"-"`
 	// Cost: the CLI's total_cost_usd for the run (recorded on runs.cost_usd).
 	Cost float64 `json:"-"`
 }
@@ -682,22 +691,45 @@ func (s *Scheduler) exec(b begun) (int64, error) {
 		// title supersedes itself while it stays open), rather than a
 		// failed run row nobody reads: a parse failure is a finding.
 		if s.Ask != nil && errors.Is(err, ErrNoResultBlock) {
-			s.Ask(name, fmt.Sprintf("The %s job ended without its result block: read run %d, its findings reached no card", name, id))
+			_ = s.Ask(name, fmt.Sprintf("The %s job ended without its result block: read run %d, its findings reached no card", name, id))
 		}
 		return id, err
 	}
 	if _, uerr := s.db.Exec(`UPDATE runs SET finished_at=?, ok=1, summary=?, output=?, cost_usd=? WHERE id=?`, fin, out.Summary, out.Raw, out.Cost, id); uerr != nil {
 		log.Printf("sched: run %d not closed: %v", id, uerr)
 	}
-	s.route(*spec, out, id)
+	if s.route(*spec, out, id) {
+		s.afterCards(*spec, dir, out.Mark)
+	}
 	return id, nil
+}
+
+// afterCards runs the job's after_cards script with its mark, once the run's
+// cards all exist. The script is a fixed repo path from the table and the
+// mark one argument (no shell), so the script is what checks its shape.
+func (s *Scheduler) afterCards(j JobSpec, dir, mark string) {
+	if j.AfterCards == "" || mark == "" {
+		return
+	}
+	p := j.AfterCards
+	if !strings.HasPrefix(p, "ops/") || !strings.HasSuffix(p, ".sh") || strings.Contains(p, "..") {
+		log.Printf("sched: %s after_cards %q is not an ops/*.sh script", j.Name, p)
+		return
+	}
+	cmd := exec.Command("bash", p, mark)
+	cmd.Dir = dir
+	if b, err := cmd.CombinedOutput(); err != nil {
+		log.Printf("sched: %s after_cards: %v: %s", j.Name, err, strings.TrimSpace(string(b)))
+	}
 }
 
 // route turns job output into actions (findings) and asks (needs_you); the
 // summary stays on the run record. runID rides each proposal as its `run_id`
 // — a job has no session, so the run is the only place a proposal can open
-// on (GET /runs/{id}).
-func (s *Scheduler) route(j JobSpec, o Output, runID int64) {
+// on (GET /runs/{id}). It reports whether every finding and line reached
+// the owner (a proposal and a card each), which gates the job's after_cards.
+func (s *Scheduler) route(j JobSpec, o Output, runID int64) bool {
+	ok := true
 	for _, f := range o.Findings {
 		et, payload, detail := f.ExecType, f.ExecPayload, f.Detail
 		if et != "" && et != "none" && !slices.Contains(j.ExecTypes, et) {
@@ -709,15 +741,18 @@ func (s *Scheduler) route(j JobSpec, o Output, runID int64) {
 		if _, err := s.acts.Propose(actions.Proposal{Project: j.Project, Kind: f.Kind, Title: f.Title, Detail: detail,
 			ExecType: et, ExecPayload: payload, Source: "claude:job:" + j.Name, RunID: strconv.FormatInt(runID, 10)}); err != nil {
 			log.Printf("sched: propose from %s: %v", j.Name, err)
+			ok = false
 		}
 	}
 	for _, n := range o.NeedsYou {
-		if s.Ask != nil {
-			s.Ask(j.Name, n)
-		} else {
+		if s.Ask == nil {
 			log.Printf("sched: %s needs you: %s", j.Name, n)
+			ok = false
+		} else if err := s.Ask(j.Name, n); err != nil {
+			ok = false
 		}
 	}
+	return ok
 }
 
 // NeedsYou is the hub's one notification: a push to the phone. Nothing is
@@ -777,7 +812,16 @@ Rules:
 - Your FINAL message must be ONLY a JSON object, no prose, no code fence:
 {"summary": "1-3 sentences on what you did (kept on the run record), or empty string if nothing noteworthy",
  "findings": [{"kind":"money|delete|contact|share|commit|other","title":"...","detail":"what exactly will happen and why","exec_type":"` + execTypes + `","exec_payload":{}}],
- "needs_you": ["things only the owner can do, each one line; empty if none"]}`
+ "needs_you": ["things only the owner can do, each one line; empty if none"]}` + markLine(j)
+}
+
+// markLine adds the `mark` key to the envelope for a job with after_cards.
+func markLine(j JobSpec) string {
+	if j.AfterCards == "" {
+		return ""
+	}
+	return `
+- This job also returns "mark" in that object: the argument the hub passes to ` + j.AfterCards + ` once your needs_you cards exist. Your instructions say what it is.`
 }
 
 // deniedNote tells a run which tool calls its job's previous run had refused
