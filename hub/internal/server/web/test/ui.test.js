@@ -709,10 +709,12 @@ test('sources: a card opens the source\'s own page, which carries the prose', ()
   const g = { id: 'grow-my-audience', title: 'Grow my audience', tag: 'Grow my audience', color: '#2563EB', sources: [
     { id: 'x', title: 'X / Twitter', status: 'connected', total: 108, from: 'X API v2 daily',
       storage: 'observations table', summary: '2 handles', brand: { mark: 'X', color: '#000000', ink: '#FFFFFF' },
-      last: '2025-09-26T04:05:11Z',
+      last: '2025-09-26T12:05:11Z',
       accounts: [{ label: '@handle', via: 'API', url: 'https://x.com/handle' }, { label: '@other' }],
-      kinds: [{ kind: 'post-stats', note: 'one row per sync', n: 27, first: '2026-08-23T05:58:27Z', last: '2026-09-26T04:05:11Z' }] },
+      kinds: [{ kind: 'post-stats', note: 'one row per sync', n: 27, first: '2026-08-23T11:58:27Z', last: '2026-09-26T12:05:11Z' }] },
   ] };
+  // Instants at midday UTC: the page shows local dates, and 04:05Z was the day
+  // before on a Mac west of Eastern (#224).
   // A card (2026-10-06): the brand tile, the name, the summary; the
   // group's colour on its edge; rows and the newest row's date.
   const card = cfgSourceCard(g, g.sources[0]);
