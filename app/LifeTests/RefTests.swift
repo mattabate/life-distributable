@@ -64,4 +64,27 @@ final class RefTests: XCTestCase {
         XCTAssertEqual(refKind("cal-53e0"), "cal")
         XCTAssertEqual(refKind("20260907-053232-0a1b2c3d"), "action")
     }
+
+    // A link in a session's text may open a page or mail, an install only
+    // from our own hub, and a blob the Mac saved opens only when it is a
+    // picture, sound, video or document.
+    func testOnlySafeLinksOpen() {
+        let hub = "https://hub.example.ts.net:8443"
+        let ok = { (s: String) in LifeLinks.mayOpen(URL(string: s)!, hubBase: hub) }
+        XCTAssertTrue(ok("https://github.com/x"))
+        XCTAssertTrue(ok("mailto:a@example.com"))
+        XCTAssertTrue(ok("itms-services://?action=download-manifest&url=https%3A%2F%2Fhub.example.ts.net%3A8443%2Fota%2Fx%2Fmanifest.plist"))
+        XCTAssertFalse(ok("itms-services://?action=download-manifest&url=https%3A%2F%2Fevil.example.com%2Fmanifest.plist"))
+        XCTAssertFalse(ok("itms-services://?action=download-manifest"))
+        XCTAssertFalse(LifeLinks.mayOpen(URL(string: "itms-services://?action=download-manifest&url=https%3A%2F%2Fhub.example.ts.net%2Fm.plist")!, hubBase: ""))
+        XCTAssertFalse(ok("file:///Applications/Calculator.app"))
+        XCTAssertFalse(ok("x-apple-systempreferences:com.apple.preference.security"))
+        XCTAssertFalse(ok("shortcuts://run-shortcut?name=x"))
+
+        XCTAssertTrue(macOpensSaved(URL(fileURLWithPath: "/tmp/shot.PNG")))
+        XCTAssertTrue(macOpensSaved(URL(fileURLWithPath: "/tmp/report.pdf")))
+        XCTAssertFalse(macOpensSaved(URL(fileURLWithPath: "/tmp/run.command")))
+        XCTAssertFalse(macOpensSaved(URL(fileURLWithPath: "/tmp/link.webloc")))
+        XCTAssertFalse(macOpensSaved(URL(fileURLWithPath: "/tmp/noext")))
+    }
 }

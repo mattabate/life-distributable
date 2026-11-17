@@ -240,8 +240,8 @@ struct RootView: View {
 }
 
 /// The app's one link opener, built once: a `life://` link is ours, anything
-/// else is still iOS's, except a link into the hub's blobs, which a browser
-/// cannot open without the token (`openBlobLink`). A fresh `OpenURLAction`
+/// else goes to iOS only when `mayOpen` allows it, except a link into the
+/// hub's blobs, which a browser cannot open without the token (`openBlobLink`). A fresh `OpenURLAction`
 /// on every pass of RootView (each board refresh) was a changed environment
 /// value, so every page that reads `openURL` redrew whole on every refresh.
 @MainActor final class LifeLinks {
@@ -252,10 +252,30 @@ struct RootView: View {
             Task { await openBlobLink(ref, hub: hub) }
             return .handled
         }
-        guard url.scheme == "life" else { return .systemAction }
+        guard url.scheme == "life" else {
+            return Self.mayOpen(url, hubBase: self?.hub?.baseURL ?? "") ? .systemAction : .discarded
+        }
         guard let self, let nav = self.nav, let hub = self.hub else { return .discarded }
         Task { await nav.open(url, hub: hub) }
         return .handled
+    }
+
+    /// What iOS may open for us: a web page, mail, and an install only when
+    /// its manifest is on our own hub. Any other scheme in a session's text
+    /// could launch an app or, as itms-services, install a stranger's build
+    /// from one tap.
+    nonisolated static func mayOpen(_ url: URL, hubBase: String) -> Bool {
+        switch url.scheme?.lowercased() {
+        case "https", "http", "mailto": return true
+        case "itms-services":
+            guard let hub = URL(string: hubBase)?.host?.lowercased(),
+                  let manifest = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "url" })?.value,
+                  let m = URL(string: manifest), m.scheme?.lowercased() == "https",
+                  let host = m.host?.lowercased() else { return false }
+            return host == hub
+        default: return false
+        }
     }
 
     func action(nav: RefNav, hub: HubClient) -> OpenURLAction {

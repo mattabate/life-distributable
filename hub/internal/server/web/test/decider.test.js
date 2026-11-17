@@ -20,8 +20,10 @@ globalThis.seenBuild = () => {};
 globalThis.toast = () => {};
 const sent = [];
 let refuseOnce = false;
+let dropOnce = false;
 globalThis.fetch = async (url, init) => {
   sent.push({ url, headers: init.headers || {} });
+  if (dropOnce) { dropOnce = false; throw new TypeError('Failed to fetch'); }
   const deny = refuseOnce; refuseOnce = false;
   return {
     ok: !deny, status: deny ? 403 : 200,
@@ -54,6 +56,23 @@ test('a send through withDecider carries the stored code', async () => {
   // and the option does not leak into the next ordinary call
   await get('/board');
   assert.equal(last(), undefined);
+});
+
+// A retried write could land twice. Every try of one write carries the same
+// X-Life-Request, so the hub runs it once (server/replay.go); a read carries
+// none, and the next write a new one.
+test('a write retried after a dropped link keeps its one request name', async () => {
+  sent.length = 0;
+  dropOnce = true;
+  await post('/threads/t1/messages?via=web', { text: 'hi' });
+  assert.equal(sent.length, 2);
+  const id = sent[0].headers['X-Life-Request'];
+  assert.match(id, /^[0-9a-f-]{36}$/);
+  assert.equal(sent[1].headers['X-Life-Request'], id);
+  await get('/board');
+  assert.equal(sent[2].headers['X-Life-Request'], undefined);
+  await post('/threads/t1/messages?via=web', { text: 'again' });
+  assert.notEqual(sent[3].headers['X-Life-Request'], id);
 });
 
 test('after a refusal and a checked new code, the retry carries the new code', async () => {

@@ -1659,3 +1659,28 @@ Entry format:
 - For: anyone setting up a new install or adding a device
 - Fix: setup never said where the hub token the other devices paste comes from, and its `lifectl` lines assumed it was on PATH. `ops/hub.sh token` prints the token, only in a Terminal window, and SETUP.md step 7 has you save it in the Passwords app as `life hub`; every `lifectl` line in SETUP.md is now `ops/bin/lifectl`. Thanks @tvtdev94.
 - How: same merge as add-0008. By hand: `ops/hub.sh` (`token`, usage), `SETUP.md` (step 7, the `ops/bin/lifectl` lines).
+
+## add-0249 · 2026-11-17 · A retried write runs once
+- For: everyone (hub, web console)
+- Fix: when the link dropped after a send or approval reached the hub but before its answer came back, the console's retry ran the write a second time, so a message or decision could land twice. The console now names each POST, PUT and DELETE with an `X-Life-Request` header and a retry carries the same name; the hub answers a name it has seen in the last two minutes, for the same caller, with the first answer instead of running it again. Thanks @tvtdev94.
+- How: same merge as add-0008, then `make check`, `make webcheck` and `ops/hub.sh restart`. By hand: `hub/internal/server/replay.go` + `replay_test.go` (new), `server.go` (`replays.serveOnce`), `hub/internal/server/web/app.js` (`api`), `web/test/decider.test.js`.
+
+## add-0250 · 2026-11-17 · Code and approvals show byte for byte
+- For: everyone on the web console and desktop app
+- Fix: the console's skin pass stripped emoji everywhere, inside code too, so a code block, a copy box or an approval's "What it runs" could show something other than what you copy or approve. A `pre`, `code`, input or approval command is now left exactly as sent. Thanks @tvtdev94.
+- How: same merge as add-0008, then `make webcheck`. By hand: `hub/internal/server/web/skin.js` (`KEEP`), `web/test/skin.test.js` (new).
+
+## add-0251 · 2026-11-17 · The apps open only safe links
+- For: everyone on the phone and desktop apps
+- Fix: a link in a card opened whatever scheme it named, and the Mac opened any saved file a card linked to. Now a card link opens a web page, mail, or an app install whose manifest is on your own hub; any other scheme is dropped. The Mac opens a saved file only when it is a picture, sound, video, document or page; anything else (`.command`, `.app`, `.webloc`) is just saved. Thanks @tvtdev94.
+- How: same merge as add-0008, then `make check` and a new app build. By hand: `app/Life/Sources/RootView.swift` (`LifeLinks.mayOpen`), `StyledText.swift`, `Attachments.swift` (`macOpensSaved`, `openBlobLink`), `MacLightbox.swift` (`openFile`), `app/LifeTests/RefTests.swift` (`testOnlySafeLinksOpen`).
+
+## add-0252 · 2026-11-17 · decider-set.sh finds lifectl without PATH
+- For: anyone setting or changing the decider code
+- Fix: in a fresh Terminal without `lifectl` on PATH, `ops/decider-set.sh` always warned that the hub had not confirmed the code. It now uses `ops/bin/lifectl` when `make` built it there. Thanks @tvtdev94.
+- How: same merge as add-0008. By hand: `ops/decider-set.sh`.
+
+## add-0253 · 2026-11-17 · Undoing the session user move keeps the newest transcripts
+- For: an install with `session_user` set that runs `ops/session-user-move.sh --undo`
+- Fix: the undo put back the transcripts parked before the move, so every turn a session took after the move was lost. It now brings back the copy the session kept writing after the move; the parked copy stays where it was. Thanks @tvtdev94.
+- How: same merge as add-0008, then `make check`. By hand: `ops/session-user-move.sh` (`undo_transcripts`), `ops/session-user-move-test.sh` (new), `Makefile` (`pylint` runs it).
