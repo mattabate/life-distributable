@@ -145,6 +145,90 @@ func main() {
 		c.call("POST", "/api/v1/actions", map[string]any{"kind": "other", "detail": text(*why), "exec_type": "relay",
 			"exec_payload": json.RawMessage(payload), "gated": true, "thread_id": *thread, "say": *say,
 			"run_id": os.Getenv("LIFE_RUN_ID"), "source": "claude:thread:" + *thread})
+	case "meeting":
+		// Several sessions talking in ONE file, woken by each other's posts,
+		// never by the clock (threads/meeting.go). The owner opens a room; a
+		// member may break out of one with others in it.
+		//   lifectl meeting list [--all]                  the open ones you are in (--all: every one)
+		//   lifectl meeting open "topic" --members a,b,c [--parent <id>] [--text "first post"|@file]
+		//   lifectl meeting read <id>                     the whole file
+		//   lifectl meeting say <id> "text"|@file|-       post; every other member is woken
+		//   lifectl meeting join|leave <id>
+		//   lifectl meeting close <id> ["outcome"|@file]  ends it for everyone
+		need(3)
+		printFile := func(code int, out []byte) {
+			var mt struct {
+				File  string `json:"file"`
+				Error string `json:"error"`
+			}
+			json.Unmarshal(out, &mt)
+			if code >= 300 {
+				die("meeting: %s", mt.Error)
+			}
+			fmt.Println(mt.File)
+		}
+		// A write answers with one line, not the room: the posts come by wake.
+		wrote := func(code int, out []byte, what string) {
+			var mt struct {
+				ID, Topic, Error string
+				Members          []struct{ Name, State string }
+			}
+			json.Unmarshal(out, &mt)
+			if code >= 300 {
+				die("meeting: %s", mt.Error)
+			}
+			var in []string
+			for _, m := range mt.Members {
+				if m.State == "in" {
+					in = append(in, m.Name)
+				}
+			}
+			fmt.Printf("%s %s %q. In the room: %s.\n", what, mt.ID, mt.Topic, strings.Join(in, ", "))
+		}
+		switch os.Args[2] {
+		case "list":
+			q := "?state=open&thread=" + os.Getenv("LIFE_THREAD_ID")
+			if len(os.Args) > 3 && os.Args[3] == "--all" {
+				q = ""
+			}
+			c.call("GET", "/api/v1/meetings"+q, nil)
+		case "open":
+			need(4)
+			fs := flag.NewFlagSet("meeting open", flag.ExitOnError)
+			members := fs.String("members", "", "session ids or roles' names, comma-separated")
+			parent := fs.String("parent", "", "the meeting this one breaks out of")
+			first := fs.String("text", "", "the first post")
+			fs.Parse(os.Args[4:])
+			var ms []string
+			for _, m := range strings.Split(*members, ",") {
+				if m = strings.TrimSpace(m); m != "" {
+					ms = append(ms, m)
+				}
+			}
+			code, out := c.send("POST", "/api/v1/meetings", map[string]any{"topic": titleArg(os.Args[3]), "members": ms, "parent": *parent, "text": text(*first)})
+			wrote(code, out, "Opened")
+		case "read":
+			need(4)
+			printFile(c.send("GET", "/api/v1/meetings/"+os.Args[3], nil))
+		case "say":
+			need(5)
+			code, out := c.send("POST", "/api/v1/meetings/"+os.Args[3]+"/posts", map[string]any{"text": text(os.Args[4])})
+			wrote(code, out, "Posted to")
+		case "join", "leave":
+			need(4)
+			code, out := c.send("POST", "/api/v1/meetings/"+os.Args[3]+"/"+os.Args[2], nil)
+			wrote(code, out, map[string]string{"join": "Joined", "leave": "Left"}[os.Args[2]])
+		case "close":
+			need(4)
+			outcome := ""
+			if len(os.Args) > 4 {
+				outcome = text(os.Args[4])
+			}
+			code, out := c.send("POST", "/api/v1/meetings/"+os.Args[3]+"/close", map[string]any{"text": outcome})
+			wrote(code, out, "Closed")
+		default:
+			usage()
+		}
 	case "api":
 		// Any hub endpoint, with the token attached — the replacement for
 		// `curl -s`, which is off prompt_tools because it could just as
@@ -1511,6 +1595,8 @@ gate      propose --title t --detail d [--kind money|delete|contact|share|commit
             [--exec none|shell|claude --payload json] [--project p] [--thread id] [--say "…"]
           actions [state] · approve|deny|dismiss|reopen <id> [note…]
           relay <session-id> "text|@file" [--why "…"] [--say "…"] [--thread id]
+          meeting list [--all] · meeting open "topic" --members a,b,c [--parent id] [--text "…"] · meeting read <id>
+            · meeting say <id> "text|@file|-" · meeting join|leave <id> · meeting close <id> ["outcome"]
 sessions  threads [--q words] [--archived] · thread new "prompt" [--goal g] [--schedule w] [--title t] [--project p]
           thread <id> [send text|@file|- | schedule when|off ["check-in prompt"] | goal g|off
             | model auto|judgment|build|claude-… | persona key|off | checkin | stop | archive | events]

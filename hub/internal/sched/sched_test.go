@@ -22,7 +22,7 @@ import (
 type nfy struct{ msgs []string }
 
 func (n *nfy) NeedsYou(s string) error { n.msgs = append(n.msgs, "needs:"+s); return nil }
-func (n *nfy) ask(job, s string)       { n.msgs = append(n.msgs, "ask:"+job+": "+s) }
+func (n *nfy) ask(job, s string) error { n.msgs = append(n.msgs, "ask:"+job+": "+s); return nil }
 
 // An unattended job connects no MCP server, nor does the gate's claude exec.
 func TestJobArgsConnectNoMCP(t *testing.T) {
@@ -463,6 +463,36 @@ func TestRunToolsReadDuringReload(t *testing.T) {
 		s.Run("j", "test")
 	}
 	<-done
+}
+
+// after_cards runs with the run's mark only once every needs_you line has
+// its card: a card that fails leaves the record where it was, so the next
+// run shows the same entries again (life-distributable#218).
+func TestAfterCardsOnlyOnceCardsExist(t *testing.T) {
+	s, _, _ := setup(t, `{"jobs":[{"name":"j","project":"life","when":"manual","prompt":"p","after_cards":"ops/mark.sh"}]}`)
+	dir, _ := s.projDir("life")
+	os.MkdirAll(filepath.Join(dir, "ops"), 0o755)
+	os.WriteFile(filepath.Join(dir, "ops", "mark.sh"), []byte("echo \"$1\" > marked.txt\n"), 0o755)
+	marked := func() string {
+		b, _ := os.ReadFile(filepath.Join(dir, "marked.txt"))
+		return strings.TrimSpace(string(b))
+	}
+	s.RunClaude = func(_ context.Context, _, prompt string, _ []string) (Output, error) {
+		if !strings.Contains(prompt, `"mark"`) {
+			t.Error("the prompt does not ask for a mark")
+		}
+		return ParseOutput(`{"summary":"","findings":[],"needs_you":["add-0002 new"],"mark":"add-0002"}`, "")
+	}
+	s.Ask = func(string, string) error { return errors.New("board down") }
+	s.Run("j", "test")
+	if got := marked(); got != "" {
+		t.Fatalf("a run whose card failed recorded %q", got)
+	}
+	s.Ask = func(string, string) error { return nil }
+	s.Run("j", "test")
+	if got := marked(); got != "add-0002" {
+		t.Fatalf("recorded %q after the cards, want add-0002", got)
+	}
 }
 
 // Fire is the clock's entry: held (gate shut) writes nothing so the next tick

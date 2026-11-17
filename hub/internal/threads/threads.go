@@ -576,6 +576,9 @@ func New(db *store.DB, claudeBin, runsDir, prefix string, projDir func(string) (
 	if err != nil {
 		return nil, err
 	}
+	if _, err := db.Migrate("meetings", MeetingSchema); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(runsDir, 0o755); err != nil {
 		return nil, err
 	}

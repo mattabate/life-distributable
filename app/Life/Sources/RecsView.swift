@@ -144,7 +144,13 @@ struct RecsView: View {
 
     private func pageModifiers(_ page: some View) -> some View {
         page
+        #if targetEnvironment(macCatalyst)
         .navigationTitle("Recommendations")
+        #else
+        // "Recs" on the camera's line, no tall title over the list.
+        .navigationTitle("Recs")
+        .toolbarTitleDisplayMode(.inlineLarge)
+        #endif
         .navigationDestination(isPresented: $showAll) { AllRecsView(recs: every, onChange: { await load() }) }
         .askButton()
         .toolbar {
@@ -315,25 +321,40 @@ struct RecRow: View {
             if let why = rec.because ?? rec.detail, !why.isEmpty {
                 Text(md(why)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
-            HStack(spacing: 8) {
-                // Whose rec it is, in place of its kind when the hub names one.
-                if let who = rec.owner { Text(who).font(.caption.weight(.semibold)) }
-                RecChip(text: rec.domain, color: recDomainColor(rec.domain))
-                if rec.owner == nil { RecChip(text: rec.kind, color: .secondary) }
-                if let m = rec.modelShort { RecChip(text: m, color: .indigo) }
-                if !rec.isOpen { RecChip(text: rec.status == "deferred" ? "later" : rec.status, color: recStatusColor(rec.status)) }
-                if let o = rec.outcome, !o.isEmpty { RecChip(text: o, color: recOutcomeColor(o)) }
-                // Its session is working right now, so there is nothing to
-                // follow up on — the same dot + word an
-                // ask row wears.
-                if rec.thread_running == true { RecRunning() }
+            // Wraps to a second line when the chips do not fit the phone.
+            FlowRow(spacing: 8) {
+                RecPillRun(rec: rec, listRow: true)
                 if let c = recDatesColor(rec) {
-                    Text(recDates(rec)).font(.caption2).foregroundStyle(c)
+                    Text(recDates(rec)).font(.caption2).foregroundStyle(c).fixedSize()
                 } else {
-                    Text(recDates(rec)).font(.caption2).foregroundStyle(.tertiary)
+                    Text(recDates(rec)).font(.caption2).foregroundStyle(.tertiary).fixedSize()
                 }
             }
         }.padding(.vertical, 2)
+    }
+}
+
+/// Owner, domain, kind, model, status, outcome and "running": the chips the
+/// list row and the rec's page both lead with, laid in a FlowRow by the caller.
+/// The list row names the status only once the rec is no longer open.
+struct RecPillRun: View {
+    let rec: Rec
+    var listRow = false
+    var body: some View {
+        // Whose rec it is, in place of its kind when the hub names one.
+        if let who = rec.owner { Text(who).font(.caption.weight(.semibold)).fixedSize() }
+        RecChip(text: rec.domain, color: recDomainColor(rec.domain))
+        if rec.owner == nil { RecChip(text: rec.kind, color: .secondary) }
+        if let m = rec.modelShort { RecChip(text: m, color: .indigo) }
+        if !listRow {
+            RecChip(text: rec.status, color: recStatusColor(rec.status))
+        } else if !rec.isOpen {
+            RecChip(text: rec.status == "deferred" ? "later" : rec.status, color: recStatusColor(rec.status))
+        }
+        if let o = rec.outcome, !o.isEmpty { RecChip(text: o, color: recOutcomeColor(o)) }
+        // Its session is working right now, so there is nothing to
+        // follow up on: the same dot + word an ask row wears.
+        if rec.thread_running == true { RecRunning() }
     }
 }
 
@@ -343,7 +364,7 @@ struct RecRunning: View {
         HStack(spacing: 4) {
             LiveDot(size: 5)
             Text("running").font(.caption2).foregroundStyle(.blue)
-        }
+        }.fixedSize()
     }
 }
 
@@ -624,16 +645,10 @@ struct RecDetail: View {
         List {
             if let error { Section { ErrorBanner(message: error) } }
             Section {
-                HStack {
-                    if let who = rec.owner { Text(who).font(.caption.weight(.semibold)) }
-                    RecChip(text: rec.domain, color: recDomainColor(rec.domain))
-                    if rec.owner == nil { RecChip(text: rec.kind, color: .secondary) }
-                    if let m = rec.modelShort { RecChip(text: m, color: .indigo) }
-                    RecChip(text: rec.status, color: recStatusColor(rec.status))
-                    if let o = rec.outcome, !o.isEmpty { RecChip(text: o, color: recOutcomeColor(o)) }
-                    if rec.thread_running == true { RecRunning() }
-                    Spacer()
-                    Text(rec.costLabel).font(.callout.weight(.medium)).monospacedDigit()
+                HStack(alignment: .top) {
+                    FlowRow(spacing: 8) { RecPillRun(rec: rec) }
+                    Spacer(minLength: 8)
+                    Text(rec.costLabel).font(.callout.weight(.medium)).monospacedDigit().fixedSize()
                 }
                 Text("\(rec.effort) effort · \(rec.confidence)% confident when filed" + (recDates(rec).isEmpty ? "" : " · \(recDates(rec))"))
                     .font(.caption).foregroundStyle(.secondary)

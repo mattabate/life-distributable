@@ -1316,8 +1316,10 @@ func (m *Manager) Poll() {
 // standing beside: the chat's newest, raised since the owner's last message
 // there. With nothing from the owner in between, the next reply is the same
 // update moving on, not a new one. A card from before the owner's newest
-// message stays: the reply answers what they said.
-func (m *Manager) updateCard(threadID, kind string, open []Ask) (Ask, bool) {
+// message stays: the reply answers what they said. So does a card on another
+// topic: one card per activity, not per chat (a reply on one errand must not
+// rewrite the open card about another).
+func (m *Manager) updateCard(threadID, kind, title, detail, say string, open []Ask) (Ask, bool) {
 	if kind != "read" {
 		return Ask{}, false
 	}
@@ -1326,9 +1328,62 @@ func (m *Manager) updateCard(threadID, kind string, open []Ask) (Ask, bool) {
 		if a.Kind != "read" || a.State != "open" || a.Step() || a.CalID != "" {
 			continue
 		}
-		return a, !m.WroteSince(threadID, a.CreatedAt)
+		return a, !m.WroteSince(threadID, a.CreatedAt) && sameTopic(a.Title+" "+sayBody(a.Said)+" "+a.Detail, title+" "+sayBody(say)+" "+detail)
 	}
 	return Ask{}, false
+}
+
+// sayBody is a spoken line less its greeting.
+func sayBody(say string) string {
+	return strings.TrimSpace(sayGreeting.ReplaceAllString(strings.TrimSpace(say), ""))
+}
+
+// sameTopic: two cards' words name the same activity: at least two content
+// words shared, and they are a fifth of the shorter card's. The greeting and
+// filler words never count.
+func sameTopic(a, b string) bool {
+	wa, wb := topicWords(a), topicWords(b)
+	n := 0
+	for w := range wa {
+		if wb[w] {
+			n++
+		}
+	}
+	return n >= 2 && n*5 >= min(len(wa), len(wb))
+}
+
+var notTopic = map[string]bool{}
+
+func init() {
+	for _, w := range strings.Fields(`hey it's its the and for you your yours with that this these those
+		from into onto have has had was were are is be been being not but all any now just only also then than
+		there here what when which who whom how why will would can could should may might must our ours out
+		off over under about after before again more most some such them they their its his her him she he
+		one two three both each every other still today tonight tomorrow yesterday morning get got make made
+		done went go goes going said says say i'm i've i'll we we're we've so if no yes up do did does`) {
+		notTopic[w] = true
+	}
+}
+
+func topicWords(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '\''
+	}) {
+		w = strings.Trim(w, "'")
+		if len(w) < 3 || notTopic[w] {
+			continue
+		}
+		w = strings.TrimSuffix(w, "'s")
+		for _, end := range []string{"ches", "shes", "sses", "xes"} {
+			if strings.HasSuffix(w, end) {
+				w = strings.TrimSuffix(w, "es") + "s"
+				break
+			}
+		}
+		out[strings.TrimSuffix(w, "s")] = true
+	}
+	return out
 }
 
 // ofProcess matches a process's messages: its first turn is run_id = r.id,
@@ -2346,7 +2401,7 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 			m.db.QueryRow(`SELECT title FROM threads WHERE id=?`, threadID).Scan(&tname)
 			title, detail, say := cardFromReply(text, tname)
 			kind := replyKind(say, detail)
-			if prev, ok := m.updateCard(threadID, kind, raised); ok {
+			if prev, ok := m.updateCard(threadID, kind, title, detail, say, raised); ok {
 				if a, err := m.RewordAsk(prev.ID, title, detail, say, "hub"); err == nil {
 					fresh = append(fresh, a)
 				}

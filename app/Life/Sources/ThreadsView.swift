@@ -280,6 +280,8 @@ struct ThreadsView: View {
             }
             .onChange(of: nav.card, initial: true) { _, c in if let c { nav.card = nil; path.append(c) } }
             .navigationTitle("Sessions")
+            // The title on the camera's line.
+            .toolbarTitleDisplayMode(.inlineLarge)
             .askButton()
             .refreshable { await load() }
             .task { await load() }
@@ -291,20 +293,11 @@ struct ThreadsView: View {
         }
     }
 
-    /// The page: start a session, then the hub's headings — Your turn (paused
-    /// on him), Working (in flight). Mirrors the console's sidebar heading for heading (the owner
-    /// 2026-08-29: "make sure the phone displays the same way"); the layout is
-    /// a phone's, the rule is the same one.
+    /// The page: the hub's headings, Your turn (paused on the owner) and
+    /// Working (in flight), then Idle, every person once: the desktop
+    /// sidebar's rule. There is no New session row: the camera button is the
+    /// phone's one way in.
     @ViewBuilder private var sessionsSections: some View {
-        // Secondary entry: the primary way to start a session is the
-        // Ask button top-right on every screen, which snaps the screen
-        // (the owner 2026-08-21). This stays for text-only asks.
-        #if !targetEnvironment(macCatalyst)
-        // (The desktop's + New session is on its top bar.)
-        Section {
-            Button { composing = true } label: { Label("New session", systemImage: "plus.bubble") }
-        }
-        #endif
         // Your turn first, then Working — each heading's words straight from
         // the hub. (A folded "N waiting on the laptop" row sat between them
         // from 2026-08-24 to 2026-09-23; a web ask is an ordinary cell now.)
@@ -312,11 +305,20 @@ struct ThreadsView: View {
         // Sessions in flight (a running session with cards open wears "N for
         // you" and gets no second row above).
         ForEach(headings.filter { $0.key != "your_turn" }, id: \.key) { h in heading(h) }
-        // THE PEOPLE, as on the Mac's foot: a row each (the hub's role
-        // order), and nothing under them: no All
-        // sessions, no Legacy (2026-10-24 00:42; `rows(_:)`).
-        Section("Sessions") {
-            ForEach(store.team.filter(person)) { t in teamRow(t) }
+        // IDLE: the team less whoever is above, two to a row, name over job
+        // (the Mac's `macItems` pairs), so no person is drawn twice.
+        let idle = idlePeople
+        if !idle.isEmpty {
+            Section("Idle") {
+                ForEach(Array(stride(from: 0, to: idle.count, by: 2)), id: \.self) { i in
+                    HStack(spacing: 0) {
+                        idleCell(idle[i])
+                        Divider()
+                        if i + 1 < idle.count { idleCell(idle[i + 1]) } else { Color.clear.frame(maxWidth: .infinity) }
+                    }
+                    .listRowInsets(EdgeInsets())
+                }
+            }
         }
         if (turn.threads_total ?? threads.count) == 0 && error == nil {
             Section {
@@ -336,27 +338,28 @@ struct ThreadsView: View {
     /// A green dot beside the name: a pill crowds the role in a half-width cell.
     static var speakDot: some View { Circle().fill(Color.green).frame(width: 7, height: 7).accessibilityLabel("speaking") }
 
-    /// One person's row: her name, her role under it, her open cards a gray
-    /// count — the Mac's `teamCard` in a phone list.
-    func teamRow(_ t: Thread) -> some View {
-        let open = turn.forYou[t.id] ?? 0
-        return NavigationLink(value: OpenAsk(thread: t, message: nil)) {
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(t.title).font(.body.weight(.semibold)).lineLimit(1)
-                        if voiced(t.id) { Self.speakDot }
-                    }
-                    if let role = t.role { Text(role).font(.subheadline).foregroundStyle(.secondary).lineLimit(1) }
+    /// The people under no heading above, in the hub's role order.
+    var idlePeople: [Thread] {
+        let placed = Set(headings.flatMap { rows($0) }.map(\.id))
+        return store.team.filter { person($0) && !placed.contains($0.id) && !nested($0) }
+    }
+
+    /// One idle person, half a row: the name (a green dot while a card of
+    /// theirs is speaking) over the job, the Mac's `idleCell`.
+    func idleCell(_ t: Thread) -> some View {
+        Button { path.append(OpenAsk(thread: t, message: nil)) } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(t.title).font(.body).foregroundStyle(.primary).lineLimit(1)
+                    if voiced(t.id) { Self.speakDot }
                 }
-                Spacer(minLength: 0)
-                if open > 0 {
-                    Text("\(open)").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                        .padding(.horizontal, 8).padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.15), in: Capsule())
-                }
+                if let role = t.role { Text(role).font(.footnote).foregroundStyle(.secondary).lineLimit(1) }
             }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     /// One heading and its rows; a heading with no rows is not drawn. With no
@@ -364,7 +367,9 @@ struct ThreadsView: View {
     @ViewBuilder func heading(_ h: BoardHeading) -> some View {
         let list = rows(h)
         if !list.isEmpty {
-            Section("\(h.label) · \(h.count.isEmpty ? "\(list.count)" : h.count)") {
+            // Only Your turn carries its count; Working and Idle are names
+            // (the desktop sidebar's words).
+            Section(h.key != "your_turn" ? h.label : "\(h.label) · \(h.count.isEmpty ? "\(list.count)" : h.count)") {
                 ForEach(list) { t in row(t) }
             }
         }

@@ -1451,6 +1451,49 @@ func TestReplyUpdatesTheOpenReadCard(t *testing.T) {
 	}
 }
 
+// A reply on another topic is a new card beside the open one, not a reword
+// of it.
+func TestReplyOnAnotherTopicIsANewCard(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Catch up the project log.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	reply := func(s string) {
+		b, _ := json.Marshal(s)
+		appendOut(t, out, `{"type":"result","subtype":"success","is_error":false,"result":`+string(b)+`,"total_cost_usd":0.01,"session_id":"s"}`+"\n")
+		m.Poll()
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(5 * time.Millisecond)
+	reply("Say: Hey, the log has your edits: the old pages are out of the apps, the thermostat is in as the first smart-home device, and the three parts are written for someone new to the project.")
+	reply("Say: Hey, the dentist invite went out for Tuesday at 3, and the plumber has his for Thursday at 2:30, both with call links.")
+	var reads []Ask
+	asks, _ := m.ListAsks("active", th.ID, 50)
+	for _, a := range asks {
+		if a.Kind == "read" {
+			reads = append(reads, a)
+		}
+	}
+	if len(reads) != 2 {
+		t.Fatalf("the invites reply reworded the log card: %+v", reads)
+	}
+}
+
+func TestSameTopic(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"The third archive batch has started. Batch 3 of 4 is running.", "The archive job is done. All four batches finished.", true},
+		{"Both email cleanups went through: all 33 handled emails are marked read", "Both email cleanups went through. The eight handled emails are marked read", true},
+		{"Read the project log, now the full history. The log has your edits: the thermostat is in", "The dentist invite went out for Tuesday at 3, and the plumber has his for Thursday", false},
+		{"Your forum account is set up, and you don't need a plan to submit", "Today: 2 PM call with the accountant; a shared bill to settle", false},
+	} {
+		if got := sameTopic(c.a, c.b); got != c.want {
+			t.Errorf("sameTopic(%q, %q) = %v, want %v (%v / %v)", c.a, c.b, got, c.want, topicWords(c.a), topicWords(c.b))
+		}
+	}
+}
+
 // A process with a background task pending is not closed at idleTTL (it
 // would live on for the task beside the next process); past bgIdleTTL it is.
 func TestIdleProcessWithBackgroundTaskStaysOpen(t *testing.T) {

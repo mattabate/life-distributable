@@ -54,7 +54,9 @@ struct CalendarView: View {
     @State private var today = dayString(Date())
     private var anchor: String { picked ?? today }
     @State private var showFilters = false
-    @State private var showAnytime = false
+    /// The phone's inbox, drawn in the page in place of the day (the tray
+    /// icon becomes a calendar that goes back), grey edge to edge.
+    @State private var inboxOpen = false
     /// The pile behind a collapsed box, listed in a sheet. A tapped row is held in `pendingOpen` until that sheet is
     /// gone, then opened — two sheets cannot swap in one breath.
     @State private var group: CalGroup?
@@ -112,7 +114,6 @@ struct CalendarView: View {
             }) { g in phoneGroupSheet(g) }
             #endif
             .sheet(isPresented: $showFilters) { CalFiltersSheet(filters: filtersBinding) }
-            .sheet(isPresented: $showAnytime) { anytimeSheet }
             .onChange(of: nav.cal, initial: true) { _, e in if let e { nav.cal = nil; picked = e.day == today ? nil : e.day; open(e) } }
             .alert("Move every check-in?", isPresented: Binding(get: { cadenceMove != nil }, set: { if !$0 { cadenceMove = nil } })) {
                 Button("Cancel", role: .cancel) { cadenceMove = nil }
@@ -215,6 +216,12 @@ struct CalendarView: View {
 
     private var phoneBody: some View {
             VStack(spacing: 0) {
+                if inboxOpen && mode == .day {
+                    Text("Inbox").font(.title3.weight(.semibold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal).padding(.bottom, 4)
+                    inboxList
+                } else {
                 // The range lives in the page, not the navigation bar: the bar
                 // gives a title about 90pt and clips "August 2026" to "ugust
                 // 2026". Here it is always whole, and it is still the button
@@ -233,7 +240,11 @@ struct CalendarView: View {
                 .accessibilityIdentifier("cal-view")
                 .padding(.horizontal).padding(.bottom, 4)
                 if mode == .schedule { scheduleList } else { grid }
+                }
             }
+            // Open, the inbox is grey edge to edge, behind the status bar too.
+            .background { if inboxOpen && mode == .day { Color(.systemGroupedBackground).ignoresSafeArea() } }
+            .onChange(of: modeRaw) { _, _ in inboxOpen = false }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .askButton()
@@ -241,6 +252,11 @@ struct CalendarView: View {
             .onAppear {
                 // ops/screens.sh calendar:day — the mode a screenshot opens on.
                 if let m = ProcessInfo.processInfo.environment["LIFE_CAL_MODE"], CalMode(rawValue: m) != nil { modeRaw = m }
+                // calendar:inbox is Day with the inbox open, after the mode change has closed it.
+                if ProcessInfo.processInfo.environment["LIFE_CAL_MODE"] == "inbox" {
+                    modeRaw = CalMode.day.rawValue
+                    DispatchQueue.main.async { inboxOpen = true }
+                }
                 if CalMode(rawValue: modeRaw) == nil { modeRaw = CalMode.schedule.rawValue }
             }
     }
@@ -274,20 +290,23 @@ struct CalendarView: View {
         // icon up here would be the same menu twice.
         ToolbarItemGroup(placement: .topBarTrailing) {
             if mode == .day {
+                if !inboxOpen {
                 Button { step(-1) } label: { Image(systemName: "chevron.left") }
                     .accessibilityLabel("Back").accessibilityIdentifier("cal-prev")
                 Button { step(1) } label: { Image(systemName: "chevron.right") }
                     .accessibilityLabel("Forward").accessibilityIdentifier("cal-next")
+                }
                 // The anytime tasks: the grid has no cell for a row with no date, so they live one tap
-                // away, with the overdue rows that are past their cell.
-                Button { showAnytime = true } label: {
-                    Image(systemName: "tray").overlay(alignment: .topTrailing) {
-                        if anytimeCount > 0 {
+                // away, with the overdue rows that are past their cell. The
+                // button is a toggle: open, it is a calendar that goes back.
+                Button { inboxOpen.toggle() } label: {
+                    Image(systemName: inboxOpen ? "calendar" : "tray").overlay(alignment: .topTrailing) {
+                        if !inboxOpen && anytimeCount > 0 {
                             Circle().fill(.red).frame(width: 7, height: 7).offset(x: 4, y: -3)
                         }
                     }
                 }
-                .accessibilityLabel("Inbox").accessibilityIdentifier("cal-anytime")
+                .accessibilityLabel(inboxOpen ? "Day" : "Inbox").accessibilityIdentifier("cal-anytime")
             } else {
                 Picker("Range", selection: $showPast) { Text("Upcoming").tag(false); Text("Past").tag(true) }
                     .pickerStyle(.segmented).frame(width: 170)
@@ -367,8 +386,7 @@ struct CalendarView: View {
     /// too — this is a tray over the calendar, not a move. The heading says
     /// "Overdue", as the console rail does, and each row wears the day it
     /// slipped from.
-    private var anytimeSheet: some View {
-        NavigationStack {
+    private var inboxList: some View {
             List {
                 let overdue = (view?.overdue ?? []).filter { filters.shows($0) }
                 if !overdue.isEmpty {
@@ -419,9 +437,7 @@ struct CalendarView: View {
                     } header: { Text("Anytime") }
                 }
             }
-            .navigationTitle("Inbox").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Close") { showAnytime = false } } }
-        }
+            .listStyle(.insetGrouped)
     }
 
     /// The popout behind a collapsed box: every member on its own line, in the

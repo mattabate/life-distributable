@@ -1325,20 +1325,20 @@ function actionHTML(a, opened, armed, cost) {
   const id = esc(a.id), job = actionJob(a);
   const open = a.open, no = a.state === 'denied' || a.state === 'failed';
   const payload = a.exec_payload && a.exec_type && a.exec_type !== 'none'
-    // Shown plainly: one toggle per card is enough.
-    ? `<div style="margin:6px 0"><div class="small muted">What it runs</div>
-       <pre class="io mono">${esc(typeof a.exec_payload === 'string' ? a.exec_payload : JSON.stringify(a.exec_payload, null, 2))}</pre></div>`
+    // Shut until the owner opens it: the card itself stays full size, only
+    // the raw command folds (a long command is hard to read on a card).
+    ? `<details class="runs"><summary class="small muted">What it runs</summary>
+       <pre class="io mono">${esc(typeof a.exec_payload === 'string' ? a.exec_payload : JSON.stringify(a.exec_payload, null, 2))}</pre></details>`
     : '';
   const arm = v => a.thread_id ? `armActionReply('${escJS(a.id)}','${escJS(v)}')` : `decideAction('${escJS(a.id)}',${v === 'approved'})`;
   const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('action','${escJS(a.id)}',true)` }] : []) : outcomeBtns(a.outcomes, arm, armed).concat({ label: 'Dismiss', js: `cardFold('action','${escJS(a.id)}')` });
-  // A commit is a quiet green card, not the red alarm of an approval; its
-  // kind is its word, so no kind pill.
-  const commit = a.kind === 'commit';
+  // A commit is red like every approval, with its kind pill: green is the
+  // installer's alone.
   const [text, pics] = splitPictures(a.detail);
-  const meta = `${a.kind && a.kind !== 'other' && !commit ? pill(a.kind, kindPill[a.kind]) : ''} ${job ? pill('⚙ ' + job + ' job') : ''} ${a.project ? esc(a.project) : ''}`.trim();
+  const meta = `${a.kind && a.kind !== 'other' ? pill(a.kind, kindPill[a.kind]) : ''} ${job ? pill('⚙ ' + job + ' job') : ''} ${a.project ? esc(a.project) : ''}`.trim();
   return cardHTML({
-    ref: 'action', id: a.id, title: a.title, tint: commit ? 'commit' : '', verb: commit ? 'commit' : 'approve',
-    mark: commit ? '' : '🔴 ',
+    ref: 'action', id: a.id, title: a.title, tint: '', verb: 'approve',
+    mark: '🔴 ',
     body: askBody(text, 'action:' + a.id) + payload, pics,
     said: a.said, thread: a.thread_id, waiting: open && a.waiting_to_speak, speaking: open && a.speaking,
     meta,

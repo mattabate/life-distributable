@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"life/hub/internal/spend"
 	"life/hub/internal/threads"
@@ -104,9 +106,17 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.settingsNow())
 }
 
+// hubJSONMu holds one read-modify-write of hub.json at a time, so two
+// PATCHes close together (phone and console) cannot drop each other's key
+// (life-distributable#219).
+var hubJSONMu sync.Mutex
+
 // writeHubJSON sets keys in the hub.json at path, keeping every other key
-// in its place, through a temporary file renamed over it (same mode).
+// in its place, through a temporary file of its own in the same folder,
+// synced and renamed over it (same mode): a torn write never becomes hub.json.
 func writeHubJSON(path string, set map[string]any) error {
+	hubJSONMu.Lock()
+	defer hubJSONMu.Unlock()
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -163,11 +173,28 @@ func writeHubJSON(path string, set map[string]any) error {
 	if st, err := os.Stat(path); err == nil {
 		mode = st.Mode().Perm()
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out.Bytes(), mode); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), ".hub.json-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmp := f.Name()
+	_, err = f.Write(out.Bytes())
+	if err == nil {
+		err = f.Chmod(mode)
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
 }
 
 // The team's roles (team mode). Reading them is anyone's; adding or

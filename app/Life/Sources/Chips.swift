@@ -143,7 +143,11 @@ struct Chip: View {
         } else {
             core.background(tint.map { AnyShapeStyle($0.opacity(tintFill)) } ?? AnyShapeStyle(.quaternary), in: shape)
                 .foregroundStyle(ink)
-                .lineLimit(style == .pill ? 1 : nil)
+                .lineLimit(style == .pill || style == .tag ? 1 : nil)
+                // A tag is one word and never breaks inside it (a crowded rec
+                // row squeezed "ACCEPTED" into "ACCEPT-/ED"); the row wraps
+                // to a second line instead.
+                .fixedSize(horizontal: style == .tag, vertical: false)
         }
     }
 }
@@ -178,7 +182,9 @@ struct FlowRow: Layout {
             var x = bounds.minX + (alignment == .center ? slack / 2 : alignment == .trailing ? slack : 0)
             for _ in 0..<row.count {
                 let size = fit(subviews[i], width: bounds.width)
-                subviews[i].place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(size))
+                // Centred in its line, so a bare name beside a padded tag
+                // (a rec's owner beside its domain) sits level with it, not above.
+                subviews[i].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), anchor: .topLeading, proposal: ProposedViewSize(size))
                 x += size.width + spacing
                 i += 1
             }

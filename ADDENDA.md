@@ -1594,3 +1594,48 @@ Entry format:
 - For: everyone on the phone app
 - Fix: a full-screen video stayed upright when the phone was turned, and Download on a card's video or picture only offered the Files sheet. Now a full-screen video turns to landscape with the phone (the rest of the app stays portrait, and Done turns it back), and Download saves to Photos, falling back to the Files sheet only for what Photos cannot hold. The first save asks for add-only Photos access.
 - How: same merge as add-0008, then `make app-project` and `make check`. By hand: `app/Life/Sources/Attachments.swift` (`VideoFullScreen.turn`, `saveToPhotos`, `BlobVideo.download`, `PictureActions`), `app/Life/Sources/Push.swift` (`AppDelegate.orientations`, `supportedInterfaceOrientationsFor`), `app/project.yml` and `app/Life/Info.plist` (`NSPhotoLibraryAddUsageDescription`, landscape orientations).
+
+## add-0236 · 2026-11-17 · The update check records an entry only once its card exists
+- For: everyone
+- Fix: the weekly `addenda-check` job recorded the newest entry it had seen itself, before the hub turned its lines into cards, so a run that timed out, ended without its result block, or met a card that could not be made lost those entries for good (#218). The job now only reads the record and returns the newest id as its `mark`; the hub runs `ops/addenda-seen.sh` with it once every card of that run exists (a job's new `after_cards` script), and otherwise the next check shows the same entries again. Thanks @uncovertechtalent.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/sched/sched.go` (`JobSpec.AfterCards`, `Output.Mark`, `route`, `afterCards`, `markLine`), `hub/internal/sched/sched_test.go` (`TestAfterCardsOnlyOnceCardsExist`), `hub/cmd/hub/main.go` (`sch.Ask` returns an error), `ops/schedule.json` (`addenda-check`: read-only grant, `after_cards`, steps 3 and 5), `ops/addenda-seen.sh` (header).
+
+## add-0237 · 2026-11-17 · Settings writes close together both land
+- For: everyone
+- Fix: two settings changes close together (the phone and the console, say) could each read `ops/hub.json` before the other wrote it, so one change was lost, and both used the same temporary file, so a torn file could replace `hub.json` and the next restart fail to load it (#219). Writes now take turns, and each goes through its own temporary file, synced before it replaces `hub.json`. Thanks @uncovertechtalent.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/server/settings.go` (`hubJSONMu`, `writeHubJSON`), `hub/internal/server/settings_write_test.go` (new).
+
+## add-0238 · 2026-11-17 · The monthly cert renewal waits for running actions
+- For: everyone
+- Fix: `ops/renew-cert.sh` restarted the hub with a bare `launchctl kickstart`, so an approved action running at that moment was killed mid-run and came back uncertain (#220). It now restarts through `ops/hub.sh restart`, which waits for running actions first. Thanks @uncovertechtalent.
+- How: same merge as add-0008. By hand: `ops/renew-cert.sh` (last line).
+
+## add-0239 · 2026-11-17 · A reply rewords an open read card only on the same topic
+- For: everyone (hub)
+- Fix: with an open read card in a chat and nothing new from you, a session's next reply reworded that card whatever it was about, so a reply on one errand could overwrite the card about another. Now the reply rewords the open card only when the two share the topic (at least two content words, a fifth of the shorter card's, greeting and filler left out); otherwise it is a new card beside it. Progress on the same job still folds into one card.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/runner.go` (`updateCard`, `sayBody`, `sameTopic`, `topicWords`, the `updateCard` call in `finishTurn`), `hub/internal/threads/runner_test.go` (`TestReplyOnAnotherTopicIsANewCard`, `TestSameTopic`).
+
+## add-0240 · 2026-11-17 · Approval cards: "What it runs" folded, commits red again
+- For: everyone on the phone app, web console and desktop app
+- Fix: an approval card's raw command showed in full and could make the card too big to read, and add-0232's green COMMIT card made a commit approval look like an install. Now "What it runs" is shut until you open it (only the command folds; the rest of the card stays full size), and a commit approval is red with the approve verb and its kind pill like every other approval; green is the installer's alone.
+- How: same merge as add-0008, then `make check`, `make webcheck` and `ops/hub.sh restart` (and `make mac` for the desktop app). By hand: `hub/internal/server/web/ui.js` (`actionHTML`: `details.runs`, the commit branch removed), `hub/internal/server/web/app.css` (`.runs` added, `.ask.commit` removed), `hub/internal/server/web/test/ui.test.js` ("actionHTML: the approval card in the chat"), `app/Life/Sources/ApprovalCard.swift` (`runsOpen`, `payload`, `body`, `metaRow`).
+
+## add-0241 · 2026-11-17 · Meetings: sessions talk in one file, woken by each other's posts
+- For: everyone (hub, team mode)
+- Fix: getting several sessions to work something out together meant one approved relay per hand-off, or timed wakes that left everybody waiting. Now you can open a meeting (`lifectl meeting open "topic" --members a,b,c [--text "…"]`): each post is appended to one file and queued at once to every other member (an idle one starts a turn, a busy one gets it when its turn ends), framed as another session's words you did not see, never as instructions. Any member leaves or closes it for all; a member may break out with others in the room (`--parent`), and the breakout's close is posted back. Opening the room is your approval: sessions cannot open a top-level meeting or join one they were never put in. Caps: 16 members, 40 posts a member, 30 session posts per room in 10 minutes, 4 open breakouts per session.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/meeting.go` + `meeting_test.go` (new; tables `meetings`, `meeting_members`, `meeting_posts`), `hub/internal/threads/threads.go` (`New`: `db.Migrate("meetings", MeetingSchema)`), `hub/internal/server/meeting.go` (new), `hub/internal/server/routes.go` (seven `/api/v1/meetings` rows), `hub/internal/server/server_test.go` (`TestFreshSchema` inventory, `TestMeetingsAPI`), `hub/cmd/lifectl/main.go` (`meeting` command and usage lines), `shared/api.md` (the `/api/v1/meetings` sections).
+
+## add-0242 · 2026-11-17 · A rec's tags wrap instead of breaking mid-word
+- For: everyone on the phone app
+- Fix: a rec row with several tags (owner, domain, model, status, outcome, running, dates) squeezed them into one line, so a tag could break inside its word ("ACCEPT-/ED") and the row ran long. A tag is now one line at its natural width, and the row's tags wrap to a second line when they do not fit, on the list and on a rec's page. Each item in a wrapping row sits centred in its line, so the owner's name is level with the tags beside it.
+- How: same merge as add-0008, then `make check`. By hand: `app/Life/Sources/Chips.swift` (`Chip` `.tag` `fixedSize`, `FlowRow.placeSubviews`), `app/Life/Sources/RecsView.swift` (`RecRow`, new `RecPillRun`, `RecRunning`, `RecDetail.phoneList`).
+
+## add-0243 · 2026-11-17 · The phone calendar's inbox opens in the page
+- For: everyone on the phone app
+- Fix: in Day, the tray button opened the inbox (Overdue, Due, Do soon, Sessions waiting, Anytime) as a sheet over the calendar. It is now a toggle: tapped, the day gives way to an Inbox title and the same list on a grey page that runs edge to edge, behind the status bar too; the back and forward arrows step aside and the tray becomes a calendar icon that goes back to the day you were on. Changing the mode closes it. `LIFE_CAL_MODE=inbox` opens Day with the inbox open, for screenshots. The desktop app is unchanged.
+- How: same merge as add-0008, then `make check`. By hand: `app/Life/Sources/CalendarView.swift` (`inboxOpen`, `phoneBody`, `toolbar`, `inboxList`).
+
+## add-0244 · 2026-11-17 · Phone Sessions and Recs: shorter rows, every person once
+- For: everyone on the phone app
+- Fix: the Sessions page spent its height on a tall title, a New session row, multi-line cards and a foot of model, cost, schedule and live call count on every row, and its Sessions list at the bottom drew a person a second time when they already sat under Your turn or Working. Now the title sits on the camera button's line, the New session row is gone (the camera button is the way in), each card is one line, a row's foot keeps only its speaking and waiting pills, Working carries no count, and the bottom list is Idle: the team less whoever is above, two to a row, name over role, as on the desktop sidebar. The phone's Recs page is titled "Recs" on the same line; the desktop keeps Recommendations.
+- How: same merge as add-0008, then `make check`. By hand: `app/Life/Sources/ThreadsView.swift` (`phoneBody`, `sessionsSections`, `idlePeople`, `idleCell(_:)`, `heading`), `app/Life/Sources/ThreadRows.swift` (`MiniCard`, `ThreadRow` foot), `app/Life/Sources/RecsView.swift` (`pageModifiers`).
