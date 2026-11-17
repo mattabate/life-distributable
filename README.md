@@ -229,8 +229,10 @@ No. It's an independent open source project built on Claude Code.
 the iPhone and desktop app. `shared/` is the contract between them, so the
 two sides agree by test. `ops/` is the scripts that run one install: build
 and start the hub, back it up nightly, install the apps, screenshot the
-pages. Those scripts are the only commands a session may run, so that folder
-is also the list of what the agent can do to your Mac.
+pages. Sessions also build, test and edit code in this folder, so the agent
+can run code on your Mac. What it cannot do on its own is anything gated
+(money, delete, contact, share, push): with sessions run as a separate user
+that is a wall, without one it is a rule the agent follows.
 
 ## Who made this
 
