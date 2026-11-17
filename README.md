@@ -4,6 +4,10 @@
 
 **A self-hosted swarm of AI agents, with apps on iPhone, Mac and web.**
 
+[![The life demo video: the desktop app's Sessions list next to the iPhone app with an approval card. Click to watch it on lifedistributable.com](docs/img/demo.jpg)][site]
+
+<p align="center"><strong><a href="https://lifedistributable.com">Watch the demo (3:45) on lifedistributable.com</a></strong></p>
+
 *life* is a self-hosted team of AI agents built on [Claude Code][claude-code].
 It will help you meet your goals, whatever they are.
 
@@ -49,8 +53,8 @@ in [ADDENDA.md](ADDENDA.md) every week, and your agent brings each one to you.
 
 <table>
 <tr>
-<td width="50%" valign="top"><img src="docs/img/sessions.png" alt="The life desktop app's Sessions list: under Your turn, one row per agent with its open card: Charlotte, marketing manager, a build thread to post on X; Diane, executive assistant, dinner with friends on Friday or Saturday; Jules, head of AI, a local model that can route messages; Grace, chief technology officer, passing on work Tim finished; Fred, chief financial officer, two subscriptions for the same thing; Rachel, head of wellness, a sleep log. Under Working, Randy, whose chat is open on the right with a photo backup running and its progress bar. Under Idle, Herbert, chief of staff, and the rest of the team"></td>
-<td width="50%" valign="top"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: Powered by Claude Code with how much of the 7 day limits is left; Devices, the Mac hub and a phone; the Team org chart under you: Herbert, chief of staff, Rachel, head of wellness, and Fred, chief financial officer; then Grace, chief technology officer, over Randy, Owen and Tim, Jules, head of AI, over Brahms the composer and Lothar the mathematician, and Diane, executive assistant, over Choppy the wedding planner; then Charlotte, marketing manager, and Justin, head of strategy; each card marked with the goals it owns; seven goals in Work, Social and Lifestyle; and the data sources for each goal with their logos"></td>
+<td width="50%" valign="top"><img src="docs/img/sessions.png" alt="The life desktop app's Sessions list: under Your turn, one row per agent with its open cards: Charlotte, chief marketing officer, a build thread to post on X and a thumbnail to pick for the demo video; Diane, executive assistant, dinner with friends on Friday or Saturday; Jules, head of AI, a local model that can route messages; Fred, chief financial officer, two subscriptions for the same thing; Rachel, head of wellness, a sleep log. Under Working, Tim, UI engineer, two of three screens done, and Randy, head of data, whose chat is open on the right with a backup of 4,210 photos running and its progress bar. Under Idle, Herbert, chief of staff, and the rest of the team"></td>
+<td width="50%" valign="top"><img src="docs/img/configuration.png" alt="The life desktop app's Configuration page: Powered by Claude Code with how much of the 7 day limits is left; Devices, the Mac hub and a phone; the Team org chart under you: Herbert, chief of staff, Rachel, head of wellness, and Fred, chief financial officer; then Grace, chief technology officer, over Randy, Owen and Tim, Jules, head of AI, over Brahms the composer and Lothar the mathematician, and Diane, executive assistant, over Choppy the wedding planner; then Charlotte, chief marketing officer, and Justin, head of strategy; each card marked with the goals it owns; seven goals in Work, Social and Lifestyle; and the data sources for each goal with their logos"></td>
 </tr>
 <tr>
 <td align="center"><strong>Sessions.</strong> Agents tell you when they need you.</td>
@@ -96,11 +100,11 @@ You don't need to be technical.
 
 | **Calendar.** Your steps and the agents' runs. | **Roles.** Agents hand work to each other. |
 |---|---|
-| ![The life desktop app's Calendar on the week of November 8: a morning routine every day, piano harmony homework in the evening, a proof to read, plants to water, a build thread to post, lunch with a friend, a demo to record, the weekly team review, the app update Grace ships on Monday, her release notes to read on Tuesday, the music service to pick and gym days, with overdue, due, do soon and sessions waiting lists](docs/img/calendar.png) | ![Grace, the chief technology officer, in the life desktop app, speaking aloud: a card telling you Tim, one of her engineers, finished the bigger calendar text and it is in tomorrow's update, with the 5 PM app update coming up below](docs/img/chat.png) |
+| ![The life desktop app's Calendar on the week of November 15: piano practice every day, a morning routine and a harmony exercise most mornings, a demo to record, plants to water, gym days, lunch with a friend, a call with Mom, dinner, a bike ride, and runs the agents do on their own, with due, do soon, sessions waiting and anytime lists](docs/img/calendar.png) | ![Grace, the chief technology officer, in the life desktop app, speaking aloud: a card telling you Tim, one of her engineers, finished the bigger calendar text and it is in tomorrow's update, with the 5 PM app update coming up below](docs/img/chat.png) |
 
 | **Cards.** The agent proposes, you approve. | **Cards.** A running job shows its progress. |
 |---|---|
-| ![Charlotte, the marketing manager, in the life desktop app: an approval card to post this week's build thread on X, with the first post quoted, tagged share, with Approve, Deny, Reply and Dismiss, a rec she filed, and a search rankings check coming up below](docs/img/approval.png) | ![The life desktop app's Sessions list with Randy's chat open: an approved backup of 4,210 photos to cloud storage, running, its progress bar past halfway](docs/img/sessions.png) |
+| ![Charlotte, the chief marketing officer, in the life desktop app: a decide card to pick the demo video's thumbnail, and an approval card to post this week's build thread on X, with the first post quoted, tagged share, with Approve, Deny, Reply and Dismiss, a rec she filed, and a search rankings check coming up below](docs/img/approval.png) | ![The life desktop app's Sessions list with Randy's chat open: an approved backup of 4,210 photos to cloud storage, running, its progress bar past halfway](docs/img/sessions.png) |
 
 ### iPhone app
 
@@ -111,9 +115,9 @@ You don't need to be technical.
 <th align="left"><strong>Calendar.</strong> Your day at a glance.</th>
 </tr>
 <tr>
-<td valign="top"><img src="docs/img/phone-approval.png" alt="The life iPhone app: Charlotte, the marketing manager, in chat with an approval card to post this week's build thread on X, the first post quoted, tagged share, with Approve, Deny, Reply and Dismiss buttons, a rec she filed, and a search rankings check coming up"></td>
-<td valign="top"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions tab: Your turn, 6 cards in 6 sessions, one row per agent: Charlotte's build thread to approve, Diane's dinner night to decide, Jules's local model to read, Grace speaking Tim's finished work aloud, and Fred's two subscriptions below"></td>
-<td valign="top"><img src="docs/img/phone-calendar.png" alt="The life iPhone app Calendar tab on November 8: the passport to renew, overdue, then seven items due today: the morning routine, plants to water at 9, the build thread to post at 11, lunch with a friend at 12:30, the demo to record at 3, a piano harmony exercise at 7 and lights out at 11"></td>
+<td valign="top"><img src="docs/img/phone-approval.png" alt="The life iPhone app: Charlotte, the chief marketing officer, in chat: a rec she filed, a decide card to pick the demo video's thumbnail, and an approval card to post this week's build thread on X, the first post quoted, tagged share, with Approve, Deny, Reply and Dismiss buttons"></td>
+<td valign="top"><img src="docs/img/phone-sessions.png" alt="The life iPhone app Sessions tab: Your turn, 7 cards in 6 sessions, one row per agent: Charlotte's build thread to approve and the demo video's thumbnail to pick, Diane's dinner night to decide, Jules's local model and Randy's finished photo backup to read, and Grace speaking Tim's finished work aloud below"></td>
+<td valign="top"><img src="docs/img/phone-calendar.png" alt="The life iPhone app Calendar tab on Monday, November 16: four items due today: piano practice, the demo to record at 3, plants to water at 7 and lights out at 11; a proof to read tomorrow night; then the sessions waiting on you, the demo video's thumbnail to pick first"></td>
 </tr>
 </table>
 
@@ -245,6 +249,7 @@ Found a security hole? [Report it privately](https://github.com/mattabate/life-d
 MIT. See [LICENSE](LICENSE).
 
 [repo]: https://github.com/mattabate/life-distributable
+[site]: https://lifedistributable.com
 [issues]: https://github.com/mattabate/life-distributable/issues
 [claude-code]: https://claude.com/claude-code
 [claude-code-setup]: https://code.claude.com/docs/en/setup
