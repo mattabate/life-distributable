@@ -1,11 +1,52 @@
 package threads
 
 import (
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
+
+// openRunFile opens a file in the runs folder for the hub to write. The
+// session user may add files there (session-user-prep.sh's ACL), so a run's
+// name could already be a link it planted to a file of the owner's, and the
+// hub would write through it with the owner's rights. A symlink fails the open
+// (O_NOFOLLOW), and a hard link or anything but a plain file is refused
+// before a byte is written.
+func openRunFile(path string, flag int) (*os.File, error) {
+	f, err := os.OpenFile(path, flag|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	st, err := f.Stat()
+	if err == nil {
+		if sys, ok := st.Sys().(*syscall.Stat_t); !st.Mode().IsRegular() || !ok || sys.Nlink != 1 {
+			err = errors.New("not a plain file of its own: " + path)
+		}
+	}
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+// writeRunFile is os.WriteFile through openRunFile.
+func writeRunFile(path string, b []byte) error {
+	f, err := openRunFile(path, os.O_CREATE)
+	if err != nil {
+		return err
+	}
+	if err = f.Truncate(0); err == nil {
+		_, err = f.Write(b)
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
 
 // RunAs starts session processes as another macOS user (config session_user),
 // so a session cannot write the owner's checkout, read ops/secrets or write

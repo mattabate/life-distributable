@@ -156,11 +156,7 @@ func (s *Server) Routes() []string {
 // register wires every route into the mux, plus the static console files.
 func (s *Server) register() {
 	for _, r := range s.routes() {
-		h := r.h
-		if !r.open {
-			h = s.auth(s.sessionLimits(r.pattern, h))
-		}
-		s.mux.HandleFunc(r.pattern, h)
+		s.mux.HandleFunc(r.pattern, s.wrap(r))
 	}
 	sub, _ := fs.Sub(webFS, "web")
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", staticCache(http.FileServerFS(sub), sub)))

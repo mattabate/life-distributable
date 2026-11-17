@@ -8,6 +8,7 @@
 #   hub.sh logs      tail the hub log
 #   hub.sh url       print the console URL with a one-minute login code (first visit; a Terminal only)
 #   hub.sh web       open the console in the browser (sets the cookie for a year)
+#   hub.sh token     print the owner's hub token, for Apple Passwords (a Terminal only)
 set -euo pipefail
 cd "$(dirname "$0")"
 SELF="$PWD/hub.sh"
@@ -148,5 +149,10 @@ case "${1:-}" in
            [[ -n "$code" ]] || { echo "hub.sh url: the hub gave no login code (is it up?)" >&2; exit 1; }
            echo "https://$HOST/?code=$code" ;;
   web)     open "$("$SELF" url)" ;;
-  *) sed -n '2,10p' "$0"; exit 1 ;;
+  # The owner's token, for the Passwords entry `life hub` that the desktop app
+  # on another Mac and the phone's Settings paste from (SETUP step 5.7). Only
+  # to a person at a Terminal, as url: never into a session's transcript.
+  token)   [[ -t 0 && -t 1 ]] || { echo "hub.sh token: printed only in a Terminal window" >&2; exit 2; }
+           cat secrets/hub.token; echo ;;
+  *) sed -n '2,11p' "$0"; exit 1 ;;
 esac

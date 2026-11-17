@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/sha256"
-	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -275,38 +274,6 @@ func (s *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return h.Hijack()
 	}
 	return nil, nil, errors.New("server: underlying writer cannot hijack")
-}
-
-// auth accepts "Authorization: Bearer <token>" or the "life_token" cookie
-// (set by the dashboard once from a ?code=, login.go). Constant-time compare.
-func (s *Server) auth(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.authorized(r) {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			jsonErr(w, http.StatusUnauthorized, "unauthorized")
-			return
-		}
-		h(w, r)
-	}
-}
-
-func (s *Server) authorized(r *http.Request) bool {
-	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if got == "" {
-		if c, err := r.Cookie("life_token"); err == nil {
-			got = c.Value
-		}
-	}
-	if got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) == 1 {
-		return true
-	}
-	// A session token: the caller IS that session, whatever header it sent, so
-	// every check on X-Life-Thread holds against it.
-	if id := s.sessionFromRequest(r); id != "" {
-		r.Header.Set("X-Life-Thread", id)
-		return true
-	}
-	return false
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {

@@ -114,7 +114,7 @@ var hangText = fmt.Sprintf("the turn printed nothing for %d min (a tool call hun
 func (m *Manager) finishGone(r run) {
 	log.Printf("thread %s: process %s: %s", r.thread, r.id, goneText)
 	if r.busy == 1 {
-		os.WriteFile(r.out+".err", []byte(goneText), 0o600)
+		writeRunFile(r.out+".err", []byte(goneText))
 	}
 	m.finishProcess(r)
 }
@@ -878,7 +878,7 @@ func (m *Manager) deliver(t Thread, r run) error {
 	if usd := m.capUSD(t, r.trigger); usd > 0 {
 		p = capNote(usd) + "\n\n" + p
 	}
-	f, err := os.OpenFile(r.in, os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := openRunFile(r.in, os.O_APPEND)
 	if err != nil {
 		return err
 	}
@@ -951,10 +951,10 @@ func (m *Manager) launch(t Thread) error {
 	now := time.Now()
 	runID := store.NewID(now.Format("20060102-150405"))
 	base := filepath.Join(m.RunsDir, t.ID+"-"+runID)
-	if err := os.WriteFile(base+".prompt", []byte(prompt), 0o600); err != nil {
+	if err := writeRunFile(base+".prompt", []byte(prompt)); err != nil {
 		return err
 	}
-	if err := os.WriteFile(base+".in", []byte(userLine(prompt)), 0o600); err != nil {
+	if err := writeRunFile(base+".in", []byte(userLine(prompt))); err != nil {
 		return err
 	}
 	// stream-json both ways (needs --verbose in -p mode): one JSON line per
@@ -975,7 +975,7 @@ func (m *Manager) launch(t Thread) error {
 		args = append(args, "--disallowedTools", strings.Join(d, ","))
 	}
 	// The list the process launched with, for toolsStale.
-	if err := os.WriteFile(base+".tools", []byte(strings.Join(m.AllowedTools, ",")), 0o600); err != nil {
+	if err := writeRunFile(base+".tools", []byte(strings.Join(m.AllowedTools, ","))); err != nil {
 		return err
 	}
 	if t.ClaudeSessionID != "" && !lean {
@@ -1299,7 +1299,7 @@ func (m *Manager) Poll() {
 			// words: the same call usually hangs again, so the card, no retry.
 			log.Printf("thread %s: process %s: %s", r.thread, r.id, hangText)
 			m.tmux("kill-session", "-t", m.tmuxSession(r.thread, r.id))
-			os.WriteFile(r.out+".err", []byte(hangText), 0o600)
+			writeRunFile(r.out+".err", []byte(hangText))
 			m.finishProcess(r)
 		case r.busy == 0 && r.eof == 0 && now.Sub(r.lastOutput) > idleTTL && (r.tasks == 0 || now.Sub(r.lastOutput) > bgIdleTTL):
 			// Not while a background task is pending: the closed process
@@ -1462,7 +1462,7 @@ func (m *Manager) sessionTokenEnv(base, threadID string) (string, error) {
 		return "", nil
 	}
 	f := base + ".tok"
-	if err := os.WriteFile(f, []byte(m.SessionToken(threadID)), 0o600); err != nil {
+	if err := writeRunFile(f, []byte(m.SessionToken(threadID))); err != nil {
 		return "", err
 	}
 	q := shellQuote(f)
@@ -1486,7 +1486,7 @@ func (m *Manager) toolsStale(r run) bool {
 // sendEOF asks the feeder to close claude's stdin; the process exits after
 // its current (none expected) turn. The next message starts a fresh process.
 func (m *Manager) sendEOF(r run) {
-	if f, err := os.OpenFile(r.in, os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+	if f, err := openRunFile(r.in, os.O_APPEND); err == nil {
 		f.WriteString(eofSentinel + "\n")
 		f.Close()
 	}
@@ -2744,7 +2744,7 @@ func (m *Manager) finishProcess(r run) {
 	// never comes, holding the tmux session open. It gets that line, so it and
 	// the session end with the run. A second eof after sendEOF's is never read.
 	if r.in != "" {
-		if f, err := os.OpenFile(r.in, os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+		if f, err := openRunFile(r.in, os.O_APPEND); err == nil {
 			f.WriteString(eofSentinel + "\n")
 			f.Close()
 		}

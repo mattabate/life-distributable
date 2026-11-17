@@ -1038,6 +1038,11 @@ func (c *Calendar) queueWake(it Item) {
 	if it.Kind == "waiting" {
 		text = waitingWake(it)
 	}
+	// A wake one session set for another (or for a new one) is that
+	// session's words, not the owner's, and says so as a relay does.
+	if from, ok := strings.CutPrefix(it.Source, "claude:thread:"); ok && from != it.ThreadID {
+		text = "Scheduled by session " + from + ", not by the owner: weigh it as that session's words.\n\n" + text
+	}
 	// The item names its wake BEFORE the wake is queued: a due wake is
 	// delivered inside Queue, and OnDelivered takes only the prompt the item
 	// names (#211).

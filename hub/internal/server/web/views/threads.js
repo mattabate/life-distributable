@@ -33,7 +33,7 @@ async function drawSessions(view, rest) {
   // loaded; the open chat has its own thread-scoped feed (watchThread). The
   // composer holds a draft, so the list refreshes even while he types.
   const wake = id ? () => { watchThread(id); refreshThread(id).catch(() => {}); } : null;
-  setRedraw(() => drawList(side, true), view, { typing: true, wake });
+  setRedraw(() => drawList(id, true), view, { typing: true, wake });
   if (id) watchThread(id);
 }
 views.sessions = { draw: drawSessions, redraw: () => render() };

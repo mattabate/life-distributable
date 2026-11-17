@@ -594,6 +594,20 @@ func (s *Scheduler) runs(where string, limit int, args ...any) ([]Run, error) {
 func (s *Scheduler) Run(name, via string) (int64, error) { return s.runWith(name, via, "") }
 
 func (s *Scheduler) runWith(name, via, promptID string) (int64, error) {
+	// A run asked for by hand (the API, `lifectl run`) passes the same budget
+	// guard as Fire: a session could start paid runs back to back while spend
+	// was paused.
+	if s.Allow != nil {
+		if ok, why := s.Allow("job", name); !ok {
+			log.Printf("sched: %s (%s) skipped: %s", name, via, why)
+			fin := store.TS(s.Now())
+			var id int64
+			if res, err := s.db.Exec(`INSERT INTO runs (job, started_at, finished_at, ok, error, prompt_id) VALUES (?,?,?,0,?,?)`, name, fin, fin, skippedByHub+why, promptID); err == nil {
+				id, _ = res.LastInsertId()
+			}
+			return id, errors.New(skippedByHub + why)
+		}
+	}
 	b, err := s.begin(name, via, promptID)
 	if err != nil {
 		return b.id, err
