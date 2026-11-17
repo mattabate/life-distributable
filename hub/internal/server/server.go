@@ -156,7 +156,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ETag sits above gzip: it hashes the plain JSON, so the tag is the same
 	// whether or not the client asked for compression.
 	cw, finish := maybeETag(gw, r)
-	s.mux.ServeHTTP(cw, r)
+	replays.serveOnce(cw, r, s.mux)
 	finish()
 	done()
 	if took := time.Since(start); logRequest(r.Method, r.URL.Path, sw.code, took) {

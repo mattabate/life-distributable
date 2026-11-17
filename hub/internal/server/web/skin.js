@@ -8,13 +8,17 @@
 // Nothing is lost: what a mark said (read / approval / rec) is the card's
 // tint rail in the skin. Only this fixed set goes — an emoji in something he
 // or a session wrote is left alone — and the typographic marks (✓ ✕ ⌘ ↩ ✻)
-// stay, they are state, not decoration.
+// stay, they are state, not decoration. Code is never touched: a code block
+// or an approval's What it runs is what the owner copies and what runs, so it
+// shows byte for byte.
 (() => {
   const UI = /(?:🔵|🔴|💡|📲|📅|📎|⏰|💬|⏳|⚠︎|⚠|⚙️?)\s?/gu;
+  const KEEP = '.chat-row .t,.row-body,textarea,input,pre,code';
   const clean = root => {
+    if (root.closest && root.closest(KEEP)) return;
     const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-      if (n.parentElement && n.parentElement.closest('.chat-row .t,.row-body, textarea, input')) continue;
+      if (n.parentElement && n.parentElement.closest(KEEP)) continue;
       UI.lastIndex = 0;
       if (UI.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(UI, '');
     }

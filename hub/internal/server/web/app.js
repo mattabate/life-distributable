@@ -37,8 +37,11 @@ async function api(path, { decider: deciding, ...opts } = {}) {
   // fetch() rejects (TypeError "Failed to fetch") only when no answer came
   // back — in practice a hub restart, a second or two of refused connections.
   // Retry through it quietly instead of toasting it at a Send (2026-09-18).
-  // A graceful drain finishes in-flight requests, so a POST that was handled
-  // got its answer and is never sent twice.
+  // A link that drops after the hub has a write rejects the same way, so a
+  // write carries one random X-Life-Request through its retries and the hub
+  // runs it once (server/replay.go: a chat message could otherwise land twice).
+  const method = (opts.method || 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') headers['X-Life-Request'] = crypto.randomUUID();
   let r;
   for (let i = 0; ; i++) {
     try {

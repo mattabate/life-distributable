@@ -918,11 +918,12 @@ private struct SelectableText: UIViewRepresentable {
         /// A `life://` link (a hub id, Refs.swift) goes to the app's own
         /// navigation; a text view on its own would hand it to iOS. So does a
         /// link into the hub's blobs, which a browser opens as
-        /// {"error":"unauthorized"}.
+        /// {"error":"unauthorized"}. Every other link goes there too, so
+        /// `LifeLinks` decides what may open at all; a text view on its own
+        /// would hand any scheme straight to iOS.
         var open: OpenURLAction?
         func textView(_ tv: UITextView, primaryActionFor item: UITextItem, defaultAction: UIAction) -> UIAction? {
-            guard case .link(let url) = item.content, url.scheme == "life" || hubBlobRef(url) != nil,
-                  let open else { return defaultAction }
+            guard case .link(let url) = item.content, let open else { return defaultAction }
             return UIAction { _ in open(url) }
         }
         /// What `sizeThatFits` has already worked out for the text this view

@@ -27,12 +27,25 @@ slug() { printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g'; }
 db() { bash "$ROOT/ops/db.sh" "$1"; }
 restart() { nohup sh -c "sleep 3; bash '$ROOT/ops/hub.sh' restart" >/dev/null 2>&1 & }
 
+# The moved copy is the newer one: the session kept writing it after the move,
+# so it comes back and the parked copy stays as it was (restoring the parked
+# file would lose every turn since the move).
+# ops/session-user-move-test.sh runs this function alone.
+undo_transcripts() { # $1 = the moved.tsv list
+  local parked old new
+  while IFS=$'\t' read -r parked old new; do
+    mkdir -p "$(dirname "$old")"
+    if as test -f "$new"; then
+      as cat "$new" > "$old.undo" && mv "$old.undo" "$old" && as rm -f "$new" || { echo "copy back failed: $new"; return 1; }
+    else
+      cp -p "$parked" "$old"
+    fi
+  done < "$1"
+}
+
 if [ "$mode" = --undo ]; then
   if [ -f "$LIST" ]; then
-    while IFS=$'\t' read -r parked old new; do
-      mkdir -p "$(dirname "$old")"
-      mv "$parked" "$old" && as rm -f "$new"
-    done < "$LIST"
+    undo_transcripts "$LIST" || exit 1
     mv "$LIST" "$LIST.undone"
   fi
   "$ROOT/ops/py.sh" setup.py session-user --off

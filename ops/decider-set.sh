@@ -76,7 +76,11 @@ PY
 # Armed for good only once the hub has seen the file and written it down, so ask
 # now: a file lost before the first decision would otherwise leave token-only
 # approval open.
-if lifectl api GET /api/v1/decider 2>/dev/null | grep -Eq '"armed": *true'; then
+# make builds lifectl into ops/bin, which is on no PATH a fresh Terminal has, so
+# a bare lifectl would fail and this would always warn.
+lc=lifectl
+[ -x bin/lifectl ] && lc=bin/lifectl
+if "$lc" api GET /api/v1/decider 2>/dev/null | grep -Eq '"armed": *true'; then
   echo "  The hub has recorded it: armed for good."
 else
   echo "  WARNING: the hub did not confirm it. It records the code when it next starts." >&2

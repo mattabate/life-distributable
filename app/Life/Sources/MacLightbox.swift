@@ -245,7 +245,7 @@ final class LightboxView: UIView, UIGestureRecognizerDelegate {
     /// to the Mac (Preview, or whatever owns the extension) — the same road
     /// as a document chip's Quick Look copy (BlobDocument.fetch).
     @objc private func openFile() {
-        guard let data else { return }
+        guard let data, macOpensSaved(URL(fileURLWithPath: name)) else { return }
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("blobs", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(name)

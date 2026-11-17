@@ -1262,10 +1262,19 @@ func hubBlobRef(_ url: URL) -> String? {
 func openBlobLink(_ ref: String, hub: HubClient) async {
     #if targetEnvironment(macCatalyst)
     guard let file = await saveBlob(ref, as: blobFileName(ref, title: ""), hub: hub) else { return }
-    _ = await UIApplication.shared.open(file)
+    if macOpensSaved(file) { _ = await UIApplication.shared.open(file) }
     #else
     await openBlobInSafari(ref, hub: hub)
     #endif
+}
+
+/// The kinds of file the Mac opens once saved: pictures, sound, video,
+/// documents and pages. Anything else (a .command, .app, .pkg, .webloc) is
+/// only saved, because opening it would run it.
+func macOpensSaved(_ file: URL) -> Bool {
+    ["png", "jpg", "jpeg", "gif", "heic", "webp", "svg", "pdf", "mp4", "mov", "m4v",
+     "m4a", "mp3", "wav", "aac", "txt", "md", "csv", "json", "html", "htm"]
+        .contains(file.pathExtension.lowercased())
 }
 
 /// Safari on the hub's own URL for a blob, logged in on the way with a
