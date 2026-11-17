@@ -1639,3 +1639,8 @@ Entry format:
 - For: everyone on the phone app
 - Fix: the Sessions page spent its height on a tall title, a New session row, multi-line cards and a foot of model, cost, schedule and live call count on every row, and its Sessions list at the bottom drew a person a second time when they already sat under Your turn or Working. Now the title sits on the camera button's line, the New session row is gone (the camera button is the way in), each card is one line, a row's foot keeps only its speaking and waiting pills, Working carries no count, and the bottom list is Idle: the team less whoever is above, two to a row, name over role, as on the desktop sidebar. The phone's Recs page is titled "Recs" on the same line; the desktop keeps Recommendations.
 - How: same merge as add-0008, then `make check`. By hand: `app/Life/Sources/ThreadsView.swift` (`phoneBody`, `sessionsSections`, `idlePeople`, `idleCell(_:)`, `heading`), `app/Life/Sources/ThreadRows.swift` (`MiniCard`, `ThreadRow` foot), `app/Life/Sources/RecsView.swift` (`pageModifiers`).
+
+## add-0245 · 2026-11-17 · The nightly backup carries this Mac's own config
+- For: everyone who runs the nightly backup (`ops/backup.sh`)
+- Fix: the backup took only `data/`, so a dead disk lost the files that live in no git repo: `ops/secrets` (the push key downloads once only), `ops/hub.json` and `app/local.xcconfig`. They now ride the same restic snapshot when present, encrypted under the repository password. Keep that password off this Mac, in a password manager, or a dead disk takes both.
+- How: same merge as add-0008. By hand: `ops/backup.sh` (`roots`).

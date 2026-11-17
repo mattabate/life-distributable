@@ -58,7 +58,15 @@ bundle_snap "$ROOT" "$ROOT/data/mirrors/life.bundle" || \
     --detail "ops/backup.sh $(date '+%F %T'): git bundle of the repo failed; the last good one is data/mirrors/life.bundle.stale. See ops/logs/backup.log." \
     2>/dev/null || echo "bundle: failed and could not raise the ask (hub down?)" >&2
 
-restic backup "$ROOT/data" --exclude "$DB" --exclude "$DB-wal" --exclude "$DB-shm" --tag nightly
+# This Mac's own config, in no git repo, rides too when present: ops/secrets
+# (the APNs key downloads once only), ops/hub.json, app/local.xcconfig. restic
+# encrypts it client-side under the repository password; keep that password
+# somewhere off this Mac (a password manager), or a dead disk takes both.
+roots=("$ROOT/data")
+for f in "$ROOT/ops/secrets" "$ROOT/ops/hub.json" "$ROOT/app/local.xcconfig"; do
+  [[ -e "$f" ]] && roots+=("$f")
+done
+restic backup "${roots[@]}" --exclude "$DB" --exclude "$DB-wal" --exclude "$DB-shm" --tag nightly
 restic check --read-data-subset=5%
 
 # No prune here, deliberately: forget/prune is the only step that deletes, so
