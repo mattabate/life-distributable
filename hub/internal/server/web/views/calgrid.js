@@ -524,8 +524,10 @@ function calStripHTML(list) {
 
 const calD3 = h => `${((h + 11) % 12) + 1} ${h < 12 ? 'AM' : 'PM'}`;
 
+// The now line sits on the hub's clock, as the grid's hours do, not the
+// browser's (#231: a laptop in another zone drew it hours off).
 function calNowHTML() {
-  const n = new Date(), mins = n.getHours() * 60 + n.getMinutes();
+  const mins = calMin(easternFields(new Date()).at_time);
   return `<div class="cal-now" style="top:${(mins / 60) * CAL_HOUR_H}px"></div>`;
 }
 

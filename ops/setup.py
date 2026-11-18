@@ -30,6 +30,18 @@ SECRETS = os.path.join(ROOT, "ops", "secrets")
 TAILSCALE = ["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"]
 
 
+def write_hub_json(cfg):
+    """Beside it, then one rename (#230, as ota.sh does): a kill mid-write
+    never leaves a truncated hub.json the hub cannot load."""
+    tmp = HUB_JSON + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, HUB_JSON)
+
+
 def tailscale_self():
     """(dns name without the trailing dot, first IPv4) of this Mac on the tailnet."""
     for exe in TAILSCALE:
@@ -85,9 +97,7 @@ def cmd_hub(a):
     cfg["claude_bin"] = os.path.realpath(claude) if a.resolve else claude
     os.makedirs(SECRETS, mode=0o700, exist_ok=True)
     os.chmod(SECRETS, 0o700)  # an existing folder gets the mode too (#153)
-    with open(HUB_JSON, "w") as f:
-        json.dump(cfg, f, indent=2)
-        f.write("\n")
+    write_hub_json(cfg)
     print("%s ops/hub.json: owner %s, hub https://%s:%d, apps %s, team mode %s"
           % ("updated" if existing else "wrote", cfg.get("owner_name", ""), host, port,
              ", ".join(cfg.get("surfaces") or SURFACES), "on" if cfg.get("team_mode", True) else "off"))
@@ -124,9 +134,7 @@ def cmd_app(a):
         cfg["apns_bundle_id"] = bundle
         if a.team:
             cfg["apns_team_id"] = a.team
-        with open(HUB_JSON, "w") as f:
-            json.dump(cfg, f, indent=2)
-            f.write("\n")
+        write_hub_json(cfg)
     print("wrote app/local.xcconfig: bundle %s, team %s" % (bundle, a.team or "(none: simulator only)"))
 
 
@@ -142,9 +150,7 @@ def cmd_apns(a):
     cfg = json.load(open(HUB_JSON))
     cfg.update({"apns_key_file": "~/life/ops/secrets/apns.p8", "apns_key_id": a.key_id,
                 "apns_team_id": a.team, "apns_production": True})
-    with open(HUB_JSON, "w") as f:
-        json.dump(cfg, f, indent=2)
-        f.write("\n")
+    write_hub_json(cfg)
     print("APNs key stored in ops/secrets/apns.p8; hub.json updated (restart the hub: ops/hub.sh restart)")
 
 
@@ -172,9 +178,7 @@ def cmd_session_user(a):
     else:
         cfg["session_user"] = a.user
         cfg["session_tokens"] = True
-    with open(HUB_JSON, "w") as f:
-        json.dump(cfg, f, indent=2)
-        f.write("\n")
+    write_hub_json(cfg)
     print("session_user %s in ops/hub.json (restart the hub: ops/hub.sh restart)"
           % ("off" if a.off else "= " + a.user))
 
@@ -190,6 +194,9 @@ def cmd_show(_):
     host = cfg.get("public_host", "").split(":")[0]
     mark(bool(host) and os.path.exists(os.path.join(SECRETS, host + ".crt")), "TLS certificate (ops/renew-cert.sh)")
     mark(os.path.exists(os.path.join(SECRETS, "hub.token")), "hub token (made on first hub start)")
+    # Unarmed, approvals need only the hub token (#229).
+    dh = os.path.join(SECRETS, "decider.hash")
+    mark(os.path.exists(dh) and os.path.getsize(dh) > 0, "decider code (bash ops/decider-set.sh)")
     mark(os.path.exists(os.path.join(SECRETS, "restic.env")), "backup credentials ops/secrets/restic.env")
     if "phone" in chosen or "desktop" in chosen:
         mark(os.path.exists(LOCAL_XC), "app identity app/local.xcconfig")

@@ -174,8 +174,12 @@ BASE="https://$HUB/ota/$TOKEN"
 VER=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$OTA/Life.xcarchive/Products/Applications/Life.app/Info.plist")
 BUILDN=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$OTA/Life.xcarchive/Products/Applications/Life.app/Info.plist")
 
-cp "$IPA" "$PUB/Life.ipa"
-cat > "$PUB/manifest.plist" <<EOF
+# Every file is written beside its served name first, then renamed into place
+# (same volume, atomic), current.json last: a phone mid-install never fetches a
+# half-copied ipa, and a failure before the renames leaves the old build whole
+# for the next run's skip check (#233).
+cp "$IPA" "$PUB/Life.ipa.tmp"
+cat > "$PUB/manifest.plist.tmp" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict><key>items</key><array><dict>
@@ -187,7 +191,7 @@ cat > "$PUB/manifest.plist" <<EOF
 <key>title</key><string>Life</string>
 </dict></dict></array></dict></plist>
 EOF
-cat > "$PUB/install.html" <<EOF
+cat > "$PUB/install.html.tmp" <<EOF
 <!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Install Life</title>
 <body style="font:-apple-system-body;font-family:-apple-system;padding:2em;text-align:center">
@@ -196,9 +200,10 @@ cat > "$PUB/install.html" <<EOF
 <p style="color:#888">$LANE signed · profile expires $PROFILE_EXP · aps $APS. Tap, accept, then check the Home Screen.</p>
 </body>
 EOF
-echo "$BASE/install.html" > "$PUB/url"
-cat > "$PUB/current.json" <<EOF
+echo "$BASE/install.html" > "$PUB/url.tmp"
+cat > "$PUB/current.json.tmp" <<EOF
 {"version":"$VER","build":$BUILDN,"method":"$LANE","aps":"$APS","profile_expires":"$PROFILE_EXP","built_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","url":"$BASE/install.html","commit":"$(git -C "$ROOT" rev-parse --short HEAD)"}
 EOF
+for f in Life.ipa manifest.plist install.html url current.json; do mv -f "$PUB/$f.tmp" "$PUB/$f"; done
 echo "✔ published $VER ($BUILDN) $LANE, profile → $PROFILE_EXP, aps=$APS"
 echo "  open on the phone: $BASE/install.html"

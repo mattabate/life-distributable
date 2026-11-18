@@ -1689,3 +1689,38 @@ Entry format:
 - For: anyone running `make webcheck` on a Mac at UTC-5 or further west
 - Fix: the source card test fed a 04:05 UTC instant and expected that day's date, but the card shows your local day, so the test failed west of Eastern (#224). The fixture's instants are now midday UTC. Test only; the console is unchanged. Thanks @dpc00.
 - How: same merge as add-0008, then `make webcheck`. By hand: `hub/internal/server/web/test/ui.test.js` (the `sources: a card opens the source's own page` case).
+
+## add-0255 · 2026-11-18 · Data sources: every account row shows
+- For: everyone on the phone and desktop apps
+- Fix: two accounts of one source that shared a label (two cards from one bank) were one row in the apps' source list, so the second never showed. Each row is now keyed by its whole line.
+- How: same merge as add-0008, then `make check` and a new app build. By hand: `app/Life/Sources/Models.swift` (`SourceAccount.id`).
+
+## add-0256 · 2026-11-18 · Token counts fill in for every session
+- For: everyone
+- Fix: the hub's token backfill ran only while no session had any tokens yet, so once one chat had settled a turn, older chats kept reading zero. It now fills each session whose own counts are still zero and never overwrites a live one (#228). Thanks @vonavikon.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/tokens.go` (`BackfillTokens`), `tokens_test.go`.
+
+## add-0257 · 2026-11-18 · Calendar: the now line uses the hub's clock
+- For: everyone on the web console
+- Fix: the calendar grid placed its rows on the hub's clock but drew the red now line on the browser's, so away from the hub's time zone the line sat hours off (#231). The line now reads the hub's clock too. Thanks @vonavikon.
+- How: same merge as add-0008, then `make webcheck`. By hand: `hub/internal/server/web/views/calgrid.js` (`calNowHTML`), `web/test/calgrid.test.js`.
+
+## add-0258 · 2026-11-18 · The spoken-card queue stays small
+- For: everyone with spoken cards
+- Fix: week-old rows left the voice queue only when the hub started, so a hub that stayed up for weeks kept every line. Each new card now drops rows older than a week (#232). Thanks @vonavikon.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/notify/queue.go` (`enqueue`), `queue_test.go`.
+
+## add-0259 · 2026-11-18 · A phone build publishes whole or not at all
+- For: phone owners who install over the air
+- Fix: `ops/ota.sh` copied the new app, manifest and install page over the old ones in place, so a phone that fetched mid-copy got a half-written app, and a failed copy left a broken install link (#233). Every file is now written beside its name and renamed in, `current.json` last. Thanks @vonavikon.
+- How: same merge as add-0008. By hand: `ops/ota.sh`.
+
+## add-0260 · 2026-11-18 · Setup checks the decider code is armed
+- For: anyone setting up a new install
+- Fix: setup's Verify step never checked that the decider code took, so a hub could run with the gate unarmed (#229). `ops/py.sh setup.py show` now lists the decider code, and SETUP.md step 5 has you check `ops/bin/lifectl api GET /api/v1/decider` reads `"armed": true`, else run `bash ops/decider-set.sh` again. Thanks @vonavikon.
+- How: same merge as add-0008. By hand: `ops/setup.py` (`cmd_show`), `SETUP.md` (step 5).
+
+## add-0261 · 2026-11-18 · Setup never leaves a half-written hub.json
+- For: anyone running `ops/py.sh setup.py`
+- Fix: setup wrote `ops/hub.json` in place, so a crash or full disk mid-write left a cut file the hub could not start on (#230). It now writes a temporary file, syncs it and renames it over. A setup run while the hub is saving a settings change can still lose one of the two edits; run setup with the hub stopped to be sure. Thanks @vonavikon.
+- How: same merge as add-0008. By hand: `ops/setup.py` (`write_hub_json`).

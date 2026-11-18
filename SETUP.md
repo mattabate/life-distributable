@@ -241,7 +241,10 @@ over Tailscale, which only their own devices can join.
     they said no, skip this.
 
 **Verify:** `ops/hub.sh status` shows `state = running` and `ok`; the owner
-says the console shows **Sessions**. Tell them this is the first
+says the console shows **Sessions**; `ops/bin/lifectl api GET /api/v1/decider`
+shows `"armed": true` (if not, the decider step was skipped: open
+`bash ops/decider-set.sh` again, since until then approvals need only the
+hub token). Tell them this is the first
 milestone: the hub is running. Until the apps arrive, the console is how
 they reach it (on the phone too: Safari, the `life hub` address, then
 **Share → Add to Home Screen**).

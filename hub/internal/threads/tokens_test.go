@@ -130,6 +130,40 @@ func TestBackfillTokensFromRunLogs(t *testing.T) {
 	}
 }
 
+// One thread's settled turn does not stop the others' backfill (#228), and
+// the settled thread keeps its live total.
+func TestBackfillTokensIsPerThread(t *testing.T) {
+	m, _, _ := setup(t)
+	line := `{"type":"result","result":"one","is_error":false,"total_cost_usd":0.5,"usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":30,"cache_creation_input_tokens":4}}` + "\n"
+	old, err := m.Create("", "life", "", "Older chat", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(runOut(t, m, old.ID), []byte(line), 0o644)
+	live, err := m.Create("", "life", "", "Live chat", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(runOut(t, m, live.ID), []byte(line), 0o644)
+	m.db.Exec(`UPDATE threads SET tok_in=5 WHERE id=?`, live.ID)
+
+	m.backfillTokens()
+	var after Thread
+	for i := 0; i < 200; i++ {
+		after, _ = m.Get(old.ID)
+		if after.Total > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if after.Total != 37 {
+		t.Fatalf("older chat not backfilled: %+v", after.Tokens)
+	}
+	if got, _ := m.Get(live.ID); got.In != 5 || got.CacheRead != 0 {
+		t.Fatalf("live chat overwritten: %+v", got.Tokens)
+	}
+}
+
 func runOut(t *testing.T, m *Manager, threadID string) string {
 	t.Helper()
 	outs, _ := filepath.Glob(filepath.Join(m.RunsDir, threadID+"-*.out"))

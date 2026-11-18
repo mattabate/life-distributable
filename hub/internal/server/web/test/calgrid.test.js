@@ -47,6 +47,20 @@ test('a YYYY-MM-DD is a LOCAL day, never UTC', () => {
   assert.equal(calHHMM(0), '00:00');
 });
 
+test('the now line sits on the hub clock, not the browser one (#231)', () => {
+  vm.runInThisContext("hubZone = 'Pacific/Honolulu'");
+  try {
+    const top = Number(/top:([\d.]+)px/.exec(calNowHTML())[1]);
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'Pacific/Honolulu', hour: '2-digit', minute: '2-digit', hour12: false })
+      .formatToParts(new Date()).map(x => [x.type, x.value]));
+    const mins = (Number(p.hour) % 24) * 60 + Number(p.minute);
+    // A minute either side: the clock may tick between the two reads.
+    assert.ok(Math.abs(top - (mins / 60) * CAL_HOUR_H) <= CAL_HOUR_H / 60 + 0.001, `now line at ${top}px, want ~${(mins / 60) * CAL_HOUR_H}`);
+  } finally {
+    vm.runInThisContext("hubZone = 'America/New_York'");
+  }
+});
+
 test('the page is one week, and one fetch covers it and the rail\'s mini-month', () => {
   // Aug 31 2026 is a Monday; Aug 1 2026 is a Saturday.
   calState.anchor = '2026-08-31';
