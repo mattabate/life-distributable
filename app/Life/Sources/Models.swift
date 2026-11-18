@@ -1344,7 +1344,10 @@ struct SourceAccount: Codable, Identifiable, Hashable {
     var url: String?
     var n: Int?
     var last: Date?
-    var id: String { (via ?? "") + "/" + label }
+    /// Label alone repeats: five accounts at one bank are five rows with the
+    /// same label, and a shared id made ForEach draw the first one five
+    /// times. The detail names the account.
+    var id: String { [via ?? "", label, detail ?? "", url ?? ""].joined(separator: "/") }
 }
 
 struct SourceEntry: Codable, Identifiable, Hashable {

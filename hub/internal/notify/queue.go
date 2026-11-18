@@ -46,6 +46,9 @@ func (a *APNs) enqueue(card, thread, kind, title, body string) {
 		card, thread, kind, title, body, now); err != nil {
 		log.Printf("voice: queue %s: %v", card, err)
 	}
+	// Rows past a week are dropped here as well as at Resume, so a hub that
+	// stays up for weeks does not grow the table (#232).
+	a.db.Exec(`DELETE FROM voice_queue WHERE queued_at < ?`, store.TS(time.Now().Add(-7*24*time.Hour)))
 }
 
 // heardCard: the Mac's helper reported the card's line playing.

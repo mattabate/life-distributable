@@ -15,16 +15,16 @@ import (
 )
 
 // backfillTokens sums each finished run's stream-json output into its thread's
-// token totals, once. It is skipped the moment any thread has a total (that
-// is, after it has run once, or after any new turn has settled), so it never
-// double-counts. The parse runs in the background: the run logs are hundreds
-// of megabytes and the hub should not wait on them to start serving.
+// token totals. The guard is per thread: only a chat still at zero is parsed
+// or written, so a thread whose turn settled live (before or during the parse)
+// is never double-counted, and one settling turn no longer stops the rest
+// (#228: a global "any thread has a total" guard dropped the whole backfill
+// the first time a stranded run was booked at boot). The parse runs in the
+// background: the run logs are hundreds of megabytes and the hub should not
+// wait on them to start serving.
 func (m *Manager) backfillTokens() {
-	var have int
-	if err := m.db.QueryRow(`SELECT COUNT(*) FROM threads WHERE tok_in+tok_out+tok_cache_read+tok_cache_write > 0`).Scan(&have); err != nil || have > 0 {
-		return
-	}
-	rows, err := m.db.Query(`SELECT thread_id, out_file FROM thread_runs WHERE out_file != ''`)
+	rows, err := m.db.Query(`SELECT r.thread_id, r.out_file FROM thread_runs r JOIN threads t ON t.id = r.thread_id
+		WHERE r.out_file != '' AND t.tok_in+t.tok_out+t.tok_cache_read+t.tok_cache_write = 0`)
 	if err != nil {
 		return
 	}
@@ -64,14 +64,10 @@ func (m *Manager) backfillTokens() {
 		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		// Re-check the guard: a turn may have settled while we were parsing,
-		// and its tokens are already on the thread.
-		var have int
-		if err := m.db.QueryRow(`SELECT COUNT(*) FROM threads WHERE tok_in+tok_out+tok_cache_read+tok_cache_write > 0`).Scan(&have); err != nil || have > 0 {
-			return
-		}
+		// A turn may have settled on a thread while we were parsing: its
+		// tokens are already there, so the WHERE leaves that thread alone.
 		for id, t := range totals {
-			m.db.Exec(`UPDATE threads SET tok_in=?, tok_out=?, tok_cache_read=?, tok_cache_write=? WHERE id=?`, t.In, t.Out, t.CacheRead, t.CacheWrite, id)
+			m.db.Exec(`UPDATE threads SET tok_in=?, tok_out=?, tok_cache_read=?, tok_cache_write=? WHERE id=? AND tok_in+tok_out+tok_cache_read+tok_cache_write=0`, t.In, t.Out, t.CacheRead, t.CacheWrite, id)
 		}
 		log.Printf("threads: back-filled tokens for %d chat(s) from %d/%d run log(s) in %s", len(totals), files, len(jobs), time.Since(start).Round(time.Second))
 	}()

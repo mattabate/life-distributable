@@ -98,6 +98,24 @@ func TestUnheardCardIsSpokenAgainAfterARestart(t *testing.T) {
 	}
 }
 
+// A hub that stays up still drops week-old rows: each new card trims them
+// (#232), not only Resume at startup.
+func TestEnqueueDropsWeekOldRows(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &APNs{db: db}
+	a.enqueue("ask-old", "t-1", "read", "old", "old line")
+	db.Exec(`UPDATE voice_queue SET queued_at=? WHERE card='ask-old'`, store.TS(time.Now().Add(-8*24*time.Hour)))
+	a.enqueue("ask-new", "t-1", "read", "new", "new line")
+	var n int
+	db.QueryRow(`SELECT COUNT(*) FROM voice_queue`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("voice_queue has %d rows, want only the new card", n)
+	}
+}
+
 // A resume whose push fails (a transient APNs error, a phone between a
 // reinstall and its first register) has said nothing: the row stays
 // unresumed, so the next hub tries again (#110). Its window still runs from
