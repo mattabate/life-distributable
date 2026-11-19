@@ -42,13 +42,15 @@ struct StyledText: View {
         // A line that is only a hub file is the file itself (`blobLine`).
         // A pipe table is a grid of its own too, unless the text is a
         // clamped preview (`lines`), where it stays one stacked text view.
+        // A paragraph holding math is typeset by MathText, unless clamped.
         if text.contains("```") || text.contains("/api/v1/blobs/")
-            || (lines == nil && (text.hasPrefix("|") || text.contains("\n|") || text.contains("\n |"))) {
+            || (lines == nil && (text.hasPrefix("|") || text.contains("\n|") || text.contains("\n |") || hasMath(text))) {
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(mdSegments(text).enumerated()), id: \.offset) { _, seg in
+                ForEach(Array(mdSegments(text, math: lines == nil).enumerated()), id: \.offset) { _, seg in
                     switch seg {
                     case .text(let t): SelectableText(attributed: cached(t), tint: UIColor(color), chat: chatHook, lines: lines)
-                    case .code(let code, let lang): CodeBlock(code: code, lang: lang, style: style)
+                    case .math(let t): MathText(text: t, font: baseFont(), color: UIColor(color))
+                    case .code(let code, let lang, let head): CodeBlock(code: code, lang: lang, head: head, style: style, macSize: macSize)
                     case .files(let files): FileStrip(files: files)
                     case .table(let rows, let header, let align): tableView(rows, header: header, align: align)
                     }
@@ -491,13 +493,17 @@ func mdTableSeparator(_ line: String) -> [NSTextAlignment]? {
 /// list item gives that indent up on every line.
 enum MdSegment: Equatable {
     case text(String)
-    case code(String, lang: String)
+    /// `head`: a link line written right above the fence (an email draft's
+    /// "[Name](url)") is the box's header (ui.js mdCode).
+    case code(String, lang: String, head: MdLink? = nil)
     /// Hub blobs on lines in a row (blank lines between are fine): one strip
     /// of small tiles, pictures or file chips.
     case files([MdFile])
     /// A pipe table: its rows (the header first when `header`), and one
     /// alignment per column from the separator row.
     case table([[String]], header: Bool, align: [NSTextAlignment])
+    /// A paragraph holding $…$ or $$…$$ (MathText), as written.
+    case math(String)
 }
 
 /// A pipe table starting at `lines[i]`: the header row, an optional
@@ -770,12 +776,37 @@ private struct MdTableLayout: Layout {
     }
 }
 
-func mdSegments(_ text: String) -> [MdSegment] {
+struct MdLink: Equatable {
+    let label: String
+    let url: URL
+    /// A line that is only `[label](url)`.
+    init?(line: String) {
+        guard let m = line.wholeMatch(of: /\s*\[([^\]]+)\]\(([^)\s]+)\)\s*/), let u = URL(string: String(m.2)) else { return nil }
+        label = String(m.1); url = u
+    }
+}
+
+/// `math`: a paragraph (lines between blank ones) holding math is a `.math`
+/// of its own; the paragraphs around it stay one `.text`.
+func mdSegments(_ text: String, math: Bool = false) -> [MdSegment] {
     var out: [MdSegment] = []
     var prose: [String] = []
     let flush = {
-        let t = prose.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !t.isEmpty { out.append(.text(t)) }
+        var run: [String] = [], para: [String] = []
+        let put = {
+            let t = run.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { out.append(.text(t)) }
+            run = []
+        }
+        let end = {
+            let p = para.joined(separator: "\n")
+            if math, hasMath(p) { put(); out.append(.math(p.trimmingCharacters(in: .whitespacesAndNewlines))) } else { run += para }
+            para = []
+        }
+        for l in prose {
+            if l.trimmingCharacters(in: .whitespaces).isEmpty { end(); run.append(l) } else { para.append(l) }
+        }
+        end(); put()
         prose = []
     }
     let lines = text.components(separatedBy: "\n")
@@ -798,6 +829,9 @@ func mdSegments(_ text: String) -> [MdSegment] {
         guard let m = lines[i].wholeMatch(of: /(\s*)(`{3,})\s*([\w.+#-]*)\s*/) else {
             prose.append(lines[i]); i += 1; continue
         }
+        // A link line right above the fence heads the box (ui.js md()).
+        var head: MdLink? = nil
+        if let last = prose.last, let link = MdLink(line: last) { head = link; prose.removeLast() }
         flush()
         let indent = String(m.1), fence = String(m.2)
         var body: [String] = []
@@ -810,7 +844,7 @@ func mdSegments(_ text: String) -> [MdSegment] {
             i += 1
         }
         i += 1      // the closing fence
-        out.append(.code(body.joined(separator: "\n"), lang: String(m.3)))
+        out.append(.code(body.joined(separator: "\n"), lang: String(m.3), head: head))
     }
     flush()
     return out
@@ -823,16 +857,33 @@ func mdSegments(_ text: String) -> [MdSegment] {
 private struct CodeBlock: View {
     let code: String
     let lang: String
+    /// The link written right above the box (an email draft's link): its
+    /// header, one line cut short.
+    var head: MdLink? = nil
     let style: UIFont.TextStyle
+    var macSize: CGFloat? = nil
     @State private var copied = false
 
     var body: some View {
         // Two points under the prose: monospace runs wide, and the phone is narrow.
-        let size = UIFont.preferredFont(forTextStyle: style).pointSize - 2
+        // The Mac's prose size is its macSize, not the style's small desk size.
+        #if targetEnvironment(macCatalyst)
+        let prose = macSize ?? UIFont.preferredFont(forTextStyle: style).pointSize
+        #else
+        let prose = UIFont.preferredFont(forTextStyle: style).pointSize
+        #endif
+        let size = prose - 2
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(lang).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
-                Spacer()
+                if let head {
+                    Link(destination: head.url) {
+                        Text(head.label + " ↗").font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1).truncationMode(.tail)
+                    }.buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                } else {
+                    Text(lang).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
                 Button {
                     UIPasteboard.general.string = code
                     copied = true

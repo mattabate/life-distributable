@@ -13,6 +13,14 @@ const vm = require('node:vm');
 // in the global scope, which is exactly how the browser sees them.
 vm.runInThisContext(fs.readFileSync(path.join(__dirname, '..', 'ui.js'), 'utf8'), { filename: 'ui.js' });
 
+// #239: 24 hours on from 23:30 Mar 7 New York is Mar 9 (the clocks go
+// forward), and from 00:30 Nov 1 it is still Nov 1.
+test('hubTomorrow: the next calendar day across a clock change', () => {
+  assert.equal(hubTomorrow(new Date('2026-03-08T04:30:00Z')), '2026-03-08');
+  assert.equal(hubTomorrow(new Date('2026-11-01T04:30:00Z')), '2026-11-02');
+  assert.equal(hubTomorrow(new Date('2026-12-31T17:00:00Z')), '2027-01-01');
+});
+
 test('esc: the five HTML characters, and null is empty', () => {
   assert.equal(esc(`<a href="x">&'</a>`), '&lt;a href=&quot;x&quot;&gt;&amp;&#39;&lt;/a&gt;');
   assert.equal(esc(null), '');
@@ -321,6 +329,12 @@ test('md: a fenced block keeps its text verbatim under a Copy button', () => {
   assert.equal(md('- run\n  ```\n  a\n    b\n  ```'), '<ul><li>run</li></ul>' + box('', 'a\n  b'));
   // Unclosed (still streaming): the block runs to the end.
   assert.equal(md('```sh\nls -la'), box('sh', 'ls -la'));
+  // A link line right above a fence heads the box; anywhere else it stays a line.
+  assert.equal(md('[Sam Rivera](https://m.test/1)\n```\nHi Sam\n```'),
+    '<div class="md-code"><div class="md-code-bar"><span class="md-code-head"><a href="https://m.test/1" target="_blank" rel="noopener">Sam Rivera</a></span>' +
+    '<button type="button" class="md-copy" onclick="mdCopy(this)">Copy</button></div><pre><code>Hi Sam</code></pre></div>');
+  assert.equal(md('[Sam Rivera](https://m.test/1)\n\n```\nHi\n```'),
+    '<p><a href="https://m.test/1" target="_blank" rel="noopener">Sam Rivera</a></p>' + box('', 'Hi'));
   // A preview drops the fence lines and keeps the words.
   assert.equal(mdPreview('Paste:\n```json\n{"a": 1}\n```'), 'Paste: {&quot;a&quot;: 1}');
 });
@@ -563,6 +577,8 @@ test('actionHTML: the approval card in the chat', () => {
   const commit = actionHTML({ ...action, kind: 'commit' });
   assert.match(commit, /^<div class="ask" id="ask-card-act-1a2b3c4d">\s*<div class="card-h">🔴 <span class="verb">approve<\/span>/);
   assert.match(commit, /<span class="pill purple">commit<\/span>/);
+  // A land card shows no command at all.
+  assert.doesNotMatch(commit, /What it runs|<details|<pre/);
   // "other" is no warning: no chip for it.
   assert.doesNotMatch(actionHTML({ ...action, kind: 'other' }), /pill[^>]*>other</);
   assert.match(chat, /<div class="acts"><button class="sm suggested" onclick="armActionReply\('act-1a2b3c4d','approved'\)">Approve<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d','denied'\)">Deny<\/button><button class="sm" onclick="armActionReply\('act-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('action','act-1a2b3c4d'\)">Dismiss<\/button><\/div>/);

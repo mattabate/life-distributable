@@ -437,6 +437,16 @@ final class HubClient {
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         return try await Self.fetch(req)
     }
+    /// Any hub path (with its query) fetched with the token, and its type:
+    /// the console's static files a `lifehub://` page loads (HubScheme).
+    func asset(_ pathAndQuery: String) async throws -> (Data, String) {
+        guard let url = URL(string: baseURL + pathAndQuery) else { throw APIError(error: "bad base URL") }
+        var req = URLRequest(url: url, timeoutInterval: 60)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, resp) = try await Self.session.data(for: req)
+        guard let h = resp as? HTTPURLResponse, (200..<300).contains(h.statusCode) else { throw APIError(error: "fetch failed: " + pathAndQuery) }
+        return (data, h.mimeType ?? "application/octet-stream")
+    }
     func sources() async throws -> SourcesInventory { try await request("GET", "/api/v1/sources") }
     func threads(archived: Bool = false) async throws -> [Thread] { try await request("GET", archived ? Self.threadsPath + "?archived=1" : Self.threadsPath) }
     func thread(_ id: String) async throws -> Thread { try await request("GET", "/api/v1/threads/\(id)", cache: true) }

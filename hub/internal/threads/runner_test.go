@@ -1543,3 +1543,19 @@ func TestTurnToolsSkipAnIdleLeftoverRun(t *testing.T) {
 		t.Fatalf("turn tools = %d, want 1", th.TurnTools)
 	}
 }
+
+// A key straddling the 4000-character cut is still redacted: the body is
+// masked before it is cut, not after (a cut key is too short for its shape).
+func TestEventBodyRedactsBeforeCut(t *testing.T) {
+	key := "ghp_" + strings.Repeat("A1b2C3d4E5", 4)[:36]
+	content := strings.Repeat("x", eventBodyMax-11) + " " + key + " tail"
+	line, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"content": []any{
+		map[string]any{"type": "tool_result", "tool_use_id": "tu1", "content": content}}}})
+	evs := parseEvents(string(line))
+	if len(evs) != 1 || evs[0].Kind != "tool_result" {
+		t.Fatalf("%+v", evs)
+	}
+	if strings.Contains(evs[0].Body, "ghp_A1b2") {
+		t.Fatalf("key prefix survived the cut: %q", evs[0].Body[len(evs[0].Body)-40:])
+	}
+}

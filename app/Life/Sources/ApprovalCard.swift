@@ -107,10 +107,10 @@ struct ApprovalCard: View {
 
     /// What it will run, shut until the owner opens it: the card stays full
     /// size, only the raw command folds (a long command was too big to read
-    /// on the card).
+    /// on the card). A land card (kind commit) has none: it is plain words only.
     @State private var runsOpen = false
     private var payload: AnyView? {
-        guard isOpen, let p = a.exec_payload, !p.text.isEmpty, !a.exec_type.isEmpty, a.exec_type != "none" else { return nil }
+        guard isOpen, a.kind != "commit", let p = a.exec_payload, !p.text.isEmpty, !a.exec_type.isEmpty, a.exec_type != "none" else { return nil }
         return AnyView(VStack(alignment: .leading, spacing: 4) {
             // Plain words, not the exec type.
             Button { runsOpen.toggle() } label: {

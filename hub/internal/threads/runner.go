@@ -1712,6 +1712,11 @@ func readAll(f *os.File) ([]byte, error) {
 
 const eventBodyMax = 4000
 
+// clip is an event body as stored: redacted first, then cut. Cut first, a key
+// straddling the 4000th character kept a prefix too short for its shape
+// (ghp_ + 29 of its 36) and was stored as is.
+func clip(s string) string { return truncate(secrets.Redact(s), eventBodyMax) }
+
 // parseEvents turns one stream-json line into zero or more events. Shapes
 // (claude -p --output-format stream-json --verbose):
 //
@@ -1749,11 +1754,11 @@ func parseEvents(line string) []Event {
 		switch b.Type {
 		case "text":
 			if s := strings.TrimSpace(b.Text); s != "" {
-				out = append(out, Event{Kind: "text", Body: truncate(s, eventBodyMax)})
+				out = append(out, Event{Kind: "text", Body: clip(s)})
 			}
 		case "thinking":
 			if s := strings.TrimSpace(b.Thinking); s != "" {
-				out = append(out, Event{Kind: "thinking", Body: truncate(s, eventBodyMax)})
+				out = append(out, Event{Kind: "thinking", Body: clip(s)})
 			}
 		case "tool_use":
 			title, body := describeTool(b.Name, b.Input)
@@ -1764,7 +1769,7 @@ func parseEvents(line string) []Event {
 			if b.IsError {
 				title = "error"
 			}
-			out = append(out, Event{Kind: "tool_result", Title: title, Body: truncate(resultText(b.Content), eventBodyMax)})
+			out = append(out, Event{Kind: "tool_result", Title: title, Body: clip(resultText(b.Content))})
 		}
 	}
 	return out
@@ -1925,7 +1930,7 @@ func describeTool(name string, input json.RawMessage) (string, string) {
 		}
 		body = strings.Join(lines, "\n")
 	}
-	return title, truncate(body, eventBodyMax)
+	return title, clip(body)
 }
 
 // editLines: an Edit as a reader sees a diff — the old lines behind "- ",
@@ -2464,7 +2469,7 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 	// on the message row, or on the read card minted from it. Text that rode
 	// beside a card has no other home, so its fold line stays.
 	if !folded {
-		m.db.Exec(`DELETE FROM thread_events WHERE id = (SELECT MAX(id) FROM thread_events WHERE run_id=? AND kind='text') AND body=?`, turn, secrets.Redact(truncate(streamed, eventBodyMax)))
+		m.db.Exec(`DELETE FROM thread_events WHERE id = (SELECT MAX(id) FROM thread_events WHERE run_id=? AND kind='text') AND body=?`, turn, clip(streamed))
 	}
 	text = secrets.Redact(text)
 	tok := h.Tok
