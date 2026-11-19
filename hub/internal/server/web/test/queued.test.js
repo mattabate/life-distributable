@@ -1,9 +1,8 @@
-// views/threads.js, the "Coming up" strip over a chat's composer (queuedHTML).
-// Open, it draws the next FIVE wakes and a "N more" button (2026-10-21,
-// a phone screenshot of a chat with 24 wakes out to Nov 2027 filling the
-// screen: "can we limit it to next 5?"); a wake in another year says the
-// year. threads.js needs a document and a few globals the page has; just
-// enough is stubbed here. The fixtures hold no personal data.
+// views/threads.js, a chat's Coming up page (queuedHTML): the second word by
+// the session's name, every wake listed in fire order, one row each; a wake
+// in another year says the year. threads.js needs a document and a few
+// globals the page has; just enough is stubbed here. The fixtures hold no
+// personal data.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -41,24 +40,23 @@ const wakes = n => Array.from({ length: n }, (_, i) => ({
   not_before: new Date(Date.now() + (i < n - 1 ? (i + 1) * 86400000 : 540 * 86400000)).toISOString(),
 }));
 
-test('queuedHTML: open, the next five and a "19 more" button; the button draws the rest', () => {
-  const html = queuedHTML(wakes(24));
-  assert.match(html, /Coming up · 24/);
-  assert.equal((html.match(/class="row qrow"/g) || []).length, 6, 'five rows and the button row');
-  assert.match(html, /<button class="sm" onclick="queuedMore\(\)">19 more<\/button>/);
-  assert.match(html, /wake 4/);
-  assert.doesNotMatch(html, /wake 5/);
-  // Five or fewer: every row, no button.
-  const five = queuedHTML(wakes(5));
-  assert.equal((five.match(/class="row qrow"/g) || []).length, 5);
-  assert.doesNotMatch(five, / more</);
-  // The button: every row this visit, five again after leaving the chat.
-  chatState.queued = wakes(24);
-  queuedMore();
-  assert.equal((el('queued').outerHTML.match(/class="row qrow"/g) || []).length, 24);
-  assert.doesNotMatch(el('queued').outerHTML, / more</);
-  for (const f of onLeave) f();
-  assert.match(queuedHTML(wakes(24)), /19 more/);
+test('queuedHTML: the page lists every wake, soonest first, each with Cancel', () => {
+  const html = queuedHTML(wakes(24).reverse());
+  assert.equal((html.match(/class="row qrow"/g) || []).length, 24);
+  assert.equal((html.match(/>Cancel</g) || []).length, 24);
+  assert.ok(html.indexOf('wake 0') < html.indexOf('wake 23'));
+  assert.match(queuedHTML([]), /Nothing coming up/);
+  assert.match(queuedHTML([{ ...wakes(1)[0], state: 'done' }]), /Nothing coming up/);
+});
+
+test('queuedSoonHTML: only wakes within 15 minutes go back on the bar', () => {
+  const at = mins => ({ id: 'p-' + mins, state: 'queued', author: 'hub', target: 't-1', title: 'in ' + mins,
+    not_before: new Date(Date.now() + mins * 60e3).toISOString() });
+  const html = queuedSoonHTML([at(40), at(10), at(14)]);
+  assert.equal((html.match(/class="row qrow"/g) || []).length, 2);
+  assert.ok(html.indexOf('in 10') < html.indexOf('in 14'));
+  assert.doesNotMatch(html, /in 40/);
+  assert.equal(queuedSoonHTML([at(40)]), '');
 });
 
 test('a standing wake is one pill: its period and its next minute', () => {
@@ -67,6 +65,7 @@ test('a standing wake is one pill: its period and its next minute', () => {
   assert.match(html, />weekly · next [^<]+</);
   assert.doesNotMatch(html, />weekly Wed 09:30</);
   assert.equal((html.match(/class="pill/g) || []).length, 1);
+  assert.match(html, />Turn off</);
 });
 
 test('wakeWhen: the clock today, the day this year, the year once it differs', () => {

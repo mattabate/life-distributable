@@ -383,7 +383,7 @@ const readAsk = { ...ask, kind: 'read', outcomes: [{ value: 'done', label: 'Read
 test('askHTML in the chat: bubble, id for deep links, the hub\'s words + Dismiss', () => {
   const h = askHTML(ask);
   assert.match(h, /^<div class="ask" id="ask-card-ask-1a2b3c4d">/);
-  assert.match(h, /🔴 <span class="verb">[a-z ]+<\/span><span class="at">[^<]*<\/span><\/div><div class="t">Pick a <strong>day<\/strong>/);
+  assert.match(h, /<span class="mark">🔴 <\/span><span class="verb">[a-z ]+<\/span><span class="at">[^<]*<\/span><\/div><div class="t">Pick a <strong>day<\/strong>/);
   assert.match(h, /<ul><li>Mon<\/li><li>Tue<\/li><\/ul>/);
   assert.match(h, /<div class="acts"><button class="sm suggested" onclick="openRespond\('ask-1a2b3c4d','done'\)">Decided<\/button><button class="sm" onclick="openRespond\('ask-1a2b3c4d',''\)">Reply<\/button><button class="sm" onclick="cardFold\('ask','ask-1a2b3c4d'\)">Dismiss<\/button><\/div>/);
   // No Open page: the card in the chat IS the page (2026-09-15).
@@ -434,7 +434,7 @@ test('askHTML in the chat: a read card is Respond (arms the reply) + Read (close
 test('askHTML: a read card is blue', () => {
   const chat = askHTML({ ...ask, kind: 'read', verb: 'read' });
   assert.match(chat, /^<div class="ask read" id="ask-card-ask-1a2b3c4d">/);
-  assert.match(chat, /🔵 <span class="verb">read<\/span><span class="at">[^<]*<\/span><\/div><div class="t">Pick/);
+  assert.match(chat, /<span class="mark">🔵 <\/span><span class="verb">read<\/span><span class="at">[^<]*<\/span><\/div><div class="t">Pick/);
   assert.doesNotMatch(chat, /🔴/);
   // Replying does not turn it red (2026-08-28: "after I responded, they
   // turn red") — it is still a read, now waiting on the agent to close it.
@@ -485,7 +485,7 @@ test('askHTML: an install card is teal with one Install button, link line stripp
     detail: 'The install ask now draws as this teal cell.\n[Install build 812](https://hub.test/ota/tok/install.html)' };
   const chat = askHTML(inst);
   assert.match(chat, /^<div class="ask install" id="ask-card-ask-1a2b3c4d">/);
-  assert.match(chat, /📲 <span class="verb">install<\/span><span class="at">[^<]*<\/span><\/div><div class="t">Install app build 812/);
+  assert.match(chat, /<span class="mark">📲 <\/span><span class="verb">install<\/span><span class="at">[^<]*<\/span><\/div><div class="t">Install app build 812/);
   assert.match(chat, /<a class="btn sm primary" href="https:\/\/hub\.test\/ota\/tok\/install\.html" target="_blank">Install<\/a>/);
   assert.match(chat, /teal cell/);
   assert.doesNotMatch(chat, /install\.html\)|>Respond<|>Done</);
@@ -534,7 +534,7 @@ test('forYouPill: blue "to read" only when every item is a read', () => {
 test('askHTML: answered keeps its buttons with ⏳; closed loses them', () => {
   const chat = askHTML({ ...ask, state: 'answered', ...WAITING });
   assert.match(chat, /class="ask" id=/);
-  assert.match(chat, /⏳ <span class="verb">[a-z ]+<\/span><span class="at">[^<]*<\/span><\/div><div class="t">Pick/);
+  assert.match(chat, /<span class="mark">⏳ <\/span><span class="verb">[a-z ]+<\/span><span class="at">[^<]*<\/span><\/div><div class="t">Pick/);
   assert.match(chat, /Decided/);
   const done = askHTML({ ...ask, state: 'done', ...CLOSED });
   assert.match(done, /<summary><span class="k">✓ done<\/span><span class="t">Pick/);
@@ -547,7 +547,7 @@ test('askHTML: an error is one line and Restart', () => {
   const err = { ...ask, kind: 'error', verb: 'restart', outcomes: [], title: 'Run died' };
   const chat = askHTML(err);
   assert.match(chat, /class="ask err-card" id="ask-card-ask-1a2b3c4d"/);
-  assert.match(chat, /⚠︎ <span class="verb">restart<\/span><span class="at">[^<]*<\/span><\/div><div class="t">Run died/);
+  assert.match(chat, /<span class="mark">⚠︎ <\/span><span class="verb">restart<\/span><span class="at">[^<]*<\/span><\/div><div class="t">Run died/);
   assert.match(chat, /retryAsk\('ask-1a2b3c4d'\)">Restart/);
   assert.match(chat, /cardFold\('ask','ask-1a2b3c4d'\)">Dismiss/);
   assert.doesNotMatch(chat, /Done|Reply|<ul>/);
@@ -566,7 +566,7 @@ test('actionHTML: the approval card in the chat', () => {
   const chat = actionHTML(action);
   assert.match(chat, /^<div class="ask" id="ask-card-act-1a2b3c4d">/);
   // One time on the head line: when it was raised, the chat's own clock.
-  assert.match(chat, /<div class="card-h">🔴 <span class="verb">approve<\/span><span class="at">today [^<]*<\/span><\/div><div class="t">git commit<\/div>/);
+  assert.match(chat, /<div class="card-h"><span class="mark">🔴 <\/span><span class="verb">approve<\/span><span class="at">today [^<]*<\/span><\/div><div class="t">git commit<\/div>/);
   assert.doesNotMatch(chat, /ago</);
   assert.match(chat, /<span class="pill purple">share<\/span>/);
   // The raw command is shut until the owner opens it; nothing else folds.
@@ -575,7 +575,7 @@ test('actionHTML: the approval card in the chat', () => {
   assert.equal((chat.match(/<details/g) || []).length, 1);
   // A commit is red like every approval, with its kind pill.
   const commit = actionHTML({ ...action, kind: 'commit' });
-  assert.match(commit, /^<div class="ask" id="ask-card-act-1a2b3c4d">\s*<div class="card-h">🔴 <span class="verb">approve<\/span>/);
+  assert.match(commit, /^<div class="ask" id="ask-card-act-1a2b3c4d">\s*<div class="card-h"><span class="mark">🔴 <\/span><span class="verb">approve<\/span>/);
   assert.match(commit, /<span class="pill purple">commit<\/span>/);
   // A land card shows no command at all.
   assert.doesNotMatch(commit, /What it runs|<details|<pre/);

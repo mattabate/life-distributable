@@ -43,7 +43,10 @@ test('a turn with no tool call yet counts "starting · N s" from its message', (
   chatState.liveSince = Date.parse(ago(7));
   // A tool call landed: the count, never the clock.
   paintWorking(true, { status: 'running', turn_tools: 3 });
-  assert.match(w.innerHTML, /working · <a href="#" class="chain-link" onclick="event.preventDefault\(\);toggleChain\(\)">3 tool calls<\/a>/);
+  assert.match(w.innerHTML, /working · <a href="#" class="chain-link" onclick="event.preventDefault\(\);toggleChain\(\)">3 steps<\/a>/);
+  // The session's name leads it, as on the desktop.
+  paintWorking(true, { status: 'running', turn_tools: 3, title: 'Research' });
+  assert.match(w.innerHTML, /<span>Research is working · <a [^>]*>3 steps<\/a>/);
   assert.doesNotMatch(w.innerHTML, /starting|since/);
   // A finished turn never counts.
   paintWorking(false, { status: 'idle' });
@@ -64,7 +67,7 @@ test('the working line reads "sending · N s" while the message is on its way', 
   chatState.sendingSince = 0;
   // Nothing on its way: the working line as before.
   paintWorking(true, { status: 'running', turn_tools: 2 });
-  assert.match(w.innerHTML, /working · <a [^>]*>2 tool calls<\/a>/);
+  assert.match(w.innerHTML, /working · <a [^>]*>2 steps<\/a>/);
   assert.doesNotMatch(w.innerHTML, /sending/);
 });
 
@@ -126,9 +129,13 @@ test('open cards only: the chat draws what is the owner\'s to act on, the full c
   const recs = [{ id: 'rec-1', closed: false }, { id: 'rec-2', closed: true, status: 'accepted' }, { id: 'rec-3', closed: false, seen_at: '2026-11-05T00:00:00Z' }];
   assert.deepEqual(openCards(asks, acts, recs).map(l => l.map(c => c.id)), [['ask-1'], ['act-1'], ['rec-1']]);
   assert.deepEqual(openCards(undefined, undefined, undefined), [[], [], []]);
-  // The button at the top names the other mode.
-  assert.match(chatFullHTML(false), /class="fold small chat-mode" onclick="toggleFullChat\(\)">Show full chat</);
-  assert.match(chatFullHTML(true), />Open cards only</);
+  // The name is the switch: shut, no words follow it; open, Chat and
+  // Coming up, Chat first.
+  assert.equal(chatTabsHTML(false, false, 3), '');
+  const tabs = chatTabsHTML(true, false, 3);
+  assert.match(tabs, /class="on" onclick="chatTab\(false\)">Chat</);
+  assert.match(tabs, /class="" onclick="chatTab\(true\)">Coming up 3</);
+  assert.match(chatTabsHTML(true, true, 0), /class="on" onclick="chatTab\(true\)">Coming up</);
   // A deep link to a closed card opens the full chat; to an open one, not.
   // A rec's links go to the Recs page, so a rec id changes nothing.
   const askById = Object.fromEntries(asks.map(a => [a.id, a]));
@@ -219,7 +226,7 @@ test('the working line counts the helpers the hub lists', () => {
   const w = el('run-working');
   chatState.liveSince = 0; chatState.sendingSince = 0;
   paintWorking(true, { status: 'running', turn_tools: 9, turn_tasks: [{ type: 'local_agent', description: 'a' }, { type: 'local_agent', description: 'b' }] });
-  assert.match(w.innerHTML, />9 tool calls · 2 subagents running<\/a><\/span>$/);
+  assert.match(w.innerHTML, />9 steps · 2 subagents running<\/a><\/span>$/);
 });
 
 test('tickSince moves every clock on the page', () => {

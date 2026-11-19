@@ -903,6 +903,9 @@ struct Prompt: Codable, Identifiable, Hashable {
         return t.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
     var startsNewSession: Bool { target == "new" || target.hasPrefix("new-or:") }
+    /// Due within 15 minutes: on the desktop's bar over the box; the rest
+    /// live on the Coming up page. The console's QUEUED_SOON is the same.
+    func isSoon(now: Date) -> Bool { (not_before ?? now).timeIntervalSince(now) <= 15 * 60 }
 }
 
 extension Prompt {

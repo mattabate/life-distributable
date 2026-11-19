@@ -27,6 +27,11 @@ struct StyledText: View {
     /// a MacFonts size stood: UIKit's own styles are the Mac's small desk
     /// sizes (subheadline 11), which MacFonts.swift only lifts for SwiftUI.
     var macSize: CGFloat? = nil
+    /// A card's reading text: on the Mac, lines 1.6 apart and paragraphs a
+    /// line apart, as a page reads.
+    var reading = false
+    /// Whole block italic: a card's spoken line, set apart from its detail.
+    var italic = false
     /// Re-renders the attributed string when the system text size changes.
     @Environment(\.dynamicTypeSize) private var typeSize
     /// Inside a component that can be chatted about (`.chatAbout`), the text
@@ -49,7 +54,7 @@ struct StyledText: View {
                 ForEach(Array(mdSegments(text, math: lines == nil).enumerated()), id: \.offset) { _, seg in
                     switch seg {
                     case .text(let t): SelectableText(attributed: cached(t), tint: UIColor(color), chat: chatHook, lines: lines)
-                    case .math(let t): MathText(text: t, font: baseFont(), color: UIColor(color))
+                    case .math(let t): MathText(text: t, font: baseFont(), color: UIColor(color), lineHeight: reading ? 1.6 : 1.35)
                     case .code(let code, let lang, let head): CodeBlock(code: code, lang: lang, head: head, style: style, macSize: macSize)
                     case .files(let files): FileStrip(files: files)
                     case .table(let rows, let header, let align): tableView(rows, header: header, align: align)
@@ -68,7 +73,7 @@ struct StyledText: View {
     /// depends on the five inputs below, so it is built once and kept.
     private static let cache = NSCache<NSString, NSAttributedString>()
     private func cached(_ text: String) -> NSAttributedString {
-        let key = "\(style.rawValue)|\(bold)|\(color)|\(typeSize)|\(macSize ?? 0)|\(text)" as NSString
+        let key = "\(style.rawValue)|\(bold)|\(color)|\(typeSize)|\(macSize ?? 0)|\(reading)|\(italic)|\(text)" as NSString
         if let hit = Self.cache.object(forKey: key) { return hit }
         let built = Perf.time("StyledText.build") { build(text) }
         Self.cache.countLimit = 400
@@ -87,7 +92,8 @@ struct StyledText: View {
         #else
         let plain = UIFont.preferredFont(forTextStyle: style)
         #endif
-        return bold ? plain.bolded() : plain
+        let slant = italic ? plain.italicized() : plain
+        return bold ? slant.bolded() : slant
     }
 
     /// Not private: StyledTextTests lays the string out.
@@ -112,7 +118,7 @@ struct StyledText: View {
             // On the Mac a blank line is a half-line gap above the next
             // paragraph, not a whole empty line (the owner 2026-09-29, on Goals:
             // "the markdown formatting is kind of weird and bad").
-            let gapBefore: CGFloat = blank && !paras.isEmpty ? base.pointSize * 0.55 : 0
+            let gapBefore: CGFloat = blank && !paras.isEmpty ? base.pointSize * (reading ? 0.8 : 0.55) : 0
             blank = false
             // A pipe table that reaches here sits in a clamped preview (body
             // cuts every other one out as a grid): one record per row.
@@ -143,7 +149,7 @@ struct StyledText: View {
             p.firstLineHeadIndent = indent
             #if targetEnvironment(macCatalyst)
             p.paragraphSpacingBefore = gapBefore
-            p.lineSpacing = 1.5
+            p.lineSpacing = reading ? round(base.pointSize * 0.4) : 1.5
             #endif
             let line = NSMutableAttributedString()
             if let mk = marker {
@@ -411,6 +417,7 @@ struct FoldedText<Fold: View>: View {
     var style: UIFont.TextStyle = .callout
     var color: Color = .primary
     var macSize: CGFloat? = nil
+    var reading = false
     var fadeTo: Color? = nil
     @ViewBuilder var button: (_ label: String, _ tap: @escaping () -> Void) -> Fold
     /// The whole text's height at this width; nil until the first layout,
@@ -421,7 +428,10 @@ struct FoldedText<Fold: View>: View {
     /// The font `StyledText.build` sets the body in, so a line is its line.
     private var lineHeight: CGFloat {
         #if targetEnvironment(macCatalyst)
-        if let macSize { return UIFont.systemFont(ofSize: macSize).lineHeight }
+        if let macSize {
+            let f = UIFont.systemFont(ofSize: macSize)
+            return f.lineHeight + (reading ? round(f.pointSize * 0.4) : 0)
+        }
         #endif
         return UIFont.preferredFont(forTextStyle: style).lineHeight
     }
@@ -431,7 +441,7 @@ struct FoldedText<Fold: View>: View {
     private var clamped: Bool { folds && !open }
 
     var body: some View {
-        StyledText(text: text, style: style, color: color, macSize: macSize)
+        StyledText(text: text, style: style, color: color, macSize: macSize, reading: reading)
             // The text view answers its own full height whatever the frame
             // below proposes, so this is the whole body's height.
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { full = $0 }
@@ -945,6 +955,10 @@ func copyText(_ parts: String...) -> String {
 private extension UIFont {
     func bolded() -> UIFont {
         guard let d = fontDescriptor.withSymbolicTraits(fontDescriptor.symbolicTraits.union(.traitBold)) else { return self }
+        return UIFont(descriptor: d, size: pointSize)
+    }
+    func italicized() -> UIFont {
+        guard let d = fontDescriptor.withSymbolicTraits(fontDescriptor.symbolicTraits.union(.traitItalic)) else { return self }
         return UIFont(descriptor: d, size: pointSize)
     }
 }

@@ -169,21 +169,31 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .chat-row .note-tag.routed { background: color-mix(in srgb, var(--muted) 14%, transparent); }
 .msgs > .ask { margin: 10px 0 18px; }
 
-/* ---- the one card: the desktop's Card (Card.swift openBody) ----
-   A wash and an outline in its tint, the verb in tint caps, the time and
-   cost at the right beside Play, so the web matches the desktop app. */
-.ask { border: 1px solid color-mix(in srgb, var(--tint) 45%, transparent); border-radius: 14px;
-  background: color-mix(in srgb, var(--tint) 8%, var(--panel)); box-shadow: none; padding: 12px 16px 13px; }
-.ask.err-card { --tint: var(--muted); }
-.ask .card-h { margin-bottom: 8px; }
-.ask .card-h .verb { font-size: 10.5px; }
-.ask .card-h .at { margin-left: auto; }
-.ask .card-h .at ~ .say-btn { margin-left: 0; }
-.ask .say-btn { padding: 3px 9px; border-radius: 6px; font-size: 12px; }
-.ask .say-btn:hover { background: var(--code); }
-.ask .said { font-size: 15px; line-height: 1.6; margin-bottom: 8px; }
-.ask .acts { margin-top: 12px; gap: 8px; }
-.ask .acts button, .ask .acts .btn { padding: 6px 14px; font-size: 13.5px; }
+/* ---- the one card: the desktop's Card (Card.swift pageBody) ----
+   No box: a 2px rule in the tint down the left, on the rows' edge, the text
+   to their right edge. The state in words in the tint, the time beside it,
+   Play at the far end; an 18px title. */
+.ask { border: 0; border-left: 2px solid var(--tint); border-radius: 0; background: transparent;
+  box-shadow: none; padding: 2px 0 2px 18px; }
+.ask.err-card { --tint: var(--muted); background: transparent; }
+.ask .card-h { margin-bottom: 8px; font-size: 12px; }
+.ask .card-h .mark { display: none; }
+.ask .card-h .verb { font-size: 12px; font-weight: 600; text-transform: capitalize; letter-spacing: 0; }
+.ask .card-h .at { font-size: 12px; }
+.ask .say-btn { padding: 1px 0; font-size: 12px; text-transform: uppercase; }
+.ask .t { font-size: 18px; font-weight: 700; line-height: 1.35; margin-bottom: 6px; }
+/* The spoken line is italic at the reading size; the detail sits back, a
+   size down and grey. */
+.ask .said { font-size: 16px; line-height: 1.6; color: var(--fg); font-style: italic; margin-bottom: 8px; }
+.ask > .small:not(.muted) { font-size: 14px; line-height: 1.6; color: var(--muted); }
+.ask > .small:not(.muted) :is(p, ul, ol) { margin: 0 0 .8em; }
+/* One capsule for every word, a faint wash until it is the armed pick, then
+   filled: arming never moves the row. */
+.ask .acts { margin-top: 10px; gap: 6px; align-items: center; }
+.ask .acts button, .ask .acts .btn { padding: 4px 11px; border: 0; border-radius: 999px; box-shadow: none;
+  background: color-mix(in srgb, var(--tint) 10%, transparent); color: var(--tint); font-size: 14px; font-weight: 600; }
+.ask .acts .suggested { border: 0; }
+.ask .acts .primary { background: var(--tint); color: #fff; }
 
 /* ---- the composer: to the walls, the same shapes ---- */
 .composer textarea { font-size: 15px; line-height: 1.55; }
