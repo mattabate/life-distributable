@@ -136,7 +136,7 @@ func TestLandRunsOnStandingApproval(t *testing.T) {
 	var g actions.Action
 	json.Unmarshal([]byte(body), &g)
 	if code != 201 || g.State != "proposed" || g.DecidedVia == "standing" || g.Title != "Change the approval gate" ||
-		!strings.Contains(g.Detail, "Changes the gate: ops/schedule.json") || !strings.Contains(g.Detail, "loosen the tool list") {
+		g.Detail != "loosen the tool list\n\nthe work" { // the commits' words alone: no sha, files or stat
 		t.Fatalf("gate land: %d %+v", code, g)
 	}
 	say = ""

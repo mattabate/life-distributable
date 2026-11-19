@@ -537,7 +537,7 @@ async function composerSend(key, action) {
 // rec's decide/reply): in / on+at_time / at, read by the hub in Eastern.
 function composerTiming(body, p) {
   if (p.when === '1h') body.in = '1h';
-  else if (p.when === 'tomorrow') { body.on = easternFields(new Date(Date.now() + 86400000)).on; body.at_time = '09:00'; }
+  else if (p.when === 'tomorrow') { body.on = hubTomorrow(); body.at_time = '09:00'; }
   else if (p.when === 'at' && p.at) Object.assign(body, easternFields(new Date(p.at)));
   return body;
 }

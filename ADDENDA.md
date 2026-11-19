@@ -1724,3 +1724,38 @@ Entry format:
 - For: anyone running `ops/py.sh setup.py`
 - Fix: setup wrote `ops/hub.json` in place, so a crash or full disk mid-write left a cut file the hub could not start on (#230). It now writes a temporary file, syncs it and renames it over. A setup run while the hub is saving a settings change can still lose one of the two edits; run setup with the hub stopped to be sure. Thanks @vonavikon.
 - How: same merge as add-0008. By hand: `ops/setup.py` (`write_hub_json`).
+
+## add-0262 · 2026-11-19 · "Tomorrow 9am" is tomorrow across a clock change
+- For: everyone who schedules a message (web console, phone and desktop apps)
+- Fix: "Tomorrow 9am" took the day 24 hours from now, so on the night a daylight-saving change starts or ends it could schedule the message for today or the day after tomorrow (23:30 on Mar 7 in New York read as Mar 9) (#239). It is now the hub's next calendar day on all three. Thanks @MashrafeeAryan.
+- How: same merge as add-0008, then `make check`, `make webcheck` and a new app build. By hand: `hub/internal/server/web/ui.js` (`hubTomorrow`), `web/composer.js` (`composerTiming`), `web/test/ui.test.js`, `app/Life/Sources/RespondSheet.swift` (`RespondWhen.tomorrow`).
+
+## add-0263 · 2026-11-19 · A key cut at 4000 characters is still redacted
+- For: everyone
+- Fix: a session's step bodies were cut to 4000 characters before secrets were masked, so a key straddling the cut kept a prefix too short to be recognised and was stored as is. Text, thinking, tool results and tool calls are now masked first, then cut.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/runner.go` (`clip`), `runner_test.go`.
+
+## add-0264 · 2026-11-19 · A land card is the commits' own words
+- For: everyone whose sessions land commits (`session_user`)
+- Change: a land card's detail listed short shas, a diff stat and, for a gate landing, "Changes the gate: <files>", and the card had a "What it runs" fold. The detail is now the commits' messages alone, one paragraph each, and a commit card shows no command on the web, phone or desktop. Other approvals keep their folded command, since the command is what you approve.
+- How: same merge as add-0008, then `make check`, `make webcheck`, `ops/hub.sh restart` and a new app build. By hand: `hub/internal/server/land.go` (`landProposal`, `landWords`), `land_test.go`, `web/ui.js` (`actionHTML`), `web/test/ui.test.js`, `shared/api.md` (POST /api/v1/land), `app/Life/Sources/ApprovalCard.swift` (`payload`).
+
+## add-0265 · 2026-11-19 · Math in replies and cards (web)
+- For: everyone on the web console
+- Change: `$...$` and `$$...$$` (also a `$$` block over several lines) in a reply or card are typeset by KaTeX 0.16.22, vendored under `web/vendor/katex` (script, CSS, woff2 fonts, MIT license) and embedded in the hub, so no CDN. Money stays money (`$12 and $15`, `$5-$10`), code spans and fences are never math, and TeX KaTeX refuses shows as written.
+- How: same merge as add-0008, then `make webcheck`, `make check` and `ops/hub.sh restart`. By hand: `hub/internal/server/web/vendor/katex/` (copy whole), `server.go` (the `//go:embed` line adds `web/vendor`), `web/index.html`, `web/ui.js` (`mdMath`, `liftMath`, `mdInline`, `md`), `web/app.css` (`.md-math`), `web/test/math.test.js` (also fails if two console scripts declare the same top-level function).
+
+## add-0266 · 2026-11-19 · Math in the phone and desktop apps
+- For: everyone on the phone and desktop apps
+- Change: a paragraph of a reply or card holding `$...$` or `$$...$$` is typeset, as on the web console. The app runs the console's own `md()` and its KaTeX in a small web view sized to the text, so the rule is the same on all three (`$12 and $15` stay money, code is never math). Pages are kept warm from launch, so a chat with math opens whole. Clamped previews keep the raw text.
+- How: needs add-0265 on the hub first (`ops/hub.sh restart`), then `make check` and a new app build. New: the app's `lifehub://` scheme, which fetches the hub's `/static/` files with the token. By hand: `app/Life/Sources/MathText.swift` (new: `MathText`, `MathPool`, `HubScheme`, `hasMath`), `StyledText.swift` (`MdSegment.math`, `mdSegments(_:math:)`), `HubClient.swift` (`asset`), `LifeApp.swift`, `app/Life.xcodeproj` (`make app-project`), `app/LifeTests/MarkdownTableTests.swift`.
+
+## add-0267 · 2026-11-19 · A link right above a copy box is its header
+- For: everyone (web console, phone and desktop apps)
+- Change: a line that is only `[label](url)` right above a fenced block (an email draft's link over its body) now heads that copy box as one line, cut short, a plain link with an arrow, instead of sitting over it as a long link. A blank line between keeps it an ordinary line. On the desktop, the copy box text is two points under the text around it when that text has its own desktop size.
+- How: same merge as add-0008, then `make webcheck`, `make check` and a new app build. By hand: `hub/internal/server/web/ui.js` (`md`, `mdCode`), `web/app.css` (`.md-code-head`), `web/test/ui.test.js`, `app/Life/Sources/StyledText.swift` (`MdLink`, `MdSegment.code` `head`, `mdSegments`, `CodeBlock`), `app/LifeTests/MarkdownTableTests.swift`.
+
+## add-0268 · 2026-11-19 · Desktop: Return sends
+- For: everyone on the desktop app
+- Change: in a chat's box a bare Return sends, as the Send button does, and Shift-Return is a new line, as in the web console. Option, Control and Command-Return, and Return while an input method is mid-word, act as before.
+- How: same merge as add-0008, then `make check` and a new app build. By hand: `app/Life/Sources/ComposerField.swift` (`PasteTextView.pressesBegan`, `onReturn`), `NewThreadSheet.swift` (`macField`).

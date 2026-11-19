@@ -179,13 +179,20 @@ enum RespondWhen: Hashable {
         case .now: ("", "", "")
         case .inAnHour: ("1h", "", "")
         case .tomorrowMorning:
-            ("", RespondWhen.day(Date().addingTimeInterval(86400)), "09:00")
+            ("", RespondWhen.tomorrow(), "09:00")
         case .at(let d):
             ("", RespondWhen.day(d), RespondWhen.clock(d))
         }
     }
     static func day(_ d: Date) -> String { Fmt.easternDay.string(from: d) }
     static func clock(_ d: Date) -> String { Fmt.easternClock.string(from: d) }
+    /// The hub's next calendar day: one day added in the hub's zone, never
+    /// 24 hours on, which a daylight-saving change moves a day either way.
+    static func tomorrow(_ now: Date = Date()) -> String {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = Fmt.easternDay.timeZone
+        return day(c.date(byAdding: .day, value: 1, to: c.startOfDay(for: now)) ?? now.addingTimeInterval(86400))
+    }
 }
 
 /// Which session hears it — the chat composer's send-options row; the Respond

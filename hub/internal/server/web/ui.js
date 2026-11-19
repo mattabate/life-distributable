@@ -418,10 +418,37 @@ function trimBareURL(u) {
   }
 }
 
+// Math: a session writes $...$ and $$...$$ and the owner sees typeset math.
+// KaTeX is vendored under /static/vendor/katex: the hub is Tailscale-only, so
+// no CDN. A dollar is only a delimiter the way Pandoc reads one: the opening
+// $ hugs its first character, the closing $ hugs its last and is not
+// followed by a digit or a letter, so "$12 and $15", "$5-$10" and
+// "$12+$15=$27" stay money. Code is never math (mdInline lifts math only
+// outside code spans; md's fences come first). TeX KaTeX refuses, and any
+// page without katex loaded (the Node tests), shows the source as written.
+const MATH_DISPLAY = /\$\$([^$]+?)\$\$/g;
+const MATH_INLINE = /(^|[^\\\w$])\$([^\s$](?:[^$\n]*?[^\s$\\])?)\$(?![\w$])/g;
+// Named mdMath, not mathHTML: the console's scripts share one global scope,
+// so a page script declaring the same name would replace this one.
+function mdMath(tex, display) {
+  const raw = display ? `$$${tex}$$` : `$${tex}$`;
+  if (typeof katex === 'undefined') return esc(raw);
+  try { return katex.renderToString(tex, { displayMode: display, throwOnError: true }); } catch { return esc(raw); }
+}
+// The math in a line, swapped for \u0002n\u0002 before anything is escaped
+// (TeX's < and & are TeX), skipping `code` exactly as mdInline's spans.
+function liftMath(s, math) {
+  const hold = (tex, display) => '\u0002' + (math.push([tex, display]) - 1) + '\u0002';
+  return s.split(/(`[^`]+`)/).map((part, i) => i % 2 ? part : part
+    .replace(MATH_DISPLAY, (_, t) => hold(t.trim(), true))
+    .replace(MATH_INLINE, (_, pre, t) => pre + hold(t, false))).join('');
+}
+
 function mdInline(src, links = true) {
   // A picture inside a sentence is its caption as a link: only a line of its
   // own draws the picture (md, BLOB_LINE).
-  let s = esc(String(src ?? '').replace(/[\u0000\u0001]/g, '').replace(/!\[([^\]]*)\]\(/g, (_, a) => `[${a || 'image'}](`));
+  const math = [];
+  let s = esc(liftMath(String(src ?? '').replace(/[\u0000\u0001\u0002]/g, '').replace(/!\[([^\]]*)\]\(/g, (_, a) => `[${a || 'image'}](`), math));
   // Code spans are lifted out first and put back last: they were substituted
   // in place, so the emphasis passes then ran over their contents and
   // "`--host *`" came out italic. Inside backticks the characters are the
@@ -446,7 +473,7 @@ function mdInline(src, links = true) {
     ? s.replace(MD_LINK, (_, t, u) => hold(/\/api\/v1\/blobs\//.test(u)
         ? `<a href="${u}" download>${emph(t)}</a>`
         : `<a href="${u}" target="_blank" rel="noopener">${emph(t)}</a>`))
-       .replace(/(^|[\s(])(https?:\/\/[^\s<\]\u0000\u0001]+)/g, (_, pre, u) => {
+       .replace(/(^|[\s(])(https?:\/\/[^\s<\]\u0000\u0001\u0002]+)/g, (_, pre, u) => {
          const [link, rest] = trimBareURL(u);
          return `${pre}${hold(`<a href="${link}" target="_blank" rel="noopener">${link}</a>`)}${rest}`;
        })
@@ -471,6 +498,7 @@ function mdInline(src, links = true) {
   });
   return emph(s)
     .replace(/\u0001(\d+)\u0001/g, (_, i) => held[i])
+    .replace(/\u0002(\d+)\u0002/g, (_, i) => mdMath(...math[i]))
     .replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${code[i]}</code>`);
 }
 
@@ -521,8 +549,12 @@ function mdTableSep(l) {
 
 // A fenced block: the language (when given) and Copy over the text, which
 // scrolls sideways rather than wrapping — a wrapped JSON line reads as two.
-function mdCode(text, lang) {
-  return `<div class="md-code"><div class="md-code-bar"><span>${esc(lang || '')}</span>` +
+// `head`: a link line written right above the fence (an email draft's
+// "[Recipient](mail url)") is the box's own header: one line, cut short,
+// never a long URL sitting over the box.
+function mdCode(text, lang, head) {
+  const top = head ? `<span class="md-code-head">${head}</span>` : `<span>${esc(lang || '')}</span>`;
+  return `<div class="md-code"><div class="md-code-bar">${top}` +
     `<button type="button" class="md-copy" onclick="mdCopy(this)">Copy</button></div>` +
     `<pre><code>${esc(text)}</code></pre></div>`;
 }
@@ -631,9 +663,10 @@ function pictureHTML(ref, caption) {
     + `<a href="${url}" download="${file}" class="small att-file">Download</a></div>`;
 }
 
+const MD_LINK_LINE = /^\s*\[[^\]]+\]\([^)\s]+\)\s*$/;
 function md(src) {
   const lines = String(src ?? '').split('\n');
-  let out = '', list = null;
+  let out = '', list = null, head = '';
   const inline = mdInline;
   const close = () => { if (list) { out += `</${list}>`; list = null; } };
   for (let i = 0; i < lines.length; i++) {
@@ -655,8 +688,15 @@ function md(src) {
         if (t.startsWith(m[2]) && /^`+$/.test(t)) break;
         body.push(lines[j].startsWith(m[1]) ? lines[j].slice(m[1].length) : lines[j].trimStart());
       }
-      out += mdCode(body.join('\n'), m[3]);
+      out += mdCode(body.join('\n'), m[3], head);
+      head = '';
       i = j;
+      continue;
+    }
+    // A line that is only a link, right above a fence, heads that box.
+    if (MD_LINK_LINE.test(l) && !blobLine(l) && i + 1 < lines.length && /^\s*`{3,}[\w.+#-]*\s*$/.test(lines[i + 1])) {
+      close();
+      head = inline(l.trim());
       continue;
     }
     // A pipe table (2026-09-17: a buy plan came out as "| Date | Buy |"
@@ -686,6 +726,20 @@ function md(src) {
       out += '</table>';
       i = j - 1;
       continue;
+    }
+    // A display equation over several lines: "$$" opens it on a line of its
+    // own (or starts the line without closing on it) and the line ending in
+    // "$$" closes it. One still streaming in, unclosed, is plain text.
+    if ((m = l.match(/^\s*\$\$(.*)$/)) && !/\$\$/.test(m[1])) {
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trimEnd().endsWith('$$')) j++;
+      if (j < lines.length) {
+        close();
+        const tex = [m[1], ...lines.slice(i + 1, j), lines[j].trimEnd().slice(0, -2)].join('\n').trim();
+        out += `<div class="md-math">${mdMath(tex, true)}</div>`;
+        i = j;
+        continue;
+      }
     }
     const blob = blobLine(l);
     if (blob) {
@@ -764,6 +818,13 @@ function easternFields(date) {
     hour: '2-digit', minute: '2-digit', hour12: false,
   }).formatToParts(date)) p[part.type] = part.value;
   return { on: `${p.year}-${p.month}-${p.day}`, at_time: `${p.hour === '24' ? '00' : p.hour}:${p.minute}` };
+}
+// The hub's next calendar day after an instant: today in the hub's zone plus
+// one day, never the day 24 hours on, which a daylight-saving change moves a
+// day either way (#239: 23:30 on Mar 7 read as Mar 9).
+function hubTomorrow(now = new Date()) {
+  const [y, m, d] = easternFields(now).on.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
 }
 
 // A bare YYYY-MM-DD parses as UTC midnight, i.e. the evening before in the
@@ -1324,9 +1385,10 @@ const actionJob = a => (!a.thread_id && /^claude:job:/.test(a.source || '')) ? a
 function actionHTML(a, opened, armed, cost) {
   const id = esc(a.id), job = actionJob(a);
   const open = a.open, no = a.state === 'denied' || a.state === 'failed';
-  const payload = a.exec_payload && a.exec_type && a.exec_type !== 'none'
+  const payload = a.exec_payload && a.exec_type && a.exec_type !== 'none' && a.kind !== 'commit'
     // Shut until the owner opens it: the card itself stays full size, only
-    // the raw command folds (a long command is hard to read on a card).
+    // the raw command folds (a long command is hard to read on a card). A
+    // land card has none: its card is the commits' words alone.
     ? `<details class="runs"><summary class="small muted">What it runs</summary>
        <pre class="io mono">${esc(typeof a.exec_payload === 'string' ? a.exec_payload : JSON.stringify(a.exec_payload, null, 2))}</pre></details>`
     : '';

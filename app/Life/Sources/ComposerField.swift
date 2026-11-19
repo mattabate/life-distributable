@@ -26,11 +26,19 @@ struct ComposerField: UIViewRepresentable {
     /// A file dropped on the box or pasted out of Finder: an attachment too,
     /// never its contents typed into the draft (PasteTextView).
     var onPasteFiles: (([AttachedFile]) -> Void)? = nil
+    /// The desktop only: Return sends, Shift-Return is a new line, as the
+    /// console's box does (composer.js wireComposer).
+    var onReturn: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIView(context: Context) -> UITextView {
         let v = PasteTextView()
+        v.onReturn = { [weak coordinator = context.coordinator] in
+            guard let send = coordinator?.parent.onReturn else { return false }
+            send()
+            return true
+        }
         v.onPasteImages = { [weak coordinator = context.coordinator] imgs in
             coordinator?.parent.onPasteImages?(imgs)
         }
@@ -248,6 +256,30 @@ struct ComposerField: UIViewRepresentable {
 final class PasteTextView: UITextView, UITextPasteDelegate {
     var onPasteImages: (([UIImage]) -> Void)?
     var onPasteFiles: (([AttachedFile]) -> Void)?
+    /// A bare Return (no Shift, nothing mid-composition): true when it was taken.
+    var onReturn: (() -> Bool)?
+    private var returnTaken = false
+
+    #if targetEnvironment(macCatalyst)
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if let key = presses.first?.key, presses.count == 1,
+           key.keyCode == .keyboardReturnOrEnter || key.keyCode == .keypadEnter,
+           key.modifierFlags.intersection([.shift, .alternate, .control, .command]).isEmpty,
+           markedTextRange == nil, onReturn?() == true {
+            returnTaken = true
+            return
+        }
+        super.pressesBegan(presses, with: event)
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if returnTaken, presses.first?.key?.keyCode == .keyboardReturnOrEnter || presses.first?.key?.keyCode == .keypadEnter {
+            returnTaken = false
+            return
+        }
+        super.pressesEnded(presses, with: event)
+    }
+    #endif
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)

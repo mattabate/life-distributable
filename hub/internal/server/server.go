@@ -38,9 +38,10 @@ import (
 // The console, served under /static/. Globbed per file type rather than `web`
 // so web/test/ (the Node tests, ops/webcheck.sh) never ends up in the binary —
 // a bare `web/*.js` still picks up a newly added top-level script, which a
-// hand-kept file list did not (composer.js 404'd on 2026-08-29).
+// hand-kept file list did not (composer.js 404'd on 2026-08-29). web/vendor is
+// third-party code kept as shipped (KaTeX: its script, CSS and woff2 fonts).
 //
-//go:embed web/index.html web/*.css web/*.js web/views
+//go:embed web/index.html web/*.css web/*.js web/views web/vendor
 var webFS embed.FS
 
 // consoleBuild identifies the console files inside THIS binary.

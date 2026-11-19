@@ -18,6 +18,8 @@ struct LifeApp: App {
                     // Re-register on every launch: the hub keeps the latest token.
                     AppDelegate.push.hub = client
                     AppDelegate.push.register()
+                    await HubScheme.warm(hub: client)
+                    MathPool.warm(hub: client)
                 }
                 .onChange(of: client.isConfigured) { _, ok in
                     if ok { AppDelegate.push.hubConfigured() }

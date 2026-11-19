@@ -41,6 +41,10 @@ final class MarkdownTableTests: XCTestCase {
                        [.text("1. Paste:"), .code("{\n  \"a\": [\n    \"**b**\"\n  ]\n}", lang: "json"), .text("2. Save")])
         XCTAssertEqual(mdSegments("- run\n  ```\n  a\n    b\n  ```"), [.text("- run"), .code("a\n  b", lang: "")])
         XCTAssertEqual(mdSegments("```sh\nls -la"), [.code("ls -la", lang: "sh")])
+        // A link line right above a fence heads the box; a blank line between keeps it a line.
+        XCTAssertEqual(mdSegments("Drafts:\n[Sam Lee](https://m.test/1)\n```\nHi Sam\n```"),
+                       [.text("Drafts:"), .code("Hi Sam", lang: "", head: MdLink(line: "[Sam Lee](https://m.test/1)"))])
+        XCTAssertEqual(mdSegments("[Sam](https://m.test/1)\n\n```\nHi\n```"), [.text("[Sam](https://m.test/1)"), .code("Hi", lang: "")])
         XCTAssertEqual(mdSegments("three ``` ticks in prose"), [.text("three ``` ticks in prose")])
     }
 
@@ -68,5 +72,19 @@ final class MarkdownTableTests: XCTestCase {
         XCTAssertEqual(mdSegments("Your steer:\n| a | b |\n|---|--:|\n| 1 | 2 |\nafter"),
                        [.text("Your steer:"), .table([["a", "b"], ["1", "2"]], header: true, align: [.left, .right]), .text("after")])
         XCTAssertEqual(mdSegments("| a | b |\n| c | d |"), [.table([["a", "b"], ["c", "d"]], header: false, align: [])])
+    }
+
+    /// Math (MathText): a paragraph holding it is its own segment, by the
+    /// console's rule; money is not math.
+    func testAParagraphWithMathIsItsOwnSegment() {
+        XCTAssertEqual(mdSegments("Euler:\n\n$e^{i\\pi} + 1 = 0$ holds.\n\nDone.", math: true),
+                       [.text("Euler:"), .math("$e^{i\\pi} + 1 = 0$ holds."), .text("Done.")])
+        XCTAssertEqual(mdSegments("Sum:\n$$\n\\sum_n n\n$$\nafter\n\nnext", math: true),
+                       [.math("Sum:\n$$\n\\sum_n n\n$$\nafter"), .text("next")])
+        for money in ["$12 and $15", "$5-$10 a month", "$12+$15=$27", "$PATH:$HOME"] {
+            XCTAssertFalse(hasMath(money), money)
+        }
+        XCTAssertTrue(hasMath("so $x$."))
+        XCTAssertEqual(mdSegments("a $x$ b"), [.text("a $x$ b")])
     }
 }

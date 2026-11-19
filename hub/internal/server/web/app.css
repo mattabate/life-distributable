@@ -420,6 +420,10 @@ textarea { resize: vertical; }
 /* A cell that is one link: the link's box stretches over the whole cell. */
 .md-table .md-link { position: relative; }
 .md-table .md-link a::after { content: ""; position: absolute; inset: 0; }
+/* Math (ui.js mdMath): an equation wider than the card slides sideways
+   rather than spilling past it. */
+.md-math, .katex-display { margin: 6px 0 8px; max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.md-math .katex-display { margin: 0; }
 /* A fenced block (2026-09-18): text he copies verbatim. Whitespace kept, long
    lines WRAP to the card — never a sideways scroll (2026-10-26
    20:57 on an email in a copy box: "these messages need to wrap… I want to
@@ -431,6 +435,12 @@ textarea { resize: vertical; }
   padding: 3px 4px 3px 10px; font: 11px ui-monospace, Menlo, monospace;
   border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
 .md-code-bar span { opacity: .6; }
+/* A draft's link heads its box: one line in the UI font, cut short, the
+   arrow saying it opens. */
+.md-code-bar .md-code-head { opacity: 1; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font: 600 13px system-ui, sans-serif; }
+.md-code-head a { text-decoration: none; }
+.md-code-head a::after { content: " ↗"; }
 .md-copy { font: 600 11px system-ui, sans-serif; padding: 2px 8px; border-radius: 6px; cursor: pointer;
   color: inherit; background: transparent; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
 .md-copy:hover { background: color-mix(in srgb, currentColor 10%, transparent); }

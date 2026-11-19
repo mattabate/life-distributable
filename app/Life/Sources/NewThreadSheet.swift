@@ -405,7 +405,8 @@ struct Composer: View {
     private var macField: some View {
         ComposerField(text: $draft.text, placeholder: placeholder, maxLines: 12, focused: $focused,
                              onPasteImages: { imgs in for i in imgs { attachments.add(i) } },
-                             onPasteFiles: { files in for f in files { attachments.add(f, picturesAsImages: true) } })
+                             onPasteFiles: { files in for f in files { attachments.add(f, picturesAsImages: true) } },
+                             onReturn: { if canSend { send() } })
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(minHeight: 44, alignment: .topLeading)
             .onAppear { editing = true; focused = true }

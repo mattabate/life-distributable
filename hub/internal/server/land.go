@@ -90,7 +90,6 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 409, "nothing to land: main already has it")
 		return
 	}
-	stat, _ := git("diff", "--stat", "main", sha)
 	hub, _ := git("diff", "--name-only", "main", sha, "--", "hub")
 	gate := gateTouched(git, "main", sha)
 	// A gate landing is the owner's card, and the session's spoken words are
@@ -101,7 +100,7 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 			"): land again with ops/land.sh --say \"I need your approval to change <what, in plain words>, because <why>.\" (one line, at most 700 characters, no file names or shas)")
 		return
 	}
-	a, err := s.acts.Propose(landProposal(from, sha, log, stat, in.Say, repo, hub != "", gate))
+	a, err := s.acts.Propose(landProposal(from, sha, log, in.Say, repo, hub != "", gate))
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
@@ -115,8 +114,10 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 // restarts the hub (#208). When hub/ changed, the hub is rebuilt and
 // restarted after the action finishes (the restart waits, or the hub would
 // kill its own run). gate lists the gatePaths files the landing changes:
-// non-empty = a proposed card for the owner, never the standing yes.
-func landProposal(thread, sha, log, stat, say, repo string, hub bool, gate string) actions.Proposal {
+// non-empty = a proposed card for the owner, never the standing yes. The
+// detail is the commits' own words and nothing else: no shas, no file list,
+// no diff stat, no gate file names.
+func landProposal(thread, sha, log, say, repo string, hub bool, gate string) actions.Proposal {
 	cmd := "bash ops/land-incoming.sh " + sha
 	if hub {
 		cmd += " && make build && (nohup sh -c 'sleep 3; bash ops/hub.sh restart' >/dev/null 2>&1 &)"
@@ -125,17 +126,28 @@ func landProposal(thread, sha, log, stat, say, repo string, hub bool, gate strin
 	gated := true
 	p := actions.Proposal{Kind: "commit", Gated: &gated, ThreadID: thread, Source: "claude:thread:" + thread,
 		Title:    fmt.Sprintf("Land %d commit(s) on main", strings.Count(log, "\n")+1),
-		Detail:   log + "\n\n" + stat,
+		Detail:   landWords(log),
 		Say:      say,
 		ExecType: "shell", ExecPayload: payload, Standing: standingNote}
 	if gate = strings.TrimSpace(gate); gate != "" {
 		// The title is the action and the session's say is the what and why;
-		// the commits and files are the folded detail.
+		// the commits' words are the detail.
 		p.Standing = ""
 		p.Title = "Change the approval gate"
-		p.Detail += "\n\nChanges the gate: " + strings.ReplaceAll(gate, "\n", ", ")
 	}
 	return p
+}
+
+// landWords: `git log --oneline` with each line's short sha cut, a blank
+// line between commits.
+func landWords(log string) string {
+	var out []string
+	for _, l := range strings.Split(strings.TrimSpace(log), "\n") {
+		if _, rest, ok := strings.Cut(strings.TrimSpace(l), " "); ok {
+			out = append(out, rest)
+		}
+	}
+	return strings.Join(out, "\n\n")
 }
 
 // gatePaths: the files that decide what a session may do without the owner,
