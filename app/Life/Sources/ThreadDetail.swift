@@ -2,8 +2,10 @@
 // closed card is one ChatRow; the tool calls are not drawn.
 import SwiftUI
 
-/// Rows drawn on open, and how many more each "Show earlier" adds.
-private let rowWindow = 25
+/// Rows drawn on open, and how many more each "Show earlier" adds. An open
+/// card older than the window still shows (headAsks/headActions).
+private let rowWindow = 20
+private let olderStep = 50
 
 struct ThreadDetail: View {
     @Environment(HubClient.self) private var hub
@@ -110,6 +112,8 @@ struct ThreadDetail: View {
     /// Off every time a chat opens: only the cards still open are drawn. The
     /// console's chatState.full (threads.js).
     @State private var full = false
+    /// The desktop's second word by the name: Coming up in place of the chat.
+    @State private var upcoming = false
     /// THE TOOL CHAIN of the turn in flight, opened by a tap on the working
     /// line's count (the console's chatState.chain): the run it belongs to,
     /// its events as read so far (only ever added to), and the window's ends.
@@ -201,12 +205,13 @@ struct ThreadDetail: View {
         return s
     }
 
-    /// The owner's messages the session is working on: the turn in flight's
-    /// starters, with no reply yet. The open-cards view keeps them, so a Send
-    /// does not vanish into the working line.
+    /// What the session is working on: the turn in flight's starters, with
+    /// no reply yet. The owner's messages, and another session's relay or a
+    /// check-in too, which say why it works. The open-cards view keeps them,
+    /// so a Send does not vanish into the working line.
     var liveStarters: Set<Int> {
         guard thread.status == "running" else { return [] }
-        return Set(inFlightStarters.filter { $0.role == "owner" }.map(\.id))
+        return Set(inFlightStarters.map(\.id))
     }
 
     /// One cell of the open-cards view (`openCells`), in conversational order.
@@ -452,14 +457,16 @@ struct ThreadDetail: View {
         workingLine(Text(text), stop: canStop)
     }
 
-    /// The working line of a turn at work: "working · 23 tool calls · 3
+    /// The working line of a turn at work: "<name> is working · 23 steps · 3
     /// subagents running · today 10:09 PM · $1.12", the count and the helpers
     /// the way into the tool chain (the console's chain-link).
     func workingFacts() -> some View {
         let n: Int = thread.turn_tools ?? 0
         let ownChain: Bool = chainLoaded && !chainRun.isEmpty
         let helpers: Int = ownChain ? toolChain(chainEvents, tasks: thread.turn_tasks).helpers.count : thread.taskHelpers
-        let words: String = [n > 0 ? callsWord(n) : "", helpersWords(helpers)].filter { !$0.isEmpty }.joined(separator: " · ")
+        // Steps, not tool calls; the count still opens the chain.
+        let steps: String = n > 0 ? "\(n) step" + (n == 1 ? "" : "s") : ""
+        let words: String = [steps, helpersWords(helpers)].filter { !$0.isEmpty }.joined(separator: " · ")
         let facts: String = thread.turnFacts(withCalls: false)
         let rest: String = facts.isEmpty ? "" : " · " + facts
         #if targetEnvironment(macCatalyst)
@@ -468,7 +475,9 @@ struct ThreadDetail: View {
         let link: Color = chainOpen ? Color.accentColor : Color.secondary
         #endif
         let count: Text = Text(words).foregroundColor(link).underline(true, color: link.opacity(0.4))
-        let line: Text = words.isEmpty ? Text("working" + rest) : Text("working · \(count)\(rest)")
+        // The session by its name: "<name> is working · 4 steps".
+        let who: String = thread.title.isEmpty ? "working" : "\(mdPlain(thread.title)) is working"
+        let line: Text = words.isEmpty ? Text(who + rest) : Text("\(who) · \(count)\(rest)")
         return workingLine(line, stop: true, tap: words.isEmpty ? nil : { toggleChain() })
     }
 
@@ -739,10 +748,15 @@ struct ThreadDetail: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }.buttonStyle(.plain).padding(.horizontal)
                         }
-                        if full {
+                        if full && Device.isMac && upcoming {
+                            ComingUpStrip(prompts: queuedPrompts, cancel: cancelPrompt, listed: true)
+                        } else if full {
+                            // On the desktop, one grey line down the whole
+                            // history, its rows unboxed and tight.
+                            VStack(alignment: .leading, spacing: Device.isMac ? 4 : 8) {
                             if rows.count > shown {
-                                Button { withAnimation { shown += rowWindow * 2 } } label: {
-                                    Label("Show \(min(rowWindow * 2, rows.count - shown)) earlier of \(rows.count)", systemImage: "chevron.up")
+                                Button { withAnimation { shown += olderStep } } label: {
+                                    Label("Show \(min(olderStep, rows.count - shown)) earlier of \(rows.count)", systemImage: "chevron.up")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }.buttonStyle(.plain).padding(.horizontal)
                             }
@@ -763,6 +777,8 @@ struct ThreadDetail: View {
                             }
                             ForEach(tailActions) { approvalCell($0) }
                             ForEach(tailRecs) { RecNotice(rec: $0, reload: { await load() }) }
+                            }
+                            .modifier(HistoryLine(on: Device.isMac))
                         } else {
                             let cells = openCells(rows)
                             ForEach(cells) { cell in
@@ -901,9 +917,15 @@ struct ThreadDetail: View {
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 .background(Web.panel)
             }
-            // The console's `details.queued` strip, between the transcript and
-            // the box (threads.js queuedHTML).
-            ComingUpStrip(prompts: queuedPrompts, cancel: cancelPrompt)
+            // Coming up is the head's second word, with the box still under
+            // it; only a wake due within 15 minutes stays on the bar over the
+            // box (threads.js queuedHTML), unless that page is open.
+            if !(full && upcoming) {
+                TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                    let soon = queuedPrompts.filter { $0.isSoon(now: ctx.date) }
+                    if !soon.isEmpty { ComingUpStrip(prompts: soon, cancel: cancelPrompt) }
+                }
+            }
             Composer(draft: draft, attachments: attachments,
                      placeholder: replyPlaceholder,
                      sending: sending, send: { send() }, allowEmpty: replies.contains { !$0.outcome.isEmpty },
@@ -1545,7 +1567,9 @@ extension ThreadDetail {
                 .accessibilityLabel("Back")
             }
             // The name opens the whole conversation and closes it again.
-            Button { withAnimation { full.toggle() } } label: {
+            // Open, two smaller grey words follow it: Chat first, then
+            // Coming up.
+            Button { withAnimation { full.toggle(); upcoming = false } } label: {
                 Text(md(thread.title)).font(.system(size: 15, weight: .semibold)).tracking(-0.18)
                     .lineLimit(1).truncationMode(.tail)
                     .contentShape(Rectangle())
@@ -1554,6 +1578,14 @@ extension ThreadDetail {
             .help(full ? "Open cards only" : "Full chat")
             .padding(.leading, pushed ? 4 : 0)
             .layoutPriority(1)
+            if full {
+                HStack(spacing: 14) {
+                    headTab("Chat", on: !upcoming) { upcoming = false }
+                    headTab(queuedPrompts.isEmpty ? "Coming up" : "Coming up \(queuedPrompts.count)", on: upcoming) { upcoming = true }
+                }
+                .padding(.leading, 10)
+                .fixedSize()
+            }
             Spacer(minLength: 12)
             HStack(spacing: 6) {
                 HStack(spacing: 4) {
@@ -1575,6 +1607,15 @@ extension ThreadDetail {
         .frame(height: 52)
         .background(Web.panel)
         .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
+    }
+
+    func headTab(_ word: String, on: Bool, _ pick: @escaping () -> Void) -> some View {
+        Button(action: pick) {
+            Text(word).font(.zoomed(size: 13, weight: on ? .semibold : .regular))
+                .foregroundStyle(on ? Color.primary : Web.muted)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// The row's pills, the board's words (views/threads.js headPills): the
@@ -1864,6 +1905,31 @@ extension Prompt {
     }
 }
 
+/// The grey of the desktop's chat line: the console's `--line`.
+private var historyLineColor: Color {
+    #if targetEnvironment(macCatalyst)
+    Web.line
+    #else
+    Color.primary.opacity(0.1)
+    #endif
+}
+
+/// The desktop's whole conversation: one grey line down its left, the rows
+/// inside it drawn unboxed (ChatRow's `plainRows`).
+struct HistoryLine: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        if on {
+            content
+                .environment(\.plainRows, true)
+                .padding(.leading, 14)
+                .overlay(alignment: .leading) { Rectangle().fill(historyLineColor).frame(width: 2).padding(.leading, 16) }
+        } else {
+            content
+        }
+    }
+}
+
 /// "Coming up · 2 · next in 28m · <its words>" over the composer: this
 /// session's queued wakes (a message the owner queued for the morning, the
 /// check-back the session set itself), the console's `details.queued` strip
@@ -1874,14 +1940,28 @@ extension Prompt {
 /// words; open, every wake with Cancel (Turn off on a standing row).
 /// Nothing queued = no strip. Open, the next five and an "N more" row that
 /// shows the rest, this visit only; the console's strip folds the same way.
+/// `listed` is the desktop's Coming up page: every wake, one tight row each
+/// inside one grey line, no fold.
 struct ComingUpStrip: View {
     let prompts: [Prompt]
     let cancel: (Prompt) -> Void
+    var listed = false
     @AppStorage("queuedOpen") private var open = false
     @State private var all = false
 
     var body: some View {
-        if let next = prompts.first {
+        if listed {
+            VStack(alignment: .leading, spacing: 0) {
+                if prompts.isEmpty {
+                    Text("Nothing coming up").font(small).foregroundStyle(.secondary).padding(.vertical, 5)
+                }
+                ForEach(prompts) { p in row(p).padding(.vertical, 5) }
+            }
+            .padding(.leading, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) { Rectangle().fill(historyLineColor).frame(width: 2) }
+            .padding(.horizontal, 16)
+        } else if let next = prompts.first {
             VStack(alignment: .leading, spacing: 0) {
                 if prompts.count == 1 {
                     HStack(spacing: 8) {

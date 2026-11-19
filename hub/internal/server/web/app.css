@@ -403,8 +403,27 @@ textarea { resize: vertical; }
   font: 600 12px system-ui, sans-serif; color: inherit; background: transparent;
   border: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
 .fold:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
-/* The chat's one mode button at its top: Show full chat / Open cards only. */
-.msgs .chat-mode { margin: 0 0 14px; color: var(--muted); }
+/* The session's name is the switch; open, Chat and Coming up follow it,
+   smaller and grey. */
+.chat-name { all: unset; cursor: pointer; }
+.chat-tabs { margin-left: 14px; display: inline-flex; gap: 14px; }
+.chat-tabs button { all: unset; cursor: pointer; font-size: 13px; color: var(--muted); }
+.chat-tabs button.on { color: var(--fg); font-weight: 600; }
+/* The whole conversation: one grey line down its left, the rows inside it
+   unboxed and tight. */
+.msgs.history {
+  padding-left: calc(var(--gutter) + 16px);
+  background-image: linear-gradient(var(--line), var(--line)); background-repeat: no-repeat;
+  background-size: 2px calc(100% - 36px); background-position: var(--gutter) 18px; background-attachment: local;
+}
+.msgs.history .chat-row { margin: 0; border-radius: 0; background: none; box-shadow: none; }
+.msgs.history .chat-row > summary { padding: 4px 0; }
+.msgs.history .row-body { padding: 2px 0 8px; }
+.qpage .qrow { gap: 8px; padding: 4px 0; }
+.chat-earlier { all: unset; cursor: pointer; font-size: 12px; color: var(--muted); padding: 2px 0 6px; }
+/* A wake within 15 minutes, back on the bar over the box. */
+.qsoon { padding: 4px var(--gutter); border-top: 1px solid var(--line); background: var(--panel); }
+.qsoon .qrow { gap: 8px; padding: 2px 0; }
 /* A pipe table in a reply or a card's detail (2026-09-17): as wide as its
    words, header bold in the text's own colour, hairlines between rows — not
    the page tables' full-width muted headers. */

@@ -1157,7 +1157,7 @@ function cardHTML(c, opened) {
   // `cost`: the turn that raised it, which rides on its first card (the chat's
   // end line went with the tool calls, 2026-10-25).
   const at = [c.at ? esc(dayWhen(c.at)) : '', c.cost ? usd(c.cost) : ''].filter(Boolean).join(' · ');
-  const head = `<div class="card-h">${c.mark}<span class="verb">${esc(c.verb || '')}</span>${at ? `<span class="at">${at}</span>` : ''}${play}</div>`;
+  const head = `<div class="card-h"><span class="mark">${c.mark}</span><span class="verb">${esc(c.verb || '')}</span>${at ? `<span class="at">${at}</span>` : ''}${play}</div>`;
   const said = c.said ? `<div class="said">${esc(c.said)}</div>` : '';
   // A closed card is one row (rowHTML): its state, title and time; open it to
   // reread or Reopen.

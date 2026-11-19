@@ -1759,3 +1759,28 @@ Entry format:
 - For: everyone on the desktop app
 - Change: in a chat's box a bare Return sends, as the Send button does, and Shift-Return is a new line, as in the web console. Option, Control and Command-Return, and Return while an input method is mid-word, act as before.
 - How: same merge as add-0008, then `make check` and a new app build. By hand: `app/Life/Sources/ComposerField.swift` (`PasteTextView.pressesBegan`, `onReturn`), `NewThreadSheet.swift` (`macField`).
+
+## add-0269 · 2026-11-19 · Cards read like a page
+- For: everyone (web console, phone and desktop apps)
+- Change: an open card is no longer a tinted box. A rule in the card's colour runs down its left on the rows' edge, the state is a word in that colour, then a bold title (18 on the web and desktop), the spoken line in italic at the reading size (16, lines 1.6 apart; body on the phone), and the detail a size down and grey (14; subheadline on the phone). On the desktop the card spans the pane like the rows around it, and a copy box in the detail is 12 pt, two under the detail. Every word button is the same capsule, a faint wash of the card's colour until it is the armed pick, then filled, so arming one never shifts the row.
+- How: same merge as add-0008, then `make webcheck`, `make check`, `ops/hub.sh restart` and a new app build. By hand: `hub/internal/server/web/skin.css` (the card block), `web/ui.js` (`cardHTML`, the `.mark` span), `web/test/ui.test.js`, `app/Life/Sources/Card.swift` (`openBody`, `bodyText(_:reading:)`), `StyledText.swift` (`reading`, `italic`, `FoldedText.reading`, `UIFont.italicized`).
+
+## add-0270 · 2026-11-19 · The working line names the session and counts steps
+- For: everyone (web console, phone and desktop apps)
+- Change: the line under a chat while its session works reads "<session name> is working · 4 steps" instead of "working · 4 tool calls". The count still opens the tool chain.
+- How: same merge as add-0008, then `make webcheck`, `make check`, `ops/hub.sh restart` and a new app build. By hand: `hub/internal/server/web/views/threads.js` (`paintWorking`), `web/test/sending.test.js`, `app/Life/Sources/ThreadDetail.swift` (`workingFacts`).
+
+## add-0271 · 2026-11-19 · Chat and Coming up by the session's name
+- For: everyone on the web console and the desktop app (the phone keeps its Show full chat button and folding Coming up strip)
+- Change: the session's name in the chat head opens the whole conversation, and two smaller grey words follow it, Chat (first) and Coming up (with its count); the name again closes both. Coming up is the second word's page: every queued wake one tight row, soonest first, with Cancel (Turn off on a standing check-in), and the box stays under it so you can still send. The whole conversation runs inside one grey line down the left, its rows unboxed and tight; the line belongs to the Chat page only.
+- How: same merge as add-0008, then `make webcheck`, `make check`, `ops/hub.sh restart` and a new app build. By hand: `hub/internal/server/web/views/threads.js` (`chatTabsHTML`, `chatTab`, `toggleFullChat`, `refreshThread`, `queuedHTML`; `chatFullHTML`, `queuedMore`, `wireQueued` removed), `web/app.css` (`.chat-name`, `.chat-tabs`, `.msgs.history`, `.qpage`), `web/test/queued.test.js`, `web/test/sending.test.js`, `app/Life/Sources/ThreadDetail.swift` (`upcoming`, `macHead`, `headTab`, `HistoryLine`, `ComingUpStrip.listed`), `Card.swift` (`plainRows`, `ChatRow`).
+
+## add-0272 · 2026-11-19 · A wake due soon sits over the box; the full chat opens on its newest 20
+- For: everyone (the bar: web console and desktop app; the window: all three)
+- Change: a wake due within 15 minutes is on a bar over the box, with Cancel, on the Chat page and the open cards; the rest stay on the Coming up page, and the bar steps aside while that page is open. The full chat draws its newest 20 messages, not all of them, and Show earlier adds 50 a click; a message still holding an open card pulls the window back to it.
+- How: same merge as add-0008, then `make webcheck`, `make check`, `ops/hub.sh restart` and a new app build. By hand: `hub/internal/server/web/views/threads.js` (`queuedSoonHTML`, `paintSoon`, `qrowHTML`, `chatEarlier`, `CHAT_WINDOW`, `CHAT_MORE`), `web/app.css` (`.qsoon`, `.chat-earlier`), `web/test/queued.test.js`, `app/Life/Sources/ThreadDetail.swift` (`rowWindow`, `olderStep`), `Models.swift` (`Prompt.isSoon`).
+
+## add-0273 · 2026-11-19 · A relay or check-in that started the turn stays in view
+- For: everyone (web console, phone and desktop apps)
+- Change: while a session works, the open-cards view kept only your own messages that started the turn. It now also keeps another session's relay or a check-in that started it, beside the working line, so you can see why it is working.
+- How: same merge as add-0008, then `make webcheck`, `make check` and a new app build. By hand: `hub/internal/server/web/views/threads.js` (`refreshThread`), `app/Life/Sources/ThreadDetail.swift` (`liveStarters`).

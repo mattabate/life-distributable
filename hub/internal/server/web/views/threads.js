@@ -739,8 +739,10 @@ async function createSession(p) {
 // thread/running = the session as last read, so a Send can repaint the
 // working line at once; liveSince = when the turn in flight was started, for
 // its "starting · N s" until the first tool call.
-// full = the whole conversation is drawn (his toggle, chatFullHTML); false,
-// the default every time a chat opens, draws only the cards still open.
+// full = the whole conversation is drawn (the toggle is the name); upcoming =
+// its Coming up page instead (chatTabsHTML); shown = how many of the newest
+// messages the full chat draws (CHAT_WINDOW, more per Show earlier). full
+// false, the default every time a chat opens, draws only the cards still open.
 // liveRun = the run id of the turn in flight; chain = its tool chain, loaded
 // only while open (his click on the working line's count, chainHTML).
 const newChain = () => ({ open: false, run: '', evs: [], first: 0, last: 0, loaded: false, all: false, busy: false, me: false, subs: {} });
@@ -763,7 +765,7 @@ async function openThread(id, focus) {
   if (!same) chatState.about = null;
   chatState.id = id; chatState.lastMsgID = 0; chatState.lastActs = ''; chatState.open = new Map();
   chatState.focus = focus || ''; chatState.focusAct = undefined; chatState.actIDs = ''; chatState.lastPrompts = ''; chatState.lastRecs = '';
-  chatState.lastAsks = ''; chatState.cards = {}; chatState.full = false; chatState.chain = newChain(); chatState.liveRun = '';
+  chatState.lastAsks = ''; chatState.cards = {}; chatState.full = false; chatState.upcoming = false; chatState.shown = 0; chatState.chain = newChain(); chatState.liveRun = '';
   // The chat's composer state IS chatState.send (composer.js keeps it across
   // the 5s redraws); a new session starts it empty.
   chatState.send = same ? composerState('chat') : composerReset('chat');
@@ -994,26 +996,38 @@ async function refreshThread(id, first) {
   // messages should only be available by toggle on… put a little button here
   // to be like show full chat"): a chat opens on what is his to act on — the
   // asks, approvals and recs still open, under nothing — and the working
-  // line; every message row and every closed card is behind "Show full chat"
-  // at the top (chatFullHTML). His message in flight stays while the session
-  // works on it, so a Send does not vanish into the working line. A deep
+  // line; every message row and every closed card is behind the session's
+  // name in the head (chatTabsHTML). A message that started the turn in
+  // flight stays while the session works on it (the owner's, another
+  // session's relay or a check-in), so the working line says why. A deep
   // link to a closed card flips the full chat on, so the card is there to
   // land on.
   if (focusNeedsFull(chatState.focus, askById, acts)) chatState.full = true;
   const full = chatState.full;
-  const liveIDs = new Set(full ? [] : starters.filter(m => m.role === OWNER).map(m => m.id));
+  const liveIDs = new Set(full ? [] : starters.map(m => m.id));
   // The rows in groups, one per message (its row and the cards under it) and
   // one per card at the end, each keyed so a redraw can keep what did not
   // change (chatPatch).
-  const groups = [['full', chatFullHTML(full)]];
+  const upcoming = full && !!chatState.upcoming;
+  const groups = [];
   const tails = (as, cs, rs) => {
     for (const a of as) groups.push(['ask:' + a.id, chatAskHTML(a)]);
     for (const a of cs) groups.push(['action:' + a.id, chatActionHTML(a)]);
     for (const r of rs) groups.push(['rec:' + r.id, recNoticeHTML(r)]);
   };
-  tails(headAsks, headActs, []);
-  if (full) {
-    for (const m of ordered) groups.push(['msg:' + m.id, msgHTML(m, askByMsg[m.id], actByMsg[m.id], recByMsg[m.id], askById, recById)]);
+  if (upcoming) groups.push(['upcoming', queuedHTML(queued)]);
+  else tails(headAsks, headActs, []);
+  if (upcoming) {
+    // Coming up in place of the chat.
+  } else if (full) {
+    // The newest CHAT_WINDOW, then CHAT_MORE a click; a message still holding
+    // an open card pulls the window back to it.
+    let from = Math.max(0, ordered.length - (chatState.shown || CHAT_WINDOW));
+    for (let i = 0; i < from; i++) {
+      if (openCards(askByMsg[ordered[i].id], actByMsg[ordered[i].id], []).some(x => x.length)) { from = i; break; }
+    }
+    if (from > 0) groups.push(['earlier:' + from, `<button class="link small muted chat-earlier" onclick="chatEarlier(${ordered.length - from})">Show ${Math.min(CHAT_MORE, from)} earlier of ${ordered.length}</button>`]);
+    for (const m of ordered.slice(from)) groups.push(['msg:' + m.id, msgHTML(m, askByMsg[m.id], actByMsg[m.id], recByMsg[m.id], askById, recById)]);
     tails(tailAsks, tail, tailRecs);
   } else {
     for (const m of ordered) {
@@ -1027,23 +1041,25 @@ async function refreshThread(id, first) {
       if (h) groups.push(['msg:' + m.id, h]);
     }
     tails(...openCards(tailAsks, tail, tailRecs));
-    if (groups.length === 1 && !running && !sendingSince()) groups.push(['none', '<div class="small muted">Nothing open</div>']);
+    if (!groups.length && !running && !sendingSince()) groups.push(['none', '<div class="small muted">Nothing open</div>']);
   }
   // Everything around the rows. When none of it changed and this chat is
   // already drawn, only the groups that changed are redrawn, in place: the
   // whole chat used to be rebuilt on every new message or card change, the
   // composer with it, which made a click on a long session slow (#160).
+  const tabs = chatTabsHTML(full, upcoming, (queued || []).filter(p => p.state === 'queued').length);
   const head = `<button class="sm narrow-only" onclick="showList()">←</button>
       <div class="grow" style="min-width:0">
-        <div class="trunc"><strong>${mdInline(t.title || t.id)}</strong></div>
+        <div class="trunc"><button type="button" class="chat-name" title="${full ? 'Open cards only' : 'Full chat'}" onclick="toggleFullChat()"><strong>${mdInline(t.title || t.id)}</strong></button>${tabs}</div>
       </div>
       <div class="head-id">
         <span id="chat-pills">${headPills(board, t)}</span>${t.model ? `<span class="pill" title="${esc(t.model)}">${esc(t.model_label || modelShort(t.model))}</span>` : ''}
       </div>`;
-  const frame = `${t.title}|${t.model}|${t.model_label}|${queuedHTML(queued)}|${aboutTagHTML(chatState.about)}${composerHTML('chat', chatComposerSpec(running))}`;
+  const frame = `${t.title}|${t.model}|${t.model_label}|${full}|${upcoming}|${tabs}|${aboutTagHTML(chatState.about)}${composerHTML('chat', chatComposerSpec(running))}`;
   if (frame === chatState.frame && el.dataset.thread === id && chatPatch(document.getElementById('msgs'), groups)) {
     paintChatPills(t);
     paintWorking(running, t);
+    paintSoon(queued);
     paintChain();
     loadChain();
     loadTasks();
@@ -1058,17 +1074,17 @@ async function refreshThread(id, first) {
     <div class="chat-head">
       ${head}
     </div>
-    <div class="msgs" id="msgs">
+    <div class="msgs${full && !upcoming ? ' history' : ''}" id="msgs">
       ${groups.map(([k, h]) => `<!--k:${esc(k)}-->${h}`).join('')}
       <div class="working small muted" id="run-working" hidden></div>
       <div class="tasks small" id="run-tasks" hidden></div>
       <div class="chain small" id="run-chain" hidden></div>
     </div>
-    ${queuedHTML(queued)}
-    <div class="composer-wrap">${aboutTagHTML(chatState.about)}${composerHTML('chat', chatComposerSpec(running))}</div>`;
+    <div class="composer-wrap"><div id="chat-soon"></div>${aboutTagHTML(chatState.about)}${composerHTML('chat', chatComposerSpec(running))}</div>`;
   chatState.drawn = new Map(groups);
 
   paintWorking(running, t);
+  paintSoon(queued);
   paintChain();
   loadChain();
   loadTasks();
@@ -1118,14 +1134,28 @@ function chatPatch(box, groups) {
   return true;
 }
 
-// The one button at the top of the chat: "Show full chat" over the open cards,
-// "Open cards only" over the whole conversation. The whole chat is drawn on
-// demand, never by default (2026-10-26 22:48: "the user, honestly,
-// doesn't need to see any of this stuff unless they specifically [request] it
-// by clicking some sort of toggle or button").
-const chatFullHTML = full => `<button type="button" class="fold small chat-mode" onclick="toggleFullChat()">${full ? 'Open cards only' : 'Show full chat'}</button>`;
+// The session's name in the head is the switch, as on the desktop: the open
+// cards, or the whole conversation, drawn on demand, never by default. Open,
+// two smaller grey words follow the name, Chat first, then Coming up, the
+// page of this session's wakes; the box stays under it.
+const chatTabsHTML = (full, upcoming, n) => full ? `<span class="chat-tabs">
+    <button type="button" class="${upcoming ? '' : 'on'}" onclick="chatTab(false)">Chat</button>
+    <button type="button" class="${upcoming ? 'on' : ''}" onclick="chatTab(true)">Coming up${n ? ' ' + n : ''}</button>
+  </span>` : '';
 function toggleFullChat() {
   chatState.full = !chatState.full;
+  chatState.upcoming = false;
+  refreshThread(chatState.id, true);
+}
+function chatTab(upcoming) {
+  chatState.upcoming = upcoming;
+  refreshThread(chatState.id, true);
+}
+// The full chat draws the newest CHAT_WINDOW messages; each Show earlier
+// adds CHAT_MORE.
+const CHAT_WINDOW = 20, CHAT_MORE = 50;
+function chatEarlier(drawn) {
+  chatState.shown = drawn + CHAT_MORE;
   refreshThread(chatState.id, true);
 }
 // The cards still his to act on, of each kind: an ask not closed, an approval
@@ -1411,9 +1441,11 @@ function paintWorking(running, t) {
     // helpers the turn has running ride on the line, opened or not.
     const n = (t && t.turn_tools) || 0, c = chatState.chain;
     const helpers = chainLive(c) ? toolChain(c.evs, t && t.turn_tasks).helpers.length : taskHelpers(t);
-    const words = [n ? `${n} tool call${n === 1 ? '' : 's'}` : '', helpersWords(helpers)].filter(Boolean).join(' · ');
+    // "<session> is working · 4 steps", the desktop's words.
+    const words = [n ? `${n} step${n === 1 ? '' : 's'}` : '', helpersWords(helpers)].filter(Boolean).join(' · ');
     const link = words ? `<a href="#" class="chain-link${c.open ? ' on' : ''}" onclick="event.preventDefault();toggleChain()">${esc(words)}</a>` : '';
-    el.innerHTML = dot + '<span>' + ['working', link, esc(turnFacts(t, false))].filter(Boolean).join(' · ') + '</span>';
+    const who = t && t.title ? esc(t.title) + ' is working' : 'working';
+    el.innerHTML = dot + '<span>' + [who, link, esc(turnFacts(t, false))].filter(Boolean).join(' · ') + '</span>';
   }
 }
 
@@ -1674,41 +1706,12 @@ async function threadAct(what) {
 // a blank line, and the whole instruction, so the row printed the title twice and
 // then a paragraph. Full text is the hover title; the words live on the item.
 //
-// The strip FOLDS, and shut is where it rests (2026-08-29: "sometimes
-// there are many of these, so we should be able to collapse them. The bar
-// should say the number that are coming up and the most recent one. Like the
-// most recent time, it doesn't need to be the name"). So the bar carries the
-// count and WHEN THE NEXT ONE FIRES, and its words after that when they fit —
-// .trunc, so a long title fades into the row rather than wrapping the bar.
-// Rows are sorted by that fire time: the API hands prompts back newest-CREATED
-// first, which printed Sep 28 above Sep 19 and would have left the bar's "next"
-// disagreeing with the first row under it.
-// His fold is remembered across a live redraw AND across page loads
-// (localStorage) — a strip that sprang open on every redraw would be worse
-// than no fold at all.
+// The wakes are the page behind "Coming up" by the session's name, every wake
+// listed, one tight row each. A wake due within 15 minutes also sits on the
+// bar over the box (queuedSoonHTML). Rows are sorted by fire time: the API
+// hands prompts back newest-CREATED first, which printed Sep 28 above Sep 19.
+// The phone keeps its folding ComingUpStrip.
 const promptWords = p => p.title || p.text || (p.repeat ? 'the default check-in' : '(no words)');
-const queuedIsOpen = () => localStorage.getItem('queuedOpen') === '1';
-// Open, the strip draws the NEXT FIVE and a "19 more" button
-// (2026-10-21, a phone screenshot of a chat with 24 wakes out to Nov 2027
-// filling the screen: "can we limit it to next 5?"); the button draws the
-// rest for this visit (queuedAll, back to five on leaving the chat). The
-// phone's ComingUpStrip folds the same way. The list no longer scrolls inside
-// itself.
-const QUEUED_WINDOW = 5;
-let queuedAll = false;
-onLeave.push(() => { queuedAll = false; });
-function queuedMore() {
-  queuedAll = true;
-  const q = document.getElementById('queued');
-  if (!q) return;
-  q.outerHTML = queuedHTML(chatState.queued);
-  wireQueued();
-}
-// The strip's fold outlives the redraw and the page (localStorage queuedOpen).
-function wireQueued() {
-  const q = document.getElementById('queued');
-  if (q) q.addEventListener('toggle', () => localStorage.setItem('queuedOpen', q.open ? '1' : '0'));
-}
 // A wake's clock: the console's `when`, with the year once it differs (a
 // Nov 2027 wake read "Nov 5 10:30 AM" at the foot of a list that ended in
 // March — a screenshot, 2026-10-21).
@@ -1717,12 +1720,30 @@ const wakeWhen = (iso, now) => {
   const d = new Date(iso); now = now || new Date();
   return d.toDateString() === now.toDateString() ? clock(d) : dayWords(d, now) + ' ' + clock(d);
 };
+const queuedSorted = prompts => (prompts || []).filter(p => p.state === 'queued')
+  .sort((a, b) => (a.not_before ? +new Date(a.not_before) : 0) - (b.not_before ? +new Date(b.not_before) : 0));
 function queuedHTML(prompts) {
-  const ps = (prompts || []).filter(p => p.state === 'queued')
-    .sort((a, b) => (a.not_before ? +new Date(a.not_before) : 0) - (b.not_before ? +new Date(b.not_before) : 0));
-  if (!ps.length) return '';
+  const ps = queuedSorted(prompts);
+  if (!ps.length) return '<div class="qpage small muted">Nothing coming up</div>';
+  return `<div class="qpage">${ps.map(qrowHTML).join('')}</div>`;
+}
+// Wakes within 15 minutes go back on the bar over the box, unless the Coming
+// up page is open. Prompt.isSoon in Swift.
+const QUEUED_SOON = 15 * 60e3;
+function queuedSoonHTML(prompts, now) {
+  now = now || Date.now();
+  const ps = queuedSorted(prompts).filter(p => !p.not_before || +new Date(p.not_before) - now <= QUEUED_SOON);
+  return ps.length ? `<div class="qsoon">${ps.map(qrowHTML).join('')}</div>` : '';
+}
+function paintSoon(prompts) {
+  const el = document.getElementById('chat-soon');
+  if (!el) return;
+  const h = chatState.full && chatState.upcoming ? '' : queuedSoonHTML(prompts);
+  if (el.innerHTML !== h) el.innerHTML = h;
+}
+function qrowHTML(p) {
   const mine = p => p.author === OWNER ? 'you' : p.author === 'hub' ? 'the hub' : 'this session';
-  const row = p => `<div class="row qrow">
+  return `<div class="row qrow">
       ${p.repeat ? `<span class="pill done" title="standing check-in: ${esc(cadenceWords(p.repeat))}">${esc(cadenceNext(p.repeat, wakeWhen(p.not_before)))}</span>`
         : `<span class="pill">${esc(wakeWhen(p.not_before))}</span>`}
       ${p.target === 'new' ? '<span class="pill">new session</span>' : ''}
@@ -1730,26 +1751,6 @@ function queuedHTML(prompts) {
       <span class="grow trunc small" title="${esc(p.text || '')}">${esc(promptWords(p))} <span class="muted">· from ${esc(mine(p))}</span></span>
       <button class="sm" onclick="cancelPrompt('${escJS(p.id)}')">${p.repeat ? 'Turn off' : 'Cancel'}</button>
     </div>`;
-  // A run is drawn ONCE (2026-10-12: "there was only one upcoming… it
-  // opened anyway and just shows that run twice… if there is only one then
-  // you shouldn't be able to click it open"). One wake = its row, no fold;
-  // several = a fold whose bar names the count and, SHUT, when the next one
-  // fires; open, the bar is the count alone and the rows carry the rest
-  // (app.css hides the bar's pill and words under [open]).
-  if (ps.length === 1) return `<div class="queued one" id="queued">
-    <div class="row qrow"><span class="hl small muted">Coming up</span>${row(ps[0])}</div>
-  </div>`;
-  const next = ps[0];
-  const shown = queuedAll ? ps : ps.slice(0, QUEUED_WINDOW);
-  const hidden = ps.length - shown.length;
-  return `<details class="queued" id="queued"${queuedIsOpen() ? ' open' : ''}>
-    <summary>
-      <span class="hl small muted">Coming up · ${ps.length}</span>
-      <span class="pill">next ${esc(wakeWhen(next.not_before))}</span>
-      <span class="grow trunc small muted">${esc(promptWords(next))}</span>
-    </summary>
-    <div class="qlist">${shown.map(row).join('')}${hidden ? `<div class="row qrow"><button class="sm" onclick="queuedMore()">${hidden} more</button></div>` : ''}</div>
-  </details>`;
 }
 
 async function cancelPrompt(id) {
@@ -2000,7 +2001,6 @@ const cardFold = (ref, id, back) => {
 // opened across the 5 s redraw.
 function wireChat() {
   wireComposer('chat');
-  wireQueued();
   const msgs = document.getElementById('msgs');
   if (!msgs) return;
   wireDrop(msgs, 'chat');

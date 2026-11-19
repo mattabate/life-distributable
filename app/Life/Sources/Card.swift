@@ -165,37 +165,67 @@ struct Card: View {
         if let folded { foldedBody(folded) } else { openBody }
     }
 
+    /// The open card reads like a page: no box, a 2 pt rule in the tint down
+    /// the left, the state in words, then the title, what was said in italic
+    /// at the reading size (16 pt on the desktop, 1.6 apart), the detail a
+    /// size down and grey, across the pane. Buttons are word capsules.
     private var openBody: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: mark)
-                Text(caption).textCase(.uppercase)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(caption.prefix(1).uppercased() + caption.dropFirst().lowercased()).foregroundStyle(tint)
+                if !right.isEmpty { Text(right).lineLimit(1).foregroundStyle(Self.muted) }
+                if !when.isEmpty { Text(when).lineLimit(1).fixedSize().foregroundStyle(Self.muted) }
                 Spacer()
-                if !right.isEmpty { Text(right).lineLimit(1).foregroundStyle(.tertiary) }
-                if !when.isEmpty { Text(when).lineLimit(1).fixedSize().foregroundStyle(.tertiary) }
-                // Play sits at the caption line's far end, never beside the
-                // mark — the console's head line.
-                if !said.isEmpty { playButton }
-            }.font(.caption2.weight(.semibold)).foregroundStyle(tint)
+                // Play sits at the head line's far end - the console's head line.
+                if !said.isEmpty { playButton.foregroundStyle(tint) }
+            }.font(.zoomed(size: 12, weight: .semibold))
             // Selectable: the thing worth copying is often IN the title (a
             // paste-this string, an endpoint).
-            if titled { StyledText(text: title, style: .body, color: .primary, bold: true) }
-            if !said.isEmpty { saidLine }
+            if titled { StyledText(text: title, style: .body, color: .primary, bold: true, macSize: 18) }
+            // What is heard leads, italic at the reading size; the detail
+            // sits back, smaller and grey.
+            if !said.isEmpty { StyledText(text: said, style: .body, color: .primary, macSize: 16, reading: true, italic: true) }
             let (detail, pictures) = split
             if !pictures.isEmpty { FileStrip(files: pictures) }
-            if !detail.isEmpty { bodyText(detail) }
+            if !detail.isEmpty { bodyText(detail, reading: true) }
             if let extra, !extraShown { extra }
             if let meta { meta }
             if let extra, extraShown { extra }
-            if !buttons.isEmpty { buttonRow }
+            if !buttons.isEmpty {
+                FlowChips {
+                    ForEach(buttons) { b in
+                        // A link opens first, then `act` (Install closes the ask too).
+                        Button { tap(b) } label: {
+                            // One capsule for every word, a faint wash until
+                            // it is the armed pick, then filled: arming never
+                            // changes the row's width.
+                            Text(b.label).font(.zoomed(size: 14, weight: .semibold))
+                                .foregroundStyle(b.primary ? Color.white : tint)
+                                .padding(.horizontal, 11).padding(.vertical, 4)
+                                .background(b.primary ? tint : tint.opacity(0.1), in: Capsule())
+                        }.buttonStyle(.plain).padding(.trailing, 6)
+                    }
+                }.disabled(busy).padding(.top, 2)
+            }
             if let trail { trail }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
         }
-        .padding(10)
+        .padding(.leading, 18)
+        .padding(.vertical, 4)
+        .overlay(alignment: .leading) { Rectangle().fill(tint).frame(width: 2) }
+        // The pane's width, the rule on the rows' left edge, as the rows are.
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(tint.opacity(0.45), lineWidth: 1) }
         .padding(.horizontal)
+        .padding(.vertical, 6)
+    }
+
+    /// The head line's grey: the console's muted on the desktop.
+    private static var muted: Color {
+        #if targetEnvironment(macCatalyst)
+        Web.muted
+        #else
+        Color.secondary
+        #endif
     }
 
     /// The detail's pictures lead it, as a strip above the text: the detail
@@ -270,9 +300,19 @@ struct Card: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder private func bodyText(_ text: String) -> some View {
+    @ViewBuilder private func bodyText(_ text: String, reading: Bool = false) -> some View {
         if let lines {
             StyledText(text: text, style: .subheadline, color: .secondary, lines: lines, macSize: 13.5)
+        } else if reading {
+            // The open card's detail: under the spoken line, a size down and
+            // grey. 14 pt on the desktop keeps equations readable.
+            if isLongText(text) {
+                FoldedText(text: text, style: .subheadline, color: .secondary, macSize: 14, reading: true) { label, tap in
+                    Button(label, action: tap).font(.zoomed(size: 13, weight: .semibold)).buttonStyle(.plain).foregroundStyle(tint)
+                }
+            } else {
+                StyledText(text: text, style: .subheadline, color: .secondary, macSize: 14, reading: true)
+            }
         } else if isLongText(text) {
             // Folds like a long chat bubble: two screens' worth fading out,
             // popped open to full height and shut again - never a box
@@ -330,6 +370,14 @@ struct Card: View {
     }
 }
 
+private struct PlainRowsKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var plainRows: Bool {
+        get { self[PlainRowsKey.self] }
+        set { self[PlainRowsKey.self] = newValue }
+    }
+}
+
 /// THE ROW. Everything in a chat that is not an open card is one line of the
 /// same shape: a closed card, the owner's message, a note, a check-in. `k`
 /// leads it (✓ DONE, YOU, ⏰ CHECK-IN), then the title cut to the line, the
@@ -343,6 +391,8 @@ struct ChatRow<Content: View>: View {
     /// The word's colour when it is not grey (a check-in green, an error red).
     var tone: Color? = nil
     @ViewBuilder var content: () -> Content
+    /// Inside the desktop's whole-chat line (HistoryLine): no box, tight.
+    @Environment(\.plainRows) private var plain
     /// LIFE_SHOT_UNFOLD=1 (ops/screens.sh, ops/mac-screens.sh UNFOLD=1): every
     /// row drawn open, as after a tap, for a shot of that state.
     @State private var open = ProcessInfo.processInfo.environment["LIFE_SHOT_UNFOLD"] == "1"
@@ -372,17 +422,17 @@ struct ChatRow<Content: View>: View {
                     if !when.isEmpty { Text(stamp).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).fixedSize() }
                     Text("›").font(.system(size: 13)).foregroundStyle(Color.secondary.opacity(0.6)).rotationEffect(.degrees(open ? 90 : 0))
                 }
-                .padding(.horizontal, 10).padding(.vertical, 7)
+                .padding(.horizontal, plain ? 0 : 10).padding(.vertical, plain ? 4 : 7)
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
             if open {
                 VStack(alignment: .leading, spacing: 6) { content() }
-                    .padding(.horizontal, 12).padding(.top, 2).padding(.bottom, 10)
+                    .padding(.horizontal, plain ? 0 : 12).padding(.top, 2).padding(.bottom, plain ? 6 : 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(mine ? Color.primary.opacity(0.07) : Color(.systemBackground), in: RoundedRectangle(cornerRadius: 8))
-        .overlay { if !mine { RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1), lineWidth: 1) } }
+        .background(plain ? Color.clear : mine ? Color.primary.opacity(0.07) : Color(.systemBackground), in: RoundedRectangle(cornerRadius: 8))
+        .overlay { if !mine && !plain { RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.1), lineWidth: 1) } }
         // The cards' width, never a column of its own: a width cap left the
         // owner's row stopping short under full-width cards.
         .padding(.horizontal)
