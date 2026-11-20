@@ -7,7 +7,7 @@
 *life* is a self-hosted team of AI agents built on [Claude Code][claude-code].
 It will help you meet your goals, whatever they are.
 
-Your Mac runs the agents. It connects to your iPhone over a private
+The agents run on an always-on computer (Mac or Linux). It connects to your iPhone over a private
 [Tailscale](https://tailscale.com) VPN, and you talk to the agents from an
 iPhone app, a desktop app or a web app. Nothing is on the public internet.
 Only your devices can reach it, and you can connect as many as you like: a
@@ -18,7 +18,7 @@ maintain their own code, and can change the UI or add data sources when asked.
 Dangerous actions, like sending emails, are safe behind a secure approval step.
 
 **Setup takes about 2 hours,** mostly waiting on Apple and the Xcode
-download. **You need** a Mac that stays on, a
+download. **You need** a computer that stays on (Mac or Linux), a
 [Claude subscription][claude-pricing] (about $20 to $200 a month), and an
 [Apple Developer membership][apple-dev] ($99 a year, only for the iPhone and
 desktop apps).
@@ -29,7 +29,7 @@ whichever way suits you.*
 
 ## Install with one prompt
 
-Open Claude Code on your Mac and paste this:
+Open Claude Code on that computer and paste this:
 
 ```
 Clone github.com/mattabate/life-distributable and set up my life agent. Follow its SETUP.md.
@@ -126,7 +126,7 @@ Every cost below goes to an outside service. Nothing goes to me.
 | What | Necessary? | Cost | Needed for |
 |---|---|---|---|
 | [Claude Pro or Max][claude-pricing] | Required | $20, $100 or $200 a month | Everything. Max is better for an always-on agent |
-| A Mac on macOS 15 or later | Required | the one you own | The hub |
+| A Mac or Linux computer | Required | the one you own | The hub |
 | [Tailscale](https://tailscale.com/pricing) | Required | free | Reaching your hub privately from your phone and laptops |
 | [Apple Developer Program][apple-dev] | Optional | $99 a year | Only the iPhone app and the desktop app. Web only? Skip it |
 | [Backblaze B2](https://www.backblaze.com/cloud-storage/pricing) | Recommended | cents a month | Nightly encrypted backup |
@@ -140,7 +140,7 @@ The agent follows [SETUP.md](SETUP.md). Here is the timeline.
 2. **Start the slow things** (10 min, then waiting). Apple developer
    enrollment and the Xcode download start first. Apple usually answers
    within hours.
-3. **Prepare the Mac** (10 min). Free tools, never sleep, disk encryption on.
+3. **Prepare the computer** (10 min). Free tools, never sleep, disk encryption on.
 4. **Your private copy on GitHub** (5 min). Your copy, your account, private.
 5. **Tailscale** (10 min). A private network only your devices can join.
 6. **The hub is up** (10 min). First milestone: the web console works.
@@ -154,7 +154,7 @@ The agent follows [SETUP.md](SETUP.md). Here is the timeline.
 
 ## How security works
 
-Your data lives on your Mac. The hub listens only on your private
+Your data lives on the hub. It listens only on your private
 [Tailscale](https://tailscale.com) network, so nothing about it is public.
 
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/security-dark.png"><img src="docs/img/security.png" alt="Security diagram for life: the iPhone app, the Mac app on your laptop and any browser talk to the hub, a Mac or Linux computer you leave on, inside your private Tailscale network, where your data lives. Only four things leave the hub: Claude sessions to Anthropic, push notifications to Apple, nightly backups encrypted on the hub first to your Backblaze bucket, and an opt-in weekly usage heartbeat with counts only. The public internet has no way in." width="900"></picture></p>
@@ -173,7 +173,7 @@ Your data lives on your Mac. The hub listens only on your private
   titles, names or amounts. Settings shows the payload and where it goes,
   and switches it off; `usage_host` in `ops/hub.json` sends it somewhere
   else.
-- **Backups are yours.** Encrypted on your Mac before upload, so the
+- **Backups are yours.** Encrypted on the hub before upload, so the
   storage only ever sees noise. The nightly key can't delete anything.
 - **The gate.** Anything that spends money, deletes, contacts a person,
   shares data or pushes code needs your approval plus a decider code that
@@ -184,7 +184,7 @@ Your data lives on your Mac. The hub listens only on your private
   builds the app without asking, and a hub change is rebuilt and restarted
   as your account, so code a session lands runs with your rights: the
   separate user guards the card, not landed code. Landed commits stay on
-  your Mac until a push is approved.
+  the hub until a push is approved.
 
 ## Updates and addenda
 
@@ -214,8 +214,8 @@ encrypted first. Nothing else, unless you opt in to the counts-only heartbeat
 Yes. Pick web only and skip the Apple Developer membership. The console
 works in any browser on your Tailscale network, phone included.
 
-**Does it run on Windows or Linux?**
-The hub needs a Mac. Once it runs, the web console works from any device on
+**Does it run on Windows?**
+The hub needs a Mac or Linux machine. Once it runs, the web console works from any device on
 your Tailscale network.
 
 **Can the agent spend my money or email people on its own?**
@@ -225,12 +225,12 @@ No. Those actions are gated. It proposes, you approve with your decider code.
 No. It's an independent open source project built on Claude Code.
 
 **What's in the folders?**
-`hub/` is the server on your Mac and the web console it serves. `app/` is
+`hub/` is the server on your computer and the web console it serves. `app/` is
 the iPhone and desktop app. `shared/` is the contract between them, so the
 two sides agree by test. `ops/` is the scripts that run one install: build
 and start the hub, back it up nightly, install the apps, screenshot the
 pages. Sessions also build, test and edit code in this folder, so the agent
-can run code on your Mac. What it cannot do on its own is anything gated
+can run code on the hub. What it cannot do on its own is anything gated
 (money, delete, contact, share, push): with sessions run as a separate user
 that is a wall, without one it is a rule the agent follows.
 
