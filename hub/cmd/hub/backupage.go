@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,15 @@ func backupAgeAsk(logs string, now time.Time) (title, detail string, due bool) {
 	}
 	title = "No nightly backup has finished since " + newest.Local().Format("Jan 2, 2006")
 	detail = "Last clean finish (ops/logs/<job>.ok): " + strings.Join(seen, "; ") +
-		". Nothing ran or every run failed: check the Mac was awake, `launchctl list | grep com.life.backup` (`ops/hub.sh install-backup` reloads it), and ops/logs/backup.log."
+		". Nothing ran or every run failed: check " + backupAgentCheck() + " (`ops/hub.sh install-backup` reloads it), and ops/logs/backup.log."
 	return title, detail, true
+}
+
+// backupAgentCheck: how to see the nightly job is loaded. ops/hub.sh writes a
+// launchd agent on a Mac and a systemd user timer on Linux.
+func backupAgentCheck() string {
+	if runtime.GOOS == "linux" {
+		return "the computer was awake, `systemctl --user list-timers life-backup.timer`"
+	}
+	return "the Mac was awake, `launchctl list | grep com.life.backup`"
 }

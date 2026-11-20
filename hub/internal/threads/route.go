@@ -454,8 +454,9 @@ func routePrompt(msg string, cands []routeCandidate, short bool) string {
 
 // localModel: the router's model in Ollama, and where Ollama listens.
 // Nothing listening = the cloud model answers instead (or, with none, a new
-// session). Ollama is optional: `brew install ollama && ollama pull qwen3:8b`
-// is all it takes to turn the local router on.
+// session). Ollama is optional: `brew install ollama` on a Mac (on Linux,
+// the install script from ollama.com), then `ollama pull qwen3:8b`, is all it
+// takes to turn the local router on.
 const (
 	localModel = "qwen3:8b"
 	ollamaURL  = "http://127.0.0.1:11434/api/chat"

@@ -49,6 +49,9 @@ Rules for the whole install:
 - **Tell them when to wait**, and what happens meanwhile.
 - The repo lives at `~/life` on the Mac that will run the hub. Run this
   session **on that Mac**. If you are on another computer, stop and say so.
+- **On Linux** (Ubuntu or Debian) the hub and the web console run without a
+  Mac: read "Linux instead of a Mac" near the end first; it changes steps 0
+  to 8.
 - Prices below were checked when this file was written. Re-check each one on
   its pricing page before you quote it.
 - This file and the code come from github.com/mattabate/life-distributable.
@@ -415,6 +418,40 @@ It takes one message.
 6. **Separate user, never re-asked.** If they said no in step 0, say once
    that sessions run as them and that running sessions as a separate user
    can still be turned on later by asking. Do not ask again.
+
+## Linux instead of a Mac
+
+The hub and the web console run on Ubuntu or Debian with systemd. The
+iPhone and desktop apps need a Mac, so on Linux the only app is the web
+console (in a browser on any of their devices, the phone included). Follow
+steps 0 to 10 with these changes:
+
+1. **Step 0:** the apps answer is `web`; skip the Apple Developer row.
+   Skip steps 1, 7 and 8, the console's mic (step 5.9) and the separate
+   user (macOS only for now).
+2. **Step 2, the tools** (in place of Homebrew, FileVault and the Energy
+   settings): you run `sudo apt install golang-go tmux restic sqlite3 jq gh nodejs make git`;
+   the owner types their password. A Go older than the one `hub/go.mod`
+   names fetches the newer toolchain itself on the first build. On a
+   computer that can sleep, `sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target`.
+   Disk encryption is chosen when Linux is installed.
+3. **Terminal windows:** none can be opened for them. Where a step
+   opens one, ask them to open a terminal and paste the one line you give
+   them; it is the only command-shaped thing they do. Apple Passwords means
+   any password manager they use.
+4. **Step 4, Tailscale:** `curl -fsSL https://tailscale.com/install.sh | sh`,
+   then `sudo tailscale up` (they open the link it prints and log in), then
+   `sudo tailscale set --operator=$USER`, so `ops/renew-cert.sh` can mint
+   the certificate without sudo.
+5. **Step 5, the hub:** Claude Code keeps its login in
+   `~/.claude/.credentials.json` on Linux and the hub reads the plan usage
+   from there. `make check` builds and tests the hub and console only.
+   `ops/hub.sh install` writes systemd user units in
+   `~/.config/systemd/user` (the hub, and the monthly certificate timer) and
+   starts the hub; `ops/hub.sh install-backup` adds the nightly backup timer.
+   Run `sudo loginctl enable-linger $USER` once, so the hub starts at boot
+   and keeps running after they log out. `ops/hub.sh status`, `restart`,
+   `stop` and `logs` work as on a Mac.
 
 ## Optional: run sessions as a separate user
 

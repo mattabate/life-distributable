@@ -1,8 +1,11 @@
 # See CLAUDE.md. `make check` is the gate.
 .PHONY: check test pylint build webcheck generate hub-install hub-restart ship ota install-phone
 
-check: test pylint build app-build-sim mac-build
-	@echo "check: OK"
+# On Linux the gate is the hub and console only: the apps need Xcode.
+OS := $(shell uname -s)
+APP_CHECKS := $(if $(filter Darwin,$(OS)),app-build-sim mac-build)
+check: test pylint build $(APP_CHECKS)
+	@echo "check: OK$(if $(APP_CHECKS),, (hub and console; the apps build on a Mac))"
 
 # ops/*.py parse, open life.db read-only, verify TLS, take the hub address,
 # Eastern time and tokens from ops/hublib.py (reads files only).
@@ -22,7 +25,11 @@ test:
 # The heartbeat's version is the release tag this checkout is on.
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
 build:
+ifeq ($(OS),Darwin)
 	@$(MAKE) --no-print-directory ops/bin/mic || echo "mic: skipped (needs the macOS 26 SDK); the console's Mic stays off"
+else
+	@echo "mic: skipped (macOS only); the console's Mic stays off"
+endif
 	cd hub && go build -ldflags "-X life/hub/internal/usage.Version=$(VERSION)" -o ../ops/bin/hub ./cmd/hub && go build -o ../ops/bin/lifectl ./cmd/lifectl
 	$(call sign,ops/bin/hub,com.life.hub)
 
@@ -30,10 +37,14 @@ build:
 # team when both are set (TEAM_ID=… make build), so a macOS privacy grant
 # survives a rebuild; otherwise the build keeps an ad-hoc signature.
 TEAM_ID ?=
+ifeq ($(OS),Darwin)
 SIGN_ID ?= $(shell security find-identity -v -p codesigning 2>/dev/null | grep -m1 -o '"Apple Development: [^"]*"' | tr -d '"')
 define sign
 $(if $(and $(SIGN_ID),$(TEAM_ID)),codesign --force --sign "$(SIGN_ID)" --identifier $(2) --requirements '=designated => identifier "$(2)" and anchor apple generic and certificate leaf[subject.OU] = "$(TEAM_ID)"' $(1),codesign --force --sign - --identifier $(2) $(1))
 endef
+else
+sign = # Linux: no code signing
+endif
 
 # The hub listens through this one when the owner switches the console's mic
 # on (server/mic.go): on-device SpeechAnalyzer, one JSON line per result,

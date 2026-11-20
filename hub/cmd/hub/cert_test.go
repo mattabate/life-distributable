@@ -66,9 +66,7 @@ func TestCertCloseToExpiryIsAnAsk(t *testing.T) {
 // lifectl, as backup.sh's trap does, instead of one log line. Run on a copy
 // with a failing tailscale and a lifectl that records its arguments.
 func TestRenewCertFailureIsAnAsk(t *testing.T) {
-	if _, err := exec.LookPath("plutil"); err != nil {
-		t.Skip("renew-cert.sh reads hub.json with plutil (macOS)")
-	}
+	needHubJSONReader(t)
 	src, err := os.ReadFile("../../../ops/renew-cert.sh")
 	if err != nil {
 		t.Fatal(err)
