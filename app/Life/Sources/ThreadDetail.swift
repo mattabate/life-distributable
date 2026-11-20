@@ -227,6 +227,26 @@ struct ThreadDetail: View {
         }
     }
 
+    /// The open cells with each run of consecutive messages folded into one,
+    /// so the run can share a HistoryLine.
+    struct OpenRun: Identifiable {
+        var cell: OpenCell? = nil
+        var messages: [ThreadMessage] = []
+        var id: String { cell?.id ?? "run:\(messages.first?.id ?? 0)" }
+        static func runs(_ cells: [OpenCell]) -> [OpenRun] {
+            var out: [OpenRun] = []
+            for c in cells {
+                if case .message(let m) = c {
+                    if let last = out.indices.last, !out[last].messages.isEmpty { out[last].messages.append(m) }
+                    else { out.append(OpenRun(messages: [m])) }
+                } else {
+                    out.append(OpenRun(cell: c))
+                }
+            }
+            return out
+        }
+    }
+
     /// What is the owner's to act on: every ask not closed and approval
     /// still open, where it sits in the conversation, plus the message in
     /// flight. A rec is not their turn (it can be done any time): an open one
@@ -781,12 +801,22 @@ struct ThreadDetail: View {
                             .modifier(HistoryLine(on: Device.isMac))
                         } else {
                             let cells = openCells(rows)
-                            ForEach(cells) { cell in
-                                switch cell {
-                                case .message(let m): messageRow(m).id(m.id)
-                                case .ask(let a, let cost): AskCard(a: a, goals: goals, cost: cost, reload: { await load() }).id(a.id)
-                                case .action(let a, let cost): approvalCell(a, cost: cost)
-                                case .recNotice(let r): RecNotice(rec: r, reload: { await load() })
+                            // A run of messages (the owner's, a check-in, a
+                            // relay) sits in the full chat's grey line, unboxed,
+                            // on the desktop too.
+                            ForEach(OpenRun.runs(cells)) { run in
+                                if run.messages.isEmpty, let cell = run.cell {
+                                    switch cell {
+                                    case .message(let m): messageRow(m).id(m.id)
+                                    case .ask(let a, let cost): AskCard(a: a, goals: goals, cost: cost, reload: { await load() }).id(a.id)
+                                    case .action(let a, let cost): approvalCell(a, cost: cost)
+                                    case .recNotice(let r): RecNotice(rec: r, reload: { await load() })
+                                    }
+                                } else {
+                                    VStack(alignment: .leading, spacing: Device.isMac ? 4 : 8) {
+                                        ForEach(run.messages) { m in messageRow(m).id(m.id) }
+                                    }
+                                    .modifier(HistoryLine(on: Device.isMac))
                                 }
                             }
                             if !Device.isMac, cells.isEmpty, thread.status != "running", cardsLoaded {

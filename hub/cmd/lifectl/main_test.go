@@ -211,3 +211,21 @@ func TestResolveMany(t *testing.T) {
 		t.Fatalf("output: %q", out.String())
 	}
 }
+
+// Past the cap, the default goal read says how many decisions it left out
+// (#242: the oldest dropped silently).
+func TestSinceDigestTail(t *testing.T) {
+	var ns []json.RawMessage
+	for i := 0; i < 43; i++ {
+		ns = append(ns, json.RawMessage(`{"id":1}`))
+	}
+	if s := sinceDigestTail(ns, "g", 40); !strings.Contains(s, "… 3 older not shown (43 since the digest)") || !strings.Contains(s, "lifectl goal g digest") {
+		t.Fatalf("no tail: %s", s)
+	}
+	if s := sinceDigestTail(ns[:5], "g", 40); strings.Contains(s, "older") {
+		t.Fatalf("tail under the cap: %s", s)
+	}
+	if s := sinceDigestTail(nil, "g", 40); s != "[]" {
+		t.Fatalf("empty = %q", s)
+	}
+}

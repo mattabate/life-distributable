@@ -1789,3 +1789,18 @@ Entry format:
 - For: anyone who wants the hub on Ubuntu or Debian instead of a Mac (web console only; the apps still need a Mac). Mac installs change nothing.
 - Change: `ops/hub.sh` writes systemd user units on Linux (`life-hub.service`, `life-renewcert.timer`, `life-backup.timer`) where a Mac gets launchd agents, and `install`, `restart`, `stop`, `status` and `install-backup` drive them. The hub reads Claude Code's login from `~/.claude/.credentials.json` where there is no Keychain (also a fallback on a Mac whose Keychain read fails). `make check` on Linux runs the hub and console checks and skips the Xcode builds and code signing. SETUP.md has a short "Linux instead of a Mac" section. A `linux` GitHub Actions job (`.github/workflows/linux.yml`) runs `make check` on Ubuntu and installs, restarts and stops the hub under systemd on every push; the hub.sh and renew-cert.sh tests now run on Linux too (jq instead of plutil).
 - How: same merge as add-0008, then `make check`. A Mac needs no restart beyond the usual `ops/hub.sh restart`. By hand: `ops/hub.sh` (`cfg`, `unit_body`, `unit`, `linger_note`, the `$OS` branches), `ops/renew-cert.sh`, `Makefile` (`OS`, `APP_CHECKS`, `sign`), `hub/internal/spend/quota.go` (`KeychainToken`, `credentialsFile`, `fileToken`, `oauthToken`) and `credentials_test.go`, `hub/cmd/hub/backupage.go` (`backupAgentCheck`), `hubsh_test.go` (`needHubJSONReader`) and `cert_test.go`, `SETUP.md`; the workflow file is optional for a private copy.
+
+## add-0275 · 2026-11-20 · `lifectl goal` says when it left decisions out
+- For: every session that reads a goal (lean wakes most of all)
+- Fix: the default read showed at most 40 decision, context and intent notes newer than the digest, with no total, so past 40 the oldest ones vanished with no sign they existed (#242). It now reads up to 500, prints the newest 40, and ends with "… N older not shown", the command that lists them all, and a nudge to rewrite the digest. Thanks @ariaxhan.
+- How: same merge as add-0008, then `make check`. By hand: `hub/cmd/lifectl/main.go` (the `goal` read, `sinceDigestTail`), `hub/cmd/lifectl/main_test.go`.
+
+## add-0276 · 2026-11-20 · Return sends on the desktop; a turn's starter sits on the chat's line
+- For: everyone (Return: desktop app; the line: web console and desktop app)
+- Change: in the desktop app a bare Return now sends and Shift-Return starts a new line; the old key handler never saw Return because the Mac turns it into a new line first. A half-typed IME word is committed, not sent. While a session works, the messages that started the turn (yours, a check-in, a relay) sit over its open card without a box, on the same grey line as the full chat.
+- How: same merge as add-0008, then `make webcheck`, `make check`, `ops/hub.sh restart` and a new app build. By hand: `app/Life/Sources/ComposerField.swift` (`PasteTextView.keyCommands`, `returnSend`, `returnNewline`; `pressesBegan`, `pressesEnded`, `returnTaken` removed), `app/Life/Sources/ThreadDetail.swift` (`OpenRun`), `hub/internal/server/web/views/threads.js` (`refreshThread`), `web/app.css` (`.openrun`).
+
+## add-0277 · 2026-11-20 · A rec notice in a chat is a violet line, not a box
+- For: everyone (web console and desktop app; the phone keeps the box)
+- Change: the one-line notice that a rec was filed drops its box for a violet line where the chat's grey one runs, with the title in violet and the × to dismiss it still at the end.
+- How: same merge as add-0008, then `make webcheck`, `make check`, `ops/hub.sh restart` and a new app build. By hand: `app/Life/Sources/RecCard.swift` (`NoticeLine`), `hub/internal/server/web/app.css` (`.rec-notice`).

@@ -378,7 +378,12 @@ func main() {
 		}
 		c.call("GET", "/api/v1/goals/"+os.Args[2], nil)
 		fmt.Println("\n# decisions, context and intents newer than the digest (the digest does not know these)")
-		c.call("GET", "/api/v1/goals/"+os.Args[2]+"/notes?since=digest&limit=40", nil)
+		// The route caps at 500 and has no total, so read them all and print
+		// the newest 40 with a count of the rest: past 40 the oldest
+		// decisions dropped with no sign they existed (#242).
+		var since []json.RawMessage
+		c.fetch("/api/v1/goals/"+os.Args[2]+"/notes?since=digest&limit=500", &since)
+		fmt.Println(sinceDigestTail(since, os.Args[2], 40))
 		fmt.Println("\n# newest notes")
 		c.call("GET", "/api/v1/goals/"+os.Args[2]+fmt.Sprintf("/notes?limit=%d", notes), nil)
 	case "obs":
@@ -1433,6 +1438,22 @@ func threadFlag(def string) string {
 		}
 	}
 	return def
+}
+
+// sinceDigestTail prints the newest show of the since-digest notes as JSON,
+// then, when there were more, how many were left out, how to read them and
+// that the digest is due a rewrite.
+func sinceDigestTail(notes []json.RawMessage, goal string, show int) string {
+	out := append([]json.RawMessage{}, notes...)
+	if len(out) > show {
+		out = out[:show]
+	}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	s := string(b)
+	if n := len(notes) - len(out); n > 0 {
+		s += fmt.Sprintf("\n… %d older not shown (%d since the digest): `lifectl api GET /api/v1/goals/%s/notes?since=digest&limit=500`. Rewrite the digest (`lifectl goal %s digest @file`) so it knows them.", n, len(notes), goal, goal)
+	}
+	return s
 }
 
 func die(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...); os.Exit(1) }

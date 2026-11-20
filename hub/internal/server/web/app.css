@@ -419,6 +419,10 @@ textarea { resize: vertical; }
 .msgs.history .chat-row { margin: 0; border-radius: 0; background: none; box-shadow: none; }
 .msgs.history .chat-row > summary { padding: 4px 0; }
 .msgs.history .row-body { padding: 2px 0 8px; }
+/* A turn's starter over its open card: the same line, its row unboxed. */
+.msgs .openrun > .chat-row { margin: 0; border-radius: 0; background: none; box-shadow: none;
+  border: 0; border-left: 2px solid var(--line); padding-left: 14px; }
+.msgs .openrun > .chat-row > summary { padding: 4px 0; }
 .qpage .qrow { gap: 8px; padding: 4px 0; }
 .chat-earlier { all: unset; cursor: pointer; font-size: 12px; color: var(--muted); padding: 2px 0 6px; }
 /* A wake within 15 minutes, back on the bar over the box. */
@@ -565,11 +569,12 @@ a.chain-w:hover, a.chain-w.on { color: var(--accent); }
 .runs > summary::before { content: '▸'; font-size: 10px; }
 .runs[open] > summary::before { content: '▾'; }
 .runs > summary:hover { color: var(--fg); }
-/* A rec in the open-cards view: one violet line until he dismisses it (2026-11-04). */
-.rec-notice { display: flex; align-items: center; gap: 6px; margin: 6px 0; padding: 6px 10px; font-size: 13px; border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--violet) 30%, transparent); background: color-mix(in srgb, var(--violet) 7%, transparent); }
+/* A rec in the open-cards view: one violet line until it is dismissed; no box,
+   a violet rule where the chat's grey one runs. */
+.rec-notice { display: flex; align-items: center; gap: 6px; margin: 6px 0; padding: 4px 0 4px 14px; font-size: 13px;
+  border-left: 2px solid var(--violet); }
 .rec-notice a { color: var(--violet); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rec-notice button { margin-left: auto; }
+.rec-notice button { margin-left: auto; border: 0; background: none; color: var(--muted); }
 /* Paused on a session limit (2026-09-30): amber, like every "waiting", and
    the wait as a bar toward the reset — a bar only ever runs toward a limit. */
 .ask.paused { --tint: var(--amber); }

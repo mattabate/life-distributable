@@ -32,11 +32,26 @@ struct RecNotice: View {
                 .buttonStyle(.plain).disabled(busy).accessibilityLabel("Dismiss")
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 7)
-        .background(Color.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.purple.opacity(0.25)))
+        .modifier(NoticeLine())
         // The cards' own inset (Card), so the line is as wide as they are.
         .padding(.horizontal)
         .id(rec.id)
+    }
+}
+
+/// On the Mac the notice drops its box for a violet line where the chat's
+/// grey one runs; the phone keeps the box.
+private struct NoticeLine: ViewModifier {
+    func body(content: Content) -> some View {
+        if Device.isMac {
+            content
+                .padding(.leading, 14).padding(.trailing, 4).padding(.vertical, 4)
+                .overlay(alignment: .leading) { Rectangle().fill(Color.purple).frame(width: 2) }
+        } else {
+            content
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Color.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.purple.opacity(0.25)))
+        }
     }
 }
