@@ -157,7 +157,7 @@ The agent follows [SETUP.md](SETUP.md). Here is the timeline.
 Your data lives on your Mac. The hub listens only on your private
 [Tailscale](https://tailscale.com) network, so nothing about it is public.
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/security-dark.png"><img src="docs/img/security.png" alt="Security diagram for life: the iPhone app, the Mac app on your laptop and any browser talk to the hub on a Mac you leave on, such as a Mac mini, inside your private Tailscale network, where your data lives. Only four things leave the hub's Mac: Claude sessions to Anthropic, push notifications to Apple, nightly backups encrypted on the Mac first to your Backblaze bucket, and an opt-in weekly usage heartbeat with counts only. The public internet has no way in." width="900"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/security-dark.png"><img src="docs/img/security.png" alt="Security diagram for life: the iPhone app, the Mac app on your laptop and any browser talk to the hub, a Mac or Linux computer you leave on, inside your private Tailscale network, where your data lives. Only four things leave the hub: Claude sessions to Anthropic, push notifications to Apple, nightly backups encrypted on the hub first to your Backblaze bucket, and an opt-in weekly usage heartbeat with counts only. The public internet has no way in." width="900"></picture></p>
 
 - **Nothing public.** No open ports, no public URL. Your phone reaches the
   hub through Tailscale.
