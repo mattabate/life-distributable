@@ -1033,7 +1033,8 @@ async function refreshThread(id, first) {
     for (const m of ordered) {
       const [ka, kc, kr] = openCards(askByMsg[m.id], actByMsg[m.id], recByMsg[m.id]);
       let h;
-      if (liveIDs.has(m.id)) h = msgHTML(m, ka, kc, [], askById, recById) + kr.map(recNoticeHTML).join('');
+      // Its row unboxed on the full chat's grey line.
+      if (liveIDs.has(m.id)) h = `<div class="openrun">${msgHTML(m, ka, kc, [], askById, recById)}</div>` + kr.map(recNoticeHTML).join('');
       else {
         noteLeadCost(m, ka, kc);
         h = ka.map(a => chatAskHTML(a)).join('') + kc.map(a => chatActionHTML(a)).join('') + kr.map(recNoticeHTML).join('');

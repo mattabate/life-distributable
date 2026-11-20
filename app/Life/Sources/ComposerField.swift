@@ -258,27 +258,28 @@ final class PasteTextView: UITextView, UITextPasteDelegate {
     var onPasteFiles: (([AttachedFile]) -> Void)?
     /// A bare Return (no Shift, nothing mid-composition): true when it was taken.
     var onReturn: (() -> Bool)?
-    private var returnTaken = false
 
     #if targetEnvironment(macCatalyst)
-    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if let key = presses.first?.key, presses.count == 1,
-           key.keyCode == .keyboardReturnOrEnter || key.keyCode == .keypadEnter,
-           key.modifierFlags.intersection([.shift, .alternate, .control, .command]).isEmpty,
-           markedTextRange == nil, onReturn?() == true {
-            returnTaken = true
-            return
-        }
-        super.pressesBegan(presses, with: event)
+    // A pressesBegan override never sees Return: the Mac's text system turns
+    // it into insertNewline before the press reaches the view. A key command
+    // with priority over system behaviour is asked first; Shift-Return gets
+    // its own so it stays a new line.
+    override var keyCommands: [UIKeyCommand]? {
+        guard onReturn != nil else { return super.keyCommands }
+        let send = UIKeyCommand(input: "\r", modifierFlags: [], action: #selector(returnSend))
+        send.wantsPriorityOverSystemBehavior = true
+        let newline = UIKeyCommand(input: "\r", modifierFlags: .shift, action: #selector(returnNewline))
+        newline.wantsPriorityOverSystemBehavior = true
+        return (super.keyCommands ?? []) + [send, newline]
     }
 
-    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if returnTaken, presses.first?.key?.keyCode == .keyboardReturnOrEnter || presses.first?.key?.keyCode == .keypadEnter {
-            returnTaken = false
-            return
-        }
-        super.pressesEnded(presses, with: event)
+    /// A half-typed IME word is committed, not sent.
+    @objc private func returnSend() {
+        if markedTextRange != nil { unmarkText(); return }
+        if onReturn?() != true { insertText("\n") }
     }
+
+    @objc private func returnNewline() { insertText("\n") }
     #endif
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
