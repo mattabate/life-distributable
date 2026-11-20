@@ -17,7 +17,8 @@ on_fail() {
     2>/dev/null || echo "renew-cert: could not raise the ask (hub down?)" >&2
 }
 trap on_fail ERR
-HOST=$(plutil -extract public_host raw -o - hub.json) # host:port — the one place it lives
+if [[ $(uname -s) == Darwin ]]; then HOST=$(plutil -extract public_host raw -o - hub.json) # host:port — the one place it lives
+else HOST=$(jq -er .public_host hub.json); fi # Linux; `tailscale cert` needs `sudo tailscale set --operator=$USER` once
 HOST=${HOST%%:*} # hub.json cert_file/key_file must name secrets/<HOST>.crt|.key
 TS=/Applications/Tailscale.app/Contents/MacOS/Tailscale
 command -v tailscale >/dev/null && TS=tailscale

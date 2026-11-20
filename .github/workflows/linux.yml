@@ -1,0 +1,129 @@
+# The Linux install, checked on every push: `make check` takes its Linux
+# branch, then the hub is installed, restarted and stopped under systemd
+# --user the way SETUP.md's "Linux instead of a Mac" section does it. No
+# Tailscale here: the hub still refuses any address outside the tailnet's
+# ranges, so the job puts a 100.64.x.x address on loopback and serves a
+# throwaway self-signed cert for it. Nothing in this job is anyone's real
+# token or data.
+name: linux
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ADDR: 100.64.0.1:8443
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: hub/go.mod
+          cache-dependency-path: hub/go.sum
+      - name: Packages (SETUP.md, Linux; go comes from setup-go)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q tmux restic sqlite3 jq gh nodejs make git openssl
+      - name: make check
+        run: make check
+      - name: Throwaway config, cert and Claude Code login
+        run: |
+          set -euo pipefail
+          root=$PWD
+          sudo ip addr add 100.64.0.1/32 dev lo
+          mkdir -p ops/secrets data/jobs data/blobs projects ~/.local/bin ~/.claude/projects
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=life-ci \
+            -addext subjectAltName=IP:100.64.0.1 \
+            -keyout ops/secrets/ci.key -out ops/secrets/ci.crt 2>/dev/null
+          chmod 600 ops/secrets/ci.key
+          sudo cp ops/secrets/ci.crt /usr/local/share/ca-certificates/life-ci.crt
+          sudo update-ca-certificates >/dev/null
+          printf '#!/bin/sh\nexit 0\n' > ~/.local/bin/claude
+          chmod +x ~/.local/bin/claude
+          jq -n --arg r "$root" --arg c "$HOME/.local/bin/claude" --arg a "$ADDR" '{
+            owner_name: "owner", time_zone: "UTC", surfaces: ["web"],
+            session_tokens: true, session_user: "",
+            listen_addr: $a, public_host: $a,
+            cert_file: ($r + "/ops/secrets/ci.crt"), key_file: ($r + "/ops/secrets/ci.key"),
+            token_file: ($r + "/ops/secrets/hub.token"),
+            claude_projects_dir: "~/.claude/projects", jobs_dir: ($r + "/data/jobs"),
+            projects_root: ($r + "/projects"), tmux_prefix: "life",
+            schedule_path: ($r + "/ops/schedule.json"), db_path: ($r + "/data/life.db"),
+            blob_dir: ($r + "/data/blobs"), claude_bin: $c, usage_opt_in: false,
+            projects: [{name: "life", dir: $r}]}' > ops/hub.json
+          # A fake login in Claude Code's Linux place; the hub must read it
+          # and never write the value anywhere.
+          tok="sk-ant-oat01-ci-fake-$(openssl rand -hex 12)"
+          echo "::add-mask::$tok"
+          echo "FAKE_TOKEN=$tok" >> "$GITHUB_ENV"
+          exp=$(( ($(date +%s) + 86400) * 1000 ))
+          printf '{"claudeAiOauth":{"accessToken":"%s","expiresAt":%s}}\n' "$tok" "$exp" > ~/.claude/.credentials.json
+          chmod 600 ~/.claude/.credentials.json
+      - name: systemd --user smoke test
+        run: |
+          set -euo pipefail
+          sudo loginctl enable-linger "$USER"
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          for i in $(seq 1 30); do systemctl --user show-environment >/dev/null 2>&1 && break; sleep 1; done
+          health() { curl -fsS --max-time 3 "https://$ADDR/healthz" | jq -e .ok >/dev/null; }
+          up() { for i in $(seq 1 30); do health && return 0; sleep 1; done; return 1; }
+          # ok and FAIL lines are also annotations, so the check run itself
+          # says what passed and why a step failed.
+          ok() { echo "ok: $*"; echo "::notice title=linux smoke::$*"; }
+          fail() {
+            trap - ERR
+            { echo "FAIL: $*"
+              systemctl --user status life-hub.service --no-pager 2>&1 | tail -15 || true
+              tail -40 ops/logs/hub.log 2>/dev/null || true; } > "$RUNNER_TEMP/why"
+            cat "$RUNNER_TEMP/why"
+            echo "::error title=linux smoke::$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' "$RUNNER_TEMP/why" | awk '{printf "%s%%0A", $0}')"
+            exit 1
+          }
+          trap 'fail "line $LINENO: $BASH_COMMAND exited $?"' ERR
+
+          # install and restart end with `status`, whose /healthz probe can
+          # run before a fresh hub has migrated its database; up() waits.
+          ops/hub.sh install || echo "(status probed before the hub was up)"
+          systemctl --user is-active life-hub.service || fail "life-hub.service is not active after install"
+          systemctl --user is-enabled life-renewcert.timer || fail "the renew-cert timer is not enabled"
+          up || fail "no /healthz after install"
+          ok "/healthz answers after install"
+          own=$(cat ops/secrets/hub.token)
+          echo "::add-mask::$own"
+          # The console's first visit, as `ops/hub.sh url` and `web` make it:
+          # a one-minute login code, which sets the cookie the page needs.
+          code=$(printf 'Authorization: Bearer %s\n' "$own" | curl -fsS --max-time 5 -X POST -H @- "https://$ADDR/api/v1/login-codes" | jq -r .code)
+          [ -n "$code" ] && [ "$code" != null ] || fail "the hub gave no login code"
+          jar=$RUNNER_TEMP/cookies
+          curl -fsS --max-time 5 -L -c "$jar" -b "$jar" "https://$ADDR/?code=$code" | grep -qi '<html' || fail "the console index did not answer"
+          ok "the console index answers (login code, then the cookie)"
+
+          q=$(printf 'Authorization: Bearer %s\n' "$own" | curl -sS --max-time 30 -H @- "https://$ADDR/api/v1/spend/quota")
+          err=$(jq -r '.error // empty' <<<"$q")
+          case "$err" in
+            *"Claude Code credentials"*|*"not Claude Code JSON"*|*"no accessToken in"*|*"command to refresh it"*|*keychain*)
+              fail "the hub did not read ~/.claude/.credentials.json: $err" ;;
+          esac
+          ok "the plan usage token came from the credentials file (usage check said: ${err:-no error})"
+
+          pid1=$(systemctl --user show -p MainPID --value life-hub.service)
+          ops/hub.sh restart || echo "(status probed before the hub was up)"
+          up || fail "no /healthz after restart"
+          pid2=$(systemctl --user show -p MainPID --value life-hub.service)
+          [ "$pid1" != "$pid2" ] || fail "restart kept the same process"
+          ok "restart brought up a new hub ($pid1 -> $pid2)"
+
+          ops/hub.sh stop
+          sleep 2
+          ! systemctl --user is-active --quiet life-hub.service || fail "the hub is still active after stop"
+          ! health || fail "/healthz still answers after stop"
+          ok "stop stops it"
+
+          if grep -rqF "$FAKE_TOKEN" ops/logs; then fail "the fake token is in ops/logs"; fi
+          if grep -qF "$FAKE_TOKEN" <<<"$q"; then fail "the fake token is in the hub's reply"; fi
+          if journalctl --user --no-pager 2>/dev/null | grep -qF "$FAKE_TOKEN"; then fail "the fake token is in the journal"; fi
+          ok "the token appears in no log"

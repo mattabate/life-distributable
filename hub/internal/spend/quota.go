@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -23,8 +24,9 @@ import (
 // Plan quota: what the Claude Code CLI's /usage shows. Consumer Max/Pro
 // plans have no billing API; the CLI reads
 // GET https://api.anthropic.com/api/oauth/usage with the OAuth access token
-// it keeps in the macOS Keychain item "Claude Code-credentials". We do the
-// same, read-only, and never persist the token.
+// it keeps in the macOS Keychain item "Claude Code-credentials" (on Linux,
+// ~/.claude/.credentials.json). We do the same, read-only, and never persist
+// the token.
 
 const (
 	usageURL      = "https://api.anthropic.com/api/oauth/usage"
@@ -159,23 +161,58 @@ func MonthUSD(us []Usage, now time.Time) float64 {
 // TokenSource returns the OAuth access token. Swappable for tests.
 type TokenSource func(ctx context.Context) (string, error)
 
-// KeychainToken reads Claude Code's credentials from the login Keychain.
+// KeychainToken reads Claude Code's OAuth token. On a Mac it is the login
+// Keychain item; on Linux Claude Code keeps the same JSON in
+// ~/.claude/.credentials.json (mode 0600, under $CLAUDE_CONFIG_DIR when set),
+// and a Mac whose Keychain read fails falls back to that file too. The token
+// is only returned, never logged or put in an error.
 func KeychainToken(ctx context.Context) (string, error) {
+	if runtime.GOOS != "darwin" {
+		return fileToken(credentialsFile())
+	}
 	out, err := exec.CommandContext(ctx, "/usr/bin/security", "find-generic-password", "-s", keychainItem, "-w").Output()
 	if err != nil {
+		if tok, ferr := fileToken(credentialsFile()); ferr == nil {
+			return tok, nil
+		}
 		return "", fmt.Errorf("keychain %q: %w", keychainItem, err)
 	}
+	return oauthToken(out, "Keychain item")
+}
+
+// credentialsFile is where Claude Code keeps its login outside a Keychain.
+func credentialsFile() string {
+	dir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if dir == "" {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".claude")
+	}
+	return filepath.Join(dir, ".credentials.json")
+}
+
+func fileToken(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("Claude Code credentials: %w (run `claude` and log in)", err)
+	}
+	return oauthToken(b, path)
+}
+
+// oauthToken: claudeAiOauth.accessToken from Claude Code's credentials JSON,
+// refused when expired. from names the source in an error, never the value
+// (a JSON error can quote the bytes it choked on, so it is not wrapped).
+func oauthToken(b []byte, from string) (string, error) {
 	var creds struct {
 		OAuth struct {
 			AccessToken string `json:"accessToken"`
 			ExpiresAt   int64  `json:"expiresAt"`
 		} `json:"claudeAiOauth"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(string(out))), &creds); err != nil {
-		return "", fmt.Errorf("keychain item is not Claude Code JSON: %w", err)
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(b))), &creds); err != nil {
+		return "", fmt.Errorf("%s is not Claude Code JSON", from)
 	}
 	if creds.OAuth.AccessToken == "" {
-		return "", errors.New("no accessToken in Keychain item (not logged in via claude.ai?)")
+		return "", fmt.Errorf("no accessToken in %s (not logged in via claude.ai?)", from)
 	}
 	if creds.OAuth.ExpiresAt > 0 && time.UnixMilli(creds.OAuth.ExpiresAt).Before(time.Now()) {
 		return "", errors.New("access token expired; run any `claude` command to refresh it")

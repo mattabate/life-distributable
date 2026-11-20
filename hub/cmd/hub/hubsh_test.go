@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -12,9 +13,7 @@ import (
 // Terminal: run from a session (no tty) it put the token in the session's
 // transcript (#129). Run on a copy, against a throwaway hub.json and token.
 func TestHubURLKeepsOwnerTokenOutOfSessions(t *testing.T) {
-	if _, err := exec.LookPath("plutil"); err != nil {
-		t.Skip("hub.sh reads hub.json with plutil (macOS)")
-	}
+	needHubJSONReader(t)
 	dir := t.TempDir()
 	ops := filepath.Join(dir, "ops")
 	os.MkdirAll(filepath.Join(ops, "secrets"), 0o755)
@@ -52,5 +51,17 @@ func TestHubURLKeepsOwnerTokenOutOfSessions(t *testing.T) {
 	out, err = run("LIFE_SESSION_TOKEN=sess-tok")
 	if err == nil || strings.Contains(out, "sess-tok") || !strings.Contains(out, "no login code") {
 		t.Fatalf("a session with no hub: got %q err=%v", out, err)
+	}
+}
+
+// needHubJSONReader skips a test of an ops script when the tool it reads
+// hub.json with is missing: plutil on a Mac, jq on Linux.
+func needHubJSONReader(t *testing.T) {
+	tool := "jq"
+	if runtime.GOOS == "darwin" {
+		tool = "plutil"
+	}
+	if _, err := exec.LookPath(tool); err != nil {
+		t.Skipf("the ops scripts read hub.json with %s", tool)
 	}
 }
