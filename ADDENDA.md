@@ -1804,3 +1804,8 @@ Entry format:
 - For: everyone (web console and desktop app; the phone keeps the box)
 - Change: the one-line notice that a rec was filed drops its box for a violet line where the chat's grey one runs, with the title in violet and the × to dismiss it still at the end.
 - How: same merge as add-0008, then `make webcheck`, `make check`, `ops/hub.sh restart` and a new app build. By hand: `app/Life/Sources/RecCard.swift` (`NoticeLine`), `hub/internal/server/web/app.css` (`.rec-notice`).
+
+## add-0278 · 2026-11-21 · A cancelled calendar drag no longer moves the item
+- For: everyone (web console, week view)
+- Fix: the drag handler treated `pointercancel` like a release, so a gesture the browser or the OS took over moved the item to the last slot it hovered, with nothing let go (#247). A cancel now only puts the row back; only a release moves it or opens its panel. Thanks @Kp759.
+- How: same merge as add-0008, then `make webcheck` and `ops/hub.sh restart`. By hand: `hub/internal/server/web/views/calgrid.js` (`calWireDrag`, `end`), `web/test/calgrid.test.js`.
