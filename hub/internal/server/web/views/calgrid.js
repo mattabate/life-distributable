@@ -923,19 +923,22 @@ function calWireDrag(root) {
       g.style.display = 'block'; g.style.left = (ev.clientX + 14) + 'px'; g.style.top = (ev.clientY + 14) + 'px';
     } else { g.style.display = 'none'; }
   });
-  const end = async ev => {
+  // A cancelled pointer (the OS took the gesture, a call came in) only puts
+  // the row back: nothing was released, so nothing moves and nothing opens.
+  const end = async (ev, drop) => {
     if (!drag) return;
     const d = drag; drag = null;
     const g = document.getElementById('cal-ghost'); if (g) g.style.display = 'none';
     document.body.classList.remove('cal-dragging');
-    if (!d.on) { calOpen(d.id); return; }          // a plain click opens the panel
     d.el.classList.remove('dragging'); d.el.style.transform = '';
+    if (!drop) return;
+    if (!d.on) { calOpen(d.id); return; }          // a plain click opens the panel
     const t = d.target;
     if (!t || (t.day === d.el.dataset.day && t.at === d.el.dataset.at)) { pageRedraw(); return; }
     await calApplyMove(d.id, d.move, t.day, t.at);
   };
-  root.addEventListener('pointerup', end);
-  root.addEventListener('pointercancel', end);
+  root.addEventListener('pointerup', ev => end(ev, true));
+  root.addEventListener('pointercancel', ev => end(ev, false));
 }
 
 // Where the pointer is: a time column (day + snapped minute), an all-day band

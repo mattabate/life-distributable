@@ -689,3 +689,36 @@ test('a row cancelled before its day is pruned from every list once', () => {
   assert.deepEqual(c.days, [{ day: '2026-10-21', entries: [skip] }]);
   assert.equal(c.today, '2026-10-19');
 });
+
+// #247: a drag the pointer never released (pointercancel) moved the row to
+// the last slot it hovered. Replay one drag, ended each way.
+test('a cancelled drag puts the row back; only a release moves it', async () => {
+  const saved = { apply: globalThis.calApplyMove, redraw: globalThis.pageRedraw, open: globalThis.calOpen, doc: globalThis.document };
+  const writes = [];
+  globalThis.calApplyMove = async (...a) => { writes.push(a); };
+  globalThis.pageRedraw = () => {};
+  globalThis.calOpen = () => { writes.push(['open']); };
+  const cls = () => ({ add() {}, remove() {}, contains: () => false });
+  const col = { classList: { contains: c => c === 'cal-col' }, dataset: { day: '2026-11-21' }, getBoundingClientRect: () => ({ top: 0, height: 1440 }) };
+  globalThis.document = { ...saved.doc, body: { classList: cls(), appendChild() {} }, elementsFromPoint: () => [col],
+    getElementById: () => null, createElement: () => ({ style: {} }) };
+  try {
+    const drive = async ending => {
+      const on = {};
+      calWireDrag({ dataset: {}, addEventListener: (k, f) => { on[k] = f; } });
+      const el = { dataset: { id: 'cal-demo', move: 'item', day: '2026-11-20', at: '09:00' }, classList: cls(), style: {}, setPointerCapture() {} };
+      el.closest = () => el;
+      on.pointerdown({ button: 0, target: el, clientX: 0, clientY: 540, pointerId: 1 });
+      on.pointermove({ clientX: 40, clientY: 615 });   // 10:15 on Nov 21
+      await on[ending]({ pointerId: 1 });
+      return el;
+    };
+    const el = await drive('pointercancel');
+    assert.deepEqual(writes, []);
+    assert.equal(el.style.transform, '');
+    await drive('pointerup');
+    assert.deepEqual(writes, [['cal-demo', 'item', '2026-11-21', '10:15']]);
+  } finally {
+    Object.assign(globalThis, { calApplyMove: saved.apply, pageRedraw: saved.redraw, calOpen: saved.open, document: saved.doc });
+  }
+});
