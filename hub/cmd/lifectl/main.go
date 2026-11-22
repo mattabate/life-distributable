@@ -506,12 +506,13 @@ func main() {
 		}
 		c.list(path)
 	case "ask":
-		// lifectl ask add "title" [--detail ...] [--kind decision|access|physical|read|install|other] [--surface mobile|web|any] [--check ...] [--thread id] [--on YYYY-MM-DD [--at HH:MM]] [--replaces id,id] [--new-topic]
+		// lifectl ask add "title" [--detail ...] [--kind decision|access|physical|read|install|other] [--surface mobile|web|any] [--check ...] [--thread id] [--on YYYY-MM-DD [--at HH:MM]] [--replaces id,id] [--new-topic] [--goal g]
 		// lifectl ask <id>                      show
 		// lifectl ask <id>[,<id>…] done|dismiss|reopen ["what happened"]
 		// lifectl ask <id> surface mobile|web|any
 		// lifectl ask <id> kind decision|access|physical|read|install|other
-		// lifectl ask <id> set [--title t] [--say s] [--detail d|@file]   reword an open card in place
+		// lifectl ask <id>[,<id>…] goal <goal-id>|none   refile a card (open or closed) under the goal it serves
+		// lifectl ask <id> set [--title t] [--say s] [--detail d|@file] [--goal g]   reword an open card in place
 		need(3)
 		if os.Args[2] == "add" {
 			need(4)
@@ -529,6 +530,7 @@ func main() {
 			at := fs.String("at", "", "HH:MM with --on (default 08:00)")
 			replaces := fs.String("replaces", "", "id,id: this session's open cards the new one folds in (closed as it lands)")
 			newTopic := fs.Bool("new-topic", false, "a read card on a topic none of this session's open read cards cover (else the hub refuses it: update that card instead)")
+			goal := fs.String("goal", "", "the goal this card serves when it is not the session's (`lifectl goals`)")
 			fs.Parse(os.Args[4:])
 			if *thread == "" {
 				die("ask add: --thread required outside a session")
@@ -548,10 +550,10 @@ func main() {
 				// only becomes theirs when it is actually doable.
 				src := actor()
 				c.call("POST", "/api/v1/calendar", map[string]any{"title": titleArg(os.Args[3]), "day": *on, "at": *at, "kind": "owner",
-					"detail": text(*detail), "thread_id": *thread, "source": src, "ask_kind": *kind, "check_hint": *check, "surface": *surface, "say": *say})
+					"detail": text(*detail), "thread_id": *thread, "source": src, "ask_kind": *kind, "check_hint": *check, "surface": *surface, "say": *say, "goal_id": *goal})
 				return
 			}
-			c.call("POST", "/api/v1/asks", map[string]any{"thread_id": *thread, "run_id": os.Getenv("LIFE_RUN_ID"), "title": titleArg(os.Args[3]), "detail": text(*detail), "kind": *kind, "check": *check, "surface": *surface, "say": *say, "replaces": folded, "new_topic": *newTopic})
+			c.call("POST", "/api/v1/asks", map[string]any{"thread_id": *thread, "run_id": os.Getenv("LIFE_RUN_ID"), "title": titleArg(os.Args[3]), "detail": text(*detail), "kind": *kind, "check": *check, "surface": *surface, "say": *say, "replaces": folded, "new_topic": *newTopic, "goal": *goal})
 			return
 		}
 		id := os.Args[2]
@@ -569,16 +571,55 @@ func main() {
 			c.call("POST", "/api/v1/asks/"+id+"/kind", map[string]string{"kind": os.Args[4]})
 			return
 		}
+		if os.Args[3] == "goal" {
+			need(5)
+			if !strings.Contains(id, ",") {
+				c.call("POST", "/api/v1/asks/"+id+"/goal", map[string]string{"goal": os.Args[4]})
+				return
+			}
+			// A refiling pass: one line per card, and every card is tried.
+			failed := false
+			for _, one := range strings.Split(id, ",") {
+				if one = strings.TrimSpace(one); one == "" {
+					continue
+				}
+				code, out := c.send("POST", "/api/v1/asks/"+one+"/goal", map[string]string{"goal": os.Args[4]})
+				if code >= 300 {
+					failed = true
+					fmt.Printf("%s: %s\n", one, bytes.TrimSpace(out))
+					continue
+				}
+				fmt.Printf("%s: goal %s\n", one, os.Args[4])
+			}
+			if failed {
+				os.Exit(1)
+			}
+			return
+		}
 		if os.Args[3] == "set" {
-			// lifectl ask <id> set [--title t] [--say s] [--detail d|@file] — reword
+			// lifectl ask <id> set [--title t] [--say s] [--detail d|@file] [--goal g] — reword
 			// an open card in place when the owner's later words made it stale (quiet:
 			// no push, no wake; the trail records the rewrite).
 			fs := flag.NewFlagSet("ask set", flag.ExitOnError)
 			title := fs.String("title", "", "new title (≤80 chars, imperative)")
 			say := fs.String("say", "", "new message: the card leads with it and Play speaks it (2-5 plain sentences, ≤700 chars)")
 			detail := fs.String("detail", "", "new steps (@/path or - reads it from a file/stdin)")
+			goal := fs.String("goal", "", "refile it under this goal (\"none\" unfiles it)")
 			fs.Parse(os.Args[4:])
-			c.call("POST", "/api/v1/asks/"+id+"/reword", map[string]string{"title": *title, "say": *say, "detail": text(*detail), "by": actor()})
+			if *goal != "" && *title == "" && *say == "" && *detail == "" {
+				c.call("POST", "/api/v1/asks/"+id+"/goal", map[string]string{"goal": *goal})
+				return
+			}
+			if *goal == "" {
+				c.call("POST", "/api/v1/asks/"+id+"/reword", map[string]string{"title": *title, "say": *say, "detail": text(*detail), "by": actor()})
+				return
+			}
+			// Words first: a card that refuses the reword (a closed one) is
+			// not refiled either, so a failure changed nothing.
+			if code, out := c.send("POST", "/api/v1/asks/"+id+"/reword", map[string]string{"title": *title, "say": *say, "detail": text(*detail), "by": actor()}); code >= 300 {
+				die("%s", bytes.TrimSpace(out))
+			}
+			c.call("POST", "/api/v1/asks/"+id+"/goal", map[string]string{"goal": *goal})
 			return
 		}
 		state := map[string]string{"done": "done", "dismiss": "dismissed", "dismissed": "dismissed", "reopen": "open", "open": "open"}[os.Args[3]]
@@ -1634,8 +1675,10 @@ asks      asks [active|all|open|answered|done|dismissed] [--thread id]
             [--surface mobile|web|any] [--check c] [--say "…"] [--thread id] [--on YYYY-MM-DD [--at HH:MM]]
             [--replaces id,id]   one card for one topic: closes this session's open cards it folds in
             [--new-topic]        a read card beside an open one: only for a different topic (else update it: ask <id> set)
-          ask <id> [done|dismiss|reopen [note] | surface mobile|web|any | kind k]
+            [--goal g]           the goal it serves when that is not the session's
+          ask <id> [done|dismiss|reopen [note] | surface mobile|web|any | kind k | goal g|none]
           ask <id,id,…> done|dismiss|reopen [note]   close a pile in one call
+          ask <id,id,…> goal g|none                   refile a pile in one call
 calendar  cal [from] [to]
           cal add "title" [--on YYYY-MM-DD] [--at HH:MM] [--kind owner|homework|agent|note|waiting] [--due on|by]
             [--detail d] [--goal g] [--thread id] [--repeat daily|weekly|monthly|yearly|every<N>d] [--nag min]

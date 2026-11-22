@@ -38,6 +38,10 @@ func (s *Server) calendarAdd(w http.ResponseWriter, r *http.Request) {
 	if id := s.caller(r); id != "" {
 		in.Source = "claude:thread:" + id
 	}
+	if msg := s.goalCheck(in.GoalID); msg != "" {
+		jsonErr(w, 400, msg)
+		return
+	}
 	it, err := s.Cal.Add(in)
 	if err != nil {
 		jsonErr(w, 400, err.Error())

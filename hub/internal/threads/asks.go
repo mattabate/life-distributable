@@ -280,6 +280,23 @@ func (m *Manager) SetAskKind(id, kind string) (Ask, error) {
 	return m.GetAsk(id)
 }
 
+// SetAskGoal files a card under the goal it serves (`lifectl ask <id> goal g`,
+// `ask add --goal g`; "" unfiles it). A card takes its session's goal when it
+// is raised, so a session opened on one goal files every later card there,
+// whatever the card is about. The goal is what the card is about, not its
+// words, so a closed card can be refiled too; it moves no card and wakes
+// nobody. The caller checks the goal exists.
+func (m *Manager) SetAskGoal(id, goal string) (Ask, error) {
+	if _, err := m.GetAsk(id); err != nil {
+		return Ask{}, errors.New("no such ask")
+	}
+	if _, err := m.db.Exec(`UPDATE items SET goal_id=?, updated_at=? WHERE id=?`, nullable(goal), ts(time.Now()), id); err != nil {
+		return Ask{}, err
+	}
+	store.StampItem(m.db, id)
+	return m.GetAsk(id)
+}
+
 // RewordAsk rewrites an open card's words in place — title, the message it
 // leads with (`said`; a dated step's `say` until it fires), its steps — so a
 // card the owner's later words made stale reads true again instead of being

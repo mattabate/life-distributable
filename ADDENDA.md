@@ -1824,3 +1824,8 @@ Entry format:
 - For: anyone who runs both the phone and the desktop app
 - Fix: an install card was read as the desktop's when "Mac" or "desktop" appeared anywhere in its title, so "Install build N: … on the Mac's page" was filed for the desktop and could close on the desktop's build report. The device is now read only from the part before the colon.
 - How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/asks.go` (`installHead`, `InstallTarget`), `threads_test.go`.
+
+## add-0282 · 2026-11-22 · A card can name its own goal
+- For: anyone whose sessions work on more than one goal
+- Change: a card took its session's goal, so a session opened on one goal filed every later card there, whatever the card was about. `lifectl ask add --goal g` files a new card under another goal, and `lifectl ask <id> goal g|none` (or `ask <id> set --goal g`) refiles one, open or closed; a comma list of ids refiles a pile in one call. Refiling is quiet: the card does not move and no session is woken. An unknown goal is refused, on a dated step too (`POST /api/v1/calendar` now checks `goal_id`).
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/asks.go` (`SetAskGoal`), `hub/internal/server/asks.go` (`setAskGoal`, `goalCheck`, `goal` on `addAsk`), `hub/internal/server/calendar.go` (`goalCheck` in `calendarAdd`), the `POST /api/v1/asks/{id}/goal` row in `routes.go` and its section in `shared/api.md`, `hub/cmd/lifectl/main.go` (`ask add --goal`, `ask <id> goal`, `ask <id> set --goal`), `asks_goal_test.go`.
