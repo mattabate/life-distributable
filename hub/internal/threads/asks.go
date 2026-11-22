@@ -1488,6 +1488,14 @@ var installMacTitle = regexp.MustCompile(`(?i)^install (?:desktop|mac) build (\d
 var anyBuild = regexp.MustCompile(`(?i)\bbuild (\d+)\b`)
 var macWord = regexp.MustCompile(`(?i)\b(desktop|mac)\b`)
 
+// installHead: an install title up to its colon, where the device is named
+// ("Install build 9 on the Mac: …"). What follows the colon is what the build
+// changes, and a change may be about a Mac on a phone's card.
+func installHead(title string) string {
+	head, _, _ := strings.Cut(title, ":")
+	return head
+}
+
 // installBuild returns N for an "Install app build N" / "Install desktop
 // build N" title, else 0. This is the strict form: it is what retags a card
 // to kind install, so it must not fire on a read or physical card that merely
@@ -1506,7 +1514,7 @@ func installBuild(title string) int {
 
 // installTarget: which device an install card is for — "phone" or "mac" —
 // and "" for anything that is not an install. The strict Mac title, else a
-// kind=install card that says desktop/Mac anywhere in its title; every other
+// kind=install card that says desktop/Mac before its colon; every other
 // install is the phone's, as it always was.
 func installTarget(kind, title string) string {
 	return InstallTarget(kind, title)
@@ -1521,7 +1529,7 @@ func InstallTarget(kind, title string) string {
 	if askBuild(kind, title) == 0 {
 		return ""
 	}
-	if kind == "install" && !installTitle.MatchString(title) && macWord.MatchString(title) {
+	if kind == "install" && !installTitle.MatchString(title) && macWord.MatchString(installHead(title)) {
 		return "mac"
 	}
 	return "phone"

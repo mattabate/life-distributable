@@ -479,7 +479,7 @@ test('askHTML: a done card carries Reopen when the hub says reopen', () => {
 
 // The install cell (2026-09-08): title, description, one teal Install
 // button — no Respond furniture. The button carries the OTA link itself, so
-// the link line is stripped from the shown detail; Dismiss stays as the out.
+// the link line is stripped from the shown detail.
 test('askHTML: an install card is teal with one Install button, link line stripped', () => {
   const inst = { ...ask, kind: 'install', verb: 'install', title: 'Install app build 812 (tap the link)',
     detail: 'The install ask now draws as this teal cell.\n[Install build 812](https://hub.test/ota/tok/install.html)' };
@@ -489,11 +489,14 @@ test('askHTML: an install card is teal with one Install button, link line stripp
   assert.match(chat, /<a class="btn sm primary" href="https:\/\/hub\.test\/ota\/tok\/install\.html" target="_blank">Install<\/a>/);
   assert.match(chat, /teal cell/);
   assert.doesNotMatch(chat, /install\.html\)|>Respond<|>Done</);
-  assert.match(chat, /Dismiss<\/button>/);
-  // No link in the detail (old habit): fall back to Respond, still teal.
+  // No Dismiss beside Install: it was one tap from losing a build's card.
+  assert.doesNotMatch(chat, /Dismiss/);
+  // No link in the detail (old habit): fall back to Respond, still teal,
+  // and Dismiss stays as its only way out.
   const bare = askHTML({ ...inst, detail: 'New build is up.' });
   assert.match(bare, /class="ask install"/);
   assert.match(bare, />Respond</);
+  assert.match(bare, /Dismiss<\/button>/);
   assert.doesNotMatch(bare, /btn sm primary/);
   // Closed drops the button with the tint like any other card.
   assert.match(askHTML({ ...inst, state: 'done', ...CLOSED }), /^<details class="chat-row"/);
@@ -511,8 +514,7 @@ test('askHTML: a Mac install card has an Install button on the mac lane, no link
   const chat = askHTML(mac);
   assert.match(chat, /^<div class="ask install" id="ask-card-ask-1a2b3c4d">/);
   assert.match(chat, /<button class="sm primary" onclick="macInstall\('ask-1a2b3c4d'\)">Install<\/button>/);
-  assert.doesNotMatch(chat, /href=|>Respond</);
-  assert.match(chat, /Dismiss<\/button>/);
+  assert.doesNotMatch(chat, /href=|>Respond<|Dismiss/);
   assert.match(chat, /install cell for the desktop app/);
   assert.equal(askInstallTarget(mac), 'mac');
   assert.equal(askInstallTarget({ ...mac, target: undefined }), 'mac');

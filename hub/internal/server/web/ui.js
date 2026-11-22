@@ -1321,7 +1321,10 @@ function askHTML(a, opened, armed, cost) {
   const acts = !open ? (a.reopen ? [{ label: 'Reopen', js: `cardFold('ask','${escJS(a.id)}',true)` }] : [])
     // An error is a run that wants starting again (2026-08-24).
     : err ? [{ label: paused ? 'Resume now' : 'Restart', js: `retryAsk('${escJS(a.id)}')`, primary: true }, dismiss]
-    : install ? [mac ? { label: 'Install', js: `macInstall('${escJS(a.id)}')`, primary: true } : link ? { label: 'Install', href: link, primary: true } : respond, dismiss]
+    // Install alone, no Dismiss beside it (one tap from dismissing a build by
+    // accident); the next build's card replaces it. One with no link keeps
+    // Respond and Dismiss, its only way out.
+    : install ? (mac ? [{ label: 'Install', js: `macInstall('${escJS(a.id)}')`, primary: true }] : link ? [{ label: 'Install', href: link, primary: true }] : [respond, dismiss])
     // A read: Respond arms the reply (sending closes it, words or not); Read
     // is its silent close — done, "Read it", wakes nothing (2026-09-17:
     // "when I hit the white read button… I have read this message and I

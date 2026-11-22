@@ -1053,6 +1053,14 @@ func TestMacInstallCardIsItsOwnDevice(t *testing.T) {
 	if mac.State != "superseded" || mac.SupersededBy != mac2.ID || mac.Resolution != "replaced by build 1512" || phone.State != "open" {
 		t.Fatalf("mac supersede: %+v %+v", mac, phone)
 	}
+	// A why that is about a Mac leaves the card the phone's; the device is
+	// named before the colon.
+	if got := InstallTarget("install", "Install build 40: the sidebar on the Mac's settings page"); got != "phone" {
+		t.Fatalf("a phone card whose why names a Mac: target %q", got)
+	}
+	if InstallTarget("install", "Install build 12 on the Mac: the sidebar") != "mac" {
+		t.Fatal("a loose Mac title before the colon is still the Mac's")
+	}
 	// the Mac reporting an older build closes nothing; the phone's report
 	// never touches a mac card
 	m.ReconcileMacInstalls(1508)

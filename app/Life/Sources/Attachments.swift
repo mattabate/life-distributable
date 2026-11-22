@@ -8,6 +8,7 @@ import QuickLook
 import AVFoundation
 import AVKit
 import WebKit
+import PDFKit
 
 /// A document (a PDF, a CSV, an export) attached to a message, as opposed to
 /// a picture: the bytes go up untouched under their own name, so the hub
@@ -221,27 +222,51 @@ final class AttachmentDraft {
     func clear() { images = []; assetIDs = []; files = [] }
 }
 
-/// A document chip: the icon, the name, a ✕. Drawn in the composer strip and
-/// as the first thing on the new-session sheet.
+/// A document tile, the same square as a picture's thumbnail beside it: a
+/// PDF's first page (any other file its icon), the name along the bottom and
+/// the ✕ in the corner. Drawn in the composer strip and as the first thing on
+/// the new-session sheet.
 struct FileChip: View {
     let file: AttachedFile
     var remove: (() -> Void)? = nil
+    @State private var page: UIImage?
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: file.isPDF ? "doc.richtext" : "doc").font(.title3).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(file.name).font(.caption.weight(.semibold)).lineLimit(1).truncationMode(.middle)
-                Text(Fmt.bytes(file.data.count)).font(.caption2).foregroundStyle(.secondary)
-            }
-            if let remove {
-                Button(action: remove) {
-                    Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(.secondary)
-                }.accessibilityLabel("Remove \(file.name)")
+        ZStack {
+            if let page {
+                // The top of the page: its letterhead is what tells two apart.
+                Image(uiImage: page).resizable().scaledToFill()
+                    .frame(width: 72, height: 72, alignment: .top)
+            } else {
+                Color(.secondarySystemBackground)
+                Image(systemName: file.isPDF ? "doc.richtext" : "doc").font(.title2).foregroundStyle(.secondary)
+                    .padding(.bottom, 14)
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
-        .frame(maxWidth: 240)
+        .frame(width: 72, height: 72)
+        .overlay(alignment: .bottom) {
+            Text(file.name).font(.system(size: 9, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 4).padding(.vertical, 2)
+                .frame(maxWidth: .infinity)
+                .background(.black.opacity(0.6))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Color(.separator), lineWidth: 0.5) }
+        .overlay(alignment: .topTrailing) {
+            if let remove {
+                Button(action: remove) {
+                    Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(.white, .black.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+                .padding(3)
+                .accessibilityLabel("Remove \(file.name)")
+            }
+        }
+        .help("\(file.name) · \(Fmt.bytes(file.data.count))")
+        .task(id: file.id) {
+            guard file.isPDF, page == nil else { return }
+            page = PDFDocument(data: file.data)?.page(at: 0)?.thumbnail(of: CGSize(width: 216, height: 216), for: .cropBox)
+        }
     }
 }
 
@@ -292,7 +317,7 @@ struct AttachBar: View {
                                 .overlay(alignment: .topTrailing) {
                                     Button { draft.remove(at: i) } label: {
                                         Image(systemName: "xmark.circle.fill").font(.body).foregroundStyle(.white, .black.opacity(0.6))
-                                    }.padding(3)
+                                    }.buttonStyle(.plain).padding(3)
                                 }
                         }
                         ForEach(Array(draft.files.enumerated()), id: \.element.id) { i, f in
