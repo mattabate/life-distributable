@@ -68,7 +68,7 @@ struct ApprovalCard: View {
         Card(tint: .red, mark: "hand.raised.fill",
              caption: "approval", right: shortAgo(a.created_at),
              cost: cost,
-             title: a.title, text: a.detail, said: a.said ?? "", thread: a.thread_id ?? "",
+             title: a.title, text: a.detail, said: a.said ?? "", unfolded: true, thread: a.thread_id ?? "",
              extra: payload, meta: AnyView(metaRow),
              line: decidedLine,
              // Decided or dismissed, it is its row: ✓ approved, ✕ denied.

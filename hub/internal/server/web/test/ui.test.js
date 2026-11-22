@@ -502,6 +502,83 @@ test('askHTML: an install card is teal with one Install button, link line stripp
   assert.match(askHTML({ ...inst, state: 'done', ...CLOSED }), /^<details class="chat-row"/);
 });
 
+test('a card under a session\'s own spoken line keeps only what is acted on; the rest is behind More', () => {
+  const d = 'Why this matters, at length.\n\n1. Open the page\n2. Click Save\n\nDraft:\n\n```\nHi Sam, yes.\n```\n\n- a bullet of background\n\nSee [the doc](https://x.test/doc).';
+  const [kept, rest] = actedDetail(d, true);
+  assert.equal(kept, '1. Open the page\n2. Click Save\n\nDraft:\n\n```\nHi Sam, yes.\n```\n\nSee [the doc](https://x.test/doc).');
+  assert.equal(rest, 'Why this matters, at length.\n\n- a bullet of background');
+  // Not folded: the detail is the card, untouched.
+  assert.deepEqual(actedDetail(d, false), [d, '']);
+  const html = detailHTML(d, 'ask:x', true);
+  // More opens the whole detail in its written order; shut, only the kept part shows.
+  assert.match(html, /<div class="card-kept">(?:(?!Why this matters)[^])*<\/div><div class="card-rest" hidden>[^]*Why this matters[^]*Open the page[^]*>More<\/button>/);
+  assert.doesNotMatch(detailHTML('1. Only steps', 'ask:y', true), /More/);
+  // A label stays with its box whether plain, bold or a heading; a step's
+  // indented paragraph stays with the step.
+  assert.equal(actedDetail('Background.\n\n**Draft:**\n\n```\nHi\n```', true)[0], '**Draft:**\n\n```\nHi\n```');
+  assert.equal(actedDetail('Background.\n\n## The draft\n\n```\nHi\n```', true)[0], '## The draft\n\n```\nHi\n```');
+  assert.deepEqual(actedDetail('1. Open the page\n\n   It is the blue one.\n\n2. Save\n\nWhy.', true),
+    ['1. Open the page\n\n   It is the blue one.\n\n2. Save', 'Why.']);
+  // A tilde fence inside a backtick box does not end the box; CRLF reads as LF.
+  assert.deepEqual(actedDetail('```\na\n~~~\n\nb\n```\n\nWhy.', true), ['```\na\n~~~\n\nb\n```', 'Why.']);
+  assert.deepEqual(actedDetail('Why.\r\n\r\n1. Go\r\n', true), ['1. Go', 'Why.']);
+  // The cards themselves: an ask folds, an approval never does (its detail
+  // is what the owner says yes to).
+  const prose = 'The body of the email, as it will be sent.';
+  const own = 'Hey Sam, it\'s your chief of staff. The page is ready and wants one click from you before Friday, then I finish the rest.';
+  const doCard = { ...ask, kind: 'physical', verb: 'do', title: 'Save the page', said: own, detail: prose + '\n\n1. Send it' };
+  const more = />More<\/button>/;
+  assert.match(askHTML(doCard), more);
+  assert.match(askHTML({ ...doCard, kind: 'read', verb: 'read' }), more);
+  // The hub's own line over a card raised with no --say is its title said
+  // aloud: the detail is the card, so nothing folds.
+  assert.doesNotMatch(askHTML({ ...doCard, said: 'Hey Sam, it\'s your chief of staff. Save the page.' }), more);
+  assert.doesNotMatch(askHTML({ ...doCard, said: '' }), more);
+  // The hub's line names the session too, however long its name is; and a
+  // line cut short leaves the only whole copy in the detail.
+  const named = 'Sort the garage shelves before the movers come on Friday';
+  assert.doesNotMatch(askHTML({ ...doCard, thread_title: named, said: `Hey, Save the page. It's for ${named}.` }), more);
+  assert.doesNotMatch(askHTML({ ...doCard, kind: 'read', thread_title: named, said: `Hey, about ${named}. Save the page.` }), more);
+  assert.doesNotMatch(askHTML({ ...doCard, said: own + ' And then a great deal more…' }), more);
+  // What is answered to is never folded: a decision's options, an install's
+  // what-it-fixes, an error's text; nor is a closed card.
+  for (const kind of ['decision', 'install', 'error']) assert.doesNotMatch(askHTML({ ...doCard, kind }), more, kind);
+  const shut = askHTML({ ...doCard, state: 'done', ...CLOSED });
+  assert.doesNotMatch(shut, more);
+  assert.match(shut, /The body of the email/);
+  const act = actionHTML({ id: 'a1', title: 'Send the email', state: 'pending', open: true, said: own, detail: prose, outcomes: [] });
+  assert.doesNotMatch(act, more);
+  assert.match(act, /The body of the email/);
+  // More kept: a checkbox, a thing to type, an address, a number, a bare
+  // site, a table with no leading pipe, an indented command under its label,
+  // a flush paragraph between two steps. Plain bullets and prose still fold.
+  for (const b of ['- [ ] Sign the form', 'Run `make ship` there.', 'Write to sam@example.org today.', 'Call 800-555-0128 after two.',
+    'It is on example.com under Book.', 'Day | Price\n--- | ---\nMon | 4'])
+    assert.deepEqual(actedDetail('Why.\n\n' + b, true), [b, 'Why.'], b);
+  assert.deepEqual(actedDetail('Why.\n\nRun this:\n\n    make ship', true), ['Run this:\n\n    make ship', 'Why.']);
+  assert.deepEqual(actedDetail('1. Open it\n\nIt is the blue one.\n\n2. Save\n\nWhy.', true), ['1. Open it\n\nIt is the blue one.\n\n2. Save', 'Why.']);
+  assert.deepEqual(actedDetail('On 2026-11-22 it moved.\n\n- background', true), ['', 'On 2026-11-22 it moved.\n\n- background']);
+  // A list that opens the detail is the steps, bulleted or not; a file on
+  // the hub written as a bare path is something to open.
+  assert.deepEqual(actedDetail('- Restart the modem\n- Tell me the light colour\n\nWhy.', true), ['- Restart the modem\n- Tell me the light colour', 'Why.']);
+  assert.deepEqual(actedDetail('Why.\n\n/api/v1/blobs/plan.pdf', true), ['/api/v1/blobs/plan.pdf', 'Why.']);
+  // All prose: the kept part is empty and hidden, More alone; open, the whole
+  // detail shows and the kept part is hidden; the click swaps them.
+  assert.match(detailHTML(prose, 'ask:p', true), /<div class="card-kept" hidden><\/div><div class="card-rest" hidden>/);
+  const keptEl = { hidden: false, firstChild: {} }, whole = { hidden: true, previousElementSibling: keptEl };
+  const btn = { previousElementSibling: whole, textContent: 'More' };
+  toggleCardMore(btn, 'ask:x');
+  assert.deepEqual([keptEl.hidden, whole.hidden, btn.textContent], [true, false, 'Less']);
+  assert.match(detailHTML(d, 'ask:x', true), /<div class="card-kept" hidden>[^]*<div class="card-rest">[^]*>Less<\/button>/);
+  toggleCardMore(btn, 'ask:x');
+  assert.deepEqual([keptEl.hidden, whole.hidden, btn.textContent], [false, true, 'More']);
+  // A long kept part keeps its own Show more; the opened whole has none.
+  const long = Array.from({ length: 60 }, (_, i) => `${i + 1}. Step ${i + 1}`).join('\n');
+  const lh = detailHTML('Why.\n\n' + long, 'ask:l', true);
+  assert.match(lh, /<div class="card-kept"><div class="ask-long/);
+  assert.doesNotMatch(lh.split('<div class="card-rest"')[1], /ask-long/);
+});
+
 // The desktop app's install cell (2026-09-30: "an install cell with the
 // word install, and myself clicking it should do the thing where it kind of
 // builds… in the background and then restart"): the same teal card, but its

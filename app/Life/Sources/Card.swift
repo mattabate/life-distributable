@@ -129,6 +129,11 @@ struct Card: View {
     /// the message already says (a read minted from a `Say:` reply is titled
     /// from its first sentence) is not drawn twice.
     var said: String = ""
+    /// The detail is never folded behind More (an approval: its detail is
+    /// what the owner says yes to).
+    var unfolded = false
+    /// The card's own id ("ask:ask-…"): what its More state is kept under.
+    var key = ""
     /// The session the card belongs to: Play marks it "speaking" while it plays.
     var thread: String = ""
     /// The line is queued, not yet spoken: Play reads "Waiting to speak", and
@@ -155,6 +160,10 @@ struct Card: View {
     var error: String? = nil
 
     @State private var hushed = false
+    /// Redraws the card when More is tapped; which cards are open is `moreKeys`.
+    @State private var moreTick = 0
+    @MainActor private static var moreKeys = Set<String>()
+    private var moreKey: String { key.isEmpty ? thread + "\u{1}" + title + "\u{1}" + said : key }
     @ObservedObject private var speaker = Speaker.shared
     @Environment(\.openURL) private var openURL
 
@@ -181,13 +190,36 @@ struct Card: View {
             }.font(.zoomed(size: 12, weight: .semibold))
             // Selectable: the thing worth copying is often IN the title (a
             // paste-this string, an endpoint).
-            if titled { StyledText(text: title, style: .body, color: .primary, bold: true, macSize: 18) }
+            let (whole, pictures) = split
+            // Under a session's own spoken line only what the owner acts on
+            // stays; the rest is behind More (`acted`).
+            let (kept, rest) = Self.acted(whole, fold: lines == nil && !unfolded)
+            // Open, More shows the whole detail in its written order. Its
+            // state outlives a lazy row (`moreKeys`): a recycled row's
+            // @State starts over.
+            let more = moreTick >= 0 && !rest.isEmpty && Self.moreKeys.contains(moreKey)
+            let detail = more ? whole : kept
+            // The title is dropped only for a body that is SHOWN leading with it.
+            if titled(over: detail) { StyledText(text: title, style: .body, color: .primary, bold: true, macSize: 18) }
             // What is heard leads, italic at the reading size; the detail
             // sits back, smaller and grey.
             if !said.isEmpty { StyledText(text: said, style: .body, color: .primary, macSize: 16, reading: true, italic: true) }
-            let (detail, pictures) = split
             if !pictures.isEmpty { FileStrip(files: pictures) }
-            if !detail.isEmpty { bodyText(detail, reading: true) }
+            if more {
+                // All of it was asked for: whole, with no second "Show N more
+                // lines" on top of More (the console's opened detail).
+                StyledText(text: detail, style: .subheadline, color: .secondary, macSize: 14, reading: true)
+            } else if !detail.isEmpty { bodyText(detail, reading: true) }
+            if !rest.isEmpty {
+                Button(more ? "Less" : "More") {
+                    if Self.moreKeys.remove(moreKey) == nil {
+                        if Self.moreKeys.count > 200 { Self.moreKeys.removeAll() }
+                        Self.moreKeys.insert(moreKey)
+                    }
+                    moreTick += 1
+                }
+                .font(.zoomed(size: 13, weight: .semibold)).buttonStyle(.plain).foregroundStyle(Self.muted)
+            }
             if let extra, !extraShown { extra }
             if let meta { meta }
             if let extra, extraShown { extra }
@@ -238,17 +270,96 @@ struct Card: View {
         return (rest.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines), pictures)
     }
 
+    /// THE SPOKEN LINE IS THE CARD; THE GREY UNDER IT STEPS BACK. On a card
+    /// whose session wrote its own spoken line the detail keeps only what
+    /// the owner acts on: numbered steps, anything with a link, a draft box,
+    /// a table, and a one-line label over one of those; the rest is behind
+    /// More. The console's `actedDetail`.
+    /// What stays with a kept block: a one-line label over it (plain, bold
+    /// or a heading) and an indented paragraph under a step. More opens the
+    /// whole detail in its written order. An approval is never folded
+    /// (`unfolded`): its detail is what the owner says yes to.
+    ///
+    /// WHICH CARDS FOLD (`folds`): only one whose line the session wrote
+    /// (the hub speaks the title of a card raised with no --say, and under
+    /// that the detail is the card), and only a kind whose detail is around
+    /// what the owner does: a decision's options, an install's what-it-fixes
+    /// and an error's text are what they answer to. The console's `askFolds`.
+    /// The hub's own line is the title plus an opener and the session's name
+    /// (cut at 80), so a session's line is one that runs well past both. A
+    /// line cut short ("…") is not folded either: the detail then holds the
+    /// only whole copy of it.
+    static func folds(kind: String, said: String, title: String, thread: String) -> Bool {
+        ["read", "physical", "access", "other"].contains(kind)
+            && !said.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("…")
+            && SessionCell.plain(said).count > SessionCell.plain(title).count + min(SessionCell.plain(thread).count, 80) + 40
+    }
+
+    /// What the owner acts on, a line at a time: a numbered step, a checkbox,
+    /// a link, a file on the hub, a thing to type (inline code), a draft box,
+    /// a table, an email address, a phone number, a bare domain. The
+    /// console's `ACTED`.
+    private static let actedLine = #"(?m)^\s*\d+[.)]\s|^\s*[-*+]\s+\[[ xX]\]|\]\([^)]+\)|https?://|/api/v1/blobs/|`[^`\n]+`|^\s*(```|~~~)|^\s*\||^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$|[\w.+-]+@[\w-]+\.[\w.-]+|(\+?\d{1,2}[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}|\b[\w-]+\.(com|org|net|io|ai|co|app|dev|gov|edu)\b"#
+
+    static func acted(_ text: String, fold: Bool) -> (kept: String, rest: String) {
+        // "\r\n" is one Character to Swift and would never split on "\n".
+        let text = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        guard fold, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return (text, "") }
+        var blocks: [String] = [], cur: [Substring] = [], fence = ""
+        let fenced: (Substring) -> String = { l in
+            let t = l.drop { $0 == " " || $0 == "\t" }
+            return t.hasPrefix("```") ? "```" : t.hasPrefix("~~~") ? "~~~" : ""
+        }
+        for l in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let f = fenced(l)
+            if !f.isEmpty, fence.isEmpty { fence = f } else if !f.isEmpty, f == fence { fence = "" }
+            if fence.isEmpty, f.isEmpty, l.allSatisfy(\.isWhitespace) {
+                if !cur.isEmpty { blocks.append(cur.joined(separator: "\n")) }
+                cur = []
+            } else { cur.append(l) }
+        }
+        if !cur.isEmpty { blocks.append(cur.joined(separator: "\n")) }
+        let has: (String, String) -> Bool = { b, re in b.range(of: re, options: .regularExpression) != nil }
+        var keep = blocks.map { has($0, actedLine) }
+        // A list that opens the detail is the owner's steps even when
+        // bulleted: a plain reply's bullets are filed as its steps.
+        if let first = blocks.first, has(first, #"^\s*[-*+•]\s"#) { keep[0] = true }
+        let label: (Int) -> Bool = { i in
+            blocks.indices.contains(i) && !blocks[i].contains("\n") && has(blocks[i], #":\s*[*_]*\s*$|^\s*#{1,6}\s"#)
+        }
+        let step: (Int) -> Bool = { i in blocks.indices.contains(i) && has(blocks[i], #"^\s*\d+[.)]\s"#) }
+        for i in blocks.indices where !keep[i] {
+            // An indented code block under its label; a step's own paragraph,
+            // indented under it or written flush between two steps.
+            let kept = i > 0 && keep[i - 1]
+            if label(i - 1), blocks[i].split(separator: "\n").allSatisfy({ $0.hasPrefix("    ") || $0.hasPrefix("\t") }) {
+                keep[i] = true
+            } else if kept, has(blocks[i], #"^( {2,}|\t)\S"#) {
+                keep[i] = true
+            } else if kept, step(i + 1), (0..<i).contains(where: step) {
+                keep[i] = true
+            }
+        }
+        for i in blocks.indices.dropLast() where !keep[i] && keep[i + 1] && label(i) { keep[i] = true }
+        let pick: (Bool) -> String = { want in blocks.indices.filter { keep[$0] == want }.map { blocks[$0] }.joined(separator: "\n\n") }
+        return (pick(true), pick(false))
+    }
+
     /// Does the message already say the title? Compared plain (links to their
     /// text, marks dropped, case folded), a cut title's "…" off — the console's
     /// `saidCovers`. Then the title stays for rows and the card leads with
     /// the message alone. The body covers it only by starting with it: an
     /// approval titled "git commit" keeps its title over a will-run block
     /// that merely holds "git commit -m x".
-    private var titled: Bool {
+    /// `shown` is the detail as drawn: a first paragraph behind More covers nothing.
+    private func titled(over shown: String) -> Bool {
+        Self.titled(title: title, said: said, shown: shown)
+    }
+    static func titled(title: String, said: String, shown: String) -> Bool {
         let t = SessionCell.plain(title).lowercased()
         guard !t.isEmpty else { return true }
         let saidSays = !said.isEmpty && SessionCell.plain(said).lowercased().contains(t)
-        let bodyLeads = !text.isEmpty && SessionCell.plain(text).lowercased().hasPrefix(t)
+        let bodyLeads = !shown.isEmpty && SessionCell.plain(shown).lowercased().hasPrefix(t)
         return !saidSays && !bodyLeads
     }
 
