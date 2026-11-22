@@ -30,6 +30,8 @@ for p in "${PAGES[@]}"; do
     # stepcard:<thread id>: that chat with a morning-routine card posed in it
     # and two of its steps staged on the bar (nothing is sent).
     stepcard:*) thread="${p#stepcard:}"; stepcard=1; tab=sessions; name="stepcard-$thread";;
+    # todo:<thread id>: that chat opened on To do with a posed list.
+    todo:*) thread="${p#todo:}"; stepcard=todo; tab=sessions; name="todo-$thread";;
     goal:*) goal="${p#goal:}"; tab=goals; name="goal-$goal";;
     open:*) open="${p#open:}"; tab=sessions; name="open-$open";;
   esac

@@ -174,11 +174,13 @@ func TestGoneIdleProcessCloses(t *testing.T) {
 	}
 }
 
-// Another session's relay (or a fired step, a check-in) never steers a turn
-// in flight: it waits on the queue and opens the next turn on the live
-// process when this one ends, rather than sitting until the process is
-// closed for idleness (life-distributable#56).
-func TestRelayWaitsForTheTurnToEnd(t *testing.T) {
+// What the clock sends (a fired step, a check-in) and a relay the hub sends
+// never steer a turn in flight: they wait on the queue and open the next turn
+// on the live process when this one ends, rather than sitting until the
+// process is closed for idleness (life-distributable#56). A teammate's own
+// relay reaches the session at once, like the owner's words, and the session
+// sorts it.
+func TestTheClockWaitsForTheTurnToEndATeammateDoesNot(t *testing.T) {
 	m, _, cmds := setup(t)
 	th, _ := m.Create("", "life", "", "Plan the trip.", "", "", nil)
 	out := pendingOut(t, m, th.ID)
@@ -187,12 +189,33 @@ func TestRelayWaitsForTheTurnToEnd(t *testing.T) {
 {"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"WebFetch","input":{"url":"https://example.com"}}]}}
 `)
 	m.Poll()
-	if err := m.run(th.ID, "system", "relay", "The booking step is yours now.", nil); err != nil {
+	if err := m.run(th.ID, "system", "checkin", "The booking step fired.", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.run(th.ID, "system", "relay", "A post from the planning room.", nil); err != nil {
 		t.Fatal(err)
 	}
 	msgs, _ := m.Messages(th.ID, 50)
-	if b, _ := os.ReadFile(in); strings.Count(string(b), "\n") != 1 || len(msgs) != 2 || !msgs[1].Queued {
-		t.Fatalf("relay steered into the running turn: %s %+v", b, msgs)
+	if b, _ := os.ReadFile(in); strings.Count(string(b), "\n") != 1 || len(msgs) != 3 || !msgs[1].Queued || !msgs[2].Queued {
+		t.Fatalf("a fired step or a hub relay steered into the running turn: %s %+v", b, msgs)
+	}
+	// A teammate's relay goes in now, framed as theirs with the filing step;
+	// the held ones stay held.
+	if err := m.runRef(th.ID, "claude:thread:planner-1", "system", "relay", "The caterer answered, 80 seats.", nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ = m.Messages(th.ID, 50)
+	if b, _ := os.ReadFile(in); strings.Count(string(b), "\n") != 2 || !strings.Contains(string(b), "The caterer answered") || !strings.Contains(string(b), "A teammate sent this while you are working") ||
+		!strings.Contains(string(b), "lifectl todo add") || strings.Contains(string(b), "booking step") || strings.Contains(string(b), "planning room") || !msgs[1].Queued || !msgs[2].Queued || !msgs[3].Steered {
+		t.Fatalf("relay not handed over at once, or a held message swept in with it: %s %+v", b, msgs)
+	}
+	// So do the owner's words, alone.
+	if err := m.Send(th.ID, "also look at the coast"); err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ = m.Messages(th.ID, 50)
+	if b, _ := os.ReadFile(in); strings.Count(string(b), "\n") != 3 || !strings.Contains(string(b), "The owner sent this while you are working") || strings.Contains(string(b), "booking step") || !msgs[1].Queued || !msgs[4].Steered {
+		t.Fatalf("a held message swept in with the owner's: %s %+v", b, msgs)
 	}
 	appendOut(t, out, `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"..."}]}}
 {"type":"result","subtype":"success","is_error":false,"result":"Two hotels fit.","total_cost_usd":0.05,"session_id":"sess-1"}
@@ -200,16 +223,138 @@ func TestRelayWaitsForTheTurnToEnd(t *testing.T) {
 	m.Poll()
 	msgs, _ = m.Messages(th.ID, 50)
 	b, _ := os.ReadFile(in)
-	if strings.Count(string(b), "\n") != 2 || !strings.Contains(string(b), "The booking step is yours now") || len(*cmds) != 1 {
-		t.Fatalf("held relay not delivered as the next turn: %s %v", b, *cmds)
+	if strings.Count(string(b), "\n") != 4 || !strings.Contains(string(b), "The booking step fired.") || !strings.Contains(string(b), "A post from the planning room.") || len(*cmds) != 1 {
+		t.Fatalf("held messages not delivered as the next turn: %s %v", b, *cmds)
 	}
 	for _, x := range msgs {
-		if x.Kind == "relay" && (x.Queued || x.Steered || x.RunID != msgs[0].RunID+"-t2") {
+		if x.Kind == "checkin" && (x.Queued || x.Steered || x.RunID != msgs[0].RunID+"-t2") {
 			t.Fatalf("%+v", x)
 		}
 	}
 	if th, _ = m.Get(th.ID); th.Status != "running" {
 		t.Fatalf("%+v", th)
+	}
+}
+
+// A turn that ends with an open to-do is followed at once by one the hub
+// opens on it. A waiting item wakes nothing, and an item left untouched is
+// not woken for ever.
+func TestAnOpenTodoOpensTheNextTurn(t *testing.T) {
+	m, _, cmds := setup(t)
+	th, _ := m.Create("", "life", "", "Fix the export.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	in := inFile(t, m, th.ID)
+	appendOut(t, out, `{"type":"system","subtype":"init","session_id":"sess-1"}
+`)
+	m.Poll()
+	a, err := m.TodoAdd(th.ID, "Log every export.", "the owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, _ := m.TodoAdd(th.ID, "Check the import.", "the planner")
+	if err := m.TodoSet(th.ID, w.ID, "waiting", ""); err == nil {
+		t.Fatal("a wait with no reason was taken")
+	}
+	if err := m.TodoSet(th.ID, w.ID, "waiting", "the planner's import"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := m.Get(th.ID); len(got.Todos) != 2 || got.Todos[0].ID != a.ID || got.Todos[1].State != "waiting" {
+		t.Fatalf("todos on the thread: %+v", got.Todos)
+	}
+	if all, _ := m.List(false); len(all) != 1 || len(all[0].Todos) != 2 || all[0].Todos[0].ID != a.ID {
+		t.Fatalf("todos on the list: %+v", all)
+	}
+	result := func() {
+		t.Helper()
+		appendOut(t, out, `{"type":"result","subtype":"success","is_error":false,"result":"Done.","total_cost_usd":0.01,"session_id":"sess-1"}
+`)
+		m.Poll()
+	}
+	lines := func() (int, string) { b, _ := os.ReadFile(in); return strings.Count(string(b), "\n"), string(b) }
+	result()
+	n, b := lines()
+	if n != 2 || !strings.Contains(b, "The hub, not the owner") || strings.Count(b, "Log every export. (from the owner)") != 1 || len(*cmds) != 1 {
+		t.Fatalf("the open to-do did not open the next turn: %d %s", n, b)
+	}
+	if th, _ = m.Get(th.ID); th.Status != "running" {
+		t.Fatalf("%+v", th)
+	}
+	// Left untouched: one more wake, then it rests on the list.
+	result()
+	result()
+	if n, _ = lines(); n != 1+todoWakeMax {
+		t.Fatalf("an untouched to-do was woken %d times, want %d", n-1, todoWakeMax)
+	}
+	// Setting a spent item to the state it is in gives it no wakes back.
+	if err := m.TodoSet(th.ID, a.ID, "open", ""); err != nil || m.todoWake(th.ID) {
+		t.Fatalf("an open item set open again woke a turn: %v", err)
+	}
+	// A new item beside the spent one wakes the session again.
+	if _, err := m.TodoAdd(th.ID, "Rename the column.", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !m.todoWake(th.ID) {
+		t.Fatal("a new item beside a spent one woke nothing")
+	}
+	if err := m.TodoSet(th.ID, a.ID, "done", "logged"); err != nil {
+		t.Fatal(err)
+	}
+	open, _ := m.Todos(th.ID, false)
+	for _, x := range open {
+		if x.State == "open" {
+			m.TodoSet(th.ID, x.ID, "dropped", "not needed")
+		}
+	}
+	if blk := m.todoBlock(th.ID); !strings.Contains(blk, "WAITING on the planner's import") || strings.Contains(blk, "Log every") {
+		t.Fatalf("block: %q", blk)
+	}
+	if m.todoWake(th.ID) {
+		t.Fatal("a waiting item alone woke a turn")
+	}
+	// A close with no note keeps what the item waited on.
+	if err := m.TodoSet(th.ID, w.ID, "done", ""); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := m.Todos(th.ID, true); len(all) < 2 || all[1].ID != w.ID || all[1].Note != "the planner's import" || all[1].AskedBy != "the planner" {
+		t.Fatalf("closed: %+v", all)
+	}
+	// A session that files an item each turn is not opened for ever.
+	for i := 0; i < todoWakeRun+2; i++ {
+		m.TodoAdd(th.ID, "One more.", "")
+		m.todoWake(th.ID)
+	}
+	var woke int
+	m.db.QueryRow(`SELECT COUNT(*) FROM thread_messages WHERE thread_id=? AND kind='todo'`, th.ID).Scan(&woke)
+	if woke != todoWakeRun {
+		t.Fatalf("%d turns in a row opened on the list, want %d", woke, todoWakeRun)
+	}
+	if err := m.TodoSet(th.ID, 99999, "done", ""); err != ErrNoTodo {
+		t.Fatalf("unknown item: %v", err)
+	}
+	other, _ := m.Create("", "life", "", "Another chat.", "", "", nil)
+	if err := m.TodoSet(other.ID, w.ID, "done", ""); err != ErrNoTodo {
+		t.Fatalf("another thread's item: %v", err)
+	}
+}
+
+// A turn that failed is not opened again on the list: the same failure would
+// only fail twice more.
+func TestAFailedTurnIsNotReopenedOnTheList(t *testing.T) {
+	m, _, _ := setup(t)
+	th, _ := m.Create("", "life", "", "Fix the export.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	in := inFile(t, m, th.ID)
+	appendOut(t, out, `{"type":"system","subtype":"init","session_id":"sess-1"}
+`)
+	m.Poll()
+	if a, err := m.TodoAdd(th.ID, "Log every export.", "Owner"); err != nil || a.AskedBy != "owner" {
+		t.Fatalf("%+v %v", a, err)
+	}
+	appendOut(t, out, `{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Invalid API key","total_cost_usd":0,"session_id":"sess-1"}
+`)
+	m.Poll()
+	if b, _ := os.ReadFile(in); strings.Contains(string(b), "The hub, not the owner") {
+		t.Fatalf("a failed turn was opened again on the list: %s", b)
 	}
 }
 

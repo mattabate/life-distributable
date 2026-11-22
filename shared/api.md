@@ -400,6 +400,15 @@ One Agent helper's own steps, so a surface can open a subagent and see its work.
 ### GET /api/v1/threads/{id}/tasks/{task}/output
 A background shell's log (`turn_tasks[].type` `local_bash`), so a surface can open a long job and read it. → `{lines: [string], cut: bool}`: the newest 64 KB of the CLI's `<tmp>/claude-<uid>/<cwd slug>/<claude_session_id>/tasks/<task>.output`, read-only and never stored, as lines with colour codes and blank lines dropped and a carriage-return redraw (a tqdm bar) kept as its last frame; `cut` = the log is longer than what came back. 404 when there is no such log.
 
+### GET /api/v1/threads/{id}/todos
+A session's to-do list (`threads/todos.go`): work that can run now, filed by the session when a new task reaches it mid-task, and shown to the owner under the session's name. Not Coming up (a prompt with a time). → `{todos: [{id, thread_id, created_at, text, asked_by, state, note, closed_at?}]}`, `state` `open` first then `waiting` (its `note` = the outside thing it waits on), oldest first in each; `?all=1` adds `done` and `dropped`. The same open and waiting rows ride each thread as `todos` on `GET /threads` and `GET /threads/{id}` (absent when the list is empty, which is the resting state: a turn that ends with an `open` item is followed at once by one the hub opens on it, at most twice per untouched item). 404 for an unknown thread.
+
+### POST /api/v1/threads/{id}/todos
+Body `{text, from?}` (`from` = who asked: the owner or a teammate's name) → 201 the new row, `state: "open"`. A session writes only its own list (403 otherwise; a task for another session is a relay).
+
+### PATCH /api/v1/threads/{id}/todos/{todo}
+Body `{state, note?}`: `done` or `dropped` (note = what happened), `waiting` (note required: what it waits on; 400 without), `open` (its wait ended). → `{todos: […]}`, the list after the change. 404 for a number not on that thread's list; 403 for another session's list.
+
 ### GET /api/v1/threads/{id}/steps
 → `[{message_id, run_id, tools, thoughts, steps, first_id, last_id, segments?: [{ref?, tools, thoughts, steps, first_id, last_id}]}]`, one row per message that opened or steered a run, in chat order. The COUNTS a run block prints, computed in SQL from `thread_events` — a turn regularly runs into the hundreds of tool calls (the longest so far is 1,131 events), so a surface that counts what it has fetched is one page size away from being wrong. The split at a steering message is the hub's: a steered message shares its `run_id` with the message that started the turn and takes the events stamped between it and the next starter; the first starter also takes anything earlier. `first_id`/`last_id` bound the block, so drawing its steps is one ranged read — `events?since=<first_id - 1>&before=<last_id + 1>` — however long the run is. Zero counts for a starter whose run has not produced a step yet.
 

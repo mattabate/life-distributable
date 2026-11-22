@@ -136,6 +136,19 @@ test('open cards only: the chat draws what is the owner\'s to act on, the full c
   assert.match(tabs, /class="on" onclick="chatTab\(false\)">Chat</);
   assert.match(tabs, /class="" onclick="chatTab\(true\)">Coming up 3</);
   assert.match(chatTabsHTML(true, true, 0), /class="on" onclick="chatTab\(true\)">Coming up</);
+  // To do is the third word, its count the session's list; a waiting row
+  // says what it waits on.
+  assert.match(tabs, /class="" onclick="chatTab\('todo'\)">To do</);
+  assert.match(chatTabsHTML(true, 'todo', 3, 2), /class="" onclick="chatTab\(false\)">Chat<[^]*class="" onclick="chatTab\(true\)">Coming up 3<[^]*class="on" onclick="chatTab\('todo'\)">To do 2</);
+  assert.match(todosHTML(undefined), /Nothing to do/);
+  const todo = todosHTML([{ id: 1, text: 'Build the tab', asked_by: 'the planner', state: 'open' }, { id: 2, text: 'Ship <it>', asked_by: '', state: 'waiting', note: 'the owner\'s <yes>' }]);
+  assert.match(todo, /Build the tab <span class="muted">· from the planner<\/span>/);
+  assert.match(todo, /<span class="pill">waiting<\/span>[^]*Ship &lt;it&gt; <span class="muted">· from this session · the owner&#39;s &lt;yes&gt;</);
+  // On the Sessions list the whole list is under the name, never folded.
+  const side = sideTodosHTML({ todos: [1, 2, 3, 4, 5].map(i => ({ id: i, text: 'Task ' + i, state: i === 5 ? 'waiting' : 'open', note: i === 5 ? 'a pick' : '' })) }, '#/sessions/planner');
+  assert.equal(side.match(/class="side-item todo/g).length, 5);
+  assert.match(side, /class="side-item todo wait" href="#\/sessions\/planner">[^]*Task 5 · a pick</);
+  assert.equal(sideTodosHTML({}, '#/sessions/planner'), '');
   // A deep link to a closed card opens the full chat; to an open one, not.
   // A rec's links go to the Recs page, so a rec id changes nothing.
   const askById = Object.fromEntries(asks.map(a => [a.id, a]));

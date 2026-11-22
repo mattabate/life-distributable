@@ -136,6 +136,41 @@ struct MiniCard: View {
     }
 }
 
+/// One to-do under a name on the Sessions list (the console's
+/// sideTodosHTML): a hollow grey dot and the task, a waiting one grey and
+/// dotted with what it waits on.
+struct TodoLine: View {
+    let d: Todo
+    var body: some View {
+        let mid = mid
+        return HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Circle().strokeBorder(muted, style: StrokeStyle(lineWidth: 1.2, dash: d.waiting ? [1.5, 1.5] : []))
+                .frame(width: 7, height: 7)
+                .frame(width: lead, alignment: .leading)
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + mid }
+            Text(md(d.text + (d.waiting ? " · " + ((d.note ?? "").isEmpty ? "waiting" : d.note ?? "") : "")))
+                .font(font).foregroundStyle(d.waiting ? muted : fg).multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, top)
+    }
+    #if targetEnvironment(macCatalyst)
+    private var font: Font { .zoomed(size: 13.5) }
+    private var mid: CGFloat { UIFont.systemFont(ofSize: 13.5 * Zoom.scale).capHeight / 2 }
+    private let lead: CGFloat = 13
+    private let top: CGFloat = 6
+    private var muted: Color { Web.muted }
+    private var fg: Color { Web.fg }
+    #else
+    private var muted: Color { .secondary }
+    private var fg: Color { .primary }
+    private var font: Font { .subheadline }
+    private var mid: CGFloat { UIFont.preferredFont(forTextStyle: .subheadline).capHeight / 2 }
+    private let lead: CGFloat = 15
+    private let top: CGFloat = 0
+    #endif
+}
+
 #if targetEnvironment(macCatalyst)
 /// A session's state line, the console's `.sess-foot`: its pills, the model
 /// as the grey `WebTag` (the one small pill the desktop has — `WebPill`, a
@@ -288,6 +323,11 @@ struct ThreadRow: View {
     static let subRows = 3
     @State private var subsOpen = false
     @State private var expanded = false
+    /// The session's to-do list, whole under the cards and never folded.
+    var todos: [Todo] { Self.todos(t) }
+    static func todos(_ t: Thread) -> [Todo] {
+        TodoShot.posed && t.id == ProcessInfo.processInfo.environment["LIFE_THREAD"] ? TodoShot.sample : t.todos ?? []
+    }
 
     init(t: Thread, board b: Board, on: Bool = false, subs: [Thread] = []) {
         self.t = t
@@ -392,6 +432,12 @@ struct ThreadRow: View {
                     Text("\(hidden) more").font(.zoomed(size: 13.5)).foregroundStyle(Web.muted).padding(.top, 6).padding(.leading, 13)
                 }.buttonStyle(.plain)
             }
+            if !todos.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(todos) { d in TodoLine(d: d) }
+                }
+                .padding(.top, items.isEmpty ? 0 : 4)
+            }
         }
         // Room between people, as the old list had (09:50: "the way that
         // really worked well was when there was space between these").
@@ -432,6 +478,7 @@ struct ThreadRow: View {
                     Text(subsOpen ? "Show less" : "and \(subs.count - Self.subRows) more").font(.caption).foregroundStyle(.secondary)
                 }.buttonStyle(.plain)
             }
+            ForEach(todos) { d in TodoLine(d: d) }
             if let todo, !todo.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "arrow.right").font(.caption2.weight(.semibold))

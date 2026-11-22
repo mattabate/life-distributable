@@ -160,6 +160,13 @@ func seedFixtures(t *testing.T, s *Server, db *store.DB) fixtureIDs {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// It keeps a to-do list: one item open, one waiting on something outside.
+	if _, err := s.thr.TodoAdd(quiet.ID, "Check the soil in the big pot", "owner"); err != nil {
+		t.Fatal(err)
+	}
+	if w, err := s.thr.TodoAdd(quiet.ID, "Order the new planter", ""); err != nil || s.thr.TodoSet(quiet.ID, w.ID, "waiting", "the shop's restock") != nil {
+		t.Fatal("fixture to-do", err)
+	}
 	// The quiet one plays the executive assistant (team mode) with one file
 	// in its workspace, so the roles list and the workspace listing carry a row.
 	if _, err := s.thr.Update(quiet.ID, map[string]string{"persona": "assistant"}); err != nil {

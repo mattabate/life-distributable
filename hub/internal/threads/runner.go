@@ -465,12 +465,22 @@ func (m *Manager) runRef(id, author, role, kind, text string, attachments []stri
 	return m.launch(t)
 }
 
+// steers: whether a message reaches a turn in flight. The owner's words do,
+// and a teammate's own relay; a meeting post and a pass-up are relays the hub
+// sends, and wait with the clock's (a fired step, a check-in) for the turn's
+// end.
+func steers(role, kind, author string) bool {
+	return role == "owner" || (kind == "relay" && strings.HasPrefix(author, "claude:thread:"))
+}
+
 type queuedMsg struct {
 	id   int64
 	role string
 	kind string
 	text string
-	atts []string
+	// author: who sent it ("claude:thread:<id>" for a teammate's relay).
+	author string
+	atts   []string
 	// replies: what this message answers ("ask:<id>" + "done", one per
 	// card), carried from the prompt that delivered it.
 	replies []Reply
@@ -536,7 +546,7 @@ func (m *Manager) stampSent(qs []queuedMsg, s sentStamp) {
 }
 
 func (m *Manager) queuedRows(threadID string) ([]queuedMsg, error) {
-	rows, err := m.db.Query(`SELECT id, role, kind, text, attachments, in_reply_to, outcome, replies, ts, via FROM thread_messages WHERE thread_id=? AND queued=1 ORDER BY id`, threadID)
+	rows, err := m.db.Query(`SELECT id, role, kind, text, attachments, in_reply_to, outcome, replies, ts, via, author FROM thread_messages WHERE thread_id=? AND queued=1 ORDER BY id`, threadID)
 	if err != nil {
 		return nil, err
 	}
@@ -545,7 +555,7 @@ func (m *Manager) queuedRows(threadID string) ([]queuedMsg, error) {
 	for rows.Next() {
 		var x queuedMsg
 		var att, ref, outcome, replies, sent string
-		rows.Scan(&x.id, &x.role, &x.kind, &x.text, &att, &ref, &outcome, &replies, &sent, &x.via)
+		rows.Scan(&x.id, &x.role, &x.kind, &x.text, &att, &ref, &outcome, &replies, &sent, &x.via, &x.author)
 		json.Unmarshal([]byte(att), &x.atts)
 		x.replies = decodeReplies(replies, ref, outcome)
 		x.ts = parseTS(sent)
@@ -619,6 +629,32 @@ func (m *Manager) pasteText(t Thread, q queuedMsg) string {
 		b.WriteString("\n\n[… the middle is in the file …]\n\n" + tl)
 	}
 	return b.String()
+}
+
+// todoFile: what a session does with a message that is a new task.
+const todoFile = "Sort it yourself, part by part (one message can hold both): what is about the task in hand, a steer, an answer or something you were waiting for, you use now; what is a NEW task you file in one step, `lifectl todo add \"<the task, in words that stand alone>\" --from <who asked>`, and go on with the task in hand. A spoken message often holds several tasks: each gets its own line, none is dropped. The owner sees the list under your name, and the hub opens it the moment this turn ends, so nothing filed is lost and nothing is scheduled for later."
+
+// midTurnHead frames what reaches a turn in flight: the owner's words, a
+// teammate's relay, or both. A message of the owner's is not always a steer
+// and a teammate's is not always a new task; the session decides.
+func midTurnHead(qs []queuedMsg) string {
+	own, theirs := 0, 0
+	for _, q := range qs {
+		if q.role == "owner" {
+			own++
+		} else {
+			theirs++
+		}
+	}
+	switch {
+	case theirs == 0 && own == 1:
+		return "[The owner sent this while you are working on the current turn. Take it into account now — where it steers the task in hand, adjust course rather than finishing the old plan first; if they say it is urgent, it comes first. " + todoFile + "]\n\n"
+	case theirs == 0:
+		return fmt.Sprintf("[The owner sent %d messages while you are working on the current turn, in this order. Take them into account now — where they steer the task in hand, adjust course. %s]\n\n", own, todoFile)
+	case own == 0:
+		return "[A teammate sent this while you are working on the current turn. " + todoFile + "]\n\n"
+	}
+	return fmt.Sprintf("[%d messages reached you while you are working on the current turn, in this order, the owner's and a teammate's; each says whose it is. The owner's words win where they conflict. %s]\n\n", own+theirs, todoFile)
 }
 
 // prompt renders queued messages as one user turn. midTurn=true when it is
@@ -706,11 +742,7 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 	}
 	prompt := strings.Join(pieces, "\n\n---\n\n")
 	if midTurn {
-		head := "[The owner sent this while you are working on the current turn. Take it into account now — it may change what you should do; adjust course rather than finishing the old plan first.]\n\n"
-		if len(pieces) > 1 {
-			head = fmt.Sprintf("[The owner sent %d messages while you are working on the current turn, in this order. Take them into account now — they may change what you should do.]\n\n", len(pieces))
-		}
-		prompt = head + prompt
+		prompt = midTurnHead(qs) + prompt
 	}
 	if fresh {
 		pre := m.systemPreamble(t)
@@ -728,6 +760,7 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 	peers := ""
 	if !midTurn {
 		peers = m.boardBlocks(t.ID, fresh)
+		peers += m.todoBlock(t.ID)
 	}
 	// Team mode: a session with a role reads its brief every turn, after the
 	// board and before the message (persona.go).
@@ -856,12 +889,12 @@ func (m *Manager) deliver(t Thread, r run) error {
 	}
 	midTurn := r.busy == 1
 	if midTurn {
-		// Only the owner's words steer (runRef): a relay held for the end of
-		// the turn stays held when the owner writes, not swept in beside
-		// their message.
+		// The owner's words and a teammate's relay reach a turn in flight
+		// (steers); what the clock sent (a fired step, a check-in) stays held
+		// when either arrives, not swept in beside it.
 		mine := qs[:0]
 		for _, q := range qs {
-			if q.role == "owner" {
+			if steers(q.role, q.kind, q.author) {
 				mine = append(mine, q)
 			}
 		}
@@ -2507,7 +2540,14 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 				now = time.Now() // the boundary is past the note, so it is not late
 			}
 		}
-	} else if qs, _ := m.queued(threadID); len(qs) > 0 {
+	} else if qs, _ := m.queued(threadID); len(qs) > 0 || (ok != 0 && !noAnswer && m.todoTurn(r)) {
+		// An open to-do with nothing else waiting is the next turn too
+		// (todoWake records its message; the rows are read again for it),
+		// but only after a turn that ended well: a failed one is not run
+		// again on the same failure.
+		if len(qs) == 0 {
+			qs, _ = m.queued(threadID)
+		}
 		// What deliver held for the end of this turn (a relay, a fired step)
 		// opens the next one, on the live process if it is still there; an
 		// exited one's queue is finishProcess's next launch

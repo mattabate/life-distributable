@@ -63,6 +63,9 @@ final class FixtureDecodeTests: XCTestCase {
         "prompts[].replies",
         // A finding's exec payload is the approval's, drawn from /actions.
         "runs_id.findings[].exec_payload", "runs_id.findings[].exec_type",
+        // A to-do is drawn under its own session, in the hub's order.
+        "threads[].todos[].created_at", "threads[].todos[].thread_id",
+        "threads_persona[].todos[].created_at", "threads_persona[].todos[].thread_id",
         // The spend page draws by model and by day; the console draws these two.
         "spend_summary.by_trigger", "spend_summary.jobs",
     ]

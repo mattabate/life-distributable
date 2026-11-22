@@ -153,9 +153,13 @@ struct ThreadsView: View {
             items += list.map(MacItem.row)
             placed.formUnion(list.map(\.id))
         }
-        let idle = store.team.filter { !placed.contains($0.id) && !nested($0) }
-        if !idle.isEmpty {
+        // An idle person with a to-do list is a whole row, the list under
+        // the name, ahead of the pairs.
+        let rest = store.team.filter { !placed.contains($0.id) && !nested($0) }
+        let idle = rest.filter { ThreadRow.todos($0).isEmpty }
+        if !rest.isEmpty {
             items.append(.heading(key: "idle", words: "IDLE", first: items.isEmpty))
+            items += rest.filter { !ThreadRow.todos($0).isEmpty }.map(MacItem.row)
             items += stride(from: 0, to: idle.count, by: 2).map { .pair(Array(idle[$0..<min($0 + 2, idle.count)])) }
         }
         return items
@@ -307,9 +311,12 @@ struct ThreadsView: View {
         ForEach(headings.filter { $0.key != "your_turn" }, id: \.key) { h in heading(h) }
         // IDLE: the team less whoever is above, two to a row, name over job
         // (the Mac's `macItems` pairs), so no person is drawn twice.
-        let idle = idlePeople
-        if !idle.isEmpty {
+        // One with a to-do list is a whole row first, the list under the name.
+        let rest = idlePeople
+        let idle = rest.filter { ThreadRow.todos($0).isEmpty }
+        if !rest.isEmpty {
             Section("Idle") {
+                ForEach(rest.filter { !ThreadRow.todos($0).isEmpty }) { t in row(t) }
                 ForEach(Array(stride(from: 0, to: idle.count, by: 2)), id: \.self) { i in
                     HStack(spacing: 0) {
                         idleCell(idle[i])
