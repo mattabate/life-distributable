@@ -110,6 +110,7 @@ func (s *Server) routes() []route {
 		{"POST /api/v1/asks/{id}/retry", s.retryAsk, false},
 		{"POST /api/v1/asks/{id}/surface", s.setAskSurface, false},
 		{"POST /api/v1/asks/{id}/kind", s.setAskKind, false},
+		{"POST /api/v1/asks/{id}/goal", s.setAskGoal, false},
 		{"POST /api/v1/asks/{id}/reword", s.rewordAsk, false},
 		{"GET /api/v1/calendar", s.calendarView, false},
 		{"POST /api/v1/calendar", s.calendarAdd, false},

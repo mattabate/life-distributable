@@ -41,9 +41,16 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 		// NewTopic: this read card is about something none of the session's
 		// open read cards cover (readGate).
 		NewTopic bool `json:"new_topic"`
+		// Goal: the goal this card serves when it is not the session's
+		// (threads.SetAskGoal); "" keeps the session's.
+		Goal string `json:"goal"`
 	}
 	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
 		jsonErr(w, 400, "bad json")
+		return
+	}
+	if msg := s.goalCheck(in.Goal); msg != "" {
+		jsonErr(w, 400, msg)
 		return
 	}
 	// A card is its session's: the owner's Done on it wakes that session with
@@ -86,6 +93,12 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonErr(w, 400, err.Error())
 		return
+	}
+	if in.Goal != "" {
+		if a, err = s.thr.SetAskGoal(a.ID, in.Goal); err != nil {
+			jsonErr(w, 500, err.Error())
+			return
+		}
 	}
 	for _, id := range in.Replaces {
 		s.thr.ResolveAsk(id, "dismissed", s.actor(r, "agent"), "folded into "+a.ID)
@@ -222,6 +235,43 @@ func (s *Server) rewordAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, a)
+}
+
+// setAskGoal refiles a card, open or closed, under the goal it serves
+// ("none" unfiles it).
+func (s *Server) setAskGoal(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Goal string }
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil {
+		jsonErr(w, 400, "bad json")
+		return
+	}
+	if in.Goal == "" {
+		jsonErr(w, 400, `goal required (a goal id, or "none" to unfile it)`)
+		return
+	}
+	if in.Goal == "none" {
+		in.Goal = ""
+	} else if msg := s.goalCheck(in.Goal); msg != "" {
+		jsonErr(w, 400, msg)
+		return
+	}
+	a, err := s.thr.SetAskGoal(r.PathValue("id"), in.Goal)
+	if err != nil {
+		jsonErr(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, a)
+}
+
+// goalCheck: "" when id is empty or names a goal, else the refusal.
+func (s *Server) goalCheck(id string) string {
+	if id == "" {
+		return ""
+	}
+	if _, err := s.goals.Get(id); err != nil {
+		return "no such goal: " + id + " (`lifectl goals` lists them)"
+	}
+	return ""
 }
 
 // retryAsk: the Restart button on an error card. Replays the turn the session
