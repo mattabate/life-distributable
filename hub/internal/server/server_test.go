@@ -100,8 +100,8 @@ func TestFreshSchema(t *testing.T) {
 		}
 		return strings.Join(names, " ")
 	}
-	wantTables := "action_events actions ask_events asks away budget_days cal_events cal_items devices goal_notes goals item_events item_step_events item_step_plans item_steps items meeting_members meeting_posts meetings observations persona_defs prompts rec_events recs runs schema_migrations settings sync_runs thread_events thread_messages thread_runs threads voice_queue"
-	wantIndices := "action_events_action actions_state asks_state asks_thread away_days cal_events_item cal_items_day goal_notes_goal item_events_item item_step_events_step item_step_plans_item item_steps_item items_ask items_day items_src items_thread meeting_posts_meeting obs_ingested_at obs_source_kind_ts obs_supersedes obs_uniq persona_defs_key prompts_due prompts_target rec_events_rec recs_review recs_status runs_job sync_runs_name thread_events_run thread_events_thread thread_messages_run thread_messages_thread thread_runs_thread"
+	wantTables := "action_events actions ask_events asks away budget_days cal_events cal_items devices goal_notes goals item_events item_step_events item_step_plans item_steps items meeting_members meeting_posts meetings observations persona_defs prompts rec_events recs runs schema_migrations settings sync_runs thread_events thread_messages thread_runs thread_todos threads voice_queue"
+	wantIndices := "action_events_action actions_state asks_state asks_thread away_days cal_events_item cal_items_day goal_notes_goal item_events_item item_step_events_step item_step_plans_item item_steps_item items_ask items_day items_src items_thread meeting_posts_meeting obs_ingested_at obs_source_kind_ts obs_supersedes obs_uniq persona_defs_key prompts_due prompts_target rec_events_rec recs_review recs_status runs_job sync_runs_name thread_events_run thread_events_thread thread_messages_run thread_messages_thread thread_runs_thread thread_todos_thread"
 	if got := inventory("table"); got != wantTables {
 		t.Errorf("tables:\n got %s\nwant %s", got, wantTables)
 	}
@@ -1414,6 +1414,82 @@ func TestGlobalVersionIgnoresSteps(t *testing.T) {
 	db.Exec(`UPDATE threads SET status='needs_you' WHERE id=?`, th.ID)
 	if g, _ := s.thr.Version(""); g == g0 {
 		t.Fatal("global version missed a status flip")
+	}
+}
+
+// A session's to-do list over the API: filed, shown on the thread and on the
+// list of threads, closed; a session writes only its own; and the list moves
+// both versions, so a view follows it.
+func TestThreadTodos(t *testing.T) {
+	s := newTest(t)
+	th, err := s.thr.Create("", "life", "", "Fix the export.", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	do := func(method, url, body, from string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, url, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer secret")
+		if from != "" {
+			r.Header.Set("X-Life-Thread", from)
+		}
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	base := "/api/v1/threads/" + th.ID + "/todos"
+	g0, _ := s.thr.Version("")
+	t0, _ := s.thr.Version(th.ID)
+	if w := do("POST", base, `{"text":"Log every export.","from":"the owner"}`, "someone-else-1"); w.Code != 403 {
+		t.Fatalf("another session wrote the list: %d %s", w.Code, w.Body)
+	}
+	if w := do("POST", base, `{"text":"  "}`, th.ID); w.Code != 400 {
+		t.Fatalf("a to-do with no words: %d %s", w.Code, w.Body)
+	}
+	if w := do("POST", "/api/v1/threads/no-such-thread/todos", `{"text":"x"}`, ""); w.Code != 404 {
+		t.Fatalf("unknown thread: %d %s", w.Code, w.Body)
+	}
+	w := do("POST", base, `{"text":"Log every export.","from":"the owner"}`, th.ID)
+	if w.Code != 201 {
+		t.Fatalf("add: %d %s", w.Code, w.Body)
+	}
+	var td threads.Todo
+	json.Unmarshal(w.Body.Bytes(), &td)
+	if td.ID == 0 || td.State != "open" || td.AskedBy != "owner" {
+		t.Fatalf("%+v", td)
+	}
+	if g, _ := s.thr.Version(""); g == g0 {
+		t.Fatal("global version missed a new to-do")
+	}
+	if v, _ := s.thr.Version(th.ID); v == t0 {
+		t.Fatal("thread version missed a new to-do")
+	}
+	if w := do("GET", "/api/v1/threads/"+th.ID, "", ""); !strings.Contains(w.Body.String(), `"todos":[{`) {
+		t.Fatalf("the thread does not carry its list: %s", w.Body)
+	}
+	if w := do("GET", "/api/v1/threads", "", ""); !strings.Contains(w.Body.String(), `"todos":[{`) {
+		t.Fatalf("the list of threads does not carry it: %s", w.Body)
+	}
+	one := base + "/" + strconv.FormatInt(td.ID, 10)
+	if w := do("PATCH", one, `{"state":"waiting"}`, th.ID); w.Code != 400 {
+		t.Fatalf("a wait with no reason: %d %s", w.Code, w.Body)
+	}
+	if w := do("PATCH", one, `{"state":"done","note":"x"}`, "someone-else-1"); w.Code != 403 {
+		t.Fatalf("another session closed it: %d %s", w.Code, w.Body)
+	}
+	if w := do("PATCH", one, `{"state":"done","note":"logged"}`, th.ID); w.Code != 200 {
+		t.Fatalf("done: %d %s", w.Code, w.Body)
+	}
+	if w := do("GET", base, "", ""); w.Code != 200 || strings.Contains(w.Body.String(), "Log every") {
+		t.Fatalf("a closed item still on the list: %d %s", w.Code, w.Body)
+	}
+	if w := do("GET", "/api/v1/threads/"+th.ID, "", ""); strings.Contains(w.Body.String(), `"todos"`) {
+		t.Fatalf("an empty list still rides the thread: %s", w.Body)
+	}
+	if w := do("GET", base+"?all=1", "", ""); !strings.Contains(w.Body.String(), `"note":"logged"`) {
+		t.Fatalf("all: %s", w.Body)
+	}
+	if w := do("PATCH", base+"/999", `{"state":"done"}`, th.ID); w.Code != 404 {
+		t.Fatalf("no such item: %d %s", w.Code, w.Body)
 	}
 }
 

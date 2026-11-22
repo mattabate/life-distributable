@@ -111,9 +111,15 @@ struct ThreadDetail: View {
     /// The whole conversation is drawn (the toggle at the top of the chat).
     /// Off every time a chat opens: only the cards still open are drawn. The
     /// console's chatState.full (threads.js).
-    @State private var full = false
+    @State private var full = TodoShot.posed
     /// The desktop's second word by the name: Coming up in place of the chat.
     @State private var upcoming = false
+    /// The third word, To do: the session's own list in place of the chat.
+    /// On the phone, the button by Show full chat, there only while the list
+    /// holds something.
+    @State private var todoOpen = TodoShot.posed
+    /// The session's list; LIFE_SHOT_STEPCARD=todo poses one for a shot.
+    var todos: [Todo] { TodoShot.posed ? TodoShot.sample : thread.todos ?? [] }
     /// THE TOOL CHAIN of the turn in flight, opened by a tap on the working
     /// line's count (the console's chatState.chain): the run it belongs to,
     /// its events as read so far (only ever added to), and the window's ends.
@@ -763,12 +769,23 @@ struct ThreadDetail: View {
                         // conversation (the console's chatFullHTML).
                         // The desktop has none: its head's name is the switch.
                         if !Device.isMac {
-                        Button { withAnimation { full.toggle() } } label: {
-                            Label(full ? "Open cards only" : "Show full chat", systemImage: full ? "rectangle.compress.vertical" : "text.alignleft")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }.buttonStyle(.plain).padding(.horizontal)
+                        HStack(spacing: 16) {
+                            Button { withAnimation { full.toggle(); todoOpen = false } } label: {
+                                Label(full ? "Open cards only" : "Show full chat", systemImage: full ? "rectangle.compress.vertical" : "text.alignleft")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.buttonStyle(.plain)
+                            if !todos.isEmpty || todoOpen {
+                                Button { withAnimation { todoOpen.toggle() } } label: {
+                                    Label(todos.isEmpty ? "To do" : "To do \(todos.count)", systemImage: "checklist")
+                                        .font(.caption.weight(todoOpen ? .semibold : .regular))
+                                        .foregroundStyle(todoOpen ? Color.primary : Color.secondary)
+                                }.buttonStyle(.plain)
+                            }
+                        }.padding(.horizontal)
                         }
-                        if full && Device.isMac && upcoming {
+                        if todoOpen && (full || !Device.isMac) {
+                            TodoList(todos: todos)
+                        } else if full && Device.isMac && upcoming {
                             ComingUpStrip(prompts: queuedPrompts, cancel: cancelPrompt, listed: true)
                         } else if full {
                             // On the desktop, one grey line down the whole
@@ -1597,9 +1614,9 @@ extension ThreadDetail {
                 .accessibilityLabel("Back")
             }
             // The name opens the whole conversation and closes it again.
-            // Open, two smaller grey words follow it: Chat first, then
-            // Coming up.
-            Button { withAnimation { full.toggle(); upcoming = false } } label: {
+            // Open, three smaller grey words follow it: Chat first, then
+            // Coming up, then To do.
+            Button { withAnimation { full.toggle(); upcoming = false; todoOpen = false } } label: {
                 Text(md(thread.title)).font(.system(size: 15, weight: .semibold)).tracking(-0.18)
                     .lineLimit(1).truncationMode(.tail)
                     .contentShape(Rectangle())
@@ -1610,8 +1627,9 @@ extension ThreadDetail {
             .layoutPriority(1)
             if full {
                 HStack(spacing: 14) {
-                    headTab("Chat", on: !upcoming) { upcoming = false }
-                    headTab(queuedPrompts.isEmpty ? "Coming up" : "Coming up \(queuedPrompts.count)", on: upcoming) { upcoming = true }
+                    headTab("Chat", on: !upcoming && !todoOpen) { upcoming = false; todoOpen = false }
+                    headTab(queuedPrompts.isEmpty ? "Coming up" : "Coming up \(queuedPrompts.count)", on: upcoming && !todoOpen) { upcoming = true; todoOpen = false }
+                    headTab(todos.isEmpty ? "To do" : "To do \(todos.count)", on: todoOpen) { todoOpen = true; upcoming = false }
                 }
                 .padding(.leading, 10)
                 .fixedSize()
@@ -2098,6 +2116,64 @@ struct ComingUpStrip: View {
     private func from(_ p: Prompt) -> String {
         p.author == "owner" ? "you" : p.author == "hub" ? "the hub" : "this session"
     }
+}
+
+/// The To do page: the session's list, one row each inside one grey line as
+/// Coming up's page draws, open first, then waiting with what it waits on
+/// (the console's todosHTML).
+struct TodoList: View {
+    let todos: [Todo]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if todos.isEmpty {
+                Text("Nothing to do").font(small).foregroundStyle(.secondary).padding(.vertical, 5)
+            }
+            ForEach(todos) { d in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if d.waiting {
+                        Text("waiting").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 5))
+                            .fixedSize()
+                    }
+                    Text("\(Text(md(d.text)))\(Text(" · from " + from(d) + (d.waiting && !(d.note ?? "").isEmpty ? " · " + (d.note ?? "") : "")).foregroundStyle(.secondary))")
+                        .font(small).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 5)
+            }
+        }
+        .padding(.leading, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .leading) { Rectangle().fill(historyLineColor).frame(width: 2) }
+        .padding(.horizontal, 16)
+    }
+
+    private var small: Font {
+        #if targetEnvironment(macCatalyst)
+        .system(size: 12.5)
+        #else
+        .caption
+        #endif
+    }
+
+    private func from(_ d: Todo) -> String {
+        let by = d.asked_by ?? ""
+        return by == "owner" ? "you" : by.isEmpty ? "this session" : by
+    }
+}
+
+/// LIFE_SHOT_STEPCARD=todo (mac-screens.sh todo:<thread id>, screens.sh): the
+/// chat opened on To do with a posed list, open first, then waiting.
+enum TodoShot {
+    static let posed = ProcessInfo.processInfo.environment["LIFE_SHOT_STEPCARD"] == "todo"
+    static let sample = [
+        Todo(id: "1", text: "Build the To do page on web, desktop and phone", asked_by: "the planner"),
+        Todo(id: "2", text: "Move the month picker left of the totals", asked_by: "owner"),
+        Todo(id: "3", text: "Screenshot the phone's To do button on a narrow chat"),
+        Todo(id: "4", text: "Draw the list under each name on Sessions", asked_by: "the planner", state: "waiting", note: "a pick from the mock"),
+    ]
 }
 
 /// A card to scroll the chat to, and where in the view it lands.

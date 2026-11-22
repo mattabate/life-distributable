@@ -580,7 +580,34 @@ struct Thread: Codable, Identifiable, Hashable {
     /// unknown = the owner), and the goal ids it owns.
     var reports_to: String?
     var owns_goals: [String]?
+    /// The session's own to-do list, open first, then waiting (absent when
+    /// empty, or from an older hub): the head's third word, To do.
+    var todos: [Todo]?
     var modelShort: String? { model_label.flatMap { $0.isEmpty ? nil : $0 } ?? model.flatMap { $0.isEmpty ? nil : shortModel($0) } }
+}
+
+/// One item on a session's to-do list: no task is kept out of the owner's
+/// sight. `state` is open | waiting; a waiting one says what it waits on in
+/// `note`. The id is the hub's, a number or a string.
+struct Todo: Codable, Identifiable, Hashable {
+    var id: String
+    var text: String
+    var asked_by: String?
+    var state: String
+    var note: String?
+    var waiting: Bool { state == "waiting" }
+
+    init(id: String, text: String, asked_by: String? = nil, state: String = "open", note: String? = nil) {
+        self.id = id; self.text = text; self.asked_by = asked_by; self.state = state; self.note = note
+    }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        if let n = try? c.decode(Int.self, forKey: .id) { id = String(n) } else { id = try c.decode(String.self, forKey: .id) }
+        text = (try? c.decode(String.self, forKey: .text)) ?? ""
+        asked_by = try? c.decode(String.self, forKey: .asked_by)
+        state = (try? c.decode(String.self, forKey: .state)) ?? "open"
+        note = try? c.decode(String.self, forKey: .note)
+    }
 }
 
 /// One file in a role's workspace (team mode, `GET /api/v1/workspace`).

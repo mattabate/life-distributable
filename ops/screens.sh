@@ -48,6 +48,8 @@ for tab in "${TABS[@]}"; do
   # "stepcard:<id>" is that chat with a morning-routine card posed in it and
   # two of its steps staged on the bar (nothing is sent; ops/mac-screens.sh).
   case "$tab" in stepcard:*) thread="${tab#stepcard:}"; stepcard=1; tab=sessions; name="stepcard-$thread";; esac
+  # "todo:<id>" is that chat opened on To do with a posed list.
+  case "$tab" in todo:*) thread="${tab#todo:}"; stepcard=todo; tab=sessions; name="todo-$thread";; esac
   # "compose" opens the new-session sheet with the draft box focused — the
   # composer's typing state, which no tab screenshot ever shows.
   case "$tab" in compose) tab=sessions; compose=1;; esac

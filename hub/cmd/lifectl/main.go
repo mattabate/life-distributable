@@ -145,6 +145,62 @@ func main() {
 		c.call("POST", "/api/v1/actions", map[string]any{"kind": "other", "detail": text(*why), "exec_type": "relay",
 			"exec_payload": json.RawMessage(payload), "gated": true, "thread_id": *thread, "say": *say,
 			"run_id": os.Getenv("LIFE_RUN_ID"), "source": "claude:thread:" + *thread})
+	case "todo":
+		// A session's own to-do list: work that can run now, shown to the
+		// owner under the session's name (threads/todos.go). Not Coming up: a
+		// timed wake is `lifectl prompt --in`.
+		//   lifectl todo [--thread id] [--all]           the list (open, then waiting)
+		//   lifectl todo add "task|@file" [--from who]   file a new task
+		//   lifectl todo done|drop <n> ["what happened"]
+		//   lifectl todo wait <n> "<the outside thing it waits on>"
+		//   lifectl todo open <n>                        its wait ended
+		verb := ""
+		if len(os.Args) >= 3 && !strings.HasPrefix(os.Args[2], "-") {
+			verb = os.Args[2]
+		}
+		fs := flag.NewFlagSet("todo", flag.ExitOnError)
+		thread := fs.String("thread", os.Getenv("LIFE_THREAD_ID"), "whose list (default $LIFE_THREAD_ID)")
+		from := fs.String("from", "", "who asked for it: the owner, or a teammate's name")
+		all := fs.Bool("all", false, "closed items too")
+		rest := os.Args[2:]
+		var pos []string
+		if verb != "" {
+			rest = os.Args[3:]
+			for len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+				pos, rest = append(pos, rest[0]), rest[1:]
+			}
+		}
+		fs.Parse(rest)
+		if *thread == "" {
+			die("todo: from a shell, name the session: --thread <id>")
+		}
+		base := "/api/v1/threads/" + *thread + "/todos"
+		arg := func(i int) string {
+			if i < len(pos) {
+				return text(pos[i])
+			}
+			return ""
+		}
+		switch verb {
+		case "":
+			if *all {
+				base += "?all=1"
+			}
+			c.call("GET", base, nil)
+		case "add":
+			if arg(0) == "" {
+				die("usage: lifectl todo add \"task\" [--from who]")
+			}
+			c.call("POST", base, map[string]string{"text": arg(0), "from": *from})
+		case "done", "drop", "wait", "open":
+			if arg(0) == "" {
+				die("usage: lifectl todo %s <n> [\"note\"]", verb)
+			}
+			state := map[string]string{"done": "done", "drop": "dropped", "wait": "waiting", "open": "open"}[verb]
+			c.call("PATCH", base+"/"+pos[0], map[string]string{"state": state, "note": arg(1)})
+		default:
+			die("usage: lifectl todo [add \"task\" [--from who] | done|drop|wait|open <n> [\"note\"]]")
+		}
 	case "meeting":
 		// Several sessions talking in ONE file, woken by each other's posts,
 		// never by the clock (threads/meeting.go). The owner opens a room; a
@@ -1657,6 +1713,7 @@ gate      propose --title t --detail d [--kind money|delete|contact|share|commit
             [--exec none|shell|claude --payload json] [--project p] [--thread id] [--say "…"]
           actions [state] · approve|deny|dismiss|reopen <id> [note…]
           relay <session-id> "text|@file" [--why "…"] [--say "…"] [--thread id]
+          todo [--all] · todo add "task" [--from who] · todo done|drop <n> ["what happened"] · todo wait <n> "<what it waits on>" · todo open <n>
           meeting list [--all] · meeting open "topic" --members a,b,c [--parent id] [--text "…"] · meeting read <id>
             · meeting say <id> "text|@file|-" · meeting join|leave <id> · meeting close <id> ["outcome"]
 sessions  threads [--q words] [--archived] · thread new "prompt" [--goal g] [--schedule w] [--title t] [--project p]

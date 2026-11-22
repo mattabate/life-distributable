@@ -177,7 +177,7 @@ async function drawList(activeID, reuse) {
       active: t.id === activeID,
       first: b.first[t.id] || '',
       audio: audioSlotHTML(b, t),
-      items: drawn.map(sideItemHTML).join('') + more,
+      items: drawn.map(sideItemHTML).join('') + more + sideTodosHTML(t, href),
     });
   };
   const group = (label, list) => !list.length ? '' :
@@ -213,10 +213,13 @@ async function drawList(activeID, reuse) {
     rows.forEach(t => placed.add(t.id));
     return group(h.label, rows);
   }).join('');
-  const idle = people.filter(t => !placed.has(t.id));
+  // An idle person with a to-do list is a whole row, the list under the
+  // name, ahead of the small cells: no task is kept out of sight.
+  const rest = people.filter(t => !placed.has(t.id));
+  const listed = rest.filter(t => (t.todos || []).length), idle = rest.filter(t => !(t.todos || []).length);
   paint(list, `
     ${groups}
-    ${idle.length ? `<h3 class="side-h">Idle</h3><div class="idle-grid">${idle.map(t => idleCellHTML(b, t, t.id === activeID)).join('')}</div>` : ''}
+    ${rest.length ? `<h3 class="side-h">Idle</h3>${listed.map(t => card(t)).join('')}${idle.length ? `<div class="idle-grid">${idle.map(t => idleCellHTML(b, t, t.id === activeID)).join('')}</div>` : ''}` : ''}
     ${(b.threads_total || threads.length || people.length) ? '' : emptyHTML('No sessions yet.')}`);
 }
 
@@ -254,6 +257,18 @@ function sideItemHTML(c) {
   const mark = c.speaking ? SPEAKER_SVG : '<span class="side-dot"></span>';
   return `<a class="side-item ${tone}${c.job ? ' job' : ''}" href="${esc(c.href)}"><span class="side-mark">${mark}</span><span class="side-tt">${mdInline(c.title, false)}</span></a>`
     + (c.job && c.job.total > 0 ? `<div class="side-bar">${taskBarHTML(c.job)}</div>` : '');
+}
+
+// A session's to-do list, whole, under its cards: a hollow grey dot and the
+// task, a waiting one grey with what it waits on. Never folded under
+// "N more".
+function sideTodosHTML(t, href) {
+  const ds = t.todos || [];
+  if (!ds.length) return '';
+  return `<div class="side-todos">${ds.map(d => {
+    const wait = d.state === 'waiting';
+    return `<a class="side-item todo${wait ? ' wait' : ''}" href="${esc(href)}"><span class="side-mark"><span class="side-dot"></span></span><span class="side-tt">${mdInline(d.text, false)}${wait ? ` · ${d.note ? mdInline(d.note, false) : 'waiting'}` : ''}</span></a>`;
+  }).join('')}</div>`;
 }
 
 // The one audio pill by a name, one state at a time: green speaking, else
@@ -1008,14 +1023,15 @@ async function refreshThread(id, first) {
   // The rows in groups, one per message (its row and the cards under it) and
   // one per card at the end, each keyed so a redraw can keep what did not
   // change (chatPatch).
-  const upcoming = full && !!chatState.upcoming;
+  const upcoming = full && (chatState.upcoming || false);
   const groups = [];
   const tails = (as, cs, rs) => {
     for (const a of as) groups.push(['ask:' + a.id, chatAskHTML(a)]);
     for (const a of cs) groups.push(['action:' + a.id, chatActionHTML(a)]);
     for (const r of rs) groups.push(['rec:' + r.id, recNoticeHTML(r)]);
   };
-  if (upcoming) groups.push(['upcoming', queuedHTML(queued)]);
+  if (upcoming === 'todo') groups.push(['todo', todosHTML(t.todos)]);
+  else if (upcoming) groups.push(['upcoming', queuedHTML(queued)]);
   else tails(headAsks, headActs, []);
   if (upcoming) {
     // Coming up in place of the chat.
@@ -1048,7 +1064,7 @@ async function refreshThread(id, first) {
   // already drawn, only the groups that changed are redrawn, in place: the
   // whole chat used to be rebuilt on every new message or card change, the
   // composer with it, which made a click on a long session slow (#160).
-  const tabs = chatTabsHTML(full, upcoming, (queued || []).filter(p => p.state === 'queued').length);
+  const tabs = chatTabsHTML(full, upcoming, (queued || []).filter(p => p.state === 'queued').length, (t.todos || []).length);
   const head = `<button class="sm narrow-only" onclick="showList()">←</button>
       <div class="grow" style="min-width:0">
         <div class="trunc"><button type="button" class="chat-name" title="${full ? 'Open cards only' : 'Full chat'}" onclick="toggleFullChat()"><strong>${mdInline(t.title || t.id)}</strong></button>${tabs}</div>
@@ -1138,11 +1154,24 @@ function chatPatch(box, groups) {
 // The session's name in the head is the switch, as on the desktop: the open
 // cards, or the whole conversation, drawn on demand, never by default. Open,
 // two smaller grey words follow the name, Chat first, then Coming up, the
-// page of this session's wakes; the box stays under it.
-const chatTabsHTML = (full, upcoming, n) => full ? `<span class="chat-tabs">
+// page of this session's wakes; the box stays under it. To do is the third
+// word: the session's own list, the thread's `todos`. `upcoming` is false for
+// the chat, true for Coming up, 'todo' for the list.
+const chatTabsHTML = (full, upcoming, n, todo) => full ? `<span class="chat-tabs">
     <button type="button" class="${upcoming ? '' : 'on'}" onclick="chatTab(false)">Chat</button>
-    <button type="button" class="${upcoming ? 'on' : ''}" onclick="chatTab(true)">Coming up${n ? ' ' + n : ''}</button>
+    <button type="button" class="${upcoming === true ? 'on' : ''}" onclick="chatTab(true)">Coming up${n ? ' ' + n : ''}</button>
+    <button type="button" class="${upcoming === 'todo' ? 'on' : ''}" onclick="chatTab('todo')">To do${todo ? ' ' + todo : ''}</button>
   </span>` : '';
+// The list's page: one tight row each inside the grey line, as Coming up
+// draws. The hub hands them open first, then waiting; a waiting row says what
+// it waits on (its `note`).
+function todosHTML(todos) {
+  if (!(todos || []).length) return '<div class="qpage small muted">Nothing to do</div>';
+  return `<div class="qpage">${todos.map(d => `<div class="row qrow">
+      ${d.state === 'waiting' ? '<span class="pill">waiting</span>' : ''}
+      <span class="grow small">${mdInline(d.text || '')} <span class="muted">· from ${d.asked_by === OWNER ? 'you' : esc(d.asked_by || 'this session')}${d.state === 'waiting' && d.note ? ' · ' + esc(d.note) : ''}</span></span>
+    </div>`).join('')}</div>`;
+}
 function toggleFullChat() {
   chatState.full = !chatState.full;
   chatState.upcoming = false;
@@ -1739,7 +1768,7 @@ function queuedSoonHTML(prompts, now) {
 function paintSoon(prompts) {
   const el = document.getElementById('chat-soon');
   if (!el) return;
-  const h = chatState.full && chatState.upcoming ? '' : queuedSoonHTML(prompts);
+  const h = chatState.full && chatState.upcoming === true ? '' : queuedSoonHTML(prompts);
   if (el.innerHTML !== h) el.innerHTML = h;
 }
 function qrowHTML(p) {

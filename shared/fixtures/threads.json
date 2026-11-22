@@ -1,15 +1,15 @@
 [
   {
     "id": "split-my-brokerage-cash-sensibly-00000001",
-    "created_at": "2026-11-08T18:25:03.34617Z",
-    "updated_at": "2026-11-08T18:25:03.358558Z",
+    "created_at": "2026-11-22T11:36:15.051734Z",
+    "updated_at": "2026-11-22T11:36:15.06223Z",
     "title": "Split my brokerage cash sensibly",
     "project": "life",
     "model_class": "",
     "status": "running",
     "schedule": "",
     "schedule_prompt": "",
-    "last_run_at": "2026-11-08T18:25:03.358558Z",
+    "last_run_at": "2026-11-22T11:36:15.06223Z",
     "unread": 2,
     "cost_usd": 0,
     "tokens": 0,
@@ -18,10 +18,10 @@
     "tokens_cache_read": 0,
     "tokens_cache_write": 0,
     "last_message": "Booked for Tuesday",
-    "last_message_at": "2026-11-08T18:25:03.358075Z",
+    "last_message_at": "2026-11-22T11:36:15.061859Z",
     "last_message_kind": "decision",
     "activity": "listed",
-    "turn_at": "2026-11-08T18:25:03.358558Z",
+    "turn_at": "2026-11-22T11:36:15.06223Z",
     "needs_you": 1,
     "pill": {
       "word": "running",
@@ -30,8 +30,8 @@
   },
   {
     "id": "water-the-plants-00000002",
-    "created_at": "2026-11-08T18:25:03.348302Z",
-    "updated_at": "2026-11-08T18:25:03.352544Z",
+    "created_at": "2026-11-22T11:36:15.053525Z",
+    "updated_at": "2026-11-22T11:36:15.057351Z",
     "title": "Water the plants",
     "project": "life",
     "goal_id": "get-smarter",
@@ -40,7 +40,7 @@
     "status": "running",
     "schedule": "",
     "schedule_prompt": "",
-    "last_run_at": "2026-11-08T18:25:03.349488Z",
+    "last_run_at": "2026-11-22T11:36:15.05436Z",
     "unread": 1,
     "cost_usd": 0,
     "tokens": 0,
@@ -49,12 +49,32 @@
     "tokens_cache_read": 0,
     "tokens_cache_write": 0,
     "last_message": "p",
-    "last_message_at": "2026-11-08T18:25:03.348576Z",
+    "last_message_at": "2026-11-22T11:36:15.053799Z",
     "last_message_kind": "message",
-    "turn_at": "2026-11-08T18:25:03.349488Z",
+    "turn_at": "2026-11-22T11:36:15.05436Z",
     "needs_you": 1,
     "speaking": true,
     "waiting_to_speak": true,
+    "todos": [
+      {
+        "id": 1,
+        "thread_id": "water-the-plants-00000002",
+        "created_at": "2026-11-22T11:36:15.054978Z",
+        "text": "Check the soil in the big pot",
+        "asked_by": "owner",
+        "state": "open",
+        "note": ""
+      },
+      {
+        "id": 2,
+        "thread_id": "water-the-plants-00000002",
+        "created_at": "2026-11-22T11:36:15.055262Z",
+        "text": "Order the new planter",
+        "asked_by": "",
+        "state": "waiting",
+        "note": "the shop's restock"
+      }
+    ],
     "pill": {
       "word": "running",
       "tone": "running"

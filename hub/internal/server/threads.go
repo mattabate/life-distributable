@@ -3,6 +3,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -237,6 +238,69 @@ func (s *Server) threadTaskOutput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"lines": lines, "cut": cut})
+}
+
+// threadTodos: a session's to-do list (threads/todos.go), open then waiting;
+// ?all=1 adds what was closed.
+func (s *Server) threadTodos(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.thr.Get(r.PathValue("id")); err != nil {
+		jsonErr(w, 404, err.Error())
+		return
+	}
+	ts, err := s.thr.Todos(r.PathValue("id"), r.URL.Query().Get("all") != "")
+	if err != nil {
+		jsonErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"todos": ts})
+}
+
+// todoOwner: a session files and closes only its own list; the owner any.
+func (s *Server) todoOwner(w http.ResponseWriter, r *http.Request) bool {
+	if from := s.caller(r); from != "" && from != r.PathValue("id") {
+		jsonErr(w, 403, "a session keeps only its own to-do list; a task for another session: `lifectl relay <session-id> \"...\"`")
+		return false
+	}
+	return true
+}
+
+func (s *Server) addThreadTodo(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Text, From string }
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil || strings.TrimSpace(in.Text) == "" {
+		jsonErr(w, 400, "need {text}")
+		return
+	}
+	if !s.todoOwner(w, r) {
+		return
+	}
+	t, err := s.thr.TodoAdd(r.PathValue("id"), in.Text, in.From)
+	if err != nil {
+		jsonErr(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 201, t)
+}
+
+func (s *Server) setThreadTodo(w http.ResponseWriter, r *http.Request) {
+	var in struct{ State, Note string }
+	id, perr := strconv.ParseInt(r.PathValue("todo"), 10, 64)
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil || perr != nil {
+		jsonErr(w, 400, "need {state: open|waiting|done|dropped, note} on a numbered to-do")
+		return
+	}
+	if !s.todoOwner(w, r) {
+		return
+	}
+	if err := s.thr.TodoSet(r.PathValue("id"), id, in.State, in.Note); err != nil {
+		code := 400
+		if errors.Is(err, threads.ErrNoTodo) {
+			code = 404
+		}
+		jsonErr(w, code, err.Error())
+		return
+	}
+	ts, _ := s.thr.Todos(r.PathValue("id"), false)
+	writeJSON(w, 200, map[string]any{"todos": ts})
 }
 
 // threadSteps: how many steps sit under each message of the chat, counted in

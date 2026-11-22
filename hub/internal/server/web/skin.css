@@ -94,6 +94,12 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .side-bar { padding-left: 13px; }
 .side-more { display: block; padding: 6px 0 0 13px; font-size: 13.5px; color: var(--muted); text-decoration: none; }
 .side-more:hover { color: var(--fg); }
+/* the to-do list, whole: a hollow grey dot, a waiting one grey and dotted */
+.side-item + .side-todos, .side-more + .side-todos, .side-bar + .side-todos { margin-top: 4px; }
+.side-item.todo { --c: var(--muted); }
+.side-item.todo .side-dot { box-sizing: border-box; width: 7px; height: 7px; background: none; border: 1.2px solid var(--c); }
+.side-item.todo.wait .side-tt { color: var(--muted); }
+.side-item.todo.wait .side-dot { border-style: dotted; }
 /* Idle: two to a line, the name over the role, a hairline between */
 .idle-grid { display: grid; grid-template-columns: 1fr 1fr; background: var(--panel); }
 .idle-cell { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 9px 18px; color: var(--fg); text-decoration: none;
