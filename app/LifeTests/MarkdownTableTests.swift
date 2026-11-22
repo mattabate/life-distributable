@@ -12,6 +12,53 @@ final class MarkdownTableTests: XCTestCase {
         XCTAssertEqual(mdTableRow("| **Today, 09-17** | 1 AMZN + 1 NVDA |"), ["**Today, 09-17**", "1 AMZN + 1 NVDA"])
     }
 
+    // The grey-detail fold is the console's (ui.js actedDetail / askFolds;
+    // ui.test.js has the same cases).
+    @MainActor func testActedKeepsWhatIsActedOnLikeTheConsole() {
+        func kept(_ s: String) -> String { Card.acted(s, fold: true).kept }
+        let d = "Why this matters, at length.\n\n1. Open the page\n2. Click Save\n\nDraft:\n\n```\nHi Sam, yes.\n```\n\n- a bullet of background\n\nSee [the doc](https://x.test/doc)."
+        let a = Card.acted(d, fold: true)
+        XCTAssertEqual(a.kept, "1. Open the page\n2. Click Save\n\nDraft:\n\n```\nHi Sam, yes.\n```\n\nSee [the doc](https://x.test/doc).")
+        XCTAssertEqual(a.rest, "Why this matters, at length.\n\n- a bullet of background")
+        XCTAssertEqual(Card.acted(d, fold: false).kept, d)
+        XCTAssertEqual(Card.acted(d, fold: false).rest, "")
+        XCTAssertEqual(kept("Background.\n\n**Draft:**\n\n```\nHi\n```"), "**Draft:**\n\n```\nHi\n```")
+        XCTAssertEqual(kept("Background.\n\n## The draft\n\n```\nHi\n```"), "## The draft\n\n```\nHi\n```")
+        XCTAssertEqual(kept("1. Open the page\n\n   It is the blue one.\n\n2. Save\n\nWhy."), "1. Open the page\n\n   It is the blue one.\n\n2. Save")
+        XCTAssertEqual(kept("1. Open it\n\nIt is the blue one.\n\n2. Save\n\nWhy."), "1. Open it\n\nIt is the blue one.\n\n2. Save")
+        XCTAssertEqual(kept("```\na\n~~~\n\nb\n```\n\nWhy."), "```\na\n~~~\n\nb\n```")
+        XCTAssertEqual(kept("Why.\r\n\r\n1. Go\r\n"), "1. Go")
+        XCTAssertEqual(kept("Why.\n\nRun this:\n\n    make ship"), "Run this:\n\n    make ship")
+        for b in ["- [ ] Sign the form", "Run `make ship` there.", "Write to sam@example.org today.", "Call 800-555-0128 after two.",
+                  "It is on example.com under Book.", "Day | Price\n--- | ---\nMon | 4"] {
+            XCTAssertEqual(kept("Why.\n\n" + b), b)
+        }
+        XCTAssertEqual(kept("On 2026-11-22 it moved.\n\n- background"), "")
+        // A list that opens the detail is the steps, bulleted or not; a file
+        // on the hub written as a bare path is something to open.
+        XCTAssertEqual(kept("- Restart the modem\n- Tell me the light colour\n\nWhy."), "- Restart the modem\n- Tell me the light colour")
+        XCTAssertEqual(kept("Why.\n\n/api/v1/blobs/plan.pdf"), "/api/v1/blobs/plan.pdf")
+    }
+
+    @MainActor func testOnlyASessionsOwnLineOverSomethingToDoFolds() {
+        let own = "Hey Sam, it's your chief of staff. The page is ready and wants one click from you before Friday, then I finish the rest."
+        let t = "Save the page", s = "Plan lunches"
+        XCTAssertTrue(Card.folds(kind: "physical", said: own, title: t, thread: s))
+        XCTAssertTrue(Card.folds(kind: "read", said: own, title: t, thread: s))
+        XCTAssertFalse(Card.folds(kind: "physical", said: "Hey Sam, it's your chief of staff. Save the page.", title: t, thread: s))
+        XCTAssertFalse(Card.folds(kind: "physical", said: "", title: t, thread: s))
+        for kind in ["decision", "install", "error"] { XCTAssertFalse(Card.folds(kind: kind, said: own, title: t, thread: s)) }
+        // The hub's line names the session too, however long its name is; a
+        // line cut short leaves the only whole copy in the detail.
+        let named = "Sort the garage shelves before the movers come on Friday"
+        XCTAssertFalse(Card.folds(kind: "physical", said: "Hey, Save the page. It's for \(named).", title: t, thread: named))
+        XCTAssertFalse(Card.folds(kind: "read", said: "Hey, about \(named). Save the page.", title: t, thread: named))
+        XCTAssertFalse(Card.folds(kind: "physical", said: own + " And then a great deal more…", title: t, thread: s))
+        // A first paragraph behind More does not stand in for the title.
+        XCTAssertTrue(Card.titled(title: "Renew passport", said: "", shown: "1. Book the slot"))
+        XCTAssertFalse(Card.titled(title: "Renew passport", said: "", shown: "Renew passport by March.\n\n1. Book the slot"))
+    }
+
     // The fold line is the console's (ui.js isLongText): >18 non-blank lines
     // or >1600 characters, blanks not counted.
     func testLongTextFoldsLikeTheConsole() {

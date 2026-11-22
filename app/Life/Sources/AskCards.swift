@@ -102,6 +102,8 @@ struct AskCard: View {
              title: a.title,
              text: a.detailWithoutLinks,
              said: a.said ?? "",
+             unfolded: !Card.folds(kind: a.kind, said: a.said ?? "", title: a.title, thread: a.thread_title ?? ""),
+             key: "ask:" + a.id,
              thread: a.thread_id,
              waiting: !closed && a.waiting_to_speak == true,
              speaking: !closed && a.speaking == true,

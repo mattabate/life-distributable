@@ -1087,6 +1087,77 @@ function askBody(detail, key) {
   return `<div class="ask-long${open ? ' open' : ''}">${md(detail)}</div>
     ${foldButtonHTML(open, `toggleCardLong(this,'${escJS(key)}')`)}`;
 }
+// THE SPOKEN LINE IS THE CARD; THE GREY UNDER IT STEPS BACK. On a card whose
+// session wrote its own spoken line, the detail keeps only what the owner
+// acts on: numbered steps, anything with a link, a draft box, a table, and a
+// one-line label over one of those. The rest sits behind More, one click
+// away. [kept, rest], both markdown. The phone's Card.acted.
+// What stays with a kept block: a one-line label over it (plain, bold or a
+// heading) and an indented paragraph under a step, which is that step's own.
+// More opens the WHOLE detail in its written order, never kept-then-rest.
+// An approval is not folded at all (actionHTML): its detail is what the
+// owner is saying yes to.
+// WHICH CARDS FOLD. Only one whose line the session wrote: the hub speaks
+// the title of a card raised with no --say (threads spokenFallback), and
+// under that the detail is the card. And only a kind whose detail is around
+// what the owner does: a decision's options, an install's what-it-fixes and
+// an error's text are what they answer to, as an approval's are. The
+// phone's Card.folds.
+// The hub's own line is the title plus an opener and the session's name
+// (notify.Spoken, the name cut at 80), so a session's line is one that runs
+// well past both. A line cut short ("…") is not folded either: the detail
+// then holds the only whole copy of it.
+const FOLD_KINDS = ['read', 'physical', 'access', 'other'];
+const askFolds = a => FOLD_KINDS.includes(a.kind) && !String(a.said || '').trim().endsWith('…')
+  && plainText(a.said).length > plainText(a.title).length + Math.min(plainText(a.thread_title).length, 80) + 40;
+// What the owner acts on, a line at a time: a numbered step, a checkbox, a
+// link, a file on the hub, a thing to type (inline code), a draft box, a
+// table, an email address, a phone number, a bare domain.
+const ACTED = /^\s*\d+[.)]\s|^\s*[-*+]\s+\[[ xX]\]|\]\([^)]+\)|https?:\/\/|\/api\/v1\/blobs\/|`[^`\n]+`|^\s*(```|~~~)|^\s*\||^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$|[\w.+-]+@[\w-]+\.[\w.-]+|(\+?\d{1,2}[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}|\b[\w-]+\.(com|org|net|io|ai|co|app|dev|gov|edu)\b/m;
+function actedDetail(detail, fold) {
+  const text = String(detail || '').replace(/\r\n?/g, '\n');
+  if (!fold || !text.trim()) return [text, ''];
+  const blocks = [];
+  let cur = [], fence = '';
+  for (const l of text.split('\n')) {
+    const f = (/^\s*(```|~~~)/.exec(l) || [])[1];
+    if (f && !fence) fence = f; else if (f === fence) fence = '';
+    if (!fence && !f && !l.trim()) { if (cur.length) blocks.push(cur.join('\n')); cur = []; } else cur.push(l);
+  }
+  if (cur.length) blocks.push(cur.join('\n'));
+  const keep = blocks.map(b => ACTED.test(b));
+  // A list that opens the detail is the owner's steps even when bulleted: a
+  // plain reply's bullets are filed as its steps (threads proseThenSteps).
+  if (/^\s*[-*+•]\s/.test(blocks[0])) keep[0] = true;
+  const label = b => b != null && !b.includes('\n') && /:\s*[*_]*\s*$|^\s*#{1,6}\s/.test(b);
+  const step = b => b != null && /^\s*\d+[.)]\s/.test(b);
+  blocks.forEach((b, i) => {
+    if (keep[i]) return;
+    // An indented code block under its label; a step's own paragraph,
+    // indented under it or written flush between two steps.
+    if (label(blocks[i - 1]) && b.split('\n').every(l => /^( {4,}|\t)/.test(l))) keep[i] = true;
+    else if (keep[i - 1] && /^( {2,}|\t)\S/.test(b)) keep[i] = true;
+    else if (keep[i - 1] && step(blocks[i + 1]) && blocks.slice(0, i).some(step)) keep[i] = true;
+  });
+  blocks.forEach((b, i) => { if (!keep[i] && keep[i + 1] && label(b)) keep[i] = true; });
+  return [blocks.filter((_, i) => keep[i]).join('\n\n'), blocks.filter((_, i) => !keep[i]).join('\n\n')];
+}
+function detailHTML(detail, key, fold) {
+  const [kept, rest] = actedDetail(detail, fold);
+  if (!rest) return askBody(kept, key);
+  const open = cardLongOpen.has(key + ':more');
+  return `<div class="card-kept"${open || !kept ? ' hidden' : ''}>${kept ? askBody(kept, key) : ''}</div><div class="card-rest"${open ? '' : ' hidden'}>${md(detail)}</div>
+    <button type="button" class="fold small" onclick="toggleCardMore(this,'${escJS(key)}')">${open ? 'Less' : 'More'}</button>`;
+}
+function toggleCardMore(btn, key) {
+  const open = !cardLongOpen.delete(key + ':more');
+  if (open) cardLongOpen.add(key + ':more');
+  const whole = btn.previousElementSibling;
+  whole.hidden = !open;
+  const kept = whole.previousElementSibling;
+  kept.hidden = open || !kept.firstChild;
+  btn.textContent = open ? 'Less' : 'More';
+}
 function toggleCardLong(btn, key) {
   const open = !cardLongOpen.delete(key);
   if (open) cardLongOpen.add(key);
@@ -1342,7 +1413,7 @@ function askHTML(a, opened, armed, cost) {
     ref: 'ask', id: a.id, title: a.title, verb: a.verb || 'for you',
     tint: paused && open ? 'paused' : err ? 'err-card' : read ? 'read' : install ? 'install' : '',
     mark: answered ? '⏳ ' : paused ? PAUSE_MARK + ' ' : err ? '⚠︎ ' : read ? '🔵 ' : install ? '📲 ' : '🔴 ',
-    body: paused && open || err ? '' : askBody(text, 'ask:' + a.id), pics: paused && open || err ? '' : pics,
+    body: paused && open || err ? '' : detailHTML(text, 'ask:' + a.id, open && askFolds(a)), pics: paused && open || err ? '' : pics,
     // After the detail, just above the buttons: the pause bar, or an item's
     // steps (each its own Did it · Skip · Reply, staged on the chat's bar
     // until Send), which are its buttons.
