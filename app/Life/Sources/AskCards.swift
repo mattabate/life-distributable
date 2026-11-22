@@ -7,7 +7,7 @@
 //
 // The inline face draws nothing of its own. It decides
 // the WORDS on the row (the console's askHTML, one list): Restart · Dismiss
-// on a crash, Install · Dismiss on a build, Respond · Read on a read, and on
+// on a crash, Install alone on a build, Respond · Read on a read, and on
 // everything else the hub's outcomes (Decided · Reply)
 // then Dismiss. Each outcome arms the chat bar with that pick.
 import SwiftUI
@@ -120,7 +120,7 @@ struct AskCard: View {
             if !closed { Button { respond("") } label: { Label("Respond", systemImage: "arrowshape.turn.up.left") } }
             if !closed, a.kind == "read" {
                 Button { Task { await resolve("done", note: a.readWord) } } label: { Label("Read", systemImage: "checkmark") }
-            } else if !closed {
+            } else if !closed, a.kind != "install" || (!a.isMacInstall && a.phoneLink == nil) {
                 Button { dismiss.act() } label: { Label("Dismiss", systemImage: "xmark") }
             }
             Button { UIPasteboard.general.string = copyText(a.said ?? "", a.detailWithoutLinks) } label: { Label("Copy text", systemImage: "doc.on.doc") }
@@ -162,9 +162,11 @@ struct AskCard: View {
             // first; the hub closes the card on the click, by "app", and
             // reopens it if the Mac still reports an older build 10 min
             // later. Works from the phone too — the hub does the work.
+            // Install alone, no Dismiss beside it (one tap from dismissing a
+            // build by accident); the next build's card replaces it.
             return [CardButton(label: busy ? "Installing…" : "Install", primary: true) {
                 Task { await macInstall() }
-            }, dismiss]
+            }]
         case "install" where a.phoneLink != nil:
             // The install cell is title + description + the one Install button.
             // Tapping it also closes the ask on the spot (by "app", no thread
@@ -178,7 +180,7 @@ struct AskCard: View {
                 // new build, with no manual restart.
                 AppDelegate.push.install.tapped(a.title)
                 Task { await resolve("done", by: "app", note: "tapped Install") }
-            }, dismiss]
+            }]
         case "read":
             // Respond ARMS THE REPLY; Read is the silent close — done,
             // "Read it", the session never wakes — and folds the card.

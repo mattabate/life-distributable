@@ -1809,3 +1809,18 @@ Entry format:
 - For: everyone (web console, week view)
 - Fix: the drag handler treated `pointercancel` like a release, so a gesture the browser or the OS took over moved the item to the last slot it hovered, with nothing let go (#247). A cancel now only puts the row back; only a release moves it or opens its panel. Thanks @Kp759.
 - How: same merge as add-0008, then `make webcheck` and `ops/hub.sh restart`. By hand: `hub/internal/server/web/views/calgrid.js` (`calWireDrag`, `end`), `web/test/calgrid.test.js`.
+
+## add-0279 · 2026-11-22 · An install card has one button, Install
+- For: everyone (web console, phone and desktop apps)
+- Change: an install card no longer carries Dismiss beside Install, on the card or in the phone's long-press menu; it was one tap from losing a build's card by accident. The next build's card replaces it as before. A card with no install link keeps Respond and Dismiss, its only way out.
+- How: same merge as add-0008, then `make webcheck`, `make check`, `ops/hub.sh restart` and a new app build. By hand: `hub/internal/server/web/ui.js` (`askHTML`, the `install` row), `web/test/ui.test.js`, `app/Life/Sources/AskCards.swift` (`buttons`, the context menu).
+
+## add-0280 · 2026-11-22 · An attached document is a square tile
+- For: everyone (phone and desktop apps)
+- Change: a document attached in the message box is now a square tile the size of a picture's thumbnail: a PDF shows the top of its first page, any other file its icon, with the name along the bottom and a bare X in the corner. The X on a picture's thumbnail loses the grey button box the desktop drew behind it.
+- How: same merge as add-0008, then `make check` and a new app build. By hand: `app/Life/Sources/Attachments.swift` (`FileChip`, the picture's remove button in `AttachBar`).
+
+## add-0281 · 2026-11-22 · A phone install card whose reason names a Mac stays the phone's
+- For: anyone who runs both the phone and the desktop app
+- Fix: an install card was read as the desktop's when "Mac" or "desktop" appeared anywhere in its title, so "Install build N: … on the Mac's page" was filed for the desktop and could close on the desktop's build report. The device is now read only from the part before the colon.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh restart`. By hand: `hub/internal/threads/asks.go` (`installHead`, `InstallTarget`), `threads_test.go`.
