@@ -255,6 +255,16 @@ func TestAnOpenTodoOpensTheNextTurn(t *testing.T) {
 	if err := m.TodoSet(th.ID, w.ID, "waiting", ""); err == nil {
 		t.Fatal("a wait with no reason was taken")
 	}
+	// A wait on the person's own next step is refused; one on the owner passes.
+	for _, note := range []string{"the land", "build finishing", "my commit landing", "make check", "waiting on the land", "until tests pass"} {
+		if err := m.TodoSet(th.ID, w.ID, "waiting", note); err == nil {
+			t.Fatalf("a wait on %q was taken", note)
+		}
+	}
+	if !selfWait("landing") || selfWait("land, held on the gate card") || selfWait("the owner's A/B/C pick") || selfWait("the import's backfill") ||
+		selfWait("build on CI") || selfWait("push notification from the provider") || selfWait("commit review by a teammate") {
+		t.Fatal("selfWait misreads a note")
+	}
 	if err := m.TodoSet(th.ID, w.ID, "waiting", "the planner's import"); err != nil {
 		t.Fatal(err)
 	}

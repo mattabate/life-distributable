@@ -5,11 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"life/hub/internal/threads"
 )
+
+// cardTitleTwoLines: the longest title a session may give a card.
+const cardTitleTwoLines = 80
+
+// asksTheirYes: words that hand the owner a choice to make.
+var asksTheirYes = regexp.MustCompile(`(?i)\b(say (yes|the word|go)|if you (agree|say)|want me to|shall i|should i|let me know if)\b`)
 
 // Asks: what agents need from the owner, as rows (docs/ASKS.md).
 func (s *Server) listAsks(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +70,20 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		in.ThreadID = from
+		// The team list clamps every line at two, so a session's title fits
+		// in two. An install's title is the ship script's.
+		// Counted as drawn: a link's address takes no room.
+		if n := utf8.RuneCountInString(threads.PlainTitle(in.Title)); in.Kind != "install" && threads.InstallTarget(in.Kind, in.Title) == "" && n > cardTitleTwoLines {
+			jsonErr(w, 400, fmt.Sprintf("a card's title fits two lines of the team list (≤%d characters, now %d); put the rest in --detail and --say", cardTitleTwoLines, n))
+			return
+		}
+		// A read card that waits on the owner's yes is a decision: Read it has
+		// no answer to give. The title and the spoken line only: a detail can
+		// quote a draft that asks someone else.
+		if threads.ClassFor(in.Kind) == threads.ClassRead && asksTheirYes.MatchString(in.Title+"\n"+in.Say) {
+			jsonErr(w, 400, "this card waits on the owner's yes, so it is --kind decision, not read: ask the question in --say and the title")
+			return
+		}
 	}
 	// A card raised from inside a turn belongs IN that turn's tool chain, and
 	// the only thing that ties it there is the run it was raised in. lifectl
@@ -225,6 +247,11 @@ func (s *Server) rewordAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.By = s.actor(r, in.By)
+	// A session's new title fits the same two lines as a new card's.
+	if n := utf8.RuneCountInString(threads.PlainTitle(in.Title)); s.caller(r) != "" && threads.InstallTarget("install", in.Title) == "" && n > cardTitleTwoLines {
+		jsonErr(w, 400, fmt.Sprintf("a card's title fits two lines of the team list (≤%d characters, now %d); put the rest in --detail and --say", cardTitleTwoLines, n))
+		return
+	}
 	a, err := s.thr.RewordAsk(r.PathValue("id"), in.Title, in.Detail, in.Say, in.By)
 	if err != nil {
 		code := 409

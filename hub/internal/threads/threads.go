@@ -2291,6 +2291,9 @@ func openingWords(msgs []Message) string {
 	return ""
 }
 
+// PlainTitle: a title as the lists draw it, markdown flattened.
+func PlainTitle(s string) string { return plainTitle(s) }
+
 func plainTitle(s string) string {
 	s = mdLead.ReplaceAllString(strings.TrimSpace(s), "")
 	s = mdLink.ReplaceAllString(s, "$1")

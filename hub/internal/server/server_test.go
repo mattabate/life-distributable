@@ -1904,6 +1904,28 @@ func TestSessionReadCardBesideAnOpenOneIsRefused(t *testing.T) {
 	if code, body := add(map[string]any{"title": "Archive more repos?", "kind": "decision"}); code != 201 {
 		t.Fatalf("decision card: %d %s", code, body)
 	}
+	// A title past two lines of the team list, and a read card waiting on the
+	// owner's yes, are refused before anything else.
+	if code, body := add(map[string]any{"title": strings.Repeat("long ", 17), "kind": "decision"}); code != 400 || !strings.Contains(body, "two lines") {
+		t.Fatalf("long title: %d %s", code, body)
+	}
+	if code, body := add(map[string]any{"title": "A fix for the sheet", "kind": "read", "new_topic": true, "say": "Say yes and I'll build it."}); code != 400 || !strings.Contains(body, "decision") {
+		t.Fatalf("read card asking a yes: %d %s", code, body)
+	}
+	// A link's address does not count, and a draft quoted in the detail may
+	// ask its reader anything.
+	if code, body := add(map[string]any{"title": "[Garden site](https://example.com/" + strings.Repeat("x", 90) + ") is live", "kind": "read", "new_topic": true, "detail": "Draft: let me know if that works for you."}); code != 201 {
+		t.Fatalf("linked title with a drafted detail: %d %s", code, body)
+	}
+	// A session's reword is held to the same two lines.
+	rw := httptest.NewRequest("POST", "/api/v1/asks/"+first.ID+"/reword", strings.NewReader(`{"title":"`+strings.Repeat("long ", 17)+`"}`))
+	rw.Header.Set("Authorization", "Bearer "+tok)
+	rw.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.ServeHTTP(rr, rw)
+	if rr.Code != 400 || !strings.Contains(rr.Body.String(), "two lines") {
+		t.Fatalf("long reword: %d %s", rr.Code, rr.Body.String())
+	}
 	if code, body := add(map[string]any{"title": "Garden site is up", "kind": "read", "new_topic": true}); code != 201 {
 		t.Fatalf("new topic: %d %s", code, body)
 	}
