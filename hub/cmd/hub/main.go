@@ -132,9 +132,17 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		sch.Push = push
 		log.Printf("apns: enabled (production=%v)", cfg.APNsProduction)
+	} else {
+		// No push key: a card's line is still said on a Mac whose ear polls
+		// (notify/ear.go); nothing goes to a phone.
+		push = notify.NewVoiceOnly(db)
+		log.Printf("apns: not configured; lines are said on a Mac only")
 	}
+	// Until Resume (below) has handed out what the last hub left unheard, a
+	// new card's push waits behind it (notify/queue.go Booting).
+	push.Booting()
+	sch.Push = push
 	acts = actions.New(db, exec, sch)
 	// Read-only runs that need no card (actions.freeShell); anything else a
 	// shell proposal runs is the owner's to approve.
@@ -195,10 +203,8 @@ func main() {
 		usage.Also = cfg.SessionProjectsDir
 		log.Printf("sessions run as %s, clones in %s", cfg.SessionUser, cfg.SessionWorktrees)
 	}
-	if push != nil {
-		// A spoken card marks its session "speaking" on the Sessions list.
-		push.Voice = thr.Voice
-	}
+	// A spoken card marks its session "speaking" on the Sessions list.
+	push.Voice = thr.Voice
 	quota.Record, quota.Past = quotaHistory(ob)
 	// One clock: every housekeeping loop the hub runs is a task on
 	// this ticker, so /status can say when each last ran. Started at the end
@@ -417,46 +423,43 @@ func main() {
 	}
 	thr.Workspace = h.WS.Count
 	h.UseBudget(guard)
-	if push != nil {
-		// One voice at a time: a push waits while a card is heard or replayed.
-		push.Floor = func() bool { return thr.Voice.Busy(time.Now()) }
-	}
+	// One voice at a time: a push waits while a card is heard or replayed.
+	push.Floor = func() bool { return thr.Voice.Busy(time.Now()) }
 	// Calendar: dated steps / agent runs / reminders; fires + nags every minute.
 	cal, err := calendar.New(db, thr)
 	if err != nil {
 		log.Fatal(err)
 	}
 	cal.Nfy = sch
-	if push != nil {
-		// A card whose line was queued when the last hub stopped is spoken
-		// by this one, if it still wants the owner (notify/queue.go; otherwise
-		// a restart drops a card unspoken). Every card that goes
-		// through notify.Card is asked about here: a proposal, an ask, a
-		// calendar nag (open while its item is fired).
-		push.Open = func(card string) bool {
-			if a, err := acts.Get(card); err == nil {
-				return a.State == "proposed"
-			}
-			// An ask the owner has replied to (`answered`: the ball is the
-			// agent's) wants no voice either: a line still waiting for its
-			// turn is dropped. Nor one whose session the owner has written
-			// into since it was raised (threads.WroteSince): the line is stale.
-			// Nor one whose silent sibling the owner has answered: it carried
-			// this line (threads.SiblingAnswered).
-			if k, err := thr.GetAsk(card); err == nil {
-				return k.State == "open" && !thr.WroteSince(k.ThreadID, k.CreatedAt) && !thr.SiblingAnswered(k)
-			}
-			if it, err := cal.Get(card); err == nil {
-				return it.State == "fired"
-			}
-			return false
+	// A card whose line was queued when the last hub stopped is spoken
+	// by this one, if it still wants the owner (notify/queue.go; otherwise
+	// a restart drops a card unspoken). Every card that goes
+	// through notify.Card is asked about here: a proposal, an ask, a
+	// calendar nag (open while its item is fired).
+	push.Open = func(card string) bool {
+		if a, err := acts.Get(card); err == nil {
+			return a.State == "proposed"
 		}
-		go push.Resume()
-		// The app icon wears the console nav's red ovals added up; a minute
-		// after the total moves, a badge-only push brings the icon along.
-		push.Badge = h.BadgeTotal
-		ck.Every("badge", time.Minute, false, push.SyncBadge)
+		// An ask the owner has replied to (`answered`: the ball is the
+		// agent's) wants no voice either: a line still waiting for its
+		// turn is dropped. Nor one whose session the owner has written
+		// into since it was raised (threads.WroteSince): the line is stale.
+		// Nor one whose silent sibling the owner has answered: it carried
+		// this line (threads.SiblingAnswered).
+		if k, err := thr.GetAsk(card); err == nil {
+			return k.State == "open" && !thr.WroteSince(k.ThreadID, k.CreatedAt) && !thr.SiblingAnswered(k)
+		}
+		if it, err := cal.Get(card); err == nil {
+			return it.State == "fired"
+		}
+		return false
 	}
+	// The app icon wears the console nav's red ovals added up; a minute
+	// after the total moves, a badge-only push brings the icon along.
+	// Set before Resume, which reads it.
+	push.Badge = h.BadgeTotal
+	go push.Resume()
+	ck.Every("badge", time.Minute, false, push.SyncBadge)
 	// The agenda carries every dated object, not only cal_items: actions on
 	// their decided/created day, deferred recs on their review day (recs join
 	// below, once the store exists), and the asks the owner closed at the
@@ -490,18 +493,16 @@ func main() {
 	ck.Every("calendar", time.Minute, true, func() error { cal.Tick(); return nil })
 	// Reopen "Install app build N" asks the owner tapped but that never landed
 	// (phone still reports an older build after 10 min).
-	if push != nil {
-		ck.Every("install", time.Minute, false, func() error {
-			// The desktop app's cards, against the build it last reported.
-			thr.ReconcileMacInstalls(thr.MacBuild())
-			if n := thr.ReconcileInstalls(push.MaxBuild()); n > 0 {
-				// Tapped, not landed yet: silent push launches the new
-				// build in the background so it reports itself.
-				return push.Wake(n)
-			}
-			return nil
-		})
-	}
+	ck.Every("install", time.Minute, false, func() error {
+		// The desktop app's cards, against the build it last reported.
+		thr.ReconcileMacInstalls(thr.MacBuild())
+		if n := thr.ReconcileInstalls(push.MaxBuild()); n > 0 {
+			// Tapped, not landed yet: silent push launches the new
+			// build in the background so it reports itself.
+			return push.Wake(n)
+		}
+		return nil
+	})
 	h.UseQuota(quota)   // one fetcher: the Spend tab and the model picker share its cache
 	h.UsePicker(picker) // Spend tab shows which rung new sessions get
 	h.UseUsage(usage)   // one transcript cache, the picker's, with its on-disk store

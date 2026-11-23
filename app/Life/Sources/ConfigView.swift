@@ -7,7 +7,8 @@ import SwiftUI
 //   Powered by: the plan (its price when the hub has found one), this
 //     month's list-price spend, each limit's headroom, the model new sessions
 //     start on. One block per provider, so a second one is a second block.
-//   Devices: the hub's Mac (uptime, zone) and the phone (its app's profile).
+//   Devices: each Mac the voice reaches (its Audio switch, Stop while it
+//     says a line; the hub's with uptime and zone), then the phone.
 //   Team: the org chart: the owner on top, a card per role reporting to
 //     them, that role's reports listed inside, its goals' emblems on the card.
 //   Goals: the active goals as small tiles under their sections, each the
@@ -31,21 +32,58 @@ struct ConfigData: Sendable {
 }
 
 /// The part of `GET /settings` this page reads: owner_name, hub.json's name
-/// for the owner ("" when unset), the top of the org chart.
+/// for the owner ("" when unset), the top of the org chart; devices, the
+/// Devices card's tiles.
 struct HubSettings: Codable, Sendable, Equatable {
     var owner_name: String = ""
+    var devices: [DeviceEars] = []
 
-    enum CodingKeys: String, CodingKey { case owner_name }
+    enum CodingKeys: String, CodingKey { case owner_name, devices }
 
-    init(owner_name: String = "") { self.owner_name = owner_name }
+    init(owner_name: String = "", devices: [DeviceEars] = []) { self.owner_name = owner_name; self.devices = devices }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         owner_name = (try c.decodeIfPresent(String.self, forKey: .owner_name) ?? "").trimmingCharacters(in: .whitespaces)
+        devices = try c.decodeIfPresent([DeviceEars].self, forKey: .devices) ?? []
     }
 
     /// The name on top of the org chart: owner_name, else You.
     var ownerLabel: String { owner_name.isEmpty ? "You" : owner_name }
+}
+
+/// One device on the Devices card (`/settings` devices, notify.MacEars): a
+/// Mac with its Audio switch and where its voice goes now, or the phone.
+struct DeviceEars: Codable, Sendable, Equatable, Identifiable {
+    var device: String
+    var kind: String = "mac"
+    var hub: Bool? = nil
+    var audio: Bool = true
+    var ears: String = ""
+    var output: String? = nil
+    var here: Bool? = nil
+    var saying: Bool? = nil
+    var line: String? = nil
+    var at: String? = nil
+    var id: String { kind + ":" + device }
+
+    /// The console's cfgMacName: a MacBook reads MacBook, the hub's says so.
+    var name: String {
+        let base = device.range(of: "macbook", options: .caseInsensitive) != nil ? "MacBook" : device == "mac" ? "Mac" : device
+        return hub == true ? base + " · hub" : base
+    }
+
+    /// The console's cfgEarWord: where its voice goes now.
+    var earWord: String {
+        let out: String
+        switch ears {
+        case "headphones": out = ((output ?? "").isEmpty ? "Headphones" : output!) + " in now"
+        case "speakers": out = "on its speakers now"
+        case "none": out = "no output now"
+        default: out = "voice not running"
+        }
+        return here == true ? out + " · you're here" : out
+    }
 }
 
 /// The goals under the owner's section names, each section where its first
@@ -126,7 +164,7 @@ struct ConfigView: View {
                         pair {
                             block("Powered by") { plan(d) }
                         } _: {
-                            block("Devices") { devices(d.status) }
+                            block("Devices") { devices(d.status, d.settings) }
                         }
                         pair {
                             block("Team") { orgTree(d) }
@@ -177,32 +215,58 @@ struct ConfigView: View {
 
     // MARK: devices
 
-    /// The console's cfgDevicesHTML: the hub's Mac, then the phone, a row
-    /// each with a hairline between.
-    @ViewBuilder private func devices(_ s: HubStatus?) -> some View {
+    /// The console's cfgDevicesHTML: each Mac the voice reaches (the hub's
+    /// first, with its uptime and zone), its Audio switch and, while it says
+    /// a line, Stop; then the phone. A row each with a hairline between.
+    @ViewBuilder private func devices(_ s: HubStatus?, _ set: HubSettings?) -> some View {
         if let s {
             let up = s.uptime_s
             let upWord = up >= 86400 ? "\(up / 86400)d" : up >= 3600 ? "\(up / 3600)h" : "\(up / 60)m"
-            let macWord = ["up " + upWord, s.time_zone ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
             let phoneWord: String = {
                 guard let a = s.app_installed, !a.isEmpty else { return "app not installed" }
                 let left = s.app_profile_days_left.map { "profile \($0) \($0 == 1 ? "day" : "days") left" } ?? "app installed"
                 let until = s.app_profile_expires.flatMap { $0.isEmpty ? nil : "until " + dayLabel(String($0.prefix(10))) }
                 return [left, until].compactMap { $0 }.joined(separator: " · ")
             }()
+            let macs: [DeviceEars] = {
+                let m = (set?.devices ?? []).filter { $0.kind == "mac" }
+                return m.isEmpty ? [DeviceEars(device: "mac", hub: true)] : m
+            }()
             VStack(alignment: .leading, spacing: 9) {
-                deviceRow("Mac · hub", macWord)
-                Rectangle().fill(line).frame(height: 1)
-                deviceRow("Phone", phoneWord)
+                ForEach(macs) { d in
+                    let word = [d.saying == true ? "saying a card" : d.earWord,
+                                d.hub == true ? "up " + upWord : "", d.hub == true ? s.time_zone ?? "" : ""]
+                        .filter { !$0.isEmpty }.joined(separator: " · ")
+                    deviceRow(d.name, word) {
+                        if d.saying == true, let line = d.line {
+                            Button("Stop") { Task { try? await hub.stopMacLine(line); await refreshSettings() } }
+                                .controlSize(.small)
+                        }
+                        Toggle("Audio", isOn: Binding(get: { d.audio }, set: { on in
+                            Task { try? await hub.setMacAudio(device: d.device, on: on); await refreshSettings() }
+                        }))
+                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    }
+                    Rectangle().fill(line).frame(height: 1)
+                }
+                deviceRow("Phone", phoneWord) { EmptyView() }
             }
         } else {
             Text("Couldn't load devices").font(.system(size: 13)).foregroundStyle(.red)
         }
     }
 
-    private func deviceRow(_ title: String, _ sub: String) -> some View {
+    /// After a switch or Stop: the Devices card redraws from a fresh GET.
+    private func refreshSettings() async {
+        if let s = try? await hub.settings() { load.value?.settings = s }
+    }
+
+    private func deviceRow<C: View>(_ title: String, _ sub: String, @ViewBuilder controls: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.system(size: 14, weight: .semibold))
+            HStack(spacing: 10) {
+                Text(title).font(.system(size: 14, weight: .semibold))
+                controls()
+            }
             if !sub.isEmpty {
                 Text(sub).font(.system(size: 12.5)).foregroundStyle(muted)
                     .fixedSize(horizontal: false, vertical: true)

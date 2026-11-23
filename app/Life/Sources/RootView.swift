@@ -176,7 +176,7 @@ struct RootView: View {
         // The hidden title bar still reserves its strip; the bar takes it.
         .ignoresSafeArea(.container, edges: .top)
         .sheet(item: $chat.pending) { r in ChatAboutSheet(request: r) }
-        .task { MacUpdate.shared.start(hub: hub) }
+        .task { MacUpdate.shared.start(hub: hub); MacEar.shared.start(hub: hub) }
     }
 
     /// A page is drawn when its tab is picked — the console redraws a page

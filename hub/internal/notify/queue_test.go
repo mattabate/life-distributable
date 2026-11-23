@@ -30,6 +30,7 @@ func TestUnheardCardIsSpokenAgainAfterARestart(t *testing.T) {
 	}
 	hub := func() *APNs {
 		a := &APNs{db: db, after: func(_ time.Duration, f func()) { f() }}
+		a.ear.boot = -1 // no Mac in this test: no wait for one
 		a.deliverFn = func(p []byte) error { sent = append(sent, body(p)); return nil }
 		return a
 	}
@@ -129,6 +130,7 @@ func TestFailedResumeIsTriedAgain(t *testing.T) {
 	var sent int
 	hub := func(fail bool) *APNs {
 		a := &APNs{db: db, after: func(_ time.Duration, f func()) { f() }}
+		a.ear.boot = -1
 		a.deliverFn = func([]byte) error {
 			sent++
 			if fail {

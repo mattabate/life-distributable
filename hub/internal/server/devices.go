@@ -44,7 +44,7 @@ func (s *Server) ota(w http.ResponseWriter, r *http.Request) {
 
 // registerDevice stores the app's APNs token (app sends it on every launch).
 func (s *Server) registerDevice(w http.ResponseWriter, r *http.Request) {
-	if !need(w, s.Push != nil, "push not configured") {
+	if !need(w, s.Push.Phone(), "push not configured") {
 		return
 	}
 	var in struct {
@@ -65,7 +65,7 @@ func (s *Server) registerDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) testPush(w http.ResponseWriter, r *http.Request) {
-	if !need(w, s.Push != nil, "push not configured") {
+	if !need(w, s.Push != nil, "no voice lane") {
 		return
 	}
 	var in struct{ Only string }
