@@ -90,6 +90,16 @@ You don't need to be technical.
 
 *All of this is a starting point and subject to change. The agents maintain their own code, so if you don't like how something looks or works, just ask and they can change it from one prompt.*
 
+### Adding a role
+
+A new install starts with one role, the chief of staff. To add another, tell it what you want in a message:
+
+```
+I'd like a fitness coach. It should keep my workout log and plan my week of training.
+```
+
+The chief of staff writes the role: its title, who it is for, the kind of messages it owns, and a short brief. Then it starts the role's session. From then on, messages about that topic go to the new role, which keeps its own files and to-do list. To change a role later, ask the chief of staff again, for example "make the fitness coach report to the head of wellness". Under the hood it is one `lifectl persona new` command, and `lifectl personas` lists the team.
+
 ## Example app layout
 
 ### Desktop app
