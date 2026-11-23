@@ -5,11 +5,9 @@ import SwiftUI
 /// surfaces can never disagree about what is his turn. Nothing here ranks,
 /// holds back or counts; the hub already did.
 ///
-/// A session is filed under Your turn or Working, or under no heading (All
-/// sessions finds it) — the console's own rule (the owner 2026-08-29, Recent
-/// gone 2026-09-20). Your turn leads, each row
-/// carrying the card that needs him — its title, and now its own description
-/// clamped to three lines (board `detail`).
+/// One list with no headings under a "Your team" band: each person a row
+/// ranked by status (SideStatus), each row carrying the cards that need the
+/// owner, then the plain idle people two to a line.
 ///
 /// THERE WAS A SECOND TAB HERE. From 2026-08-26 to 2026-09-02 this struct also
 /// drew `.yourTurn`: the same board as a stack of cards, one per ask or
@@ -53,20 +51,6 @@ struct ThreadsView: View {
     /// "N waiting on the laptop" row here, uncounted, from 2026-08-24 until
     /// 2026-09-23 ("Remove concept of waiting on laptop").
     var turn: Board { store.board ?? .empty }
-    /// ONE HEADING PER SESSION, filed by the hub (board `headings` + `section`,
-    /// 2026-09-14): running → Working, any card open for him → Your turn (a
-    /// read or an install sits there too, wearing its blue/teal pill — the
-    /// separate To read heading went on 2026-09-17: "you don't need separate
-    /// areas for these two"; a session with both wears BOTH pills, one per
-    /// class, since later that day: "I would like that called out
-    /// separately"), else → none. The console reads the same three fields,
-    /// so the headings and their words are identical there.
-    var working: [Thread] { threads.filter { $0.status == "running" } }
-    /// The groups in the hub's order and words. Before the first board,
-    /// Working only.
-    var headings: [BoardHeading] {
-        turn.headings ?? [BoardHeading(key: "working", label: "Working", count: "", n: 0, show: 0)]
-    }
     /// A PERSON is a session with a role. Only people are
     /// rows on this list (the owner 2026-10-24 00:20, of two plain
     /// sessions as rows: "all of the text should be
@@ -78,11 +62,65 @@ struct ThreadsView: View {
     /// page here ("you don't need any button for getting back to those
     /// sessions") — threads.js drawList's `person` / `shown`.
     func person(_ t: Thread) -> Bool { !(t.persona ?? "").isEmpty || !(t.role ?? "").isEmpty }
-    /// The sessions under one heading, newest activity first (the hub's
-    /// /threads order), cut to what the heading says it shows.
-    func rows(_ h: BoardHeading) -> [Thread] {
-        let all = threads.filter { turn.sectionOf($0) == h.key && !nested($0) && (person($0) || h.key == "your_turn") }
-        return h.show > 0 ? Array(all.prefix(h.show)) : all
+    /// Every session this page holds, by id: the live ones and the people.
+    var known: [String: Thread] {
+        var out: [String: Thread] = [:]
+        for t in store.team + threads { out[t.id] = t }
+        return out
+    }
+    /// ONE ROW PER PERSON: a role with two sessions is the one key, its
+    /// persona, else the session's own id (threads.js drawList's `who`).
+    func who(_ id: String, _ known: [String: Thread]) -> String {
+        known[id]?.persona.flatMap { $0.isEmpty ? nil : $0 } ?? id
+    }
+    /// A session's person: the board's `home` (the top of a listed chain),
+    /// else up the `parent_id` chain of the sessions this page holds. A quiet
+    /// sub-session on neither list cannot be walked without another read, so
+    /// its rec stays under its own id and draws on no row.
+    func ownerOf(_ id: String, _ known: [String: Thread]) -> String {
+        if let h = turn.home?[id] { return h }
+        var id = id, seen: Set<String> = [id]
+        while let p = known[id]?.parent_id, !p.isEmpty, !seen.contains(p) { seen.insert(p); id = p }
+        return id
+    }
+    /// Each person's open recs, keyed by `who`: the filing session is
+    /// `thread_id`, or on an older rec the id inside `source`
+    /// (`Rec.sourceThreadID`); a rec the owner filed is on no row.
+    var recsBy: [String: [Rec]] {
+        let k = known
+        var out: [String: [Rec]] = [:]
+        for r in store.recs where !r.isClosed {
+            guard let id = r.sourceThreadID, !id.isEmpty else { continue }
+            out[who(ownerOf(id, k), k), default: []].append(r)
+        }
+        return out
+    }
+    /// ONE LIST, NO HEADINGS, the console's drawList: every row with a
+    /// status, highest first (SideStatus), the hub's order within one; then
+    /// the plain idle people, two to a line at the foot. A row's pill is
+    /// `SideStatus.of`'s (Working over the rest while the turn runs); its
+    /// place is the `base` status's.
+    var ranked: (rows: [(t: Thread, s: SideStatus, recs: [Rec])], idle: [Thread]) {
+        let live = threads.filter { !nested($0) && (person($0) || turn.sectionOf($0) == "your_turn") }
+        let ids = Set(live.map(\.id))
+        let all = live + store.team.filter { person($0) && !nested($0) && !ids.contains($0.id) }
+        let by = recsBy, k = known
+        var cands: [(i: Int, t: Thread, s: SideStatus?, rank: Int, recs: [Rec])] = []
+        for (i, t) in all.enumerated() {
+            let rs = by[who(t.id, k)] ?? []
+            let base = SideStatus.base(t, board: turn, recs: rs.count)
+            cands.append((i, t, SideStatus.of(t, board: turn, recs: rs.count), base?.rawValue ?? 99, rs))
+        }
+        cands.sort { $0.rank != $1.rank ? $0.rank < $1.rank : $0.i < $1.i }
+        // Each person once: their highest-status session, the first in the
+        // hub's order (the newest) within one status.
+        var once = Set<String>()
+        var rows: [(t: Thread, s: SideStatus, recs: [Rec])] = []
+        var idle: [Thread] = []
+        for x in cands where once.insert(who(x.t.id, k)).inserted {
+            if let s = x.s { rows.append((x.t, s, x.recs)) } else if person(x.t) { idle.append(x.t) }
+        }
+        return (rows, idle)
     }
     /// A session another one started is a row on that one's card, whatever
     /// heading it would have had (the owner 2026-10-23 01:23: "2 little
@@ -126,43 +164,23 @@ struct ThreadsView: View {
     /// pill"). `make mac-screens PAGES=sessions LIFE_SHOT_MOVE=<id>` rehearses
     /// that move (BoardStore).
     private enum MacItem: Identifiable {
-        case heading(key: String, words: String, first: Bool)
-        case row(Thread)
+        case row(Thread, SideStatus, [Rec])
         /// Two idle people side by side, name over job (the owner 2026-11-06
         /// 02:03: "before… a more efficient use of space, putting these like
         /// 2 in a row… maybe with idle, we could put them 2 in a row").
         case pair([Thread])
         var id: String {
             switch self {
-            case .heading(let key, _, _): "heading " + key
-            case .row(let t): t.id
+            case .row(let t, _, _): t.id
             case .pair(let ts): "pair " + ts.map(\.id).joined(separator: " ")
             }
         }
     }
-    /// YOUR TURN, WORKING, then IDLE: every person once (the owner 2026-11-06,
-    /// sidebar 3 — "Your turn / Working / Idle", no counts, idle people the
-    /// same size as everyone else). Idle is the team less whoever is above.
+    /// Every person once: the rows by status, then the idle pairs (`ranked`).
     private var macItems: [MacItem] {
-        var items: [MacItem] = []
-        var placed = Set<String>()
-        for h in headings.filter({ $0.key == "your_turn" }) + headings.filter({ $0.key != "your_turn" }) {
-            let list = rows(h)
-            if list.isEmpty { continue }
-            items.append(.heading(key: h.key, words: h.label.uppercased(), first: items.isEmpty))
-            items += list.map(MacItem.row)
-            placed.formUnion(list.map(\.id))
-        }
-        // An idle person with a to-do list is a whole row, the list under
-        // the name, ahead of the pairs.
-        let rest = store.team.filter { !placed.contains($0.id) && !nested($0) }
-        let idle = rest.filter { ThreadRow.todos($0).isEmpty }
-        if !rest.isEmpty {
-            items.append(.heading(key: "idle", words: "IDLE", first: items.isEmpty))
-            items += rest.filter { !ThreadRow.todos($0).isEmpty }.map(MacItem.row)
-            items += stride(from: 0, to: idle.count, by: 2).map { .pair(Array(idle[$0..<min($0 + 2, idle.count)])) }
-        }
-        return items
+        let r = ranked
+        return r.rows.map { MacItem.row($0.t, $0.s, $0.recs) }
+            + stride(from: 0, to: r.idle.count, by: 2).map { .pair(Array(r.idle[$0..<min($0 + 2, r.idle.count)])) }
     }
     private var macBody: some View {
         HStack(spacing: 0) {
@@ -182,25 +200,19 @@ struct ThreadsView: View {
                 // it so it stands out (the owner 2026-11-06 01:46: "the
                 // background is kind of darker than the foreground… the
                 // spacing is big"). The people grid under SESSIONS (10-17 to
-                // 11-06) is the Idle heading now: each person once.
+                // 11-06) is one list now: each person once.
                 VStack(alignment: .leading, spacing: 0) {
+                    // One 52pt band, so its line runs on into the chat head's
+                    // line: one line across the window, no step at the
+                    // corner.
+                    Text("YOUR TEAM").font(.zoomed(size: 12.5, weight: .semibold)).kerning(0.9).foregroundStyle(Web.muted)
+                        .padding(.horizontal, 18).frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .leading)
+                        .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
                     if let error { ErrorBanner(message: error).padding(12) }
                     ForEach(macItems) { item in
                         switch item {
-                        case .heading(_, let words, let first):
-                            // The top heading is the chat head's 52pt, so its
-                            // line runs on into the head's line: one line
-                            // across the window, no step at the corner (the
-                            // owner 2026-11-06 02:04: "this corner is just so
-                            // jarring").
-                            Text(words)
-                                .font(.zoomed(size: 13, weight: .semibold)).tracking(0.9).foregroundStyle(Web.heading)
-                                .padding(.horizontal, 18)
-                                .padding(.top, first ? 0 : 24).padding(.bottom, first ? 0 : 9)
-                                .frame(maxWidth: .infinity, minHeight: first ? 52 : nil, alignment: .leading)
-                                .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
-                        case .row(let t):
-                            ThreadRow(t: t, board: turn, on: selected?.thread.id == t.id, subs: subs(t))
+                        case .row(let t, let s, let rs):
+                            ThreadRow(t: t, board: turn, on: selected?.thread.id == t.id, subs: subs(t), status: s, recs: rs)
                         case .pair(let ts):
                             HStack(spacing: 0) {
                                 ForEach(Array(ts.enumerated()), id: \.element.id) { i, t in idleCell(t, divider: i == 0) }
@@ -297,26 +309,24 @@ struct ThreadsView: View {
         }
     }
 
-    /// The page: the hub's headings, Your turn (paused on the owner) and
-    /// Working (in flight), then Idle, every person once: the desktop
-    /// sidebar's rule. There is no New session row: the camera button is the
-    /// phone's one way in.
+    /// The page: one list with no headings, every person once, the rows by
+    /// status, then the plain idle pairs (`ranked`, the desktop sidebar's
+    /// rule). There is no New session row: the camera button is the phone's
+    /// one way in.
     @ViewBuilder private var sessionsSections: some View {
-        // Your turn first, then Working — each heading's words straight from
-        // the hub. (A folded "N waiting on the laptop" row sat between them
-        // from 2026-08-24 to 2026-09-23; a web ask is an ordinary cell now.)
-        ForEach(headings.filter { $0.key == "your_turn" }, id: \.key) { h in heading(h) }
-        // Sessions in flight (a running session with cards open wears "N for
-        // you" and gets no second row above).
-        ForEach(headings.filter { $0.key != "your_turn" }, id: \.key) { h in heading(h) }
-        // IDLE: the team less whoever is above, two to a row, name over job
-        // (the Mac's `macItems` pairs), so no person is drawn twice.
-        // One with a to-do list is a whole row first, the list under the name.
-        let rest = idlePeople
-        let idle = rest.filter { ThreadRow.todos($0).isEmpty }
-        if !rest.isEmpty {
-            Section("Idle") {
-                ForEach(rest.filter { !ThreadRow.todos($0).isEmpty }) { t in row(t) }
+        let r = ranked
+        let idle = r.idle
+        if !r.rows.isEmpty {
+            Section {
+                ForEach(r.rows, id: \.t.id) { x in
+                    ThreadRow(t: x.t, board: turn, subs: subs(x.t), status: x.s, recs: x.recs)
+                }
+            }
+        }
+        // The plain idle people, two to a row, name over job (the Mac's
+        // `macItems` pairs), so no person is drawn twice.
+        if !idle.isEmpty {
+            Section {
                 ForEach(Array(stride(from: 0, to: idle.count, by: 2)), id: \.self) { i in
                     HStack(spacing: 0) {
                         idleCell(idle[i])
@@ -345,12 +355,6 @@ struct ThreadsView: View {
     /// A green dot beside the name: a pill crowds the role in a half-width cell.
     static var speakDot: some View { Circle().fill(Color.green).frame(width: 7, height: 7).accessibilityLabel("speaking") }
 
-    /// The people under no heading above, in the hub's role order.
-    var idlePeople: [Thread] {
-        let placed = Set(headings.flatMap { rows($0) }.map(\.id))
-        return store.team.filter { person($0) && !placed.contains($0.id) && !nested($0) }
-    }
-
     /// One idle person, half a row: the name (a green dot while a card of
     /// theirs is speaking) over the job, the Mac's `idleCell`.
     func idleCell(_ t: Thread) -> some View {
@@ -367,33 +371,6 @@ struct ThreadsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    /// One heading and its rows; a heading with no rows is not drawn. With no
-    /// hub words (older hub) it falls back to the row count.
-    @ViewBuilder func heading(_ h: BoardHeading) -> some View {
-        let list = rows(h)
-        if !list.isEmpty {
-            // Only Your turn carries its count; Working and Idle are names
-            // (the desktop sidebar's words).
-            Section(h.key != "your_turn" ? h.label : "\(h.label) · \(h.count.isEmpty ? "\(list.count)" : h.count)") {
-                ForEach(list) { t in row(t) }
-            }
-        }
-    }
-
-    /// One session row, under whichever heading it landed: its whole title,
-    /// one tinted cell per open card, its pills in the foot — the console's
-    /// card (2026-09-20, here since 2026-09-23). Everything on it comes from
-    /// the one board poll, so a row says the same thing here and there.
-    @ViewBuilder func row(_ t: Thread) -> some View {
-        #if targetEnvironment(macCatalyst)
-        // The session open on the right is tinted, as in the console.
-        ThreadRow(t: t, board: turn, subs: subs(t))
-            .listRowBackground(selected?.thread.id == t.id ? Color.accentColor.opacity(0.1) : nil)
-        #else
-        ThreadRow(t: t, board: turn, subs: subs(t))
-        #endif
     }
 
     /// Pull-to-refresh and "after I changed something": one store refresh.

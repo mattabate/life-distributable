@@ -34,6 +34,8 @@ final class BoardStore {
     /// The sessions with a role (team mode), for the people grid at the foot
     /// of Sessions; empty when the switch is off.
     var team: [Thread] = []
+    /// The open recs, each a line under its person on Sessions.
+    var recs: [Rec] = []
     var goals: [Goal] = []
     var error: String?
     /// How many ThreadDetails are open: each polls its own session, so the
@@ -127,7 +129,11 @@ final class BoardStore {
             if freshThreads != threads { threads = freshThreads }
             if freshGoals != goals { goals = freshGoals }
             if freshBoard != board { board = freshBoard }
-            if let t = try? await hub.personaThreads(), t != team { team = t }
+            // The people and the open recs, fetched side by side.
+            async let people = try? hub.personaThreads()
+            async let open = try? hub.recs()
+            if let t = await people, t != team { team = t }
+            if let r = await open, r != recs { recs = r }
             if status == nil { await loadStatus(hub) }
             error = nil
         } catch { if !error.isCancellation { self.error = error.localizedDescription } }

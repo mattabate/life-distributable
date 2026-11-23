@@ -37,11 +37,16 @@
     ],
     // Team mode's roles: the sessions that play one (a full path with its
     // query is matched before the query is dropped), and the roles under
-    // their org lines (reports_to) and the goals each owns.
+    // their org lines (reports_to) and the goals each owns. On Sessions the
+    // digest editor is mid-turn with a card open (one pill, Working, in Your
+    // turn's place), and the chief of staff and the coach are idle with a
+    // to-do line each.
     '/threads?persona=1': [
-      { id: 't-staff', title: 'Chief of staff', status: 'idle', persona: 'staff', role: 'Chief of staff', owns_goals: ['tidy-inbox'] },
+      { id: 't-staff', title: 'Chief of staff', status: 'idle', persona: 'staff', role: 'Chief of staff', owns_goals: ['tidy-inbox'],
+        todos: [{ id: 1, text: 'Sort the inbox labels after the trip is booked', state: 'open' }] },
       { id: TIDY, title: 'Tidy the weekly digest', status: 'running', persona: 'digest', role: 'Digest editor', reports_to: 'staff' },
-      { id: 't-coach', title: 'Coach', status: 'idle', persona: 'coach', role: 'Training coach', owns_goals: ['get-stronger', 'sleep-earlier'] },
+      { id: 't-coach', title: 'Coach', status: 'idle', persona: 'coach', role: 'Training coach', owns_goals: ['get-stronger', 'sleep-earlier'],
+        todos: [{ id: 2, text: 'Write next week\'s three runs', state: 'open' }] },
     ],
     '/personas': [
       { key: 'staff', role: 'Chief of staff', team: 'Core', reports_to: '', goals: ['tidy-inbox'], builtin: true, session: 't-staff' },
