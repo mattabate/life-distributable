@@ -19,22 +19,23 @@ import SwiftUI
 /// console's `statusOf`. The highest a person has, and the rows run in this
 /// order: speaking, waiting to speak, your turn, to read, working, idle with
 /// to-dos, idle with only recs. nil = a plain idle pair at the foot. Any card
-/// of the owner's but a read or an install is Your turn, ahead of a running
-/// turn.
+/// of the owner's but a read or an install is Your turn as the person's own
+/// status, ahead of a running turn, though the row then wears Working.
 enum SideStatus: Int, Comparable {
     case speak, wait, turn, read, work, todo, recs
     static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
 
     /// The pill, one per person, never stacked: a running turn wears Working
-    /// over anything but the card being said, and the row keeps the place
-    /// its `base` status gives it (the console's `pillOf`).
+    /// over anything but the card being said, and the row sorts by it (the
+    /// console's `pillOf`).
     @MainActor static func of(_ t: Thread, board b: Board, recs: Int) -> SideStatus? {
         guard let s = base(t, board: b, recs: recs) else { return nil }
         return s != .speak && t.status == "running" ? .work : s
     }
 
-    /// Where the row sits. The cards are the person's own and every
-    /// sub-session's the board's `home` files under them, so a sub-session's
+    /// The person's own status: it picks which of their sessions is the
+    /// row, and `of` turns it into the pill. The cards are the person's own
+    /// and every sub-session's the board's `home` files under them, so a sub-session's
     /// decision makes the row Your turn even where the hub's rollup says
     /// Working.
     @MainActor static func base(_ t: Thread, board b: Board, recs: Int) -> SideStatus? {

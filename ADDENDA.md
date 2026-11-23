@@ -1859,3 +1859,8 @@ Entry format:
 - For: everyone on the desktop app
 - Change: a picture opened full screen now zooms with a trackpad pinch about the pointer, up to 12 times and never below the fitted size, and a click-drag or a two-finger scroll moves the zoomed picture inside the window with no gap at an edge. The caption hides while zoomed. A click outside the picture still closes it, and so does a click on it while fitted; a click on a zoomed picture does not.
 - How: same merge as add-0008, then `make check` and a new app build. By hand: `app/Life/Sources/MacLightbox.swift` (`LightboxView`: `pinched`, `panned`, `placeImage`).
+
+## add-0289 · 2026-11-23 · A person wearing Working sorts with the working rows
+- For: everyone (web console, phone and desktop apps)
+- Change: in the Sessions list, a person whose turn is running wears Working (add-0285) and now also sits with the other working rows, below the cards to read, instead of keeping the place its open card gave it (this reverses add-0285's "the pill never moves the row"). Which of a person's sessions is the row still goes by its own status, so a running session holding a decision is the row over an idle one holding a card to read. Its red lines still name what is the owner's, and a sub-session's cards still count toward its person.
+- How: same merge as add-0008, then `make check`, `make webcheck` and a new app build. By hand: `hub/internal/server/web/views/threads.js` (`drawList`: pick each person's session by `own`, then sort the rows by the pill's `tier`), `app/Life/Sources/ThreadsView.swift` (`ranked`: the same two passes), `app/Life/Sources/ThreadRows.swift` (comments), `web/test/teamlist.test.js`.

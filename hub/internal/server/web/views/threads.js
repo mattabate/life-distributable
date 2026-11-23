@@ -210,18 +210,19 @@ async function drawList(activeID, reuse) {
   // ONE LIST, NO HEADINGS, under one "Your team" band whose line meets the
   // chat head's: each row the name, the role in its own left-aligned column
   // and one status pill on the right, a side line in the pill's colour. A
-  // person's place is the highest status they have, and the rows run in
-  // that order: speaking, waiting to speak, your turn, to read, working,
+  // person's row is their highest-status session, and the rows run by the
+  // pill each wears, in this order: speaking, waiting to speak, your turn, to read, working,
   // idle with to-dos, idle with only recs, then the plain idle pairs. Any
-  // card of the owner's but a read or an install is Your turn, ahead of a
-  // running turn (the hub files that one under Working). The cards are the
+  // card of the owner's but a read or an install is Your turn as the
+  // person's own status, ahead of a running turn (the hub files that one
+  // under Working), though the row then wears Working. The cards are the
   // person's own and every sub-session's under them, so a sub-session's
   // decision makes the row Your turn even where the hub's rollup says
   // Working.
   // ONE PILL PER PERSON, never stacked: the card being said, else Working
-  // while the turn runs, else the person's own status (`pillOf`). The pill
-  // never moves the row: it keeps the place its own status (`base`) gives
-  // it, and its red lines still say what is the owner's.
+  // while the turn runs, else the person's own status (`pillOf`). The row
+  // sorts by its pill, so a row wearing Working sits with the working rows;
+  // its red lines still say what is the owner's.
   const pillOf = (t, base) => (base && base !== 'speak' && t.status === 'running' ? 'work' : base);
   const statusOf = t => {
     const ps = (b.pills || {})[t.id] || [];
@@ -254,15 +255,17 @@ async function drawList(activeID, reuse) {
   const live = threads.filter(t => !nested(t) && shown(t, sectionOf(b, t)));
   const liveIDs = new Set(live.map(t => t.id));
   const ranked = live.concat(people.filter(t => !liveIDs.has(t.id))).map((t, i) => {
-    const base = statusOf(t);
-    return { t, i, st: pillOf(t, base), tier: base ? SIDE_TIER[base] : 99 };
+    const base = statusOf(t), st = pillOf(t, base);
+    return { t, i, st, own: base ? SIDE_TIER[base] : 99, tier: st ? SIDE_TIER[st] : 99 };
   });
-  // Each person once: their highest-status session, the first in the hub's
-  // order (the newest) within one status.
-  ranked.sort((x, y) => (x.st ? x.tier : 99) - (y.st ? y.tier : 99) || x.i - y.i);
+  // Each person once: their highest-status session by its own status (a
+  // running one with a decision beats an idle one with a card to read), the
+  // first in the hub's order (the newest) within one status. Then the rows
+  // run by the pill each wears.
+  ranked.sort((x, y) => x.own - y.own || x.i - y.i);
   const once = new Set();
   const firsts = ranked.filter(x => !once.has(who(x.t.id)) && once.add(who(x.t.id)));
-  const rows = firsts.filter(x => x.st);
+  const rows = firsts.filter(x => x.st).sort((x, y) => x.tier - y.tier || x.i - y.i);
   const idle = firsts.filter(x => !x.st && person(x.t)).map(x => x.t);
   paint(list, `
     <div class="side-top">Your team</div>
