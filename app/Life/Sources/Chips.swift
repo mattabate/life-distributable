@@ -35,17 +35,19 @@ struct LiveDot: View {
 /// the tone picks colour and icon. The console maps the same tones.
 struct PillChip: View {
     let pill: Pill
+    /// The Sessions list's one pill width (Chip.wide).
+    var width: CGFloat? = nil
     var body: some View {
         switch pill.tone {
-        case "running": Chip(pill.word, lead: .live, tint: .blue)
+        case "running": Chip(pill.word, lead: .live, tint: .blue).wide(width)
         case "speaking":
             // This session's card is being spoken aloud right now — green
             // and pulsing, the console's pill.
-            Chip(pill.word, lead: .live, tint: .green, fill: 0.16)
+            Chip(pill.word, lead: .live, tint: .green, fill: 0.16).wide(width)
         case "waiting":
             // Its line is queued behind another spoken line — amber and
             // still until it is said.
-            Chip(pill.word, lead: .dot, tint: .orange, fill: 0.15)
+            Chip(pill.word, lead: .dot, tint: .orange, fill: 0.15).wide(width)
         case "needs": Chip(pill.word, icon: "exclamationmark", tint: .red)
         case "read": Chip(pill.word, icon: "text.alignleft", tint: .accentColor)
         case "install": Chip(pill.word, icon: "arrow.down.circle", tint: .teal)
@@ -103,6 +105,10 @@ struct Chip: View {
     let tint: Color?
     let style: Style
     let fill: Double?
+    /// At least this wide, the word centred: the Sessions list's status
+    /// column, every pill one width.
+    var width: CGFloat? = nil
+    func wide(_ w: CGFloat?) -> Chip { var c = self; c.width = w; return c }
     init(_ text: String, icon: String? = nil, tint: Color? = nil, style: Style = .pill) {
         self.init(text, lead: icon.map { .icon($0) }, tint: tint, style: style)
     }
@@ -137,6 +143,7 @@ struct Chip: View {
                 .textCase(style == .tag || style == .due ? .uppercase : nil)
         }
         .padding(.horizontal, pad.h).padding(.vertical, pad.v)
+        .frame(minWidth: width)
         if style == .flag {
             // Keeps the line's own ink; the wash is the page's tint.
             core.background(.tint.opacity(tintFill), in: shape)

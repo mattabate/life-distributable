@@ -15,6 +15,105 @@ import SwiftUI
 // don't need any button for getting back to those sessions". The sessions
 // stay in the hub, `GET /threads`.)
 
+/// A row's status on the Sessions list, one list with no headings: the
+/// console's `statusOf`. The highest a person has, and the rows run in this
+/// order: speaking, waiting to speak, your turn, to read, working, idle with
+/// to-dos, idle with only recs. nil = a plain idle pair at the foot. Any card
+/// of the owner's but a read or an install is Your turn, ahead of a running
+/// turn.
+enum SideStatus: Int, Comparable {
+    case speak, wait, turn, read, work, todo, recs
+    static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
+
+    /// The pill, one per person, never stacked: a running turn wears Working
+    /// over anything but the card being said, and the row keeps the place
+    /// its `base` status gives it (the console's `pillOf`).
+    @MainActor static func of(_ t: Thread, board b: Board, recs: Int) -> SideStatus? {
+        guard let s = base(t, board: b, recs: recs) else { return nil }
+        return s != .speak && t.status == "running" ? .work : s
+    }
+
+    /// Where the row sits. The cards are the person's own and every
+    /// sub-session's the board's `home` files under them, so a sub-session's
+    /// decision makes the row Your turn even where the hub's rollup says
+    /// Working.
+    @MainActor static func base(_ t: Thread, board b: Board, recs: Int) -> SideStatus? {
+        let ps = b.pills?[t.id] ?? []
+        if ps.contains(where: { $0.tone == "speaking" }) { return .speak }
+        if ps.contains(where: { $0.tone == "waiting" }) { return .wait }
+        let ids = [t.id] + (b.home ?? [:]).filter { $0.value == t.id }.map(\.key)
+        let cs = ids.flatMap { id in b.sessions?.first { $0.id == id }.map { SessionCell.cells($0, board: b) } ?? [] }
+        let asks = ids.reduce(0) { $0 + (b.forYou[$1] ?? 0) }
+        if cs.contains(where: { !["read", "install"].contains($0.tone == "speaking" ? $0.under ?? "" : $0.tone) })
+            || (asks > 0 && cs.isEmpty) { return .turn }
+        if !cs.isEmpty { return .read }
+        if ids.contains(where: { b.section?[$0] == "your_turn" }) { return .turn }
+        if b.sectionOf(t) == "working" || t.status == "running" { return .work }
+        return !ThreadRow.todos(t).isEmpty ? .todo : recs > 0 ? .recs : nil
+    }
+
+    var word: String {
+        switch self {
+        case .speak: "Speaking"
+        case .wait: "Waiting"
+        case .turn: "Your turn"
+        case .read: "To read"
+        case .work: "Working"
+        case .todo, .recs: "Idle"
+        }
+    }
+    /// The side line and the pill's colour.
+    var color: Color {
+        #if targetEnvironment(macCatalyst)
+        switch self {
+        case .turn: Web.red
+        case .speak: Web.green
+        case .wait: Web.amber
+        case .read, .work: Web.accent
+        case .todo, .recs: Web.lineStrong
+        }
+        #else
+        switch self {
+        case .turn: .red
+        case .speak: .green
+        case .wait: .orange
+        case .read, .work: .accentColor
+        case .todo, .recs: .secondary
+        }
+        #endif
+    }
+    /// The idle pill's ink: grey, never the side line's lighter grey.
+    var ink: Color {
+        guard self == .todo || self == .recs else { return color }
+        #if targetEnvironment(macCatalyst)
+        return Web.muted
+        #else
+        return .secondary
+        #endif
+    }
+}
+
+/// The status pill on the right of a row: the live audio one (speaking,
+/// waiting), else the status's word in its colour. Every pill is one width,
+/// the word centred, and the queued line says "Waiting", not the hub's
+/// "Waiting to speak", which would make that width too wide.
+struct SideStatusPill: View {
+    static let width: CGFloat = 76
+    let status: SideStatus
+    var pills: [Pill] = []
+    private var audio: [Pill] { pills.map { $0.tone == "waiting" ? Pill(word: SideStatus.wait.word, tone: $0.tone) : $0 } }
+    var body: some View {
+        switch status {
+        case .speak, .wait:
+            if let p = audio.first(where: { $0.tone == "speaking" }) ?? audio.first(where: { $0.tone == "waiting" }) {
+                PillChip(pill: p, width: Self.width).fixedSize()
+            }
+        default:
+            Chip(status.word, lead: nil, tint: status.ink, fill: 0.14).wide(Self.width).fixedSize()
+        }
+    }
+}
+
 /// One open card on a session's row, worded the console's way (`sessionCards`
 /// + `miniCardHTML`, views/threads.js): what it wants from him in one word
 /// (`verb`), its whole title, and the tint
@@ -53,11 +152,11 @@ struct SessionCell: Identifiable, Hashable {
     }
 
     var color: Color {
-        switch tone { case "read": .accentColor; case "install": .teal; case "speaking": .green; case "error", "quiet": .secondary; default: .red }
+        switch tone { case "read": .accentColor; case "install": .teal; case "speaking": .green; case "rec": .purple; case "error", "quiet": .secondary; default: .red }
     }
     var mark: String {
         if tone == "quiet" { return sub?.status == "running" ? "circle.fill" : "circle" }
-        return switch tone { case "read": "text.alignleft"; case "install": "square.and.arrow.down"; case "speaking": "circle.fill"; case "error": "exclamationmark.triangle"; default: "hand.raised.fill" }
+        return switch tone { case "read": "text.alignleft"; case "install": "square.and.arrow.down"; case "speaking": "circle.fill"; case "rec": "lightbulb.fill"; case "error": "exclamationmark.triangle"; default: "hand.raised.fill" }
     }
 
     /// A session another one spun off, as a row on that one's card (the owner
@@ -149,7 +248,7 @@ struct TodoLine: View {
                 .frame(width: lead, alignment: .leading)
                 .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + mid }
             Text(md(d.text + (d.waiting ? " · " + ((d.note ?? "").isEmpty ? "waiting" : d.note ?? "") : "")))
-                .font(font).foregroundStyle(d.waiting ? muted : fg).multilineTextAlignment(.leading)
+                .font(font).foregroundStyle(d.waiting ? muted : fg).multilineTextAlignment(.leading).lineLimit(2)
             Spacer(minLength: 0)
         }
         .padding(.top, top)
@@ -210,6 +309,7 @@ struct SideItem: View {
         switch c.tone == "speaking" ? c.under ?? "needs" : c.tone {
         case "read": Web.accent
         case "install": Web.install
+        case "rec": Web.violet
         case "error": Web.muted
         case "quiet": Web.muted
         default: Web.red
@@ -243,7 +343,7 @@ struct SideItem: View {
                         } else {
                             marker(Circle().fill(dot).frame(width: 6, height: 6))
                         }
-                        Text(md(c.title)).font(.zoomed(size: 13.5)).foregroundStyle(Web.fg).multilineTextAlignment(.leading)
+                        Text(md(c.title)).font(.zoomed(size: 13.5)).foregroundStyle(Web.fg).multilineTextAlignment(.leading).lineLimit(2)
                         Spacer(minLength: 0)
                     }
                 }
@@ -260,17 +360,6 @@ struct SideItem: View {
         let mid = UIFont.systemFont(ofSize: 13.5 * Zoom.scale).capHeight / 2
         return v.frame(width: Self.lead, alignment: .leading)
             .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + mid }
-    }
-}
-
-/// The one audio pill by a name, one state at a time: green speaking, else
-/// orange waiting to speak (the web Sessions list's audioPill).
-struct AudioSlot: View {
-    var pills: [Pill] = []
-    var body: some View {
-        if let p = pills.first(where: { $0.tone == "speaking" }) ?? pills.first(where: { $0.tone == "waiting" }) {
-            PillChip(pill: p).fixedSize()
-        }
     }
 }
 
@@ -329,9 +418,19 @@ struct ThreadRow: View {
         TodoShot.posed && t.id == ProcessInfo.processInfo.environment["LIFE_THREAD"] ? TodoShot.sample : t.todos ?? []
     }
 
-    init(t: Thread, board b: Board, on: Bool = false, subs: [Thread] = []) {
+    /// The row's status (its pill and side line) and the person's open recs,
+    /// the lowest lines under the name.
+    var status: SideStatus = .todo
+    var recs: [Rec] = []
+    var recCells: [SessionCell] {
+        recs.map { SessionCell(id: "rec:" + $0.id, title: $0.title, verb: "rec", tone: "rec", step: false) }
+    }
+
+    init(t: Thread, board b: Board, on: Bool = false, subs: [Thread] = [], status: SideStatus? = nil, recs: [Rec] = []) {
         self.t = t
         self.on = on
+        self.recs = recs
+        self.status = status ?? SideStatus.of(t, board: b, recs: recs.count) ?? .todo
         self.subs = subs.map { SessionCell.sub($0, board: b) }
         forYou = b.forYou[t.id] ?? 0
         let cards = b.bundleOf(t).map { SessionCell.cells($0, board: b) } ?? []
@@ -403,19 +502,20 @@ struct ThreadRow: View {
 
     var macCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 7) {
-                // The chat head's 15 (the owner 02:02: "the text is
-                // smaller").
+            // Three columns: the name (the chat head's 15), the role
+            // left-aligned in its own column, the status pill on the right,
+            // the audio one (speaking, waiting) when there is one.
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                let role = t.role ?? ""
                 Text(md(t.title)).font(.zoomed(size: 15, weight: t.unread > 0 ? .bold : .semibold))
                     .foregroundStyle(Web.fg).lineLimit(1)
-                // Only audio sits by a name, one pill: speaking, else
-                // waiting (AudioSlot), never a line of its own.
-                AudioSlot(pills: pills)
-                Spacer(minLength: 8)
-                if let role = t.role, !role.isEmpty {
+                    .frame(width: role.isEmpty ? nil : 82 * Zoom.scale, alignment: .leading)
+                if !role.isEmpty {
                     Text(role).font(.zoomed(size: 13)).foregroundStyle(Web.muted).lineLimit(1)
                         .truncationMode(.tail).layoutPriority(-1)
                 }
+                Spacer(minLength: 6)
+                SideStatusPill(status: status, pills: pills)
             }
             if t.status != "running", t.last_message_kind == "error", let m = summaryLine(t.last_message) {
                 Text(md("Error: \(m)")).font(.zoomed(size: 13.5)).foregroundStyle(Web.red).lineLimit(2).padding(.top, 4)
@@ -438,6 +538,8 @@ struct ThreadRow: View {
                 }
                 .padding(.top, items.isEmpty ? 0 : 4)
             }
+            // Its open recs, the lowest lines: a violet dot and the title.
+            ForEach(recCells) { c in SideItem(c: c) { open(nil) } }
         }
         // Room between people, as the old list had (09:50: "the way that
         // really worked well was when there was space between these").
@@ -445,7 +547,7 @@ struct ThreadRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(on ? Web.accent.opacity(0.1) : Color.clear)
         .background(Web.panel)
-        .overlay(alignment: .leading) { if on { Rectangle().fill(Web.accent).frame(width: 4) } }
+        .overlay(alignment: .leading) { Rectangle().fill(status.color).frame(width: 4) }
         .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
         .contentShape(Rectangle())
         .onTapGesture { open(first) }
@@ -455,15 +557,19 @@ struct ThreadRow: View {
 
     private var phoneRow: some View {
         VStack(alignment: .leading, spacing: 5) {
-            // The whole name, never clamped (the owner 2026-09-20), and a person's
-            // role on the right (the owner 2026-10-22: "put role on the right, next
-            // to their names… im still learning their names").
+            // Three columns, as on the desktop: the name on one line in an
+            // 82pt column (a longer one ends in "…"; with no role it takes
+            // the room the role would have), the role in its own column, the
+            // status pill.
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(md(t.title)).font(.body.weight(t.unread > 0 ? .semibold : .medium))
-                if let role = t.role, !role.isEmpty {
-                    Spacer(minLength: 4)
-                    Text(role).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                let role = t.role ?? ""
+                Text(md(t.title)).font(.body.weight(t.unread > 0 ? .semibold : .medium)).lineLimit(1)
+                    .frame(width: role.isEmpty ? nil : 82, alignment: .leading)
+                if !role.isEmpty {
+                    Text(role).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).layoutPriority(-1)
                 }
+                Spacer(minLength: 4)
+                SideStatusPill(status: status, pills: pills)
             }
             ForEach(Self.folded(cells)) { c in MiniCard(c: c) { open(c.id) } }
             if !cells.isEmpty, more > 0 {
@@ -485,31 +591,25 @@ struct ThreadRow: View {
                     Text(md(todo)).font(.subheadline).lineLimit(2)
                 }.foregroundStyle(tone)
                 if let d = previewLine(detail), !d.isEmpty {
-                    Text(md(d)).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
+                    Text(md(d)).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
+            // Its open recs, the lowest lines.
+            ForEach(recCells) { c in MiniCard(c: c) { open(nil) } }
             if t.status != "running", t.last_message_kind == "error", let m = summaryLine(t.last_message) {
                 // A dead turn is a fact about the session, not a description.
                 Text(md("Error: \(m)")).font(.subheadline).foregroundStyle(.red).lineLimit(2)
             }
             // No foot: the model, cost, schedule and the live call count are
             // the chat head's, as on the desktop sidebar; the row is the name
-            // and its cards. Only the audio pills stay, the one fact a cell
-            // cannot carry.
-            let live = pills.filter { ["speaking", "waiting"].contains($0.tone) }
-            if !live.isEmpty {
-                ChipRow {
-                    ForEach(live, id: \.self) { PillChip(pill: $0) }
-                    Spacer(minLength: 0)
-                }
-            }
+            // and its cards. The audio pill is the status pill by the name.
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
         // The row itself lands on the board's first card; a cell on its own.
         // (Not a NavigationLink: a link swallows the taps meant for the cells.)
         .onTapGesture { open(first) }
-        .rowAccent(statusColor(t.status))
+        .rowAccent(status.color)
         // Chatting about a session row goes to a NEW session (the board is not
         // inside one): "what is this thing doing?" without interrupting it.
         .chatAbout(ChatSubject(

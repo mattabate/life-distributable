@@ -101,9 +101,9 @@ async function drawList(activeID, reuse) {
   // on every refresh was what made the page feel slow).
   const gen = route.gen;
   listSide = activeID;
-  const [threads, b, team] = await Promise.all([
+  const [threads, b, team, open] = await Promise.all([
     get('/threads?live=1&surface=web'), reuse && board ? board : loadBoard().catch(() => board || EMPTY_BOARD),
-    get('/threads?persona=1').catch(() => []),
+    get('/threads?persona=1').catch(() => []), get('/recs').catch(() => ({ recs: [] })),
   ]);
   const list = document.getElementById('list');
   if (!list || gen !== route.gen) return;
@@ -151,10 +151,10 @@ async function drawList(activeID, reuse) {
   };
   // THE DESKTOP'S SIDEBAR, line for line (ThreadRow.macCard, 2026-11-08:
   // the web app should match the desktop app): edge to edge, a line under
-  // each person, the name with one audio pill and the role on the right,
-  // then each open card as a coloured dot and its title, two and then
-  // "N more" opening the rest in place.
-  const card = t => {
+  // each person, the name, the role and one status pill, then each open
+  // card as a coloured dot and its title, two and then "N more" opening the
+  // rest in place.
+  const card = (t, st) => {
     const href = `#/sessions/${encodeURIComponent(t.id)}`;
     const items = [];
     const jobs = jobCells(t);
@@ -176,19 +176,67 @@ async function drawList(activeID, reuse) {
     return sideRowHTML(t, {
       active: t.id === activeID,
       first: b.first[t.id] || '',
-      audio: audioSlotHTML(b, t),
-      items: drawn.map(sideItemHTML).join('') + more + sideTodosHTML(t, href),
+      status: st,
+      pill: st === 'speak' || st === 'wait' ? audioSlotHTML(b, t) : `<span class="pill ${SIDE_PILL[st][0]}">${SIDE_PILL[st][1]}</span>`,
+      items: drawn.map(sideItemHTML).join('') + more + sideTodosHTML(t, href) + sideRecsHTML(recsBy[who(t.id)], href),
     });
   };
-  const group = (label, list) => !list.length ? '' :
-    `<h3 class="side-h">${esc(label)}</h3>` + list.map(t => card(t)).join('');
-  // A SESSION ON THIS LIST IS WORKING OR WAITING ON HIM — Your turn or Working
-  // — and the hub files it (board `section`) and words each heading (board
-  // `headings`: "3 in 2 sessions · 1 working"). The phone draws the same
-  // list, so the ladder (running → Working; any card open → Your turn, reads
-  // and installs mixed in — no separate To read heading, 2026-09-17)
-  // lives once, in internal/attention, not here and in ThreadsView.swift.
-  // ONLY PEOPLE ARE ROWS under them (2026-10-24 00:20, of "Torus
+  // ONE ROW PER PERSON: a role with two sessions is the one key `who`, its
+  // persona, else the session's own id.
+  const known = {};
+  for (const t of (team || []).concat(threads)) known[t.id] = t;
+  const who = id => (known[id] && known[id].persona) || id;
+  // A session's person: the board's `home` (the top of a listed chain), else
+  // up the `parent_id` chain of the sessions this page holds. A quiet
+  // sub-session on neither list cannot be walked without another read, so
+  // its rec stays under its own id and draws on no row.
+  const ownerOf = id => {
+    if (home[id]) return home[id];
+    for (const seen = new Set([id]); known[id] && known[id].parent_id && !seen.has(known[id].parent_id);) seen.add(id = known[id].parent_id);
+    return id;
+  };
+  // A person's open recs: the filing session is `thread_id`, or on an older
+  // rec the id inside `source` (`claude:thread:<id>`, the hub's
+  // recs.SourceThread); a rec the owner filed has neither and is on no row.
+  const recsBy = {};
+  for (const r of (open && open.recs) || []) {
+    const src = r.thread_id || (/^claude:thread:(.+)$/.exec(r.source || '') || [])[1];
+    if (src && !r.closed) (recsBy[who(ownerOf(src))] ||= []).push(r);
+  }
+  // Every session filed under a person (the board's `home`): its cards and
+  // its share of `for_you` count on the person's row.
+  const members = {};
+  for (const [k, top] of Object.entries(home)) (members[top] ||= []).push(k);
+  // ONE LIST, NO HEADINGS, under one "Your team" band whose line meets the
+  // chat head's: each row the name, the role in its own left-aligned column
+  // and one status pill on the right, a side line in the pill's colour. A
+  // person's place is the highest status they have, and the rows run in
+  // that order: speaking, waiting to speak, your turn, to read, working,
+  // idle with to-dos, idle with only recs, then the plain idle pairs. Any
+  // card of the owner's but a read or an install is Your turn, ahead of a
+  // running turn (the hub files that one under Working). The cards are the
+  // person's own and every sub-session's under them, so a sub-session's
+  // decision makes the row Your turn even where the hub's rollup says
+  // Working.
+  // ONE PILL PER PERSON, never stacked: the card being said, else Working
+  // while the turn runs, else the person's own status (`pillOf`). The pill
+  // never moves the row: it keeps the place its own status (`base`) gives
+  // it, and its red lines still say what is the owner's.
+  const pillOf = (t, base) => (base && base !== 'speak' && t.status === 'running' ? 'work' : base);
+  const statusOf = t => {
+    const ps = (b.pills || {})[t.id] || [];
+    if (ps.some(p => p.tone === 'speaking')) return 'speak';
+    if (ps.some(p => p.tone === 'waiting')) return 'wait';
+    const ids = [t.id].concat(members[t.id] || []);
+    const cs = ids.flatMap(id => sessionCards(bundles[id], false));
+    const asks = ids.reduce((n, id) => n + by(id), 0);
+    if (cs.some(c => !['read', 'install'].includes(c.speaking ? c.under : c.tint)) || (asks && !cs.length)) return 'turn';
+    if (cs.length) return 'read';
+    if (ids.some(id => (b.section || {})[id] === 'your_turn')) return 'turn';
+    if (sectionOf(b, t) === 'working' || t.status === 'running') return 'work';
+    return (t.todos || []).length ? 'todo' : (recsBy[who(t.id)] || []).length ? 'recs' : '';
+  };
+  // ONLY PEOPLE ARE ROWS (2026-10-24 00:20, of "Torus
   // crossword grid" and "Higher leverage growth" as rows: the list is "ONLY
   // the persona sessions… nothing else as a top-level row"); a session that
   // is not a person shows only while it waits on him (`shown`). Every other
@@ -200,46 +248,50 @@ async function drawList(activeID, reuse) {
   // button in this column — it is on the toolbar, on every page
   // (2026-08-26). A module's own link is the last row, always a whole one,
   // drawn by that module when it is loaded.
-  // IDLE IS EVERYONE ELSE, each person once (the desktop's macItems,
-  // 2026-11-08: Idle leaves out anyone already under Your turn or Working):
-  // two to a line, the name over the role. Your turn leads.
+  // THE PLAIN IDLE ARE EVERYONE ELSE, each person once (the desktop's
+  // macItems): two to a line, the name over the role, at the foot.
   const people = (team || []).filter(t => person(t) && !nested(t));
-  const heads = b.headings || NO_HEADINGS;
-  const placed = new Set();
-  const groups = heads.filter(h => h.key === 'your_turn').concat(heads.filter(h => h.key !== 'your_turn')).map(h => {
-    let rows = threads.filter(t => sectionOf(b, t) === h.key && !nested(t) && shown(t, h.key));
-    if (h.show) rows = rows.slice(0, h.show);
-    rows = rows.filter(t => !placed.has(t.id));
-    rows.forEach(t => placed.add(t.id));
-    return group(h.label, rows);
-  }).join('');
-  // An idle person with a to-do list is a whole row, the list under the
-  // name, ahead of the small cells: no task is kept out of sight.
-  const rest = people.filter(t => !placed.has(t.id));
-  const listed = rest.filter(t => (t.todos || []).length), idle = rest.filter(t => !(t.todos || []).length);
+  const live = threads.filter(t => !nested(t) && shown(t, sectionOf(b, t)));
+  const liveIDs = new Set(live.map(t => t.id));
+  const ranked = live.concat(people.filter(t => !liveIDs.has(t.id))).map((t, i) => {
+    const base = statusOf(t);
+    return { t, i, st: pillOf(t, base), tier: base ? SIDE_TIER[base] : 99 };
+  });
+  // Each person once: their highest-status session, the first in the hub's
+  // order (the newest) within one status.
+  ranked.sort((x, y) => (x.st ? x.tier : 99) - (y.st ? y.tier : 99) || x.i - y.i);
+  const once = new Set();
+  const firsts = ranked.filter(x => !once.has(who(x.t.id)) && once.add(who(x.t.id)));
+  const rows = firsts.filter(x => x.st);
+  const idle = firsts.filter(x => !x.st && person(x.t)).map(x => x.t);
   paint(list, `
-    ${groups}
-    ${rest.length ? `<h3 class="side-h">Idle</h3>${listed.map(t => card(t)).join('')}${idle.length ? `<div class="idle-grid">${idle.map(t => idleCellHTML(b, t, t.id === activeID)).join('')}</div>` : ''}` : ''}
+    <div class="side-top">Your team</div>
+    ${rows.map(x => card(x.t, x.st)).join('')}
+    ${idle.length ? `<div class="idle-grid">${idle.map(t => idleCellHTML(b, t, t.id === activeID)).join('')}</div>` : ''}
     ${(b.threads_total || threads.length || people.length) ? '' : emptyHTML('No sessions yet.')}`);
 }
 
-// The heading a session is filed under: the board's word for it, else (a
-// session newer than the last board) running → Working; anything else has no
-// heading and no row.
-const NO_HEADINGS = [{ key: 'working', label: 'Working', count: '' }];
+// The board's filing of a session (your_turn | working), else (a session
+// newer than the last board) running → working.
 const sectionOf = (b, t) => (b.section || {})[t.id] || (t.status === 'running' ? 'working' : '');
 
 // How many lines a person's row draws before "N more" (the desktop's sideRows).
 const SIDE_ROWS = 2;
 
-// One person on the list: the name, its audio pill, the role on the right,
-// then its lines; the open one a blue edge and tint.
+// A row's status: its rank on the list, and its pill's class and word.
+// (STATUS_PILL is the rec card's, in ui.js.)
+const SIDE_TIER = { speak: 0, wait: 1, turn: 2, read: 3, work: 4, todo: 5, recs: 6 };
+const SIDE_PILL = { turn: ['needs', 'Your turn'], read: ['read', 'To read'], work: ['running', 'Working'], todo: ['idle', 'Idle'], recs: ['idle', 'Idle'] };
+
+// One person on the list: three columns, the name, the role and the status
+// pill, then its lines; the side line is the status colour, the open row
+// tinted.
 function sideRowHTML(t, o) {
   const href = `#/sessions/${encodeURIComponent(t.id)}${o.first ? '/' + encodeURIComponent(o.first) : ''}`;
   const failed = t.status !== 'running' && t.last_message_kind === 'error' && !isPauseText(t.last_message);
   return `
-    <div class="side-row${o.active ? ' on' : ''}" onclick="if(!event.target.closest('a'))location.hash='${escJS(href)}'">
-      <div class="side-name"><a class="side-t${t.unread > 0 ? ' unread' : ''}" href="${esc(href)}">${mdInline(t.title || t.id, false)}</a>${o.audio || ''}<span class="sess-gap"></span>${t.role ? `<span class="side-role">${esc(t.role)}</span>` : ''}</div>
+    <div class="side-row st-${o.status}${o.active ? ' on' : ''}" onclick="if(!event.target.closest('a'))location.hash='${escJS(href)}'">
+      <div class="side-g3${t.role ? '' : ' norole'}"><a class="side-t${t.unread > 0 ? ' unread' : ''}" href="${esc(href)}">${mdInline(t.title || t.id, false)}</a>${t.role ? `<span class="side-role">${esc(t.role)}</span>` : ''}<span class="side-st">${o.pill || ''}</span></div>
       ${failed ? `<div class="side-err wrap2">${failedPreview(t.last_message)}</div>` : ''}
       ${o.items || ''}
     </div>`;
@@ -272,11 +324,18 @@ function sideTodosHTML(t, href) {
 }
 
 // The one audio pill by a name, one state at a time: green speaking, else
-// orange waiting to speak.
+// orange "Waiting" (the hub's "Waiting to speak" would make the list's one
+// pill width too wide).
 function audioSlotHTML(b, t) {
   const ps = ((b && b.pills) || {})[t.id] || [];
   const p = ps.find(x => x.tone === 'speaking') || ps.find(x => x.tone === 'waiting');
-  return p ? `<span class="side-audio">${livePillsHTML([p])}</span>` : '';
+  return p ? `<span class="side-audio">${livePillsHTML([p.tone === 'waiting' ? { ...p, word: 'Waiting' } : p])}</span>` : '';
+}
+
+// A person's open recs, the lowest lines, under the to-dos: a violet dot and
+// the title; it opens the chat, where the rec is its card.
+function sideRecsHTML(rs, href) {
+  return (rs || []).map(r => `<a class="side-item rec" href="${esc(href)}"><span class="side-mark"><span class="side-dot"></span></span><span class="side-tt">${mdInline(r.title, false)}</span></a>`).join('');
 }
 
 // An idle person: the name (its audio pill beside it) over the role.

@@ -150,6 +150,49 @@ final class DecodeTests: XCTestCase {
         XCTAssertNotNil(t.next_run_at)
     }
 
+    /// The Sessions list's one status per person (SideStatus, the console's
+    /// statusOf/pillOf): the place is the base status, the pill is Working
+    /// while the turn runs, except over the card being said.
+    @MainActor func testSideStatus() throws {
+        func person(_ id: String, _ status: String) throws -> Life.Thread {
+            try decode(Life.Thread.self, """
+            {"id":"\(id)","created_at":"2026-08-26T09:00:00Z","updated_at":"2026-08-26T09:30:00Z","title":"\(id)",
+             "project":"life","status":"\(status)","schedule":"","schedule_prompt":"","unread":0,"cost_usd":0,"needs_you":0,
+             "tokens":0,"tokens_in":0,"tokens_out":0,"tokens_cache_read":0,"tokens_cache_write":0,
+             "last_message":"","last_message_kind":"message","model":"claude-opus-5","role":"Planner"}
+            """)
+        }
+        let b = try decode(Board.self, """
+        {"surface":"mobile","count":1,"working":2,"calendar":[],
+         "sessions":[{"id":"busy","title":"busy","n":1,"first":"ask-1","running":true,"actions":[],
+           "asks":[{"id":"ask-1","created_at":"2026-08-26T09:00:00Z","updated_at":"2026-08-26T09:00:00Z","thread_id":"busy",
+                    "title":"Pick a day","detail":"","kind":"decision","verb":"decide","surface":"any","state":"open","check_hint":""}],"steps":[]},
+           {"id":"reader","title":"reader","n":1,"first":"ask-2","running":false,"actions":[],
+           "asks":[{"id":"ask-2","created_at":"2026-08-26T09:00:00Z","updated_at":"2026-08-26T09:00:00Z","thread_id":"reader",
+                    "title":"The draft is up","detail":"","kind":"read","verb":"read","surface":"any","state":"open","check_hint":""}],"steps":[]}],
+         "for_you":{"busy":1},"first":{},
+         "section":{"busy":"working","worker":"working","lead":"working"},"home":{"busy":"lead"},
+         "pills":{"talker":[{"word":"speaking","tone":"speaking"}],"queued":[{"word":"waiting to speak","tone":"waiting"}]},
+         "badges":{"your_turn":1,"calendar":0,"recs":0}}
+        """)
+        let busy = try person("busy", "running")
+        XCTAssertEqual(SideStatus.base(busy, board: b, recs: 0), .turn)
+        XCTAssertEqual(SideStatus.of(busy, board: b, recs: 0), .work)
+        // A sub-session's decision makes its person's row Your turn, over
+        // the hub's rollup of Working.
+        XCTAssertEqual(SideStatus.of(try person("lead", "idle"), board: b, recs: 0), .turn)
+        let talker = try person("talker", "running")
+        XCTAssertEqual(SideStatus.of(talker, board: b, recs: 0), .speak)
+        XCTAssertEqual(SideStatus.of(try person("queued", "idle"), board: b, recs: 0), .wait)
+        XCTAssertEqual(SideStatus.of(try person("reader", "idle"), board: b, recs: 0), .read)
+        XCTAssertEqual(SideStatus.of(try person("worker", "running"), board: b, recs: 0), .work)
+        XCTAssertEqual(SideStatus.of(try person("quiet", "idle"), board: b, recs: 2), .recs)
+        XCTAssertNil(SideStatus.of(try person("quiet", "idle"), board: b, recs: 0))
+        XCTAssertEqual([SideStatus.work, .speak, .recs, .turn, .wait, .read].sorted(), [.speak, .wait, .turn, .read, .work, .recs])
+        XCTAssertEqual(SideStatus.wait.word, "Waiting")
+        XCTAssertEqual(SideStatus.recs.word, "Idle")
+    }
+
     func testCalendarView() throws {
         let v = try decode(CalView.self, """
         {"from":"2026-08-26","to":"2026-10-25","today":"2026-08-26",
