@@ -98,29 +98,32 @@ struct ThreadsView: View {
     /// ONE LIST, NO HEADINGS, the console's drawList: every row with a
     /// status, highest first (SideStatus), the hub's order within one; then
     /// the plain idle people, two to a line at the foot. A row's pill is
-    /// `SideStatus.of`'s (Working over the rest while the turn runs); its
-    /// place is the `base` status's.
+    /// `SideStatus.of`'s (Working over the rest while the turn runs), and so
+    /// is its place: a row wearing Working sorts with the working rows. Which
+    /// of a person's sessions is the row goes by `base`, their own status.
     var ranked: (rows: [(t: Thread, s: SideStatus, recs: [Rec])], idle: [Thread]) {
         let live = threads.filter { !nested($0) && (person($0) || turn.sectionOf($0) == "your_turn") }
         let ids = Set(live.map(\.id))
         let all = live + store.team.filter { person($0) && !nested($0) && !ids.contains($0.id) }
         let by = recsBy, k = known
-        var cands: [(i: Int, t: Thread, s: SideStatus?, rank: Int, recs: [Rec])] = []
+        var cands: [(i: Int, t: Thread, s: SideStatus?, own: Int, recs: [Rec])] = []
         for (i, t) in all.enumerated() {
             let rs = by[who(t.id, k)] ?? []
             let base = SideStatus.base(t, board: turn, recs: rs.count)
             cands.append((i, t, SideStatus.of(t, board: turn, recs: rs.count), base?.rawValue ?? 99, rs))
         }
-        cands.sort { $0.rank != $1.rank ? $0.rank < $1.rank : $0.i < $1.i }
-        // Each person once: their highest-status session, the first in the
-        // hub's order (the newest) within one status.
+        cands.sort { $0.own != $1.own ? $0.own < $1.own : $0.i < $1.i }
+        // Each person once: their highest-status session by its own status,
+        // the first in the hub's order (the newest) within one status. Then
+        // the rows run by the pill each wears.
         var once = Set<String>()
-        var rows: [(t: Thread, s: SideStatus, recs: [Rec])] = []
+        var rows: [(i: Int, t: Thread, s: SideStatus, recs: [Rec])] = []
         var idle: [Thread] = []
         for x in cands where once.insert(who(x.t.id, k)).inserted {
-            if let s = x.s { rows.append((x.t, s, x.recs)) } else if person(x.t) { idle.append(x.t) }
+            if let s = x.s { rows.append((x.i, x.t, s, x.recs)) } else if person(x.t) { idle.append(x.t) }
         }
-        return (rows, idle)
+        rows.sort { $0.s != $1.s ? $0.s < $1.s : $0.i < $1.i }
+        return (rows.map { ($0.t, $0.s, $0.recs) }, idle)
     }
     /// A session another one started is a row on that one's card, whatever
     /// heading it would have had (the owner 2026-10-23 01:23: "2 little

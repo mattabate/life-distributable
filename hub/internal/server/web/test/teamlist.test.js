@@ -63,9 +63,9 @@ test('one list, no headings: rows in status order, one pill each', async () => {
   assert.match(html, /<div class="side-top">Your team<\/div>/);
   assert.doesNotMatch(html, /side-h\b/);
   const order = [...html.matchAll(/class="side-row st-(\w+)[^]*?class="side-t[^"]*" href="[^"]*">(\w+)</g)].map(m => [m[2], m[1]]);
-  // Dee is mid-turn with an open card: she wears Working but keeps Your
-  // turn's place, ahead of the card to read.
-  assert.deepEqual(order, [['Gus', 'speak'], ['Fay', 'wait'], ['Dee', 'work'], ['Eve', 'read'], ['Cy', 'work'], ['Ada', 'todo'], ['Bo', 'recs']]);
+  // Dee is mid-turn with an open card: she wears Working and sorts with the
+  // working rows, after the card to read, the hub's order among them.
+  assert.deepEqual(order, [['Gus', 'speak'], ['Fay', 'wait'], ['Eve', 'read'], ['Cy', 'work'], ['Dee', 'work'], ['Ada', 'todo'], ['Bo', 'recs']]);
   const row = name => html.split('class="side-row').find(s => s.includes(`">${name}</a>`));
   assert.equal(row('Dee').match(/class="pill /g).length, 1);
   assert.match(row('Dee'), /<span class="pill running">Working<\/span>/);
@@ -114,4 +114,32 @@ test('a sub-session counts on its person; old recs by source; each person once',
   // Hal once: no idle pair for the role's second session.
   assert.equal((html.match(/>Hal</g) || []).length, 1);
   assert.match(html, /<strong>Quinn<\/strong>/);
+});
+
+test("a person's row is the session with the highest own status, sorted by its pill", async () => {
+  cur = {
+    // Kim's running session holds a decision; an older one holds a card to read.
+    team: [p('kim1', 'Kim', 'Pilot', { status: 'running' }), p('kim2', 'Kim', 'Pilot', { persona: 'kim1' }), p('read1', 'Eve', 'Editor')],
+    live: [p('kim1', 'Kim', 'Pilot', { status: 'running' })],
+    board: {
+      count: 1, for_you: { kim1: 1 }, first: {}, home: {}, open: {}, todo: {},
+      section: { kim1: 'working' }, pills: {},
+      sessions: [
+        { id: 'kim1', asks: [{ id: 'ask-5', title: 'Pick a route', kind: 'decision' }] },
+        { id: 'kim2', asks: [{ id: 'ask-6', title: 'The notes are up', kind: 'read' }] },
+        { id: 'read1', asks: [{ id: 'ask-7', title: 'The draft is up', kind: 'read' }] },
+      ],
+    },
+    recs: [],
+  };
+  try {
+    await drawList('', false);
+  } finally {
+    cur = first;
+  }
+  const html = el('list').innerHTML;
+  const rows = [...html.matchAll(/class="side-row st-(\w+)[^]*?class="side-t[^"]*" href="([^"]*)">(\w+)</g)].map(m => [m[3], m[1], m[2]]);
+  // The running session with the decision is Kim's row, not the idle one
+  // with the card to read; wearing Working, it sorts after Eve's card.
+  assert.deepEqual(rows, [['Eve', 'read', '#/sessions/read1'], ['Kim', 'work', '#/sessions/kim1']]);
 });
