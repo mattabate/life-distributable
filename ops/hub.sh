@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-command hub lifecycle.
-#   hub.sh install   build + (re)load launchd agents (hub, keepawake, renewcert)
+#   hub.sh install   build + (re)load launchd agents (hub, keepawake, renewcert, ear)
 #   hub.sh install-backup  (re)load the nightly backup agent (after backup.sh init)
 #   hub.sh restart   rebuild + restart the hub only (after running actions; --now: not)
 #   hub.sh stop      unload the hub agent
@@ -34,8 +34,9 @@ rotate() {
   [[ -f $f ]] || return 0
   if (( $(wc -c < "$f") > 20*1024*1024 )); then mv -f "$f" "$f.1"; fi
 }
-# The four launchd agents, written here into ~/Library/LaunchAgents (never
-# load one by hand). hub: the server, kept alive, with the directory of
+# The five launchd agents, written here into ~/Library/LaunchAgents (never
+# load one by hand). ear: this Mac's voice (ops/ear.swift), kept alive; a
+# rebuilt binary exits between lines and launchd starts the new one. hub: the server, kept alive, with the directory of
 # hub.json claude_bin on its PATH (launchd has no nvm PATH, and an
 # npm-installed claude needs its node next to it). keepawake: caffeinate -s,
 # no idle sleep while on AC power, so the hub and its sessions stay reachable
@@ -74,6 +75,17 @@ EOF
   <dict><key>Day</key><integer>1</integer><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
   <key>StandardOutPath</key><string>$ROOT/ops/logs/renew-cert.log</string>
   <key>StandardErrorPath</key><string>$ROOT/ops/logs/renew-cert.log</string>
+EOF
+    ;;
+    com.life.ear) cat <<EOF
+  <key>ProgramArguments</key>
+  <array><string>$ROOT/ops/bin/ear</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>$ROOT/ops/logs/ear.log</string>
+  <key>StandardErrorPath</key><string>$ROOT/ops/logs/ear.log</string>
 EOF
     ;;
     com.life.backup) cat <<EOF
@@ -185,6 +197,7 @@ linger_note() {
 case "${1:-}" in
   install) build; mkdir -p logs; rotate
            if [[ $OS == Darwin ]]; then for a in com.life.hub com.life.keepawake com.life.renewcert; do load $a; done
+                [[ -x bin/ear ]] && load com.life.ear
            else for u in life-hub.service life-renewcert.service life-renewcert.timer; do unit $u; done
                 sd daemon-reload; sd enable life-hub.service life-renewcert.timer
                 sd restart life-hub.service; sd start life-renewcert.timer; linger_note; fi

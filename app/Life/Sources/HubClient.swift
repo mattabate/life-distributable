@@ -630,6 +630,27 @@ final class HubClient {
     func readThread(_ id: String) async throws { let _: Empty = try await request("POST", "/api/v1/threads/\(id)/read") }
     /// Drop a card's line still waiting to speak; the card stays open.
     func hushVoice(card: String) async throws { let _: Empty = try await request("POST", "/api/v1/voice/hush", body: ["card": card]) }
+    /// A Mac's Audio switch (Configuration's Devices card).
+    func setMacAudio(device: String, on: Bool) async throws {
+        let _: Empty = try await request("PATCH", "/api/v1/settings", body: ["audio_by": [device: on]])
+    }
+    /// The Devices card's Stop: line `id` (the one its tile shows) stops if a
+    /// Mac is still saying it, never the next card's; its card stays.
+    func stopMacLine(_ id: String) async throws {
+        let _: Empty = try await request("POST", "/api/v1/voice/stop", body: ["id": id])
+    }
+    /// This Mac's ear polls: its route, the output's name, the seconds since
+    /// its last input (MacEar.swift).
+    func earPoll(device: String, route: String, output: String, idle: Double) async throws -> EarView {
+        var q = URLComponents()
+        q.queryItems = [.init(name: "device", value: device), .init(name: "route", value: route),
+                        .init(name: "output", value: output), .init(name: "idle", value: String(idle))]
+        return try await request("GET", "/api/v1/voice/ear?" + (q.percentEncodedQuery ?? ""), cache: false, timeout: 5)
+    }
+    /// The ear's word on the line it was handed: playing, spoke or silent.
+    func earReport(device: String, id: String, outcome: String) async throws {
+        let _: Empty = try await request("POST", "/api/v1/voice/ear", body: ["device": device, "id": id, "outcome": outcome], cache: false, timeout: 5)
+    }
     /// lane "ota" (default): `make ship`, then open `InstallStatus.ota.installURL`;
     /// "lan": Xcode install over the Mac's Wi-Fi; "mac": the desktop
     /// app's Install — `ask` is the card (the hub closes it on the click, by

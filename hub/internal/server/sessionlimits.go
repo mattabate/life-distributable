@@ -43,6 +43,11 @@ var ownerOnlyRoutes = map[string]bool{
 	"GET /api/v1/mic":         true,
 	"POST /api/v1/voice":      true,
 	"POST /api/v1/voice/hush": true,
+	// A Mac's ear: polling as one would claim the owner's lines and mark
+	// cards heard that nobody heard.
+	"GET /api/v1/voice/ear":   true,
+	"POST /api/v1/voice/ear":  true,
+	"POST /api/v1/voice/stop": true,
 }
 
 // ownerSources: observations only the owner's devices make. App speech moves

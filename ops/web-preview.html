@@ -55,7 +55,11 @@
       { key: 'travel', role: 'Trip planner', team: '', reports_to: 'staff', goals: ['travel-more'] },
     ],
     '/settings': { team_mode: true, plain_sessions: false, model_cap: 'claude-opus-5-5',
-      models: ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'] },
+      models: ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'],
+      devices: [
+        { device: 'mac-mini', kind: 'mac', hub: true, audio: true, ears: 'headphones', output: 'AirPods Pro', saying: true, line: 'ear-0123456789abcdef' },
+        { device: 'macbook-air', kind: 'mac', audio: false, ears: 'speakers', output: 'MacBook Air Speakers', here: true },
+      ] },
     '/spend/quota': { available: true, next_model: 'claude-opus-5-5',
       plan: { name: 'Claude Max 20x', via: 'Claude Code', usd: 200, period: 'monthly', charged_on: '2026-08-20', month_usd: 412.3,
         brand: { mark: 'A', color: '#D97757', ink: '#FFFFFF' } },

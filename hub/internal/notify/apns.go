@@ -87,6 +87,26 @@ type APNs struct {
 	phoneEars earsSeen
 	// hushed: cards whose line the owner dropped (Hush); the card stays open.
 	hushed map[string]bool
+
+	// ear: each Mac's ear and the line handed to one (ear.go). host is the
+	// hub's own Mac by name ("" = os.Hostname's).
+	ear  ear
+	host string
+	// macLine: one line on a Mac at a time. macJobs: the card lines waiting
+	// for it, in arrival order (macEnqueue); macRun: a drain is running.
+	macLine sync.Mutex
+	macMu   sync.Mutex
+	macJobs []func()
+	macRun  bool
+	// booting: from Booting until Resume has handed out what the last hub
+	// left, a new push waits in bootJobs (in arrival order), so it neither
+	// skips a Mac whose ear has not polled yet nor goes ahead of the resumed
+	// lines.
+	bootMu   sync.Mutex
+	booting  bool
+	bootJobs []func()
+	bootRun  sync.Mutex // one openBoot at a time
+	resuming bool       // Resume has begun: its own defer opens the gate
 }
 
 // How long a push waits for the floor, and how often it looks. Past the wait
@@ -178,6 +198,16 @@ func NewAPNs(db *store.DB, c APNsConfig) (*APNs, error) {
 		client: &http.Client{Timeout: 15 * time.Second}, lastBadge: -1,
 		after: func(d time.Duration, f func()) { time.AfterFunc(d, f) }}, nil
 }
+
+// NewVoiceOnly is the lane with no push key (no paid Apple team, or no
+// phone): a card's line is still said on a Mac whose ear polls (ear.go), and
+// nothing goes to a phone.
+func NewVoiceOnly(db *store.DB) *APNs {
+	return &APNs{db: db, lastBadge: -1, after: func(d time.Duration, f func()) { time.AfterFunc(d, f) }}
+}
+
+// Phone: a push key is configured, so lines can reach a phone.
+func (a *APNs) Phone() bool { return a != nil && (a.key != nil || a.deliverFn != nil) }
 
 // speakTime is how long Siri takes to read one push aloud: the chime, "Life",
 // then title and body at roughly 14 characters a second, then the pause where
@@ -339,13 +369,40 @@ func (a *APNs) Push(kind, title, body string) error {
 	return a.push(kind, title, body, "", "")
 }
 
-// Test sends the test alert. `only` is accepted for older clients ("phone" or
-// "mac"); the phone is the only voice, so "mac" sends nothing.
+// Test sends the test alert. `only` "mac" says it on a Mac only (the one
+// earPick finds), "phone" pushes it to the phone only; "" goes as a card's
+// line would.
 func (a *APNs) Test(only string) error {
 	if only == "mac" {
-		return errors.New("apns: the Mac does not speak; the phone is the only voice")
+		rung := "headphones"
+		d, ok := a.earPick(true)
+		if !ok {
+			rung = "speakers"
+			d, ok = a.earPick(false)
+		}
+		if !ok {
+			return errors.New("no Mac can say it now: no ear polled lately with its Audio on and headphones in (or its speakers, with you at it)")
+		}
+		// One line at a time: a card's line being said or waiting its turn
+		// is never replaced or jumped.
+		if a.macBusy() || !a.macLine.TryLock() {
+			return errors.New("a Mac is saying a card's line now; try the test after it")
+		}
+		go func() {
+			defer a.macLine.Unlock()
+			a.earSay(context.Background(), "", "", d, rung, "Test line from the hub", func(bool) {})
+		}()
+		return nil
 	}
-	return a.push("fyi", "Life", "Test push from the hub", "", "")
+	if only == "phone" {
+		if !a.Phone() {
+			return errors.New("apns: push not configured")
+		}
+		return a.sendPayload(apsPayload("fyi", "Life", "Test push from the hub", false, "", a.badge()))
+	}
+	// No card to resume: a test never waits on the boot gate, so it answers
+	// its real error (no ear, no push key) at once.
+	return a.pushAs(true, "fyi", "Life", "Test push from the hub", "", "")
 }
 
 // push sends one alert in its spoken slot. The phone is the voice: the push
@@ -359,11 +416,35 @@ func (a *APNs) Test(only string) error {
 // stamped heard when the phone reports the sound, so a hub that stops with the
 // line still queued speaks it when it comes back (queue.go).
 func (a *APNs) push(kind, title, body, thread, card string) error {
+	return a.pushAs(false, kind, title, body, thread, card)
+}
+
+// pushAs: push; `resumed` = Resume's own line (or a test), which never waits
+// on the boot gate.
+func (a *APNs) pushAs(resumed bool, kind, title, body, thread, card string) error {
 	// Queued before the device check: a card raised with no device registered
 	// (a reinstall not yet re-registered, an Unregistered token dropped) is
 	// still a line the next hub's Resume should say (#112).
 	a.enqueue(card, thread, kind, title, body)
-	if a.deliverFn == nil {
+	// At startup the whole push waits (its turn, its Mac-or-phone choice)
+	// until Resume has handed out the last hub's lines and a Mac's ear has
+	// had its chance to poll: it then takes its turn behind them.
+	if !resumed && a.holdForBoot(func() {
+		if err := a.route(kind, title, body, thread, card); err != nil {
+			log.Printf("apns: push held for startup: %v", err)
+		}
+	}) {
+		return nil
+	}
+	return a.route(kind, title, body, thread, card)
+}
+
+// route: a queued push's turn, its floor and its Mac-or-phone choice.
+func (a *APNs) route(kind, title, body, thread, card string) error {
+	if a.deliverFn == nil && !a.earAlive() {
+		if !a.Phone() {
+			return errors.New("no Mac's ear is polling and push is not configured")
+		}
 		toks, err := a.tokens()
 		if err != nil {
 			return err
@@ -385,10 +466,26 @@ func (a *APNs) push(kind, title, body, thread, card string) error {
 		return a.waiting(thread, card)
 	}
 	send := func(release func()) error {
-		release()
 		// Answered while it waited its turn: nothing left to say.
 		if !a.cardOpen(card) {
+			release()
 			log.Printf("apns: %s was answered before its turn; not spoken", card)
+			return nil
+		}
+		// A Mac first when it has headphones in; the phone when its last
+		// word was headphones; a Mac's speakers while the owner is at it
+		// (ear.go). The phone's push follows the Mac's line. Lines go to the
+		// Mac in arrival order, and sayOnMac picks again once the line before
+		// this one has ended. While a line is on a Mac or waits for one, this
+		// one queues behind it whatever the pick now, so the phone never says
+		// it before the line ahead of it.
+		if _, _, mac := a.earVoice(); mac || a.macBusy() {
+			a.macEnqueue(func() { a.sayOnMac(kind, title, body, thread, card, release) })
+			return nil
+		}
+		release()
+		if !a.Phone() {
+			log.Printf("apns: no Mac can say %q now and push is not configured; unsaid", card)
 			return nil
 		}
 		return a.sendCard(apsPayload(kind, title, body, false, thread, a.badge()), card)
@@ -530,6 +627,9 @@ var pushRetryWaits = []time.Duration{2 * time.Second, 8 * time.Second, 30 * time
 // background at retryWaits, each time only while open() still holds; any
 // other 4xx is final. The first error is returned either way.
 func (a *APNs) deliver(payload []byte, open func() bool) error {
+	if a.key == nil { // NewVoiceOnly: no phone to reach
+		return nil
+	}
 	toks, err := a.tokens()
 	if err != nil {
 		return err
@@ -611,6 +711,9 @@ func transient(err error) bool {
 // the app. Best effort —
 // iOS throttles background pushes.
 func (a *APNs) Wake(build int) error {
+	if a.key == nil {
+		return nil
+	}
 	toks, err := a.tokens()
 	if err != nil {
 		return err

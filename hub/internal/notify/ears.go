@@ -10,8 +10,8 @@ import (
 
 // Ears: a push is spoken on its own only into headphones — the phone's when
 // the app finds them as its route (Speak.swift); on a speaker it is a silent
-// banner. So a held push reads "waiting to speak" only when the phone has
-// ears. The phone is known only by what it last reported on a push
+// banner. So a held push reads "waiting to speak" only when the phone or a
+// Mac (ear.go) has ears. The phone is known only by what it last reported on a push
 // (server/obs.go phoneSpeech → PhoneRoute), trusted for phoneEarsTrust.
 //
 // A wrong "no" costs a missing pill while a line waits, never a line: the
@@ -105,8 +105,13 @@ func (a *APNs) Hush(card string) {
 	log.Printf("voice: %s hushed; the card stays open", card)
 }
 
-// hasEars: whether a push now would be heard.
+// hasEars: whether a push now would be heard, on the phone or a Mac (ear.go).
 func (a *APNs) hasEars() bool {
+	return a.hasPhoneEars() || a.macEars()
+}
+
+// hasPhoneEars: the phone's last word on its route was headphones, lately.
+func (a *APNs) hasPhoneEars() bool {
 	a.emu.Lock()
 	phone := a.phoneEars
 	a.emu.Unlock()

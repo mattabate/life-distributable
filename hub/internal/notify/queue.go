@@ -98,7 +98,12 @@ func (a *APNs) LineCard(thread, line string) string {
 // first — each through the ordinary push path, so they queue behind one
 // another, wait for the floor and for the owner's microphone as any push does. Rows
 // older than a week are dropped. Called once by main after the voice is wired.
+// Opens the boot gate (Booting) once every resumed line is handed out.
 func (a *APNs) Resume() {
+	a.bootMu.Lock()
+	a.resuming = true
+	a.bootMu.Unlock()
+	defer a.openBoot()
 	if a.db == nil {
 		return
 	}
@@ -117,6 +122,10 @@ func (a *APNs) Resume() {
 		todo = append(todo, r)
 	}
 	rows.Close()
+	a.resumeMacLine(now)
+	if len(todo) > 0 {
+		a.awaitEar()
+	}
 	n := 0
 	// resumed_at is stamped after the push: enqueue clears it, so a card
 	// raised again after one resume is resumed again if a restart cuts it.
@@ -131,9 +140,16 @@ func (a *APNs) Resume() {
 			log.Printf("voice: %s was queued unheard but is closed; not re-spoken", r.card)
 			continue
 		}
+		// Read again just before its push: during the ear wait (or the line
+		// before it) the row may have been heard, or raised again by enqueue
+		// (a new queued_at), and that push says it; this one would say it twice.
+		var still int
+		if a.db.QueryRow(`SELECT 1 FROM voice_queue WHERE card=? AND heard_at='' AND resumed_at='' AND queued_at=?`, r.card, r.queued).Scan(&still) != nil {
+			continue
+		}
 		n++
 		log.Printf("voice: %s was queued unheard when the hub stopped; speaking it again", r.card)
-		err := a.push(r.kind, r.title, r.body, r.thread, r.card)
+		err := a.pushAs(true, r.kind, r.title, r.body, r.thread, r.card)
 		a.db.Exec(`UPDATE voice_queue SET queued_at=? WHERE card=?`, r.queued, r.card)
 		if err != nil {
 			log.Printf("voice: resume %s: %v; the next hub tries again", r.card, err)
@@ -145,3 +161,129 @@ func (a *APNs) Resume() {
 		log.Printf("voice: %d card(s) left unheard by the last hub, re-spoken", n)
 	}
 }
+
+// awaitEar: at startup a Mac's ear has not polled yet, so a resumed line
+// would skip a Mac with headphones in (and, with no push key, go nowhere).
+// Resume waits for the first poll, or earTrust at most (ear.boot in tests;
+// below zero = no wait).
+func (a *APNs) awaitEar() {
+	a.ear.mu.Lock()
+	wait := a.ear.boot
+	a.ear.mu.Unlock()
+	if wait < 0 {
+		return
+	}
+	if wait == 0 {
+		wait = earTrust
+	}
+	end := time.Now().Add(wait)
+	for !a.earAlive() && time.Now().Before(end) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	// One poll seen: one more poll interval, so the other ear on the hub's
+	// Mac (the helper or the app) is seen too, never past `end`.
+	if a.earAlive() {
+		if gap := min(earPollGap, time.Until(end)); gap > 0 {
+			time.Sleep(gap)
+		}
+	}
+}
+
+// earPollGap: about one ear poll interval (ops/ear.swift and MacEar poll
+// every 2 s; the second ear is usually seen within one).
+const earPollGap = time.Second
+
+// bootSafety bounds the boot gate: if Resume never starts (startup stopped
+// short of it), new pushes go on after this. Once Resume has begun, its own
+// deferred openBoot opens the gate on every return, and the timer does
+// nothing: firing mid-Resume would let held pushes ahead of resumed rows.
+const bootSafety = earTrust + 30*time.Second
+
+// Booting closes the boot gate: until Resume ends (or bootSafety, if Resume
+// never starts), each new push waits whole (pushAs), in arrival order. main
+// calls it before `go Resume()`; without it nothing waits.
+func (a *APNs) Booting() {
+	a.bootMu.Lock()
+	a.booting = true
+	a.bootMu.Unlock()
+	time.AfterFunc(bootSafety, a.bootTimeout)
+}
+
+// bootTimeout: the safety timer's end, a no-op once Resume has begun.
+func (a *APNs) bootTimeout() {
+	a.bootMu.Lock()
+	started := a.resuming
+	a.bootMu.Unlock()
+	if !started {
+		a.openBoot()
+	}
+}
+
+// holdForBoot queues `job` while the gate is closed (true = held).
+func (a *APNs) holdForBoot(job func()) bool {
+	a.bootMu.Lock()
+	defer a.bootMu.Unlock()
+	if !a.booting {
+		return false
+	}
+	a.bootJobs = append(a.bootJobs, job)
+	return true
+}
+
+// openBoot runs the held choices in arrival order, then opens the gate. The
+// gate stays closed while they run, so a push arriving meanwhile goes after
+// them; a second call (the safety timer) waits for the first and finds it open.
+func (a *APNs) openBoot() {
+	a.bootRun.Lock()
+	defer a.bootRun.Unlock()
+	for {
+		a.bootMu.Lock()
+		jobs := a.bootJobs
+		a.bootJobs = nil
+		if len(jobs) == 0 {
+			a.booting = false
+			a.bootMu.Unlock()
+			return
+		}
+		a.bootMu.Unlock()
+		for _, j := range jobs {
+			j()
+		}
+	}
+}
+
+// earBegunKey (a settings row) names the card whose line a Mac began and
+// has not ended: one line is on a Mac at a time (macLine), so one row.
+const earBegunKey = "voice:mac-begun"
+
+// macBegun records (card) or clears ("") the line a Mac is saying.
+func (a *APNs) macBegun(card string) {
+	if a.db != nil {
+		a.db.SetSetting(earBegunKey, card)
+	}
+}
+
+// resumeMacLine: the last hub stopped while a Mac was saying a card's line.
+// It is heard (from its first word), so it is not said again, but the phone
+// never got its banner: send that now, if the line began within
+// macBegunWindow and the card is still open. No phone: nothing.
+func (a *APNs) resumeMacLine(now time.Time) {
+	card := a.db.Setting(earBegunKey)
+	if card == "" {
+		return
+	}
+	a.macBegun("")
+	var kind, title, body, thread string
+	err := a.db.QueryRow(`SELECT kind, title, body, thread FROM voice_queue WHERE card=? AND heard_at >= ?`,
+		card, store.TS(now.Add(-macBegunWindow))).Scan(&kind, &title, &body, &thread)
+	if err != nil || !a.Phone() || a.Open != nil && !a.Open(card) {
+		return
+	}
+	log.Printf("voice: the last hub stopped mid-line on a Mac (%s); the phone gets its banner", card)
+	if err := a.sendCard(apsPayload(kind, title, body, true, thread, a.badge()), card); err != nil {
+		log.Printf("voice: banner for %s: %v", card, err)
+	}
+}
+
+// macBegunWindow: how recent a line cut by a restart must be for its banner.
+const macBegunWindow = 5 * time.Minute

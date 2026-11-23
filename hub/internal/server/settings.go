@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"life/hub/internal/notify"
 	"life/hub/internal/spend"
 	"life/hub/internal/threads"
 )
@@ -27,11 +28,14 @@ type settingsOut struct {
 	ModelCap      string   `json:"model_cap"`
 	Models        []string `json:"models"`
 	OwnerName     string   `json:"owner_name"`
+	// Devices: the hub's Mac, every Mac whose ear has polled, then the phone
+	// (notify.MacEars), for Configuration's Devices card.
+	Devices []notify.MacEars `json:"devices"`
 }
 
 func (s *Server) settingsNow() settingsOut {
 	out := settingsOut{TeamMode: s.thr.TeamMode(), PlainSessions: s.thr.PlainSessions(), Models: s.modelChoices(),
-		OwnerName: strings.TrimSpace(s.cfg.OwnerName)}
+		OwnerName: strings.TrimSpace(s.cfg.OwnerName), Devices: s.Push.Macs()}
 	if out.OwnerName == "the owner" { // config's stand-in when hub.json names no one
 		out.OwnerName = ""
 	}
@@ -48,18 +52,31 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // patchSettings writes the keys given into ops/hub.json (every other key
-// and its place kept) and applies them at once: no restart.
+// and its place kept) and applies them at once: no restart. `audio_by` is
+// each Mac's Audio switch, {device: on}, kept in the hub's settings table.
 func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		TeamMode      *bool   `json:"team_mode"`
-		PlainSessions *bool   `json:"plain_sessions"`
-		ModelCap      *string `json:"model_cap"`
+		TeamMode      *bool           `json:"team_mode"`
+		PlainSessions *bool           `json:"plain_sessions"`
+		ModelCap      *string         `json:"model_cap"`
+		AudioBy       map[string]bool `json:"audio_by"`
 	}
+	const keys = "team_mode, plain_sessions, model_cap, audio_by"
 	dec := json.NewDecoder(jsonBody(w, r))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
-		jsonErr(w, 400, "bad json (keys: team_mode, plain_sessions, model_cap): "+err.Error())
+		jsonErr(w, 400, "bad json (keys: "+keys+"): "+err.Error())
 		return
+	}
+	// Every field is checked before anything is written: a 400 saves nothing.
+	audio := map[string]bool{}
+	for d, on := range in.AudioBy {
+		n, ok := notify.EarDevice(d)
+		if !ok {
+			jsonErr(w, 400, "audio_by names a Mac by its device name")
+			return
+		}
+		audio[n] = on
 	}
 	set := map[string]any{}
 	if in.TeamMode != nil {
@@ -77,13 +94,18 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 		set["model_cap"] = c
 		in.ModelCap = &c
 	}
-	if len(set) == 0 {
-		jsonErr(w, 400, "nothing to set (keys: team_mode, plain_sessions, model_cap)")
+	if len(set) == 0 && len(audio) == 0 {
+		jsonErr(w, 400, "nothing to set (keys: "+keys+")")
 		return
 	}
-	if err := writeHubJSON(s.cfg.OpsPath("hub.json"), set); err != nil {
-		jsonErr(w, 500, "ops/hub.json: "+err.Error())
-		return
+	// hub.json first and the live fields with it: if it cannot be written,
+	// nothing changes; if an Audio row then fails, the running hub still
+	// matches hub.json.
+	if len(set) > 0 {
+		if err := writeHubJSON(s.cfg.OpsPath("hub.json"), set); err != nil {
+			jsonErr(w, 500, "ops/hub.json: "+err.Error())
+			return
+		}
 	}
 	if in.ModelCap != nil {
 		s.cfg.ModelCap = *in.ModelCap
@@ -101,6 +123,12 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 			s.thr.StartTeam()
 		} else {
 			s.thr.SetTeamMode(false)
+		}
+	}
+	for d, on := range audio {
+		if err := s.Push.SetAudio(d, on); err != nil {
+			jsonErr(w, 500, "audio: "+err.Error())
+			return
 		}
 	}
 	writeJSON(w, 200, s.settingsNow())

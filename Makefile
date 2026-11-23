@@ -27,6 +27,7 @@ VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
 build:
 ifeq ($(OS),Darwin)
 	@$(MAKE) --no-print-directory ops/bin/mic || echo "mic: skipped (needs the macOS 26 SDK); the console's Mic stays off"
+	@$(MAKE) --no-print-directory ops/bin/ear || echo "ear: skipped; this Mac says lines only while the desktop app is open"
 else
 	@echo "mic: skipped (macOS only); the console's Mic stays off"
 endif
@@ -55,6 +56,14 @@ ops/bin/mic: ops/mic.swift ops/mic.plist
 	@mkdir -p $(@D)
 	swiftc -O -o $@ $< -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker ops/mic.plist
 	$(call sign,$@,com.life.mic)
+
+# The hub Mac's voice (ops/ear.swift, launchd com.life.ear from
+# `ops/hub.sh install`): says a card's line with `say` when the hub picks
+# this Mac (notify/ear.go), the desktop app open or not.
+ops/bin/ear: ops/ear.swift
+	@mkdir -p $(@D)
+	swiftc -O -o $@ $<
+	$(call sign,$@,com.life.ear)
 
 # Syntax-check the laptop console's JS. Deliberately NOT part of `check`: the
 # hub is one static binary with no node toolchain and the gate must not grow a
