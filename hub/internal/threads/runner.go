@@ -634,6 +634,19 @@ func (m *Manager) pasteText(t Thread, q queuedMsg) string {
 // todoFile: what a session does with a message that is a new task.
 const todoFile = "Sort it yourself, part by part (one message can hold both): what is about the task in hand, a steer, an answer or something you were waiting for, you use now; what is a NEW task you file in one step, `lifectl todo add \"<the task, in words that stand alone>\" --from <who asked>`, and go on with the task in hand. A spoken message often holds several tasks: each gets its own line, none is dropped. The owner sees the list under your name, and the hub opens it the moment this turn ends, so nothing filed is lost and nothing is scheduled for later."
 
+// turnTodoHead opens a turn that starts on a new message of the owner's (an
+// answer to one card is not a new message).
+const turnTodoHead = "[When the message holds more than one task, the first is the task in hand. " + todoFile + "]\n\n"
+
+func ownerMessage(qs []queuedMsg) bool {
+	for _, q := range qs {
+		if q.role == "owner" && q.kind == "message" && len(q.replies) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // midTurnHead frames what reaches a turn in flight: the owner's words, a
 // teammate's relay, or both. A message of the owner's is not always a steer
 // and a teammate's is not always a new task; the session decides.
@@ -743,6 +756,11 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 	prompt := strings.Join(pieces, "\n\n---\n\n")
 	if midTurn {
 		prompt = midTurnHead(qs) + prompt
+	} else if ownerMessage(qs) {
+		// A turn the owner's message opens gets the same rule: a session the
+		// owner mostly wakes, and seldom steers, otherwise files nothing from
+		// a message holding several tasks.
+		prompt = turnTodoHead + prompt
 	}
 	if fresh {
 		pre := m.systemPreamble(t)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -100,6 +101,9 @@ func (m *Manager) TodoSet(threadID string, id int64, state, note string) error {
 		if note == "" {
 			return errors.New("a waiting to-do says what it waits on; work that can run now stays open")
 		}
+		if selfWait(note) {
+			return errors.New("a to-do never waits on the person's own land, build, commit, push or tests: those run now, in this turn, and the item closes when they are done (`todo done`); wait only on the owner, a teammate or the world")
+		}
 	case "open":
 	default:
 		return fmt.Errorf("state %q: open, waiting, done or dropped", state)
@@ -117,6 +121,17 @@ func (m *Manager) TodoSet(threadID string, id int64, state, note string) error {
 		return ErrNoTodo
 	}
 	return nil
+}
+
+// selfWait: a wait note that names the person's own next step, "the land",
+// "build finishing", "my commit", rather than something outside. A note that
+// names the owner, a card or a gate is their move, so it passes.
+// A note naming a teammate, a maintainer, CI or a review is a wait outside.
+var selfWaitRe = regexp.MustCompile(`(?i)^((waiting|wait)\s+)?((on|for|until)\s+)?((my|our|the|a)\s+)?(own\s+)?(land(ing)?|build|commit|push|make( check| build)?|ship|tests?|deploy)\b`)
+var outsideRe = regexp.MustCompile(`(?i)\b(owner|their|them|cards?|gates?|approv\w*|teammates?|maintainers?|upstream|vendors?|review\w*|ci|notifications?)\b`)
+
+func selfWait(note string) bool {
+	return selfWaitRe.MatchString(note) && !outsideRe.MatchString(note)
 }
 
 // Todos: a session's list, open first, then waiting, oldest first in each.

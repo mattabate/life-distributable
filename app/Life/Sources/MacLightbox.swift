@@ -183,7 +183,21 @@ final class LightboxView: UIView, UIGestureRecognizerDelegate {
         let tap = UITapGestureRecognizer(target: self, action: #selector(closeTapped))
         tap.delegate = self
         addGestureRecognizer(tap)
+        // A trackpad pinch zooms about the pointer; a click-drag or a
+        // two-finger scroll moves the zoomed picture, inside the window.
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:)))
+        pinch.delegate = self
+        addGestureRecognizer(pinch)
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
+        pan.allowedScrollTypesMask = .all
+        pan.delegate = self
+        addGestureRecognizer(pan)
     }
+    /// 1 = fitted to the window; `shift` moves the picture's centre off the
+    /// fitted one, in points.
+    private var zoom: CGFloat = 1
+    private var shift = CGPoint.zero
+    private var fitted = CGRect.zero
     private let shadow = UIView()
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -221,16 +235,68 @@ final class LightboxView: UIView, UIGestureRecognizerDelegate {
         // The picture and its caption as one centred column with a 10 pt gap.
         let block = size.height + 10 + capSize.height
         let y = ((bounds.height - block) / 2).rounded()
-        imageView.frame = CGRect(x: ((bounds.width - size.width) / 2).rounded(), y: y, width: size.width, height: size.height)
-        shadow.frame = imageView.frame
-        shadow.layer.shadowPath = UIBezierPath(roundedRect: shadow.bounds, cornerRadius: 8).cgPath
-        cap.frame = CGRect(x: ((bounds.width - capSize.width) / 2).rounded(), y: imageView.frame.maxY + 10,
+        fitted = CGRect(x: ((bounds.width - size.width) / 2).rounded(), y: y, width: size.width, height: size.height)
+        cap.frame = CGRect(x: ((bounds.width - capSize.width) / 2).rounded(), y: fitted.maxY + 10,
                            width: capSize.width, height: capSize.height)
+        placeImage()
     }
 
-    // A click anywhere but the link closes (the web's `e.target.tagName !== 'A'`).
+    /// The fitted frame grown by `zoom` about its centre, then moved by
+    /// `shift`, kept so a picture wider than the window never leaves a gap at
+    /// an edge and a narrower one stays centred on that axis.
+    private func placeImage() {
+        if zoom <= 1 { zoom = 1; shift = .zero }
+        let w = fitted.width * zoom, h = fitted.height * zoom
+        func clamp(_ v: CGFloat, _ size: CGFloat, _ room: CGFloat, _ mid: CGFloat, _ fitMid: CGFloat) -> CGFloat {
+            // Centre offset from the fitted centre that keeps [mid ± room/2] covered.
+            // Smaller than the window on this axis: it stays where it is
+            // inside the window, so a light pinch never jumps it by the
+            // caption's room and no edge of it leaves the window.
+            guard size > room else {
+                let slack = (room - size) / 2
+                return min(max(v, mid - slack - fitMid), mid + slack - fitMid)
+            }
+            let lo = mid + room / 2 - size / 2 - fitMid, hi = mid - room / 2 + size / 2 - fitMid
+            return min(max(v, lo), hi)
+        }
+        shift.x = clamp(shift.x, w, bounds.width, bounds.midX, fitted.midX)
+        shift.y = clamp(shift.y, h, bounds.height, bounds.midY, fitted.midY)
+        imageView.frame = CGRect(x: fitted.midX + shift.x - w / 2, y: fitted.midY + shift.y - h / 2, width: w, height: h)
+        shadow.frame = imageView.frame
+        shadow.layer.shadowPath = UIBezierPath(roundedRect: shadow.bounds, cornerRadius: 8).cgPath
+        cap.isHidden = zoom > 1
+    }
+
+    @objc private func pinched(_ g: UIPinchGestureRecognizer) {
+        guard image != nil, g.state == .changed || g.state == .ended else { return }
+        let z = min(max(zoom * g.scale, 1), 12)
+        // The point under the pointer stays under it.
+        let p = g.location(in: self), c = CGPoint(x: fitted.midX + shift.x, y: fitted.midY + shift.y)
+        let r = z / zoom
+        shift = CGPoint(x: p.x + (c.x - p.x) * r - fitted.midX, y: p.y + (c.y - p.y) * r - fitted.midY)
+        zoom = z
+        g.scale = 1
+        placeImage()
+    }
+
+    @objc private func panned(_ g: UIPanGestureRecognizer) {
+        guard zoom > 1 else { return }
+        let t = g.translation(in: self)
+        shift.x += t.x
+        shift.y += t.y
+        g.setTranslation(.zero, in: self)
+        placeImage()
+    }
+
+    // A click anywhere but the link closes (the web's `e.target.tagName !== 'A'`);
+    // on a zoomed picture it does not, so a look around never loses it.
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        !(touch.view is UIControl)
+        if touch.view is UIControl { return false }
+        if g is UITapGestureRecognizer, zoom > 1 { return !imageView.frame.contains(touch.location(in: self)) }
+        return true
+    }
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool {
+        !(g is UITapGestureRecognizer || o is UITapGestureRecognizer)
     }
     @objc private func closeTapped() { MacLightbox.close() }
 

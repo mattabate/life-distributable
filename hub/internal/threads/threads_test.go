@@ -1020,6 +1020,17 @@ func TestConsoleMessageIsStampedNotInjected(t *testing.T) {
 	if i, j := strings.Index(p, "and the one after it"), strings.Index(p, "[Sent from the web console"); !(i < j && j < strings.Index(p, "from the phone")) {
 		t.Fatalf("the stamp sits under the console message:\n%s", p)
 	}
+	// A turn the owner's message opens carries the to-do rule once; a
+	// check-in or a turn in flight does not get this head.
+	if strings.Count(p, turnTodoHead) != 1 {
+		t.Fatalf("an owner's turn lacks the to-do head:\n%s", p)
+	}
+	if p, _ := m.prompt(th, []queuedMsg{{role: "hub", kind: "checkin", text: "weekly look"}}, false, false); strings.Contains(p, turnTodoHead) {
+		t.Fatalf("a check-in got the to-do head:\n%s", p)
+	}
+	if p, _ := m.prompt(th, qs[1:], true, false); strings.Contains(p, turnTodoHead) {
+		t.Fatalf("a mid-turn message got the turn head as well:\n%s", p)
+	}
 }
 
 // The desktop app's install card, like the phone's, shows only the most
