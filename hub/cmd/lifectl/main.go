@@ -1051,6 +1051,7 @@ func main() {
 		// lifectl thread <id> goal <goal-id|off>
 		// lifectl thread <id> model <auto|judgment|build|claude-…>
 		// lifectl thread <id> persona <key|off>
+		// lifectl thread <id|me> title "<name>"
 		// lifectl thread <id> checkin | stop | archive | events
 		if len(os.Args) < 3 {
 			usage()
@@ -1067,6 +1068,12 @@ func main() {
 			return
 		}
 		id := os.Args[2]
+		if id == "me" {
+			// "me": the session running this (lifectl thread me title "…").
+			if id = os.Getenv("LIFE_THREAD_ID"); id == "" {
+				die("thread me: only inside a session")
+			}
+		}
 		if len(os.Args) == 3 {
 			c.call("GET", "/api/v1/threads/"+id, nil)
 			c.call("GET", "/api/v1/threads/"+id+"/messages?limit=20", nil)
@@ -1104,6 +1111,11 @@ func main() {
 			// rung this thread's wakes start on (ops/hub.json model_policy)
 			need(5)
 			c.call("PATCH", "/api/v1/threads/"+id, map[string]string{"model_class": os.Args[4]})
+		case "title":
+			// lifectl thread <id|me> title "<name>"  — a session renames
+			// itself (a role, when the owner gives it a new name)
+			need(5)
+			c.call("PATCH", "/api/v1/threads/"+id, map[string]string{"title": os.Args[4]})
 		case "persona":
 			// lifectl thread <id> persona <key|off>  — the role this session
 			// plays
@@ -1713,7 +1725,8 @@ gate      propose --title t --detail d [--kind money|delete|contact|share|commit
             · meeting say <id> "text|@file|-" · meeting join|leave <id> · meeting close <id> ["outcome"]
 sessions  threads [--q words] [--archived] · thread new "prompt" [--goal g] [--schedule w] [--title t] [--project p]
           thread <id> [send text|@file|- | schedule when|off ["check-in prompt"] | goal g|off
-            | model auto|judgment|build|claude-… | persona key|off | checkin | stop | archive | events]
+            | model auto|judgment|build|claude-… | persona key|off | title "name" | checkin | stop | archive | events]
+            (id "me" = this session)
           personas · persona new <key> --role r --who w --brief text|@file [--name n] [--covers c] [--lane l]
             [--route-lane l] [--team t] [--reports-to key] [--goals a,b]
             · persona <key> set role|covers|who|lane|route_lane|brief|team|reports_to|goals <value>

@@ -2529,7 +2529,7 @@ func (c *Calendar) threadFor(it Item) (string, error) {
 	if _, err := c.thr.Get(c.FallbackThread); err == nil {
 		return c.FallbackThread, nil
 	}
-	t, err := c.thr.CreateIdle(c.FallbackThread, "Calendar", "life")
+	t, err := c.thr.CreateIdle(c.FallbackThread, threads.StaffName, "life")
 	if err != nil {
 		return "", err
 	}

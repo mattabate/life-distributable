@@ -406,10 +406,11 @@ It takes one message.
 4. **Tell them how to pass it on.** One sentence: a friend installs it by
    pasting the one sentence from the README into Claude Code on their Mac.
 5. **The team: tell them how it works.** Say, in these words: *"Your hub
-   runs as a team. Your first session is a chief of staff: it owns your
-   calendar, takes any message no one else owns, and adds new roles when
-   you ask it for one (say \"I'd like a fitness coach\"). Each new message
-   goes to the role that owns it."* Nothing to run: the team is the only
+   runs as a team. Your first session is Herbert, your chief of staff: it
+   owns your calendar, takes any message no one else owns, and adds new
+   roles when you ask it for one (say \"I'd like a fitness coach\"). Each
+   new message goes to the role that owns it. Every name is yours to
+   change: ask Herbert for another."* Nothing to run: the team is the only
    mode, there is no switch.
 6. **Separate user, never re-asked.** If they said no in step 0, say once
    that sessions run as them and that running sessions as a separate user
