@@ -52,7 +52,7 @@ func (s *Server) listThreads(w http.ResponseWriter, r *http.Request) {
 	var ts []threads.Thread
 	var err error
 	if r.URL.Query().Get("persona") == "1" {
-		// The roles, in role order.
+		// The roles, in role order (empty with team mode off).
 		ts, err = s.thr.Personas()
 	} else {
 		ts, err = s.thr.Find(r.URL.Query().Get("q"), r.URL.Query().Get("archived") == "1")
@@ -94,11 +94,11 @@ func (s *Server) createThread(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// A new message from one of the owner's surfaces (no title, goal or
-	// schedule chosen) goes past the router first, which hands it to the
-	// session that owns that work, else the chief of staff. lifectl's new
-	// sessions and scheduled ones are never routed.
-	if via(in.Via) != "" && in.Title == "" && in.GoalID == "" && in.Schedule == "" && in.Project == "life" {
+	// Team mode: a plain new message from one of the owner's surfaces (no
+	// title, goal or schedule chosen) goes past the router first, which may
+	// hand it to the session that owns that work. lifectl's new sessions and
+	// scheduled ones are never routed.
+	if s.thr.TeamMode() && via(in.Via) != "" && in.Title == "" && in.GoalID == "" && in.Schedule == "" && in.Project == "life" {
 		t, routed, err := s.thr.CreateRouted(in.Prompt, in.Attachments, via(in.Via))
 		if err != nil {
 			jsonErr(w, 400, err.Error())
@@ -126,13 +126,17 @@ func (s *Server) createThread(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, t)
 }
 
-// routeDry: where the router would send a message, without sending it
-// (`lifectl api POST /api/v1/route '{"prompt": "…"}'`). `model` tries
+// routeDry: where the router would send a message, without sending it (team
+// mode; `lifectl api POST /api/v1/route '{"prompt": "…"}'`). `model` tries
 // another Ollama model in place of the default.
 func (s *Server) routeDry(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Prompt, Model string }
 	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil || strings.TrimSpace(in.Prompt) == "" {
 		jsonErr(w, 400, "need {prompt}")
+		return
+	}
+	if !s.thr.TeamMode() {
+		jsonErr(w, 404, "team mode is off (team_mode in ops/hub.json)")
 		return
 	}
 	id, why := s.thr.RouteWith(in.Prompt, in.Model)

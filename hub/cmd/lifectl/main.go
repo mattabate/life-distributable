@@ -1050,7 +1050,7 @@ func main() {
 		// lifectl thread <id> schedule <when|off>
 		// lifectl thread <id> goal <goal-id|off>
 		// lifectl thread <id> model <auto|judgment|build|claude-…>
-		// lifectl thread <id> persona <key|off>
+		// lifectl thread <id> persona <key|off>        (team mode)
 		// lifectl thread <id> checkin | stop | archive | events
 		if len(os.Args) < 3 {
 			usage()
@@ -1106,7 +1106,7 @@ func main() {
 			c.call("PATCH", "/api/v1/threads/"+id, map[string]string{"model_class": os.Args[4]})
 		case "persona":
 			// lifectl thread <id> persona <key|off>  — the role this session
-			// plays
+			// plays (team mode; the hub refuses with how to turn it on when off)
 			need(5)
 			c.call("PATCH", "/api/v1/threads/"+id, map[string]string{"persona": os.Args[4]})
 		case "checkin":
@@ -1122,7 +1122,7 @@ func main() {
 			usage()
 		}
 	case "personas":
-		// lifectl personas   the team's roles
+		// lifectl personas   the team's roles (team mode)
 		c.call("GET", "/api/v1/personas", nil)
 	case "persona":
 		// lifectl persona new <key> --name n --role r --who w --brief text|@file [--covers c] [--lane l] [--route-lane l] [--team t] [--reports-to key] [--goals a,b]
@@ -1164,10 +1164,15 @@ func main() {
 		}
 		usage()
 	case "settings":
-		// lifectl settings                        model_cap, the models, the devices
-		// lifectl settings set model_cap <model|"">  (the owner's: a session is refused)
+		// lifectl settings                        team_mode, plain_sessions, model_cap
+		// lifectl settings set <key> <value>     (the owner's: a session is refused)
 		if len(os.Args) >= 5 && os.Args[2] == "set" {
-			c.call("PATCH", "/api/v1/settings", map[string]any{os.Args[3]: os.Args[4]})
+			var v any = os.Args[4]
+			switch os.Args[3] {
+			case "team_mode", "plain_sessions":
+				v = os.Args[4] == "true" || os.Args[4] == "on" || os.Args[4] == "yes"
+			}
+			c.call("PATCH", "/api/v1/settings", map[string]any{os.Args[3]: v})
 			return
 		}
 		c.call("GET", "/api/v1/settings", nil)
@@ -1717,7 +1722,7 @@ sessions  threads [--q words] [--archived] · thread new "prompt" [--goal g] [--
           personas · persona new <key> --role r --who w --brief text|@file [--name n] [--covers c] [--lane l]
             [--route-lane l] [--team t] [--reports-to key] [--goals a,b]
             · persona <key> set role|covers|who|lane|route_lane|brief|team|reports_to|goals <value>
-          settings · settings set model_cap <model|"">
+          settings · settings set team_mode|plain_sessions true|false · settings set model_cap <model|"">
           workspace [persona] · workspace cat <persona>/<name> · workspace put <name> text|@file [--persona p]
           prompt "text" [--thread id | --new [--title t] [--goal g]] [--in 30m | --on YYYY-MM-DD [--at HH:MM]]
             [--re ask:id|action:id|rec:id|cal:id|message:id] [--outcome done|wont|approved|denied]

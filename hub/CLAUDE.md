@@ -12,8 +12,8 @@ console in `web/`) · `internal/store` (SQLite + the migrator) ·
 `internal/calendar` (dated items) · `internal/recs` (recommendations +
 `flow.go`, what happens around a decision) · `internal/attention` (the board:
 ONE "your turn" for both surfaces) · `internal/deliver` (the one way a hub
-event reaches a session) · `internal/workspace` (a role's own files;
-`threads/persona.go` + `route.go` are the roles and the router,
+event reaches a session) · `internal/workspace` (a role's own files, team
+mode; `threads/persona.go` + `route.go` are the roles and the router,
 `server/settings.go` the owner's live switches).
 
 ## Recipe: add an endpoint

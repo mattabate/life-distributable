@@ -1588,7 +1588,7 @@ div.goal-group:first-child { margin-top: 0; }
 /* The Team: the switches, a hairline, then the org chart, a tree: the owner
    on top, a line down and across, a card per role that reports to the owner,
    its goals' emblems beside its name, its own reports a list inside. */
-.cfg-team { margin-top: 4px; }
+.cfg-team { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .cfg-org { display: flex; flex-direction: column; align-items: center; }
 .cfg-me { font-weight: 650; padding: 4px 16px; border: 1px solid var(--line); border-radius: 999px; position: relative; margin-bottom: 20px; }
 .cfg-me::after { content: ""; position: absolute; left: 50%; top: 100%; height: 10px; border-left: 1px solid var(--line); }

@@ -58,8 +58,10 @@ func newTestDB(t *testing.T) (*Server, *store.DB) {
 	th, _ := threads.New(db, "/usr/local/bin/claude", filepath.Join(t.TempDir(), "runs"), "life", func(p string) (string, bool) { return "/tmp", p == "life" }, nil, nil)
 	th.Summarize = nil // no claude in tests
 	th.Run = func(string, ...string) ([]byte, error) { return nil, nil }
-	// No router and no chief of staff until a test starts the team: a new
-	// message is a new session.
+	// Team mode on, with no router: the role routes answer, a new message
+	// is still a new session.
+	th.SetTeamMode(true)
+	th.SetPlainSessions(true) // a message no role claims stays a new session
 	th.Pick, th.Local = nil, nil
 	s := New(cfg, "secret", q, sc, gs, ob, th)
 	s.WS = &workspace.Store{Dir: filepath.Join(t.TempDir(), "people"), Role: th.PersonaOf, Known: th.IsPersona}
@@ -2193,7 +2195,7 @@ func TestRecsSayWhenTheirSessionIsRunning(t *testing.T) {
 	if w := s.do(t, "GET", "/api/v1/recs/"+bySession.ID, nil); strings.Contains(w.Body.String(), "thread_running") {
 		t.Fatal("false should be omitted:", w.Body.String())
 	}
-	// Whose rec it is rides along, running or not, for a role's
+	// Whose rec it is rides along in team mode, running or not, for a role's
 	// session only; the owner's own has none.
 	db.Exec(`UPDATE threads SET title='Researcher' WHERE id=?`, th.ID)
 	if w := s.do(t, "GET", "/api/v1/recs/"+bySession.ID, nil); strings.Contains(w.Body.String(), "thread_title") {
@@ -2209,6 +2211,11 @@ func TestRecsSayWhenTheirSessionIsRunning(t *testing.T) {
 	if w := s.do(t, "GET", "/api/v1/recs/"+byOwner.ID, nil); strings.Contains(w.Body.String(), "thread_title") {
 		t.Fatal("the owner's own rec has no session:", w.Body.String())
 	}
+	s.thr.SetTeamMode(false)
+	if w := s.do(t, "GET", "/api/v1/recs/"+bySession.ID, nil); strings.Contains(w.Body.String(), "thread_title") {
+		t.Fatal("team mode off names nobody:", w.Body.String())
+	}
+	s.thr.SetTeamMode(true)
 	if _, err := db.Exec(`UPDATE threads SET status='running' WHERE id=?`, th.ID); err != nil {
 		t.Fatal(err)
 	}

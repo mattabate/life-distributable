@@ -1,12 +1,11 @@
-// The owner's switches (the model cap in ops/hub.json, each Mac's Audio),
-// and the team's roles.
+// The owner's switches that live in ops/hub.json (team mode, plain sessions,
+// the model cap), and the team's roles.
 package server
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,16 +23,18 @@ import (
 // what the apps call the owner (the org chart's top node, their messages'
 // author); "" = none, and the apps say "You".
 type settingsOut struct {
-	ModelCap  string   `json:"model_cap"`
-	Models    []string `json:"models"`
-	OwnerName string   `json:"owner_name"`
+	TeamMode      bool     `json:"team_mode"`
+	PlainSessions bool     `json:"plain_sessions"`
+	ModelCap      string   `json:"model_cap"`
+	Models        []string `json:"models"`
+	OwnerName     string   `json:"owner_name"`
 	// Devices: the hub's Mac, every Mac whose ear has polled, then the phone
 	// (notify.MacEars), for Configuration's Devices card.
 	Devices []notify.MacEars `json:"devices"`
 }
 
 func (s *Server) settingsNow() settingsOut {
-	out := settingsOut{Models: s.modelChoices(),
+	out := settingsOut{TeamMode: s.thr.TeamMode(), PlainSessions: s.thr.PlainSessions(), Models: s.modelChoices(),
 		OwnerName: strings.TrimSpace(s.cfg.OwnerName), Devices: s.Push.Macs()}
 	if out.OwnerName == "the owner" { // config's stand-in when hub.json names no one
 		out.OwnerName = ""
@@ -55,10 +56,12 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 // each Mac's Audio switch, {device: on}, kept in the hub's settings table.
 func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		ModelCap *string         `json:"model_cap"`
-		AudioBy  map[string]bool `json:"audio_by"`
+		TeamMode      *bool           `json:"team_mode"`
+		PlainSessions *bool           `json:"plain_sessions"`
+		ModelCap      *string         `json:"model_cap"`
+		AudioBy       map[string]bool `json:"audio_by"`
 	}
-	const keys = "model_cap, audio_by"
+	const keys = "team_mode, plain_sessions, model_cap, audio_by"
 	dec := json.NewDecoder(jsonBody(w, r))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
@@ -76,6 +79,12 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 		audio[n] = on
 	}
 	set := map[string]any{}
+	if in.TeamMode != nil {
+		set["team_mode"] = *in.TeamMode
+	}
+	if in.PlainSessions != nil {
+		set["plain_sessions"] = *in.PlainSessions
+	}
 	if in.ModelCap != nil {
 		c := spend.Current(strings.TrimSpace(*in.ModelCap))
 		if c != "" && !slices.Contains(s.modelChoices(), c) {
@@ -102,6 +111,18 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 		s.cfg.ModelCap = *in.ModelCap
 		if s.picker != nil {
 			s.picker.SetCap(*in.ModelCap)
+		}
+	}
+	if in.PlainSessions != nil {
+		s.cfg.PlainSessions = *in.PlainSessions
+		s.thr.SetPlainSessions(*in.PlainSessions)
+	}
+	if in.TeamMode != nil {
+		s.cfg.TeamMode = *in.TeamMode
+		if *in.TeamMode {
+			s.thr.StartTeam()
+		} else {
+			s.thr.SetTeamMode(false)
 		}
 	}
 	for d, on := range audio {
@@ -148,8 +169,12 @@ func writeHubJSON(path string, set map[string]any) error {
 		}
 		kvs = append(kvs, kv{tok.(string), v})
 	}
-	for _, k := range slices.Sorted(maps.Keys(set)) {
-		raw, _ := json.Marshal(set[k])
+	for _, k := range []string{"team_mode", "plain_sessions", "model_cap"} {
+		v, ok := set[k]
+		if !ok {
+			continue
+		}
+		raw, _ := json.Marshal(v)
 		i := slices.IndexFunc(kvs, func(e kv) bool { return e.k == k })
 		if i < 0 {
 			kvs = append(kvs, kv{k, raw})
@@ -200,11 +225,15 @@ func writeHubJSON(path string, set map[string]any) error {
 	return err
 }
 
-// The team's roles. Reading them is anyone's; adding or rewriting one is the
-// owner's or the chief of staff's: the owner asks the chief of staff for a
-// new role, never a form.
+// The team's roles (team mode). Reading them is anyone's; adding or
+// rewriting one is the owner's or the chief of staff's: the owner asks the
+// chief of staff for a new role, never a form.
 
 func (s *Server) listPersonas(w http.ResponseWriter, r *http.Request) {
+	if !s.thr.TeamMode() {
+		jsonErr(w, 404, "team mode is off (team_mode in ops/hub.json)")
+		return
+	}
 	writeJSON(w, 200, s.thr.PersonaDefs())
 }
 
@@ -212,6 +241,10 @@ func (s *Server) listPersonas(w http.ResponseWriter, r *http.Request) {
 // session that is the chief of staff (an older install's executive assistant
 // where there is none).
 func (s *Server) teamWriter(w http.ResponseWriter, r *http.Request) bool {
+	if !s.thr.TeamMode() {
+		jsonErr(w, 404, "team mode is off (team_mode in ops/hub.json)")
+		return false
+	}
 	if id := s.caller(r); id != "" && id != s.thr.CatchAll() {
 		jsonErr(w, 403, "only the chief of staff adds or changes a role: relay the owner's wish there (`lifectl relay <its id> \"…\"`)")
 		return false

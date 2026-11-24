@@ -117,12 +117,11 @@ func TestAudioRowFailureKeepsLiveSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
-	cap := s.modelChoices()[1]
-	w := s.do(t, "PATCH", "/api/v1/settings", map[string]any{"model_cap": cap, "audio_by": map[string]bool{"macbook-air": false}})
+	w := s.do(t, "PATCH", "/api/v1/settings", map[string]any{"plain_sessions": true, "audio_by": map[string]bool{"macbook-air": false}})
 	if w.Code != 500 {
 		t.Fatalf("closed db: %d %s", w.Code, w.Body)
 	}
-	if s.cfg.ModelCap != cap {
-		t.Fatalf("hub.json says model_cap, the running hub does not (%s)", w.Body)
+	if !s.cfg.PlainSessions {
+		t.Fatalf("hub.json says plain_sessions, the running hub does not (%s)", w.Body)
 	}
 }

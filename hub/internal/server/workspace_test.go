@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -9,7 +10,7 @@ import (
 
 // A role's files over the API: the owner and the role's own session write,
 // anyone reads, by role key or session id; unknown roles and hidden names
-// are refused.
+// are refused; the whole thing is a 404 with team mode off.
 func TestWorkspaceRoutes(t *testing.T) {
 	s := newTest(t)
 	th, err := s.thr.Create("Calendar keeper", "life", "", "p", "", "", nil)
@@ -63,5 +64,17 @@ func TestWorkspaceRoutes(t *testing.T) {
 	}
 	if w := s.do(t, "GET", "/api/v1/threads?persona=1", nil); w.Code != 200 || !strings.Contains(w.Body.String(), `"role":"Executive assistant"`) {
 		t.Fatalf("persona list: %d %s", w.Code, w.Body)
+	}
+
+	// The switch off: no roles, no workspace, no persona to set.
+	s.thr.SetTeamMode(false)
+	if w := s.do(t, "GET", "/api/v1/workspace", nil); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "team mode is off") {
+		t.Fatalf("off: %d %s", w.Code, w.Body)
+	}
+	if w := s.do(t, "GET", "/api/v1/threads?persona=1", nil); w.Code != 200 || strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatalf("off list: %d %s", w.Code, w.Body)
+	}
+	if w := s.do(t, "PATCH", "/api/v1/threads/"+th.ID, map[string]string{"persona": "assistant"}); w.Code != 400 || !strings.Contains(w.Body.String(), "team mode is off") {
+		t.Fatalf("off patch: %d %s", w.Code, w.Body)
 	}
 }

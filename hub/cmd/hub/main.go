@@ -174,11 +174,15 @@ func main() {
 	}
 	thr.OwnerName = cfg.OwnerName
 	thr.Surfaces = cfg.Surfaces
-	// The router's local model stays paged in (nothing when Ollama is not
-	// there: routes fall to the cloud model), and the calendar's home session
-	// is the chief of staff (an older install's executive assistant keeps it).
+	thr.SetPlainSessions(cfg.PlainSessions)
+	// The router's local model stays paged in while team mode is on (nothing
+	// when Ollama is not there: routes fall to the cloud model).
 	thr.WarmRouter = true
-	thr.StartTeam()
+	if cfg.TeamMode {
+		// The calendar's home session is the chief of staff from the day the
+		// switch goes on (an older install's executive assistant keeps it).
+		thr.StartTeam()
+	}
 	thr.BlobPath = ob.BlobPath
 	thr.IntakePath = ob.IntakePath
 	thr.SavePaste = ob.PutIntakeText

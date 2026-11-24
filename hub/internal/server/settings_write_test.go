@@ -18,7 +18,7 @@ func TestWriteHubJSONConcurrentWritesKeepBothKeys(t *testing.T) {
 	}
 	for i := 0; i < 20; i++ {
 		var wg sync.WaitGroup
-		for _, set := range []map[string]any{{"session_tokens": i%2 == 0}, {"model_cap": "opus"}} {
+		for _, set := range []map[string]any{{"team_mode": i%2 == 0}, {"model_cap": "opus"}} {
 			wg.Add(1)
 			go func(set map[string]any) {
 				defer wg.Done()
@@ -36,7 +36,7 @@ func TestWriteHubJSONConcurrentWritesKeepBothKeys(t *testing.T) {
 		if err := json.Unmarshal(b, &m); err != nil {
 			t.Fatalf("hub.json is not whole JSON: %v\n%s", err, b)
 		}
-		if m["session_tokens"] != (i%2 == 0) || m["model_cap"] != "opus" || m["addr"] != "x" {
+		if m["team_mode"] != (i%2 == 0) || m["model_cap"] != "opus" || m["addr"] != "x" {
 			t.Fatalf("a write was lost: %s", b)
 		}
 	}

@@ -405,12 +405,16 @@ It takes one message.
    personal details. It describes the step and what went wrong.
 4. **Tell them how to pass it on.** One sentence: a friend installs it by
    pasting the one sentence from the README into Claude Code on their Mac.
-5. **The team: tell them how it works.** Say, in these words: *"Your hub
-   runs as a team. Your first session is a chief of staff: it owns your
+5. **Team mode: tell them it is on.** Say, in these words: *"Your hub runs
+   as a team. Your first session is a chief of staff: it owns your
    calendar, takes any message no one else owns, and adds new roles when
    you ask it for one (say \"I'd like a fitness coach\"). Each new message
-   goes to the role that owns it."* Nothing to run: the team is the only
-   mode, there is no switch.
+   goes to the role that owns it. If you would rather start plain sessions
+   too, or turn the team off, ask me: it is one switch."* Nothing to run: a new `ops/hub.json` has `"team_mode": true`. Off:
+   `ops/bin/lifectl settings set team_mode false` (or `ops/py.sh setup.py hub
+   --team no --force`, which changes only `team_mode` and keeps the rest,
+   the push key included). Plain sessions as well as roles:
+   `ops/bin/lifectl settings set plain_sessions true`. Both apply without a restart.
 6. **Separate user, never re-asked.** If they said no in step 0, say once
    that sessions run as them and that running sessions as a separate user
    can still be turned on later by asking. Do not ask again.

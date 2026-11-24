@@ -299,15 +299,17 @@ func sessionFootWords(_ t: Thread) -> String {
 
 /// One open card under a name on the desktop sidebar (the owner 2026-11-06,
 /// sidebar 3): a coloured dot and its whole title — red do, blue read, teal
-/// install, a speaker in its kind colour while spoken, grey a quiet sub-session ("dots… a little
+/// install, a green speaker while spoken, grey a quiet sub-session ("dots… a little
 /// teeny bit smaller": 8pt). A running job is its bar and what it is doing.
 /// A click lands the chat on that card.
 struct SideItem: View {
     let c: SessionCell
     let tap: () -> Void
-    /// The card's kind colour; the card being spoken keeps its own.
+    /// The card's kind colour; the card being spoken is green, like its
+    /// row's edge and pill, whatever its kind.
     var dot: Color {
-        switch c.tone == "speaking" ? c.under ?? "needs" : c.tone {
+        switch c.tone {
+        case "speaking": Web.green
         case "read": Web.accent
         case "install": Web.install
         case "rec": Web.violet

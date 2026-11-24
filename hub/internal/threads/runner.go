@@ -780,10 +780,10 @@ func (m *Manager) prompt(t Thread, qs []queuedMsg, midTurn, fresh bool) (string,
 		peers = m.boardBlocks(t.ID, fresh)
 		peers += m.todoBlock(t.ID)
 	}
-	// A session with a role reads its brief every turn, after the board and
-	// before the message (persona.go).
+	// Team mode: a session with a role reads its brief every turn, after the
+	// board and before the message (persona.go).
 	role := ""
-	if !midTurn && t.Persona != "" {
+	if m.TeamMode() && !midTurn && t.Persona != "" {
 		role = m.personaWith(t, m.formerTitles(t.ID)) + "\n\n"
 	}
 	return m.asksHeader(t.ID) + peers + role + prompt, nil
