@@ -17,19 +17,18 @@ import (
 	"life/hub/internal/spend"
 )
 
-// Routing a new session (team mode): a message the owner starts a NEW
+// Routing a new session: a message the owner starts a NEW
 // session with from an app (the New session box) goes first past a router,
 // which may hand it to a session that already holds that work instead: a
 // role whose lane covers it, a live session, or one of the last few stopped
 // ones. A message typed into a session the owner clicked into is never
 // routed, and a new session is always a valid answer (a fundamentally
 // different task deserves its own). lifectl and the hub's own sessions never
-// route; only the owner's surfaces call CreateRouted, and only while
-// Manager.TeamMode is on.
+// route; only the owner's surfaces call CreateRouted.
 //
 // The router is a local model first (Ollama, when it is listening) and a
 // cheap Claude model second; neither is required: with no router at all a
-// new message is a new session, as it is with team mode off.
+// new message goes to the chief of staff.
 
 // routeRecent: the stopped sessions offered beside the live ones and the
 // roles.
@@ -108,17 +107,15 @@ func (m *Manager) CreateRouted(prompt string, attachments []string, via string) 
 			log.Printf("route: %s refused the message (%v); a new session takes it", id, err)
 		}
 	}
-	// Plain sessions off: a message no role claims is the chief of staff's,
-	// who takes it or hands it on (routedNote says how).
-	if m.TeamMode() && !m.PlainSessions() {
-		if cs := m.CatchAll(); cs != "" && cs != id {
-			note := m.routedNote("no other role's lane holds it, so it is the chief of staff's to take or hand on")
-			if err := m.SendVia(cs, note+prompt, attachments, via); err == nil {
-				t, err := m.Get(cs)
-				return t, true, err
-			} else {
-				log.Printf("route: %s refused the message (%v); a new session takes it", cs, err)
-			}
+	// A message no role claims is the chief of staff's, who takes it or
+	// hands it on (routedNote says how).
+	if cs := m.CatchAll(); cs != "" && cs != id {
+		note := m.routedNote("no other role's lane holds it, so it is the chief of staff's to take or hand on")
+		if err := m.SendVia(cs, note+prompt, attachments, via); err == nil {
+			t, err := m.Get(cs)
+			return t, true, err
+		} else {
+			log.Printf("route: %s refused the message (%v); a new session takes it", cs, err)
 		}
 	}
 	t, err := m.CreateVia("", "life", "", prompt, "", "", attachments, via)
@@ -146,16 +143,13 @@ func (m *Manager) passesOn(from, text string) bool {
 }
 
 // Route asks the router where a new-session message belongs: a candidate's
-// id and the router's reason, or "" for a new session (team mode off, no
-// candidates, no router, a timeout, an answer that is not a candidate).
+// id and the router's reason, or "" for none (no candidates, no router, a
+// timeout, an answer that is not a candidate).
 func (m *Manager) Route(prompt string) (string, string) { return m.RouteWith(prompt, "") }
 
 // RouteWith is Route with another Ollama model in place of localModel (""
 // = localModel): the dry run's way to compare models without a restart.
 func (m *Manager) RouteWith(prompt, model string) (string, string) {
-	if !m.TeamMode() {
-		return "", ""
-	}
 	local := m.Local
 	if model == "" {
 		model = localModel
@@ -545,20 +539,14 @@ func ollamaPickWith(model, prompt string, lanes []RouteLane, ids []string) (stri
 // lanes and today's candidates, no message), so the runner's one slot keeps
 // that whole prefix cached and the next real route prefills only the owner's
 // words. Runs for the hub's life; nothing when there is no local router
-// (tests, team mode off). The log hears only a change: a warm-up over 3 s
-// (the model WAS cold, or just loaded), a failure, and the first success
-// after one.
+// (tests). The log hears only a change: a warm-up over 3 s (the model WAS
+// cold, or just loaded), a failure, and the first success after one.
 func (m *Manager) WarmLocal() {
-	if m.Local == nil || !m.TeamMode() {
+	if m.Local == nil {
 		return
 	}
 	failing := false
 	for {
-		if !m.TeamMode() {
-			// Turned off since: nothing to keep warm until it is back on.
-			time.Sleep(warmEvery)
-			continue
-		}
 		took, err := ollamaWarm(localModel, routePrompt("", m.routeCandidates(), true))
 		switch {
 		case err != nil && !failing:

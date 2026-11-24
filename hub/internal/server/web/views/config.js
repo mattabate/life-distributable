@@ -9,8 +9,7 @@
 //     not a redesign.
 //   Devices: each Mac the voice reaches (/settings devices) with its Audio
 //     switch and a Stop while it says a line, then the phone (/status).
-//   Team: the owner's two switches (/settings team_mode, plain_sessions),
-//     then the org chart: the owner on top, a card per role that reports to
+//   Team: the org chart: the owner on top, a card per role that reports to
 //     the owner (/personas reports_to), its goals' emblems (goals) beside its
 //     name, its own reports listed inside. Roles and their lines are made by
 //     asking the chief of staff, never a form, so there is none here.
@@ -100,28 +99,17 @@ function cfgGoalsHTML(goals) {
       ${goalEmblem(g)}<span>${mdInline(g.title, false)}</span></a>`).join('')}</div>`).join('');
 }
 
-// One switch tile: the title, the switch right after it.
-function cfgSwitchHTML(key, title, on) {
-  return `<label class="cfg-setting">
-      <span class="top"><strong>${esc(title)}</strong><span class="switch"><input type="checkbox"${on ? ' checked' : ''} onchange="setSetting('${key}', this.checked)"><span></span></span></span>
-    </label>`;
-}
-
-// The team: the two switches, then the org chart, a tree: the owner on top, a
-// card per role that reports to the owner (`reports_to` "" or naming no
-// role), the emblems of the goals it owns (`goals`) on the card's top line
-// beside its name, and the roles under it listed inside the card, a step in
-// per level. A role's name is the title of the session playing it (from
-// /threads?persona=1), else its role words; a name opens the session.
+// The team: the org chart, a tree: the owner on top, a card per role that
+// reports to the owner (`reports_to` "" or naming no role), the emblems of
+// the goals it owns (`goals`) on the card's top line beside its name, and the
+// roles under it listed inside the card, a step in per level. A role's name
+// is the title of the session playing it (from /threads?persona=1), else its
+// role words; a name opens the session. No switches: the team is the only
+// mode (#259).
 function cfgTeamHTML(st, personas, sessions, goals) {
-  const switches = st ? `<div class="cfg-settings">
-      ${cfgSwitchHTML('team_mode', 'Personas', !!st.team_mode)}
-      ${st.team_mode ? cfgSwitchHTML('plain_sessions', 'Plain sessions', !!st.plain_sessions) : ''}
-    </div>` : failHTML('settings', 'pageRedraw()');
-  if (!st || !st.team_mode) return switches;
-  if (!personas) return `${switches}<div class="cfg-team">${failHTML('the team', 'pageRedraw()')}</div>`;
-  if (!personas.length) return `${switches}<div class="cfg-team">${emptyHTML('No roles yet.')}</div>`;
-  return `${switches}<div class="cfg-team">${cfgOrgHTML(personas, sessions, goals, st.owner_name)}</div>`;
+  if (!personas) return `<div class="cfg-team">${failHTML('the team', 'pageRedraw()')}</div>`;
+  if (!personas.length) return `<div class="cfg-team">${emptyHTML('No roles yet.')}</div>`;
+  return `<div class="cfg-team">${cfgOrgHTML(personas, sessions, goals, st?.owner_name)}</div>`;
 }
 
 // The top is /settings owner_name (hub.json's), else You.
@@ -242,12 +230,6 @@ function cfgSourcesHTML(groups) {
     `<div class="scell" style="--c:${esc(sec.color || '#64748B')}"><h4${i ? ' class="ghost" aria-hidden="true"' : ''}>${esc(sec.tag)}<span class="muted">${sec.cards.length}</span></h4>${cfgSourceCard(g, s)}</div>`).join('')).join('')}</div>`;
 }
 
-// The owner's switches: PATCH /settings takes team_mode, plain_sessions and
-// model_cap, and answers with the whole GET shape.
-async function setSetting(key, on) {
-  return act(() => patch('/settings', { [key]: on }));
-}
-
 async function setModelCap(model) {
   return act(() => patch('/settings', { model_cap: model }));
 }
@@ -257,9 +239,8 @@ async function drawConfig(view) {
     get('/spend/quota').catch(() => null), get('/spend/model').catch(() => null),
     get('/goals').catch(() => null), get('/sources').catch(() => null),
     get('/settings').catch(() => null), get('/status').catch(() => null)]);
-  // The roles exist only with team mode on (/personas is a 404 without it).
-  const [personas, sessions] = st && st.team_mode ? await Promise.all([
-    get('/personas').catch(() => null), get('/threads?persona=1').catch(() => [])]) : [[], []];
+  const [personas, sessions] = await Promise.all([
+    get('/personas').catch(() => null), get('/threads?persona=1').catch(() => [])]);
   // A Mac saying a line redraws soon, so its Stop goes when the line does.
   setRedraw(() => drawConfig(view), view, { every: (st?.devices || []).some(d => d.saying) ? 3000 : 60000 });
   const groups = (src?.groups || []).filter(g => (g.sources || []).length);

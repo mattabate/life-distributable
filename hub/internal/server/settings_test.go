@@ -18,12 +18,12 @@ func TestSettings(t *testing.T) {
 	s.UsePicker(spend.NewPicker(nil, nil, nil))
 	os.MkdirAll(s.cfg.OpsPath(), 0o755)
 	hub := s.cfg.OpsPath("hub.json")
-	os.WriteFile(hub, []byte("{\n  \"listen_addr\": \"127.0.0.1:0\",\n  \"surfaces\": [\"web\"],\n  \"team_mode\": true\n}\n"), 0o600)
+	os.WriteFile(hub, []byte("{\n  \"listen_addr\": \"127.0.0.1:0\",\n  \"surfaces\": [\"web\"]\n}\n"), 0o600)
 
 	var got settingsOut
 	w := s.do(t, "GET", "/api/v1/settings", nil)
 	json.Unmarshal(w.Body.Bytes(), &got)
-	if w.Code != 200 || !got.TeamMode || !got.PlainSessions || got.ModelCap != "" || len(got.Models) == 0 {
+	if w.Code != 200 || got.ModelCap != "" || len(got.Models) == 0 || strings.Contains(w.Body.String(), "team_mode") {
 		t.Fatalf("GET: %d %s", w.Code, w.Body)
 	}
 	// What the apps call the owner: hub.json's owner_name, "" when it names
@@ -39,17 +39,17 @@ func TestSettings(t *testing.T) {
 	s.cfg.OwnerName = ""
 
 	cap := got.Models[1]
-	w = s.do(t, "PATCH", "/api/v1/settings", map[string]any{"plain_sessions": false, "model_cap": cap})
+	w = s.do(t, "PATCH", "/api/v1/settings", map[string]any{"model_cap": cap})
 	json.Unmarshal(w.Body.Bytes(), &got)
-	if w.Code != 200 || got.PlainSessions || got.ModelCap != cap {
+	if w.Code != 200 || got.ModelCap != cap {
 		t.Fatalf("PATCH: %d %s", w.Code, w.Body)
 	}
-	if s.thr.PlainSessions() || s.picker.Cap() != cap {
+	if s.picker.Cap() != cap {
 		t.Fatal("not applied live")
 	}
 	var file map[string]any
 	b, _ := os.ReadFile(hub)
-	if err := json.Unmarshal(b, &file); err != nil || file["listen_addr"] != "127.0.0.1:0" || file["plain_sessions"] != false || file["model_cap"] != cap || file["team_mode"] != true {
+	if err := json.Unmarshal(b, &file); err != nil || file["listen_addr"] != "127.0.0.1:0" || file["model_cap"] != cap {
 		t.Fatalf("hub.json: %v %s", err, b)
 	}
 	if st, _ := os.Stat(hub); st.Mode().Perm() != 0o600 {
@@ -63,23 +63,15 @@ func TestSettings(t *testing.T) {
 		t.Fatalf("above the cap: %d %s", w.Code, w.Body)
 	}
 
-	for _, bad := range []map[string]any{{"session_tokens": false}, {"model_cap": "gpt-9"}, {}} {
+	// The team is not a setting (#259): the old switches are refused.
+	for _, bad := range []map[string]any{{"session_tokens": false}, {"model_cap": "gpt-9"}, {}, {"team_mode": false}, {"plain_sessions": true}} {
 		if w := s.do(t, "PATCH", "/api/v1/settings", bad); w.Code != 400 {
 			t.Fatalf("%v: %d %s", bad, w.Code, w.Body)
 		}
 	}
-
-	// Off, roles go; on again, the chief of staff holds the calendar.
-	s.do(t, "PATCH", "/api/v1/settings", map[string]any{"team_mode": false})
-	if s.thr.TeamMode() {
-		t.Fatal("team mode still on")
-	}
-	if w := s.do(t, "GET", "/api/v1/personas", nil); w.Code != 404 {
-		t.Fatalf("personas with team mode off: %d", w.Code)
-	}
-	s.do(t, "PATCH", "/api/v1/settings", map[string]any{"team_mode": true, "model_cap": ""})
-	if th, err := s.thr.Get(threads.StepThread); err != nil || th.Persona != threads.PersonaStaff || s.picker.Cap() != "" {
-		t.Fatalf("team on: %+v %v cap %q", th, err, s.picker.Cap())
+	s.do(t, "PATCH", "/api/v1/settings", map[string]any{"model_cap": ""})
+	if s.picker.Cap() != "" {
+		t.Fatalf("cap %q", s.picker.Cap())
 	}
 }
 
@@ -132,7 +124,7 @@ func TestPersonasRoutes(t *testing.T) {
 	if w := call("", "PATCH", "/api/v1/personas/coach", `{"name":"X"}`); w.Code != 400 {
 		t.Fatalf("unknown field: %d", w.Code)
 	}
-	if w := call(other.ID, "PATCH", "/api/v1/settings", `{"team_mode":false}`); w.Code != 403 {
+	if w := call(other.ID, "PATCH", "/api/v1/settings", `{"model_cap":""}`); w.Code != 403 {
 		t.Fatalf("a session flipped a setting: %d", w.Code)
 	}
 

@@ -16,7 +16,7 @@ load('ui.js');
 load('views/goals.js');
 load('views/config.js');
 
-const st = { team_mode: true, plain_sessions: false };
+const st = {};
 const goals = [
   { id: 'get-fit', title: 'Get fit', status: 'active', emblem: { symbol: 'goal', hue: 20 } },
   { id: 'eat-well', title: 'Eat well', status: 'active', emblem: { symbol: 'goal', hue: 140 } },
@@ -37,10 +37,11 @@ const cards = html => html.split('<div class="cfg-ocard">').slice(1);
 test('team: the owner on top, a card per role under the owner, reports inside', () => {
   const html = cfgTeamHTML(st, personas, sessions, goals);
   assert.match(html, /<div class="cfg-me">You<\/div>/);
-  assert.match(cfgTeamHTML({ ...st, owner_name: 'Robin' }, personas, sessions, goals), /<div class="cfg-me">Robin<\/div>/, "hub.json's owner_name on top");
-  assert.match(cfgTeamHTML({ ...st, owner_name: '  ' }, personas, sessions, goals), /<div class="cfg-me">You<\/div>/);
-  assert.match(cfgTeamHTML({ ...st, owner_name: '<b>' }, personas, sessions, goals), /<div class="cfg-me">&lt;b&gt;<\/div>/);
-  assert.match(html, /setSetting\('team_mode'/, 'the switches stay');
+  assert.match(cfgTeamHTML({ owner_name: 'Robin' }, personas, sessions, goals), /<div class="cfg-me">Robin<\/div>/, "hub.json's owner_name on top");
+  assert.match(cfgTeamHTML({ owner_name: '  ' }, personas, sessions, goals), /<div class="cfg-me">You<\/div>/);
+  assert.match(cfgTeamHTML({ owner_name: '<b>' }, personas, sessions, goals), /<div class="cfg-me">&lt;b&gt;<\/div>/);
+  assert.match(cfgTeamHTML(null, personas, sessions, goals), /<div class="cfg-me">You<\/div>/, 'no settings: the chart still draws');
+  assert.ok(!html.includes('switch') && !html.includes('team_mode'), 'no switches (#259)');
   const cs = cards(html);
   assert.equal(cs.length, 2, 'Alex, and Kim whose boss is no role');
   assert.match(cs[0], /class="nm" href="#\/sessions\/calendar">Alex</);
@@ -64,9 +65,7 @@ test('team: a role carries the emblems of the goals it owns, unknown ids dropped
   assert.equal((chef.split('</div>')[0].match(/href="#\/goals\//g) || []).length, 1, 'eat-well only');
 });
 
-test('team: off, only the switch; no roles, the empty line', () => {
-  const off = cfgTeamHTML({ team_mode: false }, null, null, goals);
-  assert.ok(!off.includes('cfg-org') && off.includes("setSetting('team_mode'"));
+test('team: no roles, the empty line; a failed load, the retry', () => {
   assert.match(cfgTeamHTML(st, [], [], goals), /No roles yet/);
   assert.match(cfgTeamHTML(st, null, [], goals), /the team/);
 });

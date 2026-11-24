@@ -10,8 +10,8 @@
 
 `hub` reads the tailnet name and IP from the Tailscale CLI and the claude
 binary from PATH, and refuses to touch an existing ops/hub.json without
---force; with it, only the keys `hub` sets change (`--team no --force` turns
-team mode off and keeps the push key; a new hub.json has it on). Every file it writes is git-ignored; secrets go to ops/secrets/
+--force; with it, only the keys `hub` sets change (the push key is kept).
+Every file it writes is git-ignored; secrets go to ops/secrets/
 (mode 600) and are never printed.
 """
 import argparse
@@ -73,6 +73,9 @@ def cmd_hub(a):
         # (apns_*), session_user and anything set by hand survive, and a
         # flag left out keeps its current value.
         cfg.update(json.load(open(HUB_JSON)))
+        # The team is no longer a switch (#259): the old keys go.
+        cfg.pop("team_mode", None)
+        cfg.pop("plain_sessions", None)
     else:
         for k in ("apns_key_id", "apns_team_id", "apns_bundle_id", "apns_key_file"):
             cfg[k] = ""
@@ -82,10 +85,6 @@ def cmd_hub(a):
         cfg["usage_opt_in"] = a.usage == "yes"
     if a.surfaces is not None or not existing:
         cfg["surfaces"] = a.surfaces or list(SURFACES)
-    if a.team is not None or not existing:
-        cfg["team_mode"] = a.team != "no"  # on unless the owner says no
-    if a.plain is not None or not existing:
-        cfg["plain_sessions"] = a.plain == "yes"
     port = a.port
     if port is None:
         old = str(cfg.get("listen_addr", "")).rpartition(":")[2] if existing else ""
@@ -98,9 +97,9 @@ def cmd_hub(a):
     os.makedirs(SECRETS, mode=0o700, exist_ok=True)
     os.chmod(SECRETS, 0o700)  # an existing folder gets the mode too (#153)
     write_hub_json(cfg)
-    print("%s ops/hub.json: owner %s, hub https://%s:%d, apps %s, team mode %s"
+    print("%s ops/hub.json: owner %s, hub https://%s:%d, apps %s"
           % ("updated" if existing else "wrote", cfg.get("owner_name", ""), host, port,
-             ", ".join(cfg.get("surfaces") or SURFACES), "on" if cfg.get("team_mode", True) else "off"))
+             ", ".join(cfg.get("surfaces") or SURFACES)))
 
 
 SURFACES = ("phone", "desktop", "web")
@@ -190,7 +189,6 @@ def cmd_show(_):
     mark(bool(cfg), "ops/hub.json")
     chosen = cfg.get("surfaces") or list(SURFACES)
     print("       apps: %s" % ", ".join(chosen))
-    print("       team mode: %s" % ("on" if cfg.get("team_mode", True) else "off"))
     host = cfg.get("public_host", "").split(":")[0]
     mark(bool(host) and os.path.exists(os.path.join(SECRETS, host + ".crt")), "TLS certificate (ops/renew-cert.sh)")
     mark(os.path.exists(os.path.join(SECRETS, "hub.token")), "hub token (made on first hub start)")
@@ -216,10 +214,6 @@ def main():
                    help="send the weekly anonymous usage heartbeat (SETUP.md step 5; needed for a new hub.json)")
     h.add_argument("--surfaces", type=surfaces,
                    help="which apps: comma list of phone,desktop,web (default all three)")
-    h.add_argument("--team", choices=["yes", "no"],
-                   help="team mode: sessions with roles and a router (SETUP.md step 10; default yes)")
-    h.add_argument("--plain", choices=["yes", "no"],
-                   help="with team mode, may you also start sessions with no role (default no)")
     h.add_argument("--port", type=int, help="default 8443, or the existing hub.json's port")
     h.add_argument("--force", action="store_true",
                    help="update an existing ops/hub.json: only the keys this command sets, the rest kept")

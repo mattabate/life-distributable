@@ -127,16 +127,6 @@ type Config struct {
 	// Surfaces: the setup answer to "which apps?" (phone, desktop, web);
 	// empty = all three. `setup.py show` reads it to list what is left.
 	Surfaces []string `json:"surfaces"`
-	// TeamMode: the layer where long-lived sessions play named roles
-	// (threads.Persona), a new message from the app is routed to the role
-	// that owns it, and each role keeps its own files (internal/workspace).
-	// On unless hub.json says "team_mode": false (a hub.json without the key
-	// gets the default). PATCH /api/v1/settings flips it without a restart.
-	TeamMode bool `json:"team_mode"`
-	// PlainSessions: with team mode on, may a new message from the app or
-	// console start a session with no role? False (the default) sends a
-	// message no role claims to the chief of staff.
-	PlainSessions bool `json:"plain_sessions"`
 	// ModelCap: the best model sessions may start on, one of ModelLadder (or
 	// spend.DefaultLadder). Empty = the top of the ladder. The ladder below
 	// the cap still steps down as buckets fill.
@@ -184,7 +174,7 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{TmuxPrefix: "life", SessionTokens: true, TeamMode: true}
+	c := &Config{TmuxPrefix: "life", SessionTokens: true}
 	if err := json.Unmarshal(b, c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
