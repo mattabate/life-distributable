@@ -60,7 +60,11 @@ test('a spend day is a stacked bar whose card is the split by model', () => {
   assert.equal(col.foot, 'the most expensive day so far');
   // Thirty-five days of history under a 7-day window: thirty-five columns,
   // the empty ones drawn at zero, the foot naming the first day.
-  const first = easternFields(new Date(Date.now() - 34 * 86400000)).on;
+  // Calendar days back from today's Eastern date: 34 × 24 h lands a day
+  // short across a clock change late in the evening.
+  const back = new Date(easternFields(new Date()).on + 'T12:00:00Z');
+  back.setUTCDate(back.getUTCDate() - 34);
+  const first = back.toISOString().slice(0, 10);
   const long = { ...s, history: [{ key: first, usd: 1, messages: 1, models: [{ key: 'claude-opus-5', usd: 1, messages: 1 }] }, ...s.history] };
   const h2 = spendDays(long);
   assert.equal((h2.match(/class="daycol"/g) || []).length, 35);
