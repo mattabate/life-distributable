@@ -2623,7 +2623,10 @@ func (m *Manager) relaunchBelow(r run, text string) bool {
 	if m.Model == nil {
 		return false
 	}
-	if m.ModelExhausted != nil {
+	refused := spend.IsModelRefusedError(text) && !spend.IsLimitError(text)
+	if refused && m.ModelRefused != nil {
+		m.ModelRefused(r.model, "refused to this login: "+refusalWords(text))
+	} else if m.ModelExhausted != nil {
 		m.ModelExhausted(r.model)
 	}
 	t, err := m.Get(r.thread)
@@ -2646,6 +2649,8 @@ func (m *Manager) relaunchBelow(r run, text string) bool {
 	why := "plan limit on " + orDefault(r.model)
 	if spend.IsUnsupportedModelError(text) && !spend.IsLimitError(text) {
 		why = "the CLI does not support " + orDefault(r.model)
+	} else if refused {
+		why = "the API refuses " + orDefault(r.model) + " to this login"
 	}
 	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text, run_id) VALUES (?,?,?,?,?,?)`, r.thread, ts(now), "system", "message",
 		fmt.Sprintf("%s (%s); restarting on %s", why, firstLine(text, 120), orDefault(next)), r.turnID())
@@ -2696,6 +2701,8 @@ func failureTitle(text string) string {
 		return "Session paused: plan limit reached on every model"
 	case spend.IsUnsupportedModelError(text):
 		return "Session stopped: the Claude CLI is too old for this model"
+	case spend.IsModelRefusedError(text):
+		return "Session stopped: this login's organization may not use this model"
 	// A dead login: the card says what fixes it, and ResumeAuthFailed
 	// restarts it once any turn gets through again. Only the owner's login
 	// fixes it, so the title says so: "resumes once it works" read as

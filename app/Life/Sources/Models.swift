@@ -106,6 +106,9 @@ struct Quota: Codable {
     var next_model: String?
     var next_reason: String?
     var error: String?
+    /// "api" when the login has no claude.ai plan (an org's managed key):
+    /// no windows, and that is not an error.
+    var billing: String?
     var windows: [QuotaWindow]
     /// The plan the sessions run on (`quota.plan`): its name, what runs it,
     /// its price when the hub has found one, and this month's spend.

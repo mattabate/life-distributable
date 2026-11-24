@@ -419,3 +419,21 @@ func TestCurrentMapsRetiredRungs(t *testing.T) {
 		}
 	}
 }
+
+// A rung the org may not use (#262) is skipped, says why, and comes back when
+// preflight passes it.
+func TestARefusedRungIsSkippedUntilOpened(t *testing.T) {
+	p := NewPicker(nil, []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5"}, nil)
+	ctx, now := context.Background(), time.Now()
+	p.Refuse("claude-fable-5-1", "refused to this login: data retention")
+	if got, why := p.ExplainFrom(ctx, now, ""); got != "claude-opus-5-5" || why != "refused to this login: data retention" {
+		t.Fatalf("ExplainFrom = %q, %q", got, why)
+	}
+	if !IsRungError("API Error: 400 In order to access this model, your organization or workspace must have data retention enabled") {
+		t.Fatal("an org refusal steps a live turn down")
+	}
+	p.Refuse("claude-fable-5-1", "")
+	if got := p.Pick(ctx); got != "claude-fable-5-1" {
+		t.Fatalf("opened again: %q", got)
+	}
+}

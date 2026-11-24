@@ -446,6 +446,9 @@ type Manager struct {
 	// model id the CLI rejects) so the picker closes that rung before the
 	// usage endpoint catches up.
 	ModelExhausted func(model string)
+	// ModelRefused shuts a rung the API refuses to this login's organization
+	// (why), or opens it again (why "") when a preflight probe passes it.
+	ModelRefused func(model, why string)
 	// Probe runs one tool-less turn on a model (preflight.go); nil in tests.
 	Probe func(model string) (string, error)
 	// CLIVersion is `claude --version`; preflight skips the probes when the

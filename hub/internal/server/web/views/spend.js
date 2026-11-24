@@ -157,7 +157,8 @@ async function drawSpend(view) {
   paint(view, `<div class="pane wide"><h2>Spend</h2>
     ${spendModelBar(q, m)}
     <h3>Limits</h3>
-    ${q.available ? `<div class="card limits">${wins}</div>` : card(`Plan usage unavailable: ${esc(q.error || '')}`, 'err')}
+    ${q.available ? `<div class="card limits">${wins}</div>` : q.billing === 'api' ? card('Billed by the API, no plan windows')
+      : card(`Plan usage unavailable: ${esc(q.error || '')}`, 'err')}
     ${byDay}
     ${s?.unknown_models?.length ? `<div class="small err mt8">Unpriced (assumed Opus rate): ${esc(s.unknown_models.join(', '))}</div>` : ''}
   </div>`);

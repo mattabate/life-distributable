@@ -3,9 +3,8 @@
 // are my data sources"). views.config. It replaced the Sources tab: dense
 // blocks, no wide white space —
 //   Powered by: the plan (its price is the card charge the hub found), this
-//     month's list-price spend and each limit's headroom, the model order new
-//     sessions start on (/spend/model) and the cap above it (/settings
-//     model_cap). One block per provider, so a second one is a second block,
+//     month's list-price spend and each limit's headroom, the model ladder
+//     sessions run on (/spend/model). One block per provider, so a second one is a second block,
 //     not a redesign.
 //   Devices: each Mac the voice reaches (/settings devices) with its Audio
 //     switch and a Stop while it says a line, then the phone (/status).
@@ -36,11 +35,13 @@ const CFG_LOW_LEFT = 10;
 const cfgLeft = w => Math.max(0, 100 - Math.round(w.utilization));
 const cfgLow = w => cfgLeft(w) <= CFG_LOW_LEFT;
 
-// The model ladder's toggle (2026-10-06): the same buttons as the Spend bar
-// (spend.js spendModelBar, setDefaultModel): the rung new sessions start on
-// filled, a shut rung struck through, auto. The ladder is the hub's, top
-// first (fable, opus, sonnet); /settings `models` stands in when /spend/model
-// did not answer.
+// The model ladder, one row (#261): the same buttons as the Spend bar
+// (spend.js spendModelBar, setDefaultModel), top first (fable, opus,
+// sonnet). The rung sessions run on is filled; a rung its cutoff or the cap
+// (/settings `model_cap`, `lifectl settings`) shut is struck through, with
+// why on hover. When the ladder has stepped down from the rung chosen, the
+// line under it says where and why. /settings `models` stands in when
+// /spend/model did not answer.
 function cfgModelHTML(q, m, st) {
   const runs = m?.starts_on || m?.default_model || q.next_model || '';
   const rungs = m?.rungs?.length ? m.rungs
@@ -50,18 +51,10 @@ function cfgModelHTML(q, m, st) {
     ? `<button class="sm ${r.model === runs ? 'on' : ''}" onclick="setDefaultModel(${esc(JSON.stringify(r.model))})">${esc(modelShort(r.model))}</button>`
     : `<button class="sm" disabled title="${esc(r.why || 'closed')}" style="text-decoration:line-through;opacity:.5">${esc(modelShort(r.model))}</button>`
   ).join('<span class="muted">›</span>');
-  const auto = rungs.length ? `<span class="muted">·</span><button class="sm ${m?.explicit ? '' : 'on'}" onclick="setDefaultModel('')">auto</button>` : '';
-  return `<div class="cfg-model"><span class="small muted">New sessions run on</span><span class="chips-row">${steps || `<strong class="small">${esc(modelShort(runs))}</strong>`}${auto}</span></div>`;
-}
-
-// The cap: the best model the ladder may start a session on (/settings
-// `model_cap`, "" = none), one button per rung of `models` and "none".
-function cfgCapHTML(st) {
-  if (!st || !(st.models || []).length) return '';
-  const cap = st.model_cap || '';
-  const btn = (v, label) => `<button class="sm ${cap === v ? 'on' : ''}" onclick="setModelCap('${esc(v)}')">${esc(label)}</button>`;
-  return `<div class="cfg-model"><span class="small muted">Never above</span><span class="chips-row">${
-    st.models.map(x => btn(x, modelShort(x))).join('<span class="muted">›</span>')}<span class="muted">·</span>${btn('', 'no cap')}</span></div>`;
+  const down = m?.explicit && m.starts_on && m.starts_on !== m.default_model
+    ? [`${modelShort(m.default_model)} handed over to ${modelShort(m.starts_on)}`, m.reason].filter(Boolean).join(' · ') : '';
+  return `<div class="cfg-model"><span class="small muted">Sessions run on</span><span class="chips-row">${steps || `<strong class="small">${esc(modelShort(runs))}</strong>`}</span>${
+    down ? `<span class="small muted cfg-model-note">${esc(down)}</span>` : ''}</div>`;
 }
 
 function cfgPlanHTML(q, m, st) {
@@ -85,9 +78,9 @@ function cfgPlanHTML(q, m, st) {
       <span class="grow"><strong>${esc(p.name)}</strong><span class="small muted">${[esc(p.via), price].filter(Boolean).join(' · ')}</span></span>
       <span class="cfg-month"><span class="n">${usd0(p.month_usd)}</span><span class="small muted">this month</span></span>
     </a>
-    ${lims ? `<div class="cfg-lims">${lims}</div>` : q.error ? `<div class="small err">${esc(q.error)}</div>` : ''}
+    ${lims ? `<div class="cfg-lims">${lims}</div>` : q.billing === 'api' ? '<div class="small muted">Billed by the API, no plan windows</div>'
+      : q.error ? `<div class="small err">${esc(q.error)}</div>` : ''}
     ${cfgModelHTML(q, m, st)}
-    ${cfgCapHTML(st)}
   </div>`;
 }
 
@@ -228,10 +221,6 @@ function cfgSourcesHTML(groups) {
   const key = ([, s]) => (s.title || s.id).toLowerCase();
   return `<div class="sflow">${secs.map(sec => sec.cards.sort((a, b) => key(a).localeCompare(key(b))).map(([g, s], i) =>
     `<div class="scell" style="--c:${esc(sec.color || '#64748B')}"><h4${i ? ' class="ghost" aria-hidden="true"' : ''}>${esc(sec.tag)}<span class="muted">${sec.cards.length}</span></h4>${cfgSourceCard(g, s)}</div>`).join('')).join('')}</div>`;
-}
-
-async function setModelCap(model) {
-  return act(() => patch('/settings', { model_cap: model }));
 }
 
 async function drawConfig(view) {

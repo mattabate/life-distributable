@@ -33,8 +33,12 @@ func (m *Manager) probeModel(model string) (string, error) {
 
 // PreflightModels probes every rung and returns the ones the CLI rejects as
 // unsupported. Each is closed on the picker (ModelExhausted) and raised once
-// as a card on the hub thread. Any other failure (network, a limit) is only
-// logged: the ladder's reactive path already handles those.
+// as a card on the hub thread. A rung the API refuses to this login's
+// organization (#262: "your organization or workspace must have data
+// retention enabled") is shut on the picker (ModelRefused) until a probe
+// passes it; only an org admin fixes that, so no card, and the console shows
+// the rung struck through with the API's words. Any other failure (network, a
+// limit) is only logged: the ladder's reactive path already handles those.
 func (m *Manager) PreflightModels(ladder []string) []string {
 	if m.Probe == nil {
 		return nil
@@ -57,11 +61,21 @@ func (m *Manager) PreflightModels(ladder []string) []string {
 	clean := true
 	for _, model := range ladder {
 		out, err := m.Probe(model)
-		if err == nil && !spend.IsUnsupportedModelError(out) {
+		if err == nil && !spend.IsUnsupportedModelError(out) && !spend.IsModelRefusedError(out) {
 			log.Printf("preflight: %s ok", model)
+			if m.ModelRefused != nil {
+				m.ModelRefused(model, "")
+			}
 			continue
 		}
 		clean = false
+		if spend.IsModelRefusedError(out) {
+			log.Printf("preflight: the API refuses %s to this login: %s", model, firstLine(out, 200))
+			if m.ModelRefused != nil {
+				m.ModelRefused(model, "refused to this login: "+refusalWords(out))
+			}
+			continue
+		}
 		if !spend.IsUnsupportedModelError(out) {
 			log.Printf("preflight: %s failed (%v): %s", model, err, firstLine(out, 200))
 			continue
@@ -77,6 +91,17 @@ func (m *Manager) PreflightModels(ladder []string) []string {
 		m.db.SetSetting(preflightKey, key)
 	}
 	return bad
+}
+
+// refusalWords: the API's sentence without the "API Error: 400" prefix, for
+// a struck rung's hover ("In order to access this model, your organization or
+// workspace must have data retention enabled").
+func refusalWords(out string) string {
+	s := firstLine(strings.TrimSpace(out), 160)
+	if _, after, ok := strings.Cut(s, "API Error: 400 "); ok {
+		return after
+	}
+	return s
 }
 
 // preflightKey: the settings row holding the CLI version + ladder that last

@@ -1,6 +1,8 @@
 package spend
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -41,7 +43,18 @@ func TestCredentialsFileToken(t *testing.T) {
 		t.Fatalf("broken JSON: err = %v", err)
 	}
 	write(`{}`)
-	if _, err := fileToken(path); err == nil {
-		t.Fatal("no claudeAiOauth gave a token")
+	if _, err := fileToken(path); !errors.Is(err, ErrAPILogin) {
+		t.Fatalf("no claudeAiOauth: err = %v, want ErrAPILogin", err)
+	}
+}
+
+// An org's managed-key login has no claude.ai plan (#262): the meter says
+// "billed by the API" in grey, never a red error, and the picker has no
+// windows to steer by.
+func TestAnAPILoginIsNotAnError(t *testing.T) {
+	q := &QuotaFetcher{Token: func(context.Context) (string, error) { return "", ErrAPILogin }}
+	got := q.Quota(context.Background(), nil, time.Now())
+	if got.Available || got.Error != "" || got.Billing != "api" {
+		t.Fatalf("quota = available %v, error %q, billing %q", got.Available, got.Error, got.Billing)
 	}
 }

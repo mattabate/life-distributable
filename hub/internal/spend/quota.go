@@ -122,7 +122,8 @@ type Quota struct {
 	GeneratedAt time.Time       `json:"generated_at"`
 	FetchedAt   time.Time       `json:"fetched_at"`
 	Available   bool            `json:"available"`
-	Error       string          `json:"error,omitempty"` // why not available
+	Error       string          `json:"error,omitempty"`   // why not available
+	Billing     string          `json:"billing,omitempty"` // "api": no claude.ai plan (ErrAPILogin), not an error
 	Windows     []Window        `json:"windows"`
 	NextModel   string          `json:"next_model,omitempty"`  // what a new session will run on
 	NextReason  string          `json:"next_reason,omitempty"` // why, when it is not the top rung
@@ -198,6 +199,12 @@ func fileToken(path string) (string, error) {
 	return oauthToken(b, path)
 }
 
+// ErrAPILogin: Claude Code is signed in with no claude.ai subscription (an
+// organization's managed key or an API key, #262), so sessions are billed by
+// the API and there are no plan windows to read. Not a failure: the surfaces
+// say so in plain grey (Quota.Billing "api").
+var ErrAPILogin = errors.New("billed by the API, no plan windows")
+
 // oauthToken: claudeAiOauth.accessToken from Claude Code's credentials JSON,
 // refused when expired. from names the source in an error, never the value
 // (a JSON error can quote the bytes it choked on, so it is not wrapped).
@@ -212,7 +219,7 @@ func oauthToken(b []byte, from string) (string, error) {
 		return "", fmt.Errorf("%s is not Claude Code JSON", from)
 	}
 	if creds.OAuth.AccessToken == "" {
-		return "", fmt.Errorf("no accessToken in %s (not logged in via claude.ai?)", from)
+		return "", ErrAPILogin
 	}
 	if creds.OAuth.ExpiresAt > 0 && time.UnixMilli(creds.OAuth.ExpiresAt).Before(time.Now()) {
 		return "", errors.New("access token expired; run any `claude` command to refresh it")
@@ -513,6 +520,10 @@ func (q *QuotaFetcher) Quota(ctx context.Context, us []Usage, now time.Time) Quo
 	out := Quota{GeneratedAt: now, Windows: []Window{}}
 	raw, fetchedAt, err := q.rawAt(ctx)
 	out.FetchedAt = fetchedAt
+	if errors.Is(err, ErrAPILogin) {
+		out.Billing = "api"
+		return out
+	}
 	if err != nil {
 		out.Error = err.Error()
 		return out

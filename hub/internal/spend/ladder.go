@@ -83,9 +83,21 @@ var UnsupportedModelRe = regexp.MustCompile(`(?i)(unrecognized_model|does not su
 // the CLI rejects. The ladder treats it like a limit: close the rung, step down.
 func IsUnsupportedModelError(text string) bool { return UnsupportedModelRe.MatchString(text) }
 
-// IsRungError: a failure the next rung down fixes — a full plan bucket or a
-// model id this CLI does not know.
-func IsRungError(text string) bool { return IsLimitError(text) || IsUnsupportedModelError(text) }
+// RefusedModelRe matches the API refusing a model to this login's organization
+// (#262): "API Error: 400 In order to access this model, your organization or
+// workspace must have data retention enabled". Only an org admin changes it,
+// so the rung stays shut until a preflight probe passes it again.
+var RefusedModelRe = regexp.MustCompile(`(?i)(to access this model, your (organization|workspace)|(organization|workspace) (does not|doesn't) have access to (this )?model)`)
+
+// IsModelRefusedError reports whether a failed turn died on a model the API
+// refuses to this organization.
+func IsModelRefusedError(text string) bool { return RefusedModelRe.MatchString(text) }
+
+// IsRungError: a failure the next rung down fixes — a full plan bucket, a
+// model id this CLI does not know, or a model the org may not use.
+func IsRungError(text string) bool {
+	return IsLimitError(text) || IsUnsupportedModelError(text) || IsModelRefusedError(text)
+}
 
 type Picker struct {
 	Q      *QuotaFetcher
@@ -99,6 +111,9 @@ type Picker struct {
 
 	mu     sync.Mutex
 	closed map[string]time.Time // model → when it was seen exhausted
+	// refused: model → why, for a rung the API refuses to this login (Refuse);
+	// shut until a preflight probe passes it, not for an hour.
+	refused map[string]string
 	// limit: the owner's model cap (config model_cap, SetCap): no pick starts
 	// above it. "" or a model off the ladder = the top rung.
 	limit string
@@ -160,7 +175,7 @@ func NewPicker(q *QuotaFetcher, ladder []string, stepDown []float64) *Picker {
 	if len(stepDown) == 0 {
 		stepDown = DefaultStepDown
 	}
-	return &Picker{Q: q, Ladder: ladder, StepDown: stepDown, closed: map[string]time.Time{}}
+	return &Picker{Q: q, Ladder: ladder, StepDown: stepDown, closed: map[string]time.Time{}, refused: map[string]string{}}
 }
 
 // Below: the first rung under `family` (Below("fable") = "claude-opus-5-5" on
@@ -232,6 +247,27 @@ func (p *Picker) MarkExhausted(model string) {
 	p.closed[model] = time.Now()
 }
 
+// Refuse shuts a rung the API refuses to this login, `why` saying so; "" opens
+// it again (a preflight probe passed it).
+func (p *Picker) Refuse(model, why string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.refused == nil {
+		p.refused = map[string]string{}
+	}
+	if why == "" {
+		delete(p.refused, model)
+	} else {
+		p.refused[model] = why
+	}
+}
+
+func (p *Picker) refusal(model string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.refused[model]
+}
+
 // Pick returns the model for the next run. Never empty.
 func (p *Picker) Pick(ctx context.Context) string {
 	return p.pick(ctx, time.Now())
@@ -289,6 +325,11 @@ func (p *Picker) ExplainFrom(ctx context.Context, now time.Time, start string) (
 		return model, ""
 	}
 	var reasons []string
+	for i := from; i < len(p.Ladder) && p.Ladder[i] != model; i++ {
+		if why := p.refusal(p.Ladder[i]); why != "" {
+			reasons = append(reasons, why)
+		}
+	}
 	us := p.usages()
 	if p.Q != nil {
 		if raw, err := p.Q.raw(ctx); err == nil {
@@ -366,6 +407,9 @@ func (p *Picker) pickFrom(ctx context.Context, now time.Time, from int) string {
 			continue
 		}
 		if t, ok := p.closed[m]; ok && now.Sub(t) < exhaustedTTL {
+			continue
+		}
+		if p.refused[m] != "" {
 			continue
 		}
 		if bucketFull(m, live, func(w Window) float64 { return p.windowThreshold(w, i, us, now) }) {
