@@ -300,15 +300,15 @@ function sideRowHTML(t, o) {
     </div>`;
 }
 
-// The small speaker the card being spoken wears instead of its dot, in the
-// card's own colour, the size of the dots.
+// The small speaker the card being spoken wears instead of its dot, the size
+// of the dots, green like the row's edge and pill whatever the card's kind.
 const SPEAKER_SVG = '<svg class="side-spk" viewBox="0 0 16 16" aria-label="speaking"><path d="M1.5 5.75h2.6L7.6 2.9v10.2L4.1 10.25H1.5z" fill="currentColor"/><path d="M10 5.4a3.6 3.6 0 0 1 0 5.2M12.3 3.3a6.6 6.6 0 0 1 0 9.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 
 // One line under a name: a dot in the card's colour (red do, blue read, teal
 // install, grey in hand) and its whole title; a running job is grey with its
 // bar while it has a count.
 function sideItemHTML(c) {
-  const tone = c.speaking ? c.under || '' : c.tint || '';
+  const tone = c.speaking ? 'speaking' : c.tint || '';
   const mark = c.speaking ? SPEAKER_SVG : '<span class="side-dot"></span>';
   return `<a class="side-item ${tone}${c.job ? ' job' : ''}" href="${esc(c.href)}"><span class="side-mark">${mark}</span><span class="side-tt">${mdInline(c.title, false)}</span></a>`
     + (c.job && c.job.total > 0 ? `<div class="side-bar">${taskBarHTML(c.job)}</div>` : '');
