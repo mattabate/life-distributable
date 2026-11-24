@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"life/hub/internal/spend"
 )
@@ -249,6 +250,50 @@ func TestMessageRelaunchesOffStaleToolList(t *testing.T) {
 	// Same list: the next message goes to the live process.
 	appendOut(t, pendingOut(t, m, th.ID), `{"type":"system","subtype":"init","session_id":"sess-5"}
 {"type":"result","subtype":"success","is_error":false,"result":"Ran it.","total_cost_usd":0.02,"session_id":"sess-5"}
+`)
+	m.Poll()
+	n = len(*cmds)
+	if err := m.Send(th.ID, "thanks"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(inFile(t, m, th.ID)); len(*cmds) != n || !strings.Contains(string(b), "thanks") {
+		t.Fatalf("%v %q", (*cmds)[n:], string(b))
+	}
+}
+
+// #266: a session process outlives a hub restart in tmux, keeping the old
+// hub's PATH and preamble, so a fix the session landed and restarted the hub
+// for never reached its next turn. An idle process from before this hub is
+// closed and the message relaunches with --resume; one this hub started is fed.
+func TestMessageRelaunchesOffAProcessFromAnEarlierHub(t *testing.T) {
+	m, _, cmds := setup(t)
+	th, _ := m.Create("", "life", "", "Create the two roles.", "", "", nil)
+	out := pendingOut(t, m, th.ID)
+	in := inFile(t, m, th.ID)
+	appendOut(t, out, `{"type":"system","subtype":"init","session_id":"sess-6"}
+{"type":"result","subtype":"success","is_error":false,"result":"Fixed the PATH and restarted the hub.","total_cost_usd":0.02,"session_id":"sess-6"}
+`)
+	m.Poll()
+	m.Booted = time.Now().Add(time.Second) // the hub restarted after this process began
+	n := len(*cmds)
+	if err := m.Send(th.ID, "go"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(in); !strings.HasSuffix(string(b), eofSentinel+"\n") || strings.Contains(string(b), "go\n") {
+		t.Fatalf("in-file: %q", string(b))
+	}
+	if len(*cmds) != n {
+		t.Fatalf("launched early: %v", (*cmds)[n:])
+	}
+	os.WriteFile(out+".done", nil, 0o644)
+	m.Poll()
+	if len(*cmds) != n+1 || !strings.Contains((*cmds)[n], "'--resume' 'sess-6'") {
+		t.Fatalf("%v", (*cmds)[n:])
+	}
+	// A process this hub started is fed as before.
+	m.Booted = time.Now().Add(-time.Hour)
+	appendOut(t, pendingOut(t, m, th.ID), `{"type":"system","subtype":"init","session_id":"sess-6"}
+{"type":"result","subtype":"success","is_error":false,"result":"Both roles made.","total_cost_usd":0.02,"session_id":"sess-6"}
 `)
 	m.Poll()
 	n = len(*cmds)

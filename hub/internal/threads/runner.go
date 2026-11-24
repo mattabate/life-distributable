@@ -451,6 +451,11 @@ func (m *Manager) runRef(id, author, role, kind, text string, attachments []stri
 					m.sendEOF(r)
 					return nil
 				}
+				if m.predatesHub(r) {
+					log.Printf("thread %s: process predates this hub: closing it", id)
+					m.sendEOF(r)
+					return nil
+				}
 			}
 			// Live process: hand the message straight to claude's stdin — it
 			// is steered into the current turn or starts the next one.
@@ -1534,6 +1539,23 @@ func (m *Manager) toolsStale(r run) bool {
 	return err != nil || string(b) != strings.Join(m.AllowedTools, ",")
 }
 
+// predatesHub: the process was started by an earlier hub. It survived the
+// restart in tmux with that hub's PATH, environment and preamble, so a fix
+// the session itself landed and restarted the hub for never reached it (#266).
+// Like toolsStale, it is closed before its next message and the conversation
+// resumes on a fresh process.
+func (m *Manager) predatesHub(r run) bool {
+	if m.Booted.IsZero() {
+		return false
+	}
+	var started string
+	if m.db.QueryRow(`SELECT started_at FROM thread_runs WHERE id=?`, r.id).Scan(&started) != nil {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339Nano, started)
+	return err == nil && at.Before(m.Booted)
+}
+
 // sendEOF asks the feeder to close claude's stdin; the process exits after
 // its current (none expected) turn. The next message starts a fresh process.
 func (m *Manager) sendEOF(r run) {
@@ -1664,6 +1686,7 @@ func (m *Manager) tail(r run) run {
 		case head.Type == "result" || (head.Type == "" && strings.Contains(line, `"result"`)):
 			var env resultEnvelope
 			if json.Unmarshal([]byte(line), &env) == nil {
+				m.grantRefused(r.thread, line) // a refused lifectl call: the hub's card, not the owner's approval (#265)
 				h := heldResult{Env: env, Tok: env.tokens(), At: now, Turn: r.turnID()}
 				if prev, ok := r.heldResult(); ok {
 					h.Tok = addTokens(prev.Tok, h.Tok) // the folded sub-turns' usage rides on the reply

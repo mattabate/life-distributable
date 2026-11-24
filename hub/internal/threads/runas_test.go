@@ -26,6 +26,19 @@ func TestRunAsOffIsPlainTmux(t *testing.T) {
 	}
 }
 
+// #263: a session as the hub's own user gets ops/bin first on PATH too, so
+// its bare `lifectl` grant finds the command; never the token line.
+func TestRunAsOffStillPutsOpsBinOnPath(t *testing.T) {
+	m := &Manager{FeedBin: "/repo/ops/bin/lifectl"}
+	env := m.sessionUserEnv()
+	if !strings.Contains(env, "PATH=") || !strings.Contains(env, "/repo/ops/bin") || !strings.HasSuffix(env, `:"$PATH"`) {
+		t.Fatalf("off: env %q", env)
+	}
+	if strings.Contains(env, "CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Fatalf("off: token line in %q", env)
+	}
+}
+
 func TestRunAsOnGoesThroughSudoAndNeverReadsTheToken(t *testing.T) {
 	var got string
 	m := &Manager{ClaudeBin: "/hub/claude", RunAs: RunAs{User: "life-agent", ClaudeBin: "/agent/claude", TmuxBin: "/brew/tmux"},

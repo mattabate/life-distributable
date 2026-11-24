@@ -338,7 +338,7 @@ func (m *Manager) Queue(p Prompt) (Prompt, error) {
 			t = strings.TrimPrefix(t, "new-or:")
 		}
 		if t != "new" && t != self {
-			return p, errors.New("a session may only prompt itself or a new session; to hand a task to another session: `lifectl relay <session-id> \"…\"` (the owner approves the card, the hub delivers)")
+			return p, errors.New("a session may only prompt itself or a new session; to hand a task to another session: `lifectl relay <session-id> \"…\"` (the hub delivers it straight away inside a daily allowance between sessions, past it as the owner's approval card)")
 		}
 	}
 	if p.Attachments == nil {

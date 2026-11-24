@@ -128,9 +128,10 @@ func main() {
 			"say": *say, "run_id": os.Getenv("LIFE_RUN_ID"), "source": src}
 		c.call("POST", "/api/v1/actions", body)
 	case "relay":
-		// Hand a task or a fact to ANOTHER session. Always an
-		// approval card: the owner's Approve is what delivers the words, and nothing
-		// else can (threads/relay.go). The card shows exactly what is sent.
+		// Hand a task or a fact to ANOTHER session. Delivered at once
+		// inside the daily allowance between sessions; past it, an approval
+		// card that shows exactly what is sent (actions relayFree,
+		// threads/relay.go).
 		//   lifectl relay <session-id> "text|@file" [--why "one line: why that session needs it"]
 		need(4)
 		fs := flag.NewFlagSet("relay", flag.ExitOnError)

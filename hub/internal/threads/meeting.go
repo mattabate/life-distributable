@@ -24,8 +24,8 @@ import (
 // rests; any member leaves, any member closes it for all. A breakout is a
 // meeting with a parent: its close is posted back into the parent's file.
 //
-// The owner's approval is the room itself: sessions reach each other only
-// through a relay the owner approves (Relay), so only the owner opens a
+// The owner's approval is the room itself: outside one, sessions reach each
+// other one recorded relay at a time (Relay), so only the owner opens a
 // meeting and picks who is in it. A member may break out with others already
 // in the room, and come back to a room it left, but no session joins one it
 // was never put in.
