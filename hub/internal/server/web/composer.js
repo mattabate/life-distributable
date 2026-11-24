@@ -303,21 +303,29 @@ function composerReHTML(key) {
   if ((st.spec || {}).actions && re.fixed) return '';
   return composerCards(key).map((r, i) => composerStripHTML(key, r, i)).join('');
 }
+// Several strips stacked read as one block unless each is visibly its own card
+// (#269): each wears its card's tint, they stand apart, the × sits by the
+// title, and the words-only "Reply" chip goes, because the one box below IS
+// the reply (pressing the lit chip again takes the pick back).
+const STRIP_TINT = { read: '', step: '', install: 'teal', rec: 'violet' };
 function composerStripHTML(key, re, i) {
-  const k = esc(key);
-  const outcomes = re.outcomes && re.outcomes.length ? re.outcomes : [{ value: '', label: 'Reply' }];
+  const k = esc(key), several = composerCards(key).length > 1;
+  let outcomes = re.outcomes && re.outcomes.length ? re.outcomes : [{ value: '', label: 'Reply' }];
+  if (several) outcomes = outcomes.filter(o => o.value);
+  const kind = re.kind || re.ref, tint = kind in STRIP_TINT ? STRIP_TINT[kind] : 'red';
+  const cls = `reply-strip${tint ? ' ' + tint : ''}`;
   // What a pick does is its tooltip, never a line beside the chips (the
   // desktop draws none; no explainer text in the UI).
   const chip = re.plain ? o => pickChipHTML(o, re.outcome === o.value, (re.means || {})[o.value] || '', `composerPickOutcome('${k}','${esc(o.value)}',${i})`) : o => `<button type="button" class="sm${re.outcome === o.value ? ' primary' : ''}" title="${esc((re.means || {})[o.value] || '')}" onclick="composerPickOutcome('${k}','${esc(o.value)}',${i})">${esc(o.label)}</button>`;
   const head = re.fixed ? '' : `<div class="row">
-      <span class="small muted">${esc(re.label || 'Answering')}</span>
-      <a class="trunc grow" href="${esc(re.href || '#')}" onclick="${re.focus ? `${re.focus}('${esc(re.id)}');return false` : ''}" title="${esc(re.title)}">${mdInline(re.title, false)}</a>
+      <span class="small lbl">${esc(re.label || 'Answering')}</span>
+      <a class="trunc" href="${esc(re.href || '#')}" onclick="${re.focus ? `${re.focus}('${esc(re.id)}');return false` : ''}" title="${esc(re.title)}">${mdInline(re.title, false)}</a>
       <button type="button" class="x" onclick="composerDropRe('${k}',${i})" title="just a message, not an answer to this card">×</button>
     </div>`;
   // A bare card ON its row (a reminder's box, 2026-10-26) has no strip at
   // all — no head to show and no chips — not an empty band's padding.
-  if (re.bare) return head ? `<div class="reply-strip">${head}</div>` : '';
-  return `<div class="reply-strip">${head}
+  if (re.bare || !outcomes.length) return head ? `<div class="${cls}">${head}</div>` : '';
+  return `<div class="${cls}">${head}
     <div class="row"><span class="chips-row">${outcomes.map(chip).join('')}</span></div>
   </div>`;
 }
@@ -353,7 +361,8 @@ function composerDrawRe(key) {
 function composerPickOutcome(key, v, i) {
   const re = composerCards(key)[i || 0];
   if (!re) return;
-  re.outcome = v;
+  // With several strips there is no Reply chip, so the lit one un-picks.
+  re.outcome = v && re.outcome === v && composerCards(key).length > 1 ? '' : v;
   const st = composerState(key);
   st.err = ''; composerShowErr(key, '');
   composerDrawRe(key);

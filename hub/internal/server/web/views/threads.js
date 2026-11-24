@@ -1979,7 +1979,8 @@ function chatComposerSpec(running) {
   return {
     placeholder: st => {
       const re = st.re;
-      if (re && st.also.length) return 'One message for all of them (optional)';
+      // Several strips: the box says where its words go (#269).
+      if (re && st.also.length) return `One message to ${chatState.title || 'this session'}, sent with ${st.also.length === 1 ? 'both answers' : `all ${st.also.length + 1} answers`} (optional)`;
       if (re && re.ref === 'action') return re.outcome ? 'Your note to the session (optional)' : 'Your line — it goes to the session, the proposal stays open';
       if (re) return re.outcome ? 'Anything to add (optional)' : 'Your answer…';
       return running ? 'Steer it while it works…' : 'Message…';

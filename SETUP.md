@@ -231,7 +231,7 @@ over Tailscale, which only their own devices can join.
    2. If they chose `web`, for each other computer on Tailscale: run
       `ops/hub.sh url` again on this Mac and open the new address on that
       computer within a minute.
-9. **The console's mic** (macOS 26 only; skip otherwise). `make build` made
+9. **The console's mic** (macOS 26 or later; skip otherwise). `make build` made
    `ops/bin/mic`, which turns speech into text on this Mac; nothing leaves
    it. Tell them: "Click **Mic** at the top of the console (or tap Option
    alone) and say a few words. The first time, macOS asks for the
