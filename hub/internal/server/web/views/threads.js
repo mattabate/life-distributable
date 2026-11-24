@@ -856,7 +856,7 @@ async function openThread(id, focus) {
   // thread's own reads land (the phone's seedCards), so a card he opened the
   // chat to answer is there at once.
   const s = ((board && board.sessions) || []).find(x => x.id === id);
-  const seed = s ? (s.asks || []).map(chatAskHTML).join('') + (s.actions || []).map(chatActionHTML).join('') : '';
+  const seed = s ? (s.actions || []).map(chatActionHTML).join('') + (s.asks || []).map(chatAskHTML).join('') : '';
   el.innerHTML = `<div class="chat-head"><span class="muted">Loading…</span></div><div class="msgs" id="msgs">${seed}</div>`;
   el.dataset.thread = ''; // not drawn yet (refreshThread's anchor)
   await refreshThread(id, true);
@@ -1087,9 +1087,11 @@ async function refreshThread(id, first) {
   // change (chatPatch).
   const upcoming = full && (chatState.upcoming || false);
   const groups = [];
+  // Approvals, then asks, then recs: the order of the row's lines in the
+  // list (sessionCards), so a card is where its line said.
   const tails = (as, cs, rs) => {
-    for (const a of as) groups.push(['ask:' + a.id, chatAskHTML(a)]);
     for (const a of cs) groups.push(['action:' + a.id, chatActionHTML(a)]);
+    for (const a of as) groups.push(['ask:' + a.id, chatAskHTML(a)]);
     for (const r of rs) groups.push(['rec:' + r.id, recNoticeHTML(r)]);
   };
   if (upcoming === 'todo') groups.push(['todo', todosHTML(t.todos)]);
@@ -1115,7 +1117,7 @@ async function refreshThread(id, first) {
       if (liveIDs.has(m.id)) h = `<div class="openrun">${msgHTML(m, ka, kc, [], askById, recById)}</div>` + kr.map(recNoticeHTML).join('');
       else {
         noteLeadCost(m, ka, kc);
-        h = ka.map(a => chatAskHTML(a)).join('') + kc.map(a => chatActionHTML(a)).join('') + kr.map(recNoticeHTML).join('');
+        h = kc.map(a => chatActionHTML(a)).join('') + ka.map(a => chatAskHTML(a)).join('') + kr.map(recNoticeHTML).join('');
       }
       if (h) groups.push(['msg:' + m.id, h]);
     }
@@ -1379,7 +1381,7 @@ function calTitle(ref) {
 // A reply's dollars ride on the first card it raised (chatState.costs), so
 // the turn is one row, not a reply row and a card. Returns the cards' refs.
 function noteLeadCost(m, asks, acts) {
-  const cards = [...(asks || []).map(a => 'ask:' + a.id), ...(acts || []).map(a => 'action:' + a.id)];
+  const cards = [...(acts || []).map(a => 'action:' + a.id), ...(asks || []).map(a => 'ask:' + a.id)];
   if (m.role === 'claude' && m.cost_usd && cards.length) chatState.costs[cards[0]] = m.cost_usd;
   return cards;
 }
@@ -1396,7 +1398,7 @@ function mdKept(s) {
 }
 function msgHTML(m, asks, acts, recs, askById, recById) {
   const cards = noteLeadCost(m, asks, acts);
-  const html = (asks || []).map(a => chatAskHTML(a)).join('') + (acts || []).map(a => chatActionHTML(a)).join('') + (recs || []).map(recNoticeHTML).join('');
+  const html = (acts || []).map(a => chatActionHTML(a)).join('') + (asks || []).map(a => chatAskHTML(a)).join('') + (recs || []).map(recNoticeHTML).join('');
   const atts = (m.attachments || []).map(r => attachHTML(r)).join('');
   const text = m.shown ?? m.text ?? '';
   const row = (k, cls, title, body) => rowHTML({ id: 'msg-' + m.id, key: 'msg:' + m.id, opened: chatState.open.get('msg:' + m.id) === true,

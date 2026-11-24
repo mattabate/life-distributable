@@ -263,16 +263,18 @@ struct ThreadDetail: View {
         var out: [OpenCell] = []
         let live = liveStarters
         let notice = { (r: Rec) in !r.isClosed && (r.seen_at ?? "").isEmpty }
-        for a in headAsks where !a.isClosed { out.append(.ask(a, 0)) }
+        // Approvals, then asks, then recs: the row's order in the list
+        // (SessionCell.cells) and the console's tails.
         for a in headActions where a.open == true { out.append(.action(a, 0)) }
+        for a in headAsks where !a.isClosed { out.append(.ask(a, 0)) }
         for m in rows {
             if live.contains(m.id) { out.append(.message(m)) }
-            for a in asksByMessage[m.id] ?? [] where !a.isClosed { out.append(.ask(a, leadCost(m, "ask:" + a.id))) }
             for a in actionsByMessage[m.id] ?? [] where a.open == true { out.append(.action(a, leadCost(m, "action:" + a.id))) }
+            for a in asksByMessage[m.id] ?? [] where !a.isClosed { out.append(.ask(a, leadCost(m, "ask:" + a.id))) }
             for r in recsByMessage[m.id] ?? [] where notice(r) { out.append(.recNotice(r)) }
         }
-        for a in tailAsks where !a.isClosed { out.append(.ask(a, 0)) }
         for a in tailActions where a.open == true { out.append(.action(a, 0)) }
+        for a in tailAsks where !a.isClosed { out.append(.ask(a, 0)) }
         for r in tailRecs where notice(r) { out.append(.recNotice(r)) }
         return out
     }
@@ -468,9 +470,10 @@ struct ThreadDetail: View {
     /// The first card under a message: an empty reply's dollars ride on it
     /// (the console's msgHTML), so the turn is one row, not a reply row and
     /// a card.
+    /// Open cards only draws the open ones, so a decided card never leads there.
     func leadRef(_ m: ThreadMessage) -> String? {
-        if let a = asksByMessage[m.id]?.first { return "ask:" + a.id }
-        return actionsByMessage[m.id]?.first.map { "action:" + $0.id }
+        if let a = (actionsByMessage[m.id] ?? []).first(where: { full || $0.open == true }) { return "action:" + a.id }
+        return (asksByMessage[m.id] ?? []).first(where: { full || !$0.isClosed }).map { "ask:" + $0.id }
     }
 
     func leadCost(_ m: ThreadMessage, _ ref: String) -> Double {
@@ -797,22 +800,22 @@ struct ThreadDetail: View {
                                         .font(.caption).foregroundStyle(.secondary)
                                 }.buttonStyle(.plain).padding(.horizontal)
                             }
+                            ForEach(headActions) { approvalCell($0) }
                             ForEach(headAsks) { a in
                                 AskCard(a: a, goals: goals, reload: { await load() }).id(a.id)
                             }
-                            ForEach(headActions) { approvalCell($0) }
                             ForEach(visible(rows)) { m in
                                 messageRow(m).id(m.id)
+                                ForEach(actionsByMessage[m.id] ?? []) { approvalCell($0, cost: leadCost(m, "action:" + $0.id)) }
                                 ForEach(asksByMessage[m.id] ?? []) { a in
                                     AskCard(a: a, goals: goals, cost: leadCost(m, "ask:" + a.id), reload: { await load() }).id(a.id)
                                 }
-                                ForEach(actionsByMessage[m.id] ?? []) { approvalCell($0, cost: leadCost(m, "action:" + $0.id)) }
                                 ForEach(recsByMessage[m.id] ?? []) { RecNotice(rec: $0, reload: { await load() }) }
                             }
+                            ForEach(tailActions) { approvalCell($0) }
                             ForEach(tailAsks) { a in
                                 AskCard(a: a, goals: goals, reload: { await load() }).id(a.id)
                             }
-                            ForEach(tailActions) { approvalCell($0) }
                             ForEach(tailRecs) { RecNotice(rec: $0, reload: { await load() }) }
                             }
                             .modifier(HistoryLine(on: Device.isMac))
