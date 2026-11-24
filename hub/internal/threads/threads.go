@@ -805,6 +805,9 @@ func (m *Manager) CreateIdle(id, title, project string) (Thread, error) {
 	}
 	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text) VALUES (?,?,?,?,?)`, id, ts(now), "system", "schedule",
 		"This session holds calendar items that have no session of their own: when a dated step for you comes due, its card appears here.")
+	if persona == PersonaStaff {
+		m.sayHello(id)
+	}
 	return m.Get(id)
 }
 

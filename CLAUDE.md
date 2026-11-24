@@ -77,7 +77,9 @@ the recipe is in `hub/CLAUDE.md`, read it when that is the task.
 ## The team
 
 The only mode; there is no switch. Some sessions take a standing role. One role ships, the
-**chief of staff** (`staff`, `hub/internal/threads/persona.go`): it owns the
+**chief of staff** (`staff`, `hub/internal/threads/persona.go`), named
+Herbert until the owner asks for another name (`lifectl thread me title`).
+It owns the
 calendar session until the owner gives the calendar to another role, and it
 is the catch-all. The router (a local Ollama model, else the cloud's small
 one) sends each new message from the app or console to the role whose lane

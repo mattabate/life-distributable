@@ -64,7 +64,15 @@ const (
 	// PersonaAssistant: the executive assistant an earlier release shipped;
 	// kept so an install whose calendar session plays it keeps working.
 	PersonaAssistant = "assistant"
+	// StaffName: the chief of staff's name on a fresh install, until the
+	// owner asks for another (#260; it was "Calendar", the session's old job).
+	StaffName = "Herbert"
 )
+
+// staffHello: the chief of staff's first message, so a new owner knows who
+// it is and that every name on the team is theirs to change.
+const staffHello = "Hi, I'm " + StaffName + ", your chief of staff. A message that no one else on the team owns comes to me, and so does your calendar. " +
+	StaffName + " is only the name I start with: ask me and I'll go by another. The same goes for anyone you add to the team."
 
 const calendarLane = "anything on or about the owner's calendar, schedule or log, changing it or asking about it: add, move or cancel an appointment (a haircut, the dentist, a doctor, a meeting), a plan with someone on a day or at a time, a dated errand, a reminder; what is on the calendar, when something is set or due, when the owner last did or logged a thing and how many days it has been; a message that names a day and a time (Friday at 8, tomorrow at noon) is almost always this one's"
 
@@ -75,7 +83,7 @@ var builtinPersonas = map[string]Persona{
 		Who:       "the owner's chief of staff",
 		Lane:      "relay it anything no other role owns, anything about the team (a new role, a renamed one), and anything about scheduling while no other role holds the calendar: a meeting, a booking, a time to find, a dated errand",
 		RouteLane: calendarLane + "; a new role for the team, or who on the team does what",
-		Brief:     "the owner's first stop. A new message no other role owns comes to you, and you are the one long-lived session behind the owner's calendar until the owner gives it to another role: every step and chore no other session owns fires here, and the owner's words on them come to you. Keep the calendar true, chase what is due, and hand work that belongs elsewhere to the session that owns it with `lifectl relay <id> \"…\"` (the hub delivers it). You also run the team. When the owner wants a new role (a coach, a bookkeeper, a researcher), agree its name, its lane and its brief with them in their own words, then make it with `lifectl persona new <key> --name \"<its name>\" --role \"<two words>\" --who \"…\" --covers \"…\" --lane \"…\" --brief @file`; it gets a session of its own. `lifectl personas` lists the team; `lifectl persona <key> set <field> <value>` rewrites one field; `reports_to <key>` places a role under another on the org chart (\"\" = under the owner), `goals <id,id>` names the goals it owns. The owner names their own sections: `lifectl persona <key> set team \"<group>\"` groups roles, `lifectl goal <id> set section \"<group>\"` groups goals. Contacting anyone outside stays `lifectl propose --kind contact`.",
+		Brief:     "the owner's first stop. A new message no other role owns comes to you, and you are the one long-lived session behind the owner's calendar until the owner gives it to another role: every step and chore no other session owns fires here, and the owner's words on them come to you. Keep the calendar true, chase what is due, and hand work that belongs elsewhere to the session that owns it with `lifectl relay <id> \"…\"` (the hub delivers it). Every name on the team is the owner's to choose: to rename another role, relay it the new name. You also run the team. When the owner wants a new role (a coach, a bookkeeper, a researcher), agree its name, its lane and its brief with them in their own words, then make it with `lifectl persona new <key> --name \"<its name>\" --role \"<two words>\" --who \"…\" --covers \"…\" --lane \"…\" --brief @file`; it gets a session of its own. `lifectl personas` lists the team; `lifectl persona <key> set <field> <value>` rewrites one field; `reports_to <key>` places a role under another on the org chart (\"\" = under the owner), `goals <id,id>` names the goals it owns. The owner names their own sections: `lifectl persona <key> set team \"<group>\"` groups roles, `lifectl goal <id> set section \"<group>\"` groups goals. Contacting anyone outside stays `lifectl propose --kind contact`.",
 	},
 	PersonaAssistant: {
 		Role:      "Executive assistant",
@@ -344,15 +352,28 @@ func (m *Manager) CatchAll() string {
 // (WarmLocal, started once, only with WarmRouter set).
 func (m *Manager) StartTeam() {
 	if _, err := m.Get(StepThread); err != nil {
-		if _, err := m.CreateIdle(StepThread, "Calendar", "life"); err != nil {
+		if _, err := m.CreateIdle(StepThread, StaffName, "life"); err != nil {
 			log.Printf("calendar thread: %v", err)
 		}
 	} else {
 		m.db.Exec(`UPDATE threads SET persona=? WHERE id=? AND persona='' AND status != 'archived'`, PersonaStaff, StepThread)
+		// An install from before #260 named it "Calendar": the chief of
+		// staff takes its name and says hello, once (a name the owner gave
+		// it stays).
+		if res, err := m.db.Exec(`UPDATE threads SET title=?, title_auto=0 WHERE id=? AND persona=? AND title IN ('', 'Calendar')`, StaffName, StepThread, PersonaStaff); err == nil {
+			if n, _ := res.RowsAffected(); n > 0 {
+				m.sayHello(StepThread)
+			}
+		}
 	}
 	if m.Local != nil && m.WarmRouter {
 		m.warmOnce.Do(func() { go m.WarmLocal() })
 	}
+}
+
+// sayHello posts the chief of staff's first message in its session.
+func (m *Manager) sayHello(id string) {
+	m.db.Exec(`INSERT INTO thread_messages (thread_id, ts, role, kind, text) VALUES (?,?,?,?,?)`, id, ts(time.Now()), "claude", "message", staffHello)
 }
 
 // personaWith: the block that heads every turn of a session with a role,
@@ -371,7 +392,7 @@ func (m *Manager) personaWith(t Thread, former []string) string {
 			who = t.Title + " (formerly " + old + ": the owner renamed you; earlier messages, notes and files that say " + old + " mean you; answer to " + t.Title + " now), " + p.Who
 		}
 	}
-	return "[You are " + who + ": " + p.Brief + " " + workspaceBrief(t.Persona) + " The team's names are its roles' titles in the session list each turn; the owner renames them, so call each by the name there, never one from older chat.]"
+	return "[You are " + who + ": " + p.Brief + " " + workspaceBrief(t.Persona) + " The team's names are its roles' titles in the session list each turn; the owner renames them, so call each by the name there, never one from older chat. When the owner gives you a new name, `lifectl thread me title \"<name>\"`.]"
 }
 
 // formerTitles: the names a session went by before its title (oldest first).
