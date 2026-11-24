@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Team mode (config team_mode, Manager.TeamMode): a long-lived session can
+// The team (always on; issue #259 removed the switch): a long-lived session can
 // play a named role. The role is a key (builtinPersonas, or a persona_defs
 // row the owner's agent added); the session's title is its name, whatever the
 // owner calls it; its chat is its history; its workspace (internal/workspace)
@@ -234,9 +234,6 @@ func (m *Manager) writePersona(p Persona, by string) error {
 // role's words when empty). The key must be new; role, who and brief are
 // required, covers and lane default from each other.
 func (m *Manager) NewPersona(p Persona, name, by string) (Persona, error) {
-	if !m.TeamMode() {
-		return Persona{}, errTeamOff
-	}
 	p.Key = strings.TrimSpace(p.Key)
 	if !validPersonaKey.MatchString(p.Key) {
 		return Persona{}, errors.New("key: 2-24 lowercase letters, digits or -, starting with a letter")
@@ -329,9 +326,8 @@ func (m *Manager) EditPersona(key string, patch map[string]string, by string) (P
 	return p, nil
 }
 
-// CatchAll: the session a message no role claims goes to while plain
-// sessions are off: the chief of staff, else an older install's executive
-// assistant. "" for none.
+// CatchAll: the session a message no role claims goes to: the chief of
+// staff, else an older install's executive assistant. "" for none.
 func (m *Manager) CatchAll() string {
 	for _, key := range []string{PersonaStaff, PersonaAssistant} {
 		if id := m.personaSession(key); id != "" {
@@ -341,30 +337,12 @@ func (m *Manager) CatchAll() string {
 	return ""
 }
 
-var errTeamOff = errors.New("team mode is off: the owner turns it on (`lifectl settings set team_mode true`, PATCH /api/v1/settings), then try again")
-
-// TeamMode: are roles, the router and workspaces on (config team_mode)?
-func (m *Manager) TeamMode() bool { return m.team.Load() }
-
-// PlainSessions: with team mode on, may a new message from an app start a
-// session with no role (config plain_sessions)? Off, a message no role
-// claims goes to the CatchAll.
-func (m *Manager) PlainSessions() bool { return m.plain.Load() }
-
-// SetPlainSessions applies plain_sessions now.
-func (m *Manager) SetPlainSessions(on bool) { m.plain.Store(on) }
-
-// SetTeamMode applies team_mode now (the switch alone; StartTeam does the
-// rest of turning it on).
-func (m *Manager) SetTeamMode(on bool) { m.team.Store(on) }
-
-// StartTeam turns team mode on with what it needs: the calendar's home
-// session gets the chief of staff if it plays no role yet (made here when it
-// does not exist: on a database that predates the switch the calendar makes
-// it only when a step first fires), and the router's local model is kept warm
-// from then on (WarmLocal, started once, only with WarmRouter set).
+// StartTeam readies the team at boot: the calendar's home session gets the
+// chief of staff if it plays no role yet (made here when it does not exist:
+// on a database that predates the team the calendar makes it only when a
+// step first fires), and the router's local model is kept warm from then on
+// (WarmLocal, started once, only with WarmRouter set).
 func (m *Manager) StartTeam() {
-	m.team.Store(true)
 	if _, err := m.Get(StepThread); err != nil {
 		if _, err := m.CreateIdle(StepThread, "Calendar", "life"); err != nil {
 			log.Printf("calendar thread: %v", err)
@@ -443,12 +421,8 @@ func workspaceBrief(key string) string {
 
 // Personas: every session that plays a role, archived ones aside: the
 // people at the foot of the Sessions list, whether or not one is calling.
-// In role order, never by last message, so the cards hold still. Empty with
-// team mode off, whatever the rows say.
+// In role order, never by last message, so the cards hold still.
 func (m *Manager) Personas() ([]Thread, error) {
-	if !m.TeamMode() {
-		return []Thread{}, nil
-	}
 	out, err := m.list("WHERE t.persona != '' AND t.status != 'archived'")
 	sort.SliceStable(out, func(i, j int) bool {
 		if a, b := personaRank(out[i].Persona), personaRank(out[j].Persona); a != b {
@@ -461,9 +435,6 @@ func (m *Manager) Personas() ([]Thread, error) {
 
 // PersonaOf: the role a session plays, "" for none (workspace.Store.Role).
 func (m *Manager) PersonaOf(id string) string {
-	if !m.TeamMode() {
-		return ""
-	}
 	var p string
 	m.db.QueryRow(`SELECT persona FROM threads WHERE id=? AND status != 'archived'`, id).Scan(&p)
 	return p

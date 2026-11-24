@@ -22,7 +22,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -369,14 +368,6 @@ type Manager struct {
 	// desktop, web). The preamble names them so a session builds a change
 	// for those and leaves the rest until asked. Empty reads as all three.
 	Surfaces []string
-	// team mirrors config team_mode (TeamMode, SetTeamMode): when on,
-	// sessions may play roles (Persona), a new message from the app is routed
-	// to the role whose lane holds it (route.go), and each role has a
-	// workspace. Off, every one of those is bypassed: a new message is a new
-	// session, Personas() is empty and a persona cannot be set. plain mirrors
-	// config plain_sessions (PlainSessions). Atomic: the settings route flips
-	// them while sessions run.
-	team, plain atomic.Bool
 	// WarmRouter: StartTeam keeps the local router warm (WarmLocal,
 	// once per process). main sets it; tests leave it off.
 	WarmRouter bool
@@ -800,12 +791,11 @@ func (m *Manager) CreateIdle(id, title, project string) (Thread, error) {
 		return Thread{}, fmt.Errorf("unknown project %q", project)
 	}
 	now := time.Now()
-	// In team mode the calendar's home session is the chief of staff: the
-	// role that owns the owner's calendar until another takes it, so every
-	// step with no session of its own fires with someone who knows the
-	// schedule.
+	// The calendar's home session is the chief of staff: the role that owns
+	// the owner's calendar until another takes it, so every step with no
+	// session of its own fires with someone who knows the schedule.
 	persona := ""
-	if m.TeamMode() && id == StepThread {
+	if id == StepThread {
 		persona = PersonaStaff
 	}
 	_, err := m.db.Exec(`INSERT INTO threads (id,created_at,updated_at,title,project,status,schedule,schedule_prompt,persona,title_auto) VALUES (?,?,?,?,?,'done','','',?,0)`,
@@ -1226,7 +1216,7 @@ How to work:
 - BLOCKED ON {OWNER} (a decision, access, a physical step, a missing tool, a work-changing ambiguity) → an ASK the moment you know; never silently drop, shrink or substitute the task: ‵lifectl ask add "<imperative title, ≤80 chars>" --say "what you tried, why blocked, what unblocks it" --kind decision|access|physical|read|other [--check "how a verifier could tell it is done"]‵. One ask per thing; keep working, the answer arrives mid-turn. Never restate a card in text.
 - KIND = THE VERB ON THEIR BUTTONS: decision → Decided; access → Granted (ONLY a credential, scope or permission they hand over); physical/other → I did this (steps they carry out, even in a web console); read → Read it. Retag: ‵lifectl ask <id> kind physical‵.
 - THE MESSAGE IS WHAT THEY HEAR: the phone reads it aloud and it leads the card. The whole answer first, 2-5 plain sentences:"{hey}you asked if the export finished. It has." It STANDS ALONE: name the thing, never "this session"; no ids, URLs, paths, markdown or lists; ≤700 chars. After it ONLY their numbered steps and linked lines; other detail folds under More. No title line, no prose body. ‵lifectl ask add "<imperative title>" --say "<message>" [--detail "<steps>"]‵; a closing reply is ‵Say: {hey}…‵ (wraps until a blank line), then the steps.
-- A fix or plan they carry out is ONE card: detail a NUMBERED LIST of EVERY step in their order, each with its ~time, trivial ones included — exact URL, literal click labels, file paths, literal lines to type, EVERY form field with its value ("leave blank" included); anything they open is a [text](url) link, never a bare handle. A minutes-long step is never a rec, a cal item or "next week"; a short plan is never split across days. A CARD STANDS ALONE: {owner} sees only the open card, so it never points at another; every step, URL and copy-box text is in it, in full.
+- A fix or plan they carry out is ONE card: detail a NUMBERED LIST of EVERY step in their order, each with its ~time, trivial ones included — exact URL, literal click labels, file paths, literal lines to type, EVERY form field with its value ("leave blank" included); anything they open is a [text](url) link, never a bare handle. A minutes-long step is never a rec, a cal item or "next week"; a short plan is never split across days. A CARD STANDS ALONE: never pointing at another; every step, URL and copy-box text in full.
 - Only at the computer (key, OAuth link, file drop, console page) → ‵--surface web‵; holding the phone (install, permission, photo) → ‵--surface mobile‵; else default. Fix: ‵lifectl ask <id> surface web|mobile|any‵.
 - Only on a later day → ‵--on YYYY-MM-DD [--at HH:MM]‵ on the ask: hidden until that morning, then nagged.
 - "[Open asks on this thread …]" and "[Open for the owner right now …]" (all sessions' cards) start a turn when any exist: the message may settle one: close it (‵lifectl ask <id> done "what happened"‵ or ‵dismiss‵) or reword a stale one (‵lifectl ask <id> set --title "…" --say "…" [--detail @file]‵); never re-raise a listed one. ‵lifectl asks‵ lists all.
@@ -1239,14 +1229,14 @@ How to work:
 - HOW A TURN ENDS, one of four: (1) NOTHING to tell (a rule set, nothing found, a card says it) → exactly ‵[end]‵, never "confirmed". (2) READ (blue): an answer, a finding, or YOU FINISHED WHAT THEY ASKED — ‵--kind read --say "<message>"‵, or end on ‵Say: {hey}…‵ and the hub mints the card. A long deliverable (list, JSON, code) is a file, sent as ‵--detail @/path‵, never retyped. (3) NEEDS ACTION (red): blocked on them. (4) APPROVAL (red): ‵lifectl propose‵. A read that says nothing new is a (1). NO WHITE CELL: never Did:/Next: bullets, notes-to-self, progress lines, headers, or their instruction restated.
 - THE CARD IS THE REPLY: a turn that raised any card ends with exactly ‵[end]‵. Raise it in the SAME completion as bookkeeping it doesn't depend on (commit, note, calendar item).
 - TEXT ENDING A COMPLETION IS A REPLY: no tool call ends the turn; the text becomes a card. A progress line rides ABOVE the next tool call. NO BACKGROUND WAITS (task, Monitor, subagent): long ones run foreground (‵timeout‵ ≤10 min); a build lock = poll in a loop, never a wake. A long shell prints ‵N/total‵ (its bar), never ‵> file‵ (‵| tee‵ for a log).
-- END-OF-TURN CHECK: a next step they want → do it NOW, or thread/card it; close open asks here no longer true; then end as above. Work you name is in motion.
-- TEXT FORMAT = MARKDOWN SUBSET wherever {owner} reads (replies, --detail, goal notes): "- " bullets, "1. " numbered (one per line), 2-space nesting, "# " heading, blank line between paragraphs, **bold**, ‵code‵, bare URLs, [text](url), pipe tables (short cells), a picture (blob-put.py's ![name](url) line, alone, is drawn), and a fenced block — a line of ‵‵‵json (or any language word), the text, a line of ‵‵‵ — for ANYTHING THEY COPY VERBATIM (JSON, a file, a multi-line command): verbatim, one block per thing to paste; a one-line command stays ‵code‵. Not rendered: > quotes, --- rules, HTML. One step per line, real newlines.
+- END-OF-TURN CHECK: a next step they want → do it NOW, or thread/card it; close open asks here no longer true; then end as above.
+- TEXT FORMAT = MARKDOWN SUBSET wherever {owner} reads (replies, --detail, goal notes): "- " bullets, "1. " numbered (one per line), 2-space nesting, "# " heading, blank line between paragraphs, **bold**, ‵code‵, bare URLs, [text](url), pipe tables, a picture (blob-put.py's ![name](url) line, alone, is drawn), and a fenced block — a line of ‵‵‵json (or any language word), the text, a line of ‵‵‵ — for ANYTHING THEY COPY VERBATIM (JSON, a file, a multi-line command): verbatim, one block per thing to paste; a one-line command stays ‵code‵. No > quotes, --- rules or HTML. One step per line, real newlines.
 
 Follow-through is YOUR call:
 - RECURRING work: ‵lifectl thread {id} schedule <daily@HH:MM|weekly@Mon HH:MM|every@6h> "what to do at each check-in"‵; ‵... schedule off‵ when done. A SCHEDULE IS A CADENCE, NOT A DATE — one known day is a calendar item. Fleet = 5-10 scheduled sessions: ‵lifectl threads‵ first, add to an existing check-in on that goal and cadence; every watch gets a sunset date.
 - A wake runs on this session's model; sonnet only for rote work you pin: ‵lifectl thread <id> model claude-sonnet-5-5‵.
 - TO-DO LIST = WORK FOR NOW: a new task mid-turn → ‵lifectl todo add "<task>" [--from <who>]‵; ‵todo done|drop|wait <n> "note"‵ (wait: the outside world only). An open item reopens your turn.
-- A TIMED WAKE IS ONLY FOR THE WORLD (a bank post, a reply): ‵lifectl prompt "<what to check, what to do per outcome>" --in 2h‵ or ‵--on YYYY-MM-DD [--at HH:MM]‵; ‵lifectl prompts queued‵ lists yours, ‵lifectl prompt cancel <id>‵ drops one. NEVER FOR WORK THAT CAN RUN NOW. A CAPPED PROCESS (a check-in wake) with steps left hands EVERY remaining step to a new session THE SAME MINUTE: ‵lifectl prompt "<done; each step left>" --new --title "…"‵ (no cap), then [end]. For ANOTHER session: ‵lifectl relay <id> "…"‵ (approval card), never chat; the session on that work takes it ("[Other sessions right now …]"; ‵lifectl threads --q <word>‵ finds more).
+- A TIMED WAKE IS ONLY FOR THE WORLD (a bank post, a reply): ‵lifectl prompt "<what to check, what to do per outcome>" --in 2h‵ or ‵--on YYYY-MM-DD [--at HH:MM]‵; ‵lifectl prompts queued‵ lists yours, ‵lifectl prompt cancel <id>‵ drops one. NEVER FOR WORK THAT CAN RUN NOW. A CAPPED PROCESS (a check-in wake) with steps left hands EVERY remaining step to a new session THE SAME MINUTE: ‵lifectl prompt "<done; each step left>" --new --title "…"‵ (no cap), then [end]. For ANOTHER session or role: ‵lifectl relay <id> "…"‵, never chat ("[Other sessions right now …]"; ‵lifectl threads --q <word>‵ finds more).
 - A fan-out is the Agent tool, never ‵lifectl thread new‵ or ‵prompt --new‵.
 - ANYTHING WITH A DATE GOES ON THE CALENDAR. Before a day, check ‵lifectl cal <from> <to>‵, ‵cal away‵. Their step on a day: ‵lifectl cal add "<imperative title>" --on YYYY-MM-DD [--at HH:MM] --kind owner --detail "what and why" [--goal id] [--repeat monthly]‵ (nags that day). Day-only chore: ‵--due on --thread ""‵ (missed at midnight). NO REAL DEADLINE: omit --on (a soon to-do; ‵lifectl cal <id> soon‵ converts); never invent a day. Agent work: ‵--kind agent --at HH:MM‵, instructions in --detail (no --thread = fresh session); NEVER ALL DAY: after its data lands. ONE ITEM PER THING: edit the open one (any session's); ONE AGENT ITEM PER SESSION PER DAY. Owed a reply by a day: ‵--kind waiting --on <due> --detail "where to look"‵. Fold one: ‵lifectl cal <dup> into <keeper>‵. Instructions checkable, never "see how it went". "Remind me to…"/a date: ‵--kind note‵. A dated plan = ONE rec + one item per date. ‵lifectl cal <id> done|dismiss‵ closes one.
 - ANYTHING YOU RECOMMEND GOES IN THE LEDGER: ‵lifectl rec add "<title>" --domain money|health|tools|home|other --kind buy|subscribe|trade|try|stop|habit|process --because "<the evidence>" --expect "<what should change, and how we would know>" [--cost <dollars> --period monthly|yearly] [--goal id] [--act-by <date>] [--review-on <date>]‵. A rec is a cost or a real choice, never a step they can do now; PULL, never notify. Read ‵lifectl recs all --domain <d>‵ first; never re-serve a declined/deferred one — ‵--supersedes <id>‵. Accepted → mint items/proposals, ‵lifectl rec <id> link <ids>‵; later ‵lifectl rec <id> score worked|mixed|failed|unclear "<what happened>"‵.
@@ -1270,9 +1260,7 @@ func (m *Manager) systemPreamble(t Thread) string {
 	if t.Schedule != "" {
 		sched = "This thread has a schedule (" + t.Schedule + "): you are woken with a check-in prompt on that cadence, with full memory of this conversation.\n"
 	}
-	if m.TeamMode() {
-		sched += "Team mode is on: some sessions play a named role (the people at the foot of the Sessions list; `lifectl personas` lists them); a message that belongs to a role's lane goes to that session with `lifectl relay <id> \"…\"`, and a role's own files are `lifectl workspace <role>`. A new role is the chief of staff's to make with the owner (`lifectl persona new`): relay the owner's wish there.\n"
-	}
+	sched += "Roles (`lifectl personas`): a role's work goes to its session by relay, its files are `lifectl workspace <role>`; new roles are the chief of staff's.\n"
 	if m.RunAs.User != "" {
 		sched += "You run as a separate user in a clone of the hub repo of your own (branch th-" + t.ID + "): commit there, then `bash ops/land.sh` puts it on main through the hub and prints how it ended; `make ship WHY=\"fixes ...\"` and `make mac WHY=\"fixes ...\"` build from main the same way, so land first. The main checkout, ops/secrets and the database are read-only to you.\n"
 	}
@@ -1978,9 +1966,6 @@ func (m *Manager) Update(id string, patch map[string]string) (Thread, error) {
 			t.Title = v
 			m.db.Exec(`UPDATE threads SET title_auto=0 WHERE id=?`, id) // manual rename pins it
 		case "persona":
-			if !m.TeamMode() {
-				return t, errTeamOff
-			}
 			if v == "off" {
 				v = ""
 			}

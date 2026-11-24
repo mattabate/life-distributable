@@ -74,10 +74,9 @@ when a goal needs one; none ships.
 Building a page for a goal (data first, a page only when the owner asks):
 the recipe is in `hub/CLAUDE.md`, read it when that is the task.
 
-## Team mode
+## The team
 
-On by default (`team_mode` in `ops/hub.json`; a hub.json without the key
-is on too). Some sessions take a standing role. One role ships, the
+The only mode; there is no switch. Some sessions take a standing role. One role ships, the
 **chief of staff** (`staff`, `hub/internal/threads/persona.go`): it owns the
 calendar session until the owner gives the calendar to another role, and it
 is the catch-all. The router (a local Ollama model, else the cloud's small
@@ -96,10 +95,8 @@ the chief of staff may write roles. Every brief is written for this owner,
 never copied from anyone's. A role's own files live in `data/people/<key>/`
 (`lifectl workspace`); only that session or the owner writes them.
 
-The owner's switches (`GET/PATCH /api/v1/settings`, `lifectl settings`,
-applied without a restart): `team_mode` (off: no roles, no router);
-`plain_sessions` (default false: every new message goes to a role; true:
-the owner may also start sessions with no role); `model_cap` (the best
+The owner's setting (`GET/PATCH /api/v1/settings`, `lifectl settings`,
+applied without a restart): `model_cap` (the best
 model the ladder may start a session on; the ladder itself is
 `model_ladder`, fable, then opus, then sonnet). Goals are grouped by a
 `section` the owner names (`lifectl goal <id> set section "…"`).

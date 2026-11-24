@@ -10,16 +10,10 @@ import (
 	"life/hub/internal/workspace"
 )
 
-// Workspaces (team mode): a role's own files, read by every session and
-// written only by the session that plays the role, or the owner. 404 while
-// team mode is off, so a session told about workspaces by an old note learns
-// the switch is off from the one line.
+// Workspaces: a role's own files, read by every session and written only by
+// the session that plays the role, or the owner.
 
 func (s *Server) workspaceOn(w http.ResponseWriter) bool {
-	if !s.thr.TeamMode() {
-		jsonErr(w, 404, "team mode is off (team_mode in ops/hub.json)")
-		return false
-	}
 	return need(w, s.WS != nil, "workspaces not configured")
 }
 

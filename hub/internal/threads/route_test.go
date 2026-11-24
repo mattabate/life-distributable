@@ -10,7 +10,6 @@ import (
 // decides.
 func TestAMessageOpenedByNameGoesToThatRole(t *testing.T) {
 	m, _, _ := setup(t)
-	m.team.Store(true)
 	if _, err := m.CreateIdle(StepThread, "Calendar", "life"); err != nil {
 		t.Fatal(err)
 	}
@@ -42,8 +41,8 @@ func TestAMessageOpenedByNameGoesToThatRole(t *testing.T) {
 	}
 }
 
-// With plain sessions off, a message no role claims goes to the chief of
-// staff; with them on it starts a plain session, as with team mode off.
+// A message no role claims goes to the chief of staff (there is no plain
+// session to fall back on, issue #259).
 func TestAMessageNoRoleClaimsGoesToTheChiefOfStaff(t *testing.T) {
 	m, _, _ := setup(t)
 	m.Pick, m.Local = nil, nil
@@ -56,17 +55,7 @@ func TestAMessageNoRoleClaimsGoesToTheChiefOfStaff(t *testing.T) {
 	}
 	th, routed, err := m.CreateRouted("what is on this week?", nil, "app")
 	if err != nil || !routed || th.ID != StepThread {
-		t.Fatalf("plain off: %s routed=%v %v", th.ID, routed, err)
-	}
-	m.SetPlainSessions(true)
-	th, routed, err = m.CreateRouted("start something new", nil, "app")
-	if err != nil || routed || th.ID == StepThread {
-		t.Fatalf("plain on: %s routed=%v %v", th.ID, routed, err)
-	}
-	m.SetTeamMode(false)
-	m.SetPlainSessions(false)
-	if _, routed, _ := m.CreateRouted("team off", nil, "app"); routed {
-		t.Fatal("team mode off routes nothing")
+		t.Fatalf("to the chief of staff: %s routed=%v %v", th.ID, routed, err)
 	}
 }
 
@@ -74,9 +63,6 @@ func TestAMessageNoRoleClaimsGoesToTheChiefOfStaff(t *testing.T) {
 // its own session, and its words can be rewritten without losing the old.
 func TestNewPersona(t *testing.T) {
 	m, _, _ := setup(t)
-	if _, err := m.NewPersona(Persona{Key: "coach", Role: "Coach", Who: "a coach", Brief: "Train."}, "", "owner"); err == nil {
-		t.Fatal("team mode off: no new role")
-	}
 	m.StartTeam()
 	for _, bad := range []Persona{{Key: "Coach", Role: "C", Who: "w", Brief: "b"}, {Key: "staff", Role: "C", Who: "w", Brief: "b"}, {Key: "coach", Role: "C"}} {
 		if _, err := m.NewPersona(bad, "", "owner"); err == nil {
