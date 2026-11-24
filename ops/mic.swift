@@ -361,6 +361,27 @@ final class Switch: @unchecked Sendable {
 
 func seconds(_ t: CMTime) -> Double { t.isValid ? CMTimeGetSeconds(t) : 0 }
 
+/// One result as its JSON line. Deliberately synchronous: walking a final's
+/// attributed runs for the word times inside run()'s async frame aborted the
+/// helper on macOS 27 right after the first final (swift_task_dealloc, a
+/// task-allocator fatal error, #264); here those values live on the thread's
+/// own stack and never touch the task allocator.
+@available(macOS 26, *)
+func emitResult(_ r: SpeechTranscriber.Result) {
+    let text = String(r.text.characters)
+    guard r.isFinal else {
+        emit(["k": "partial", "text": text])
+        return
+    }
+    var words: [[Any]] = []
+    for span in r.text.runs {
+        let w = String(r.text[span.range].characters).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !w.isEmpty, let tr = span.audioTimeRange else { continue }
+        words.append([seconds(tr.start), seconds(tr.end), w])
+    }
+    emit(["k": "final", "text": text, "t0": seconds(r.range.start), "t1": seconds(r.range.end), "words": words])
+}
+
 @available(macOS 26, *)
 func run() async {
     let sw = Switch()
@@ -440,20 +461,7 @@ func run() async {
     }
 
     do {
-        for try await r in transcriber.results {
-            let text = String(r.text.characters)
-            if !r.isFinal {
-                emit(["k": "partial", "text": text])
-                continue
-            }
-            var words: [[Any]] = []
-            for run in r.text.runs {
-                let w = String(r.text[run.range].characters).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !w.isEmpty, let tr = run.audioTimeRange else { continue }
-                words.append([seconds(tr.start), seconds(tr.end), w])
-            }
-            emit(["k": "final", "text": text, "t0": seconds(r.range.start), "t1": seconds(r.range.end), "words": words])
-        }
+        for try await r in transcriber.results { emitResult(r) }
     } catch {
         fail("transcription stopped: \(error.localizedDescription)", 4)
     }

@@ -901,19 +901,30 @@ a.chain-w:hover, a.chain-w.on { color: var(--accent); }
    Attachments sit below it with the words, so a pasted screenshot never splits
    the card from the answer. */
 .reply-strip {
-  border-left: 3px solid var(--accent); padding: 6px 12px; margin: 0; border-radius: 0;
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  --tint: var(--accent);
+  border-left: 3px solid var(--tint); padding: 6px 12px; margin: 0; border-radius: 0;
+  background: color-mix(in srgb, var(--tint) 8%, var(--panel));
+  border-bottom: 1px solid color-mix(in srgb, var(--tint) 25%, var(--line));
 }
+/* The card's own tint, as on its cell in the chat (#269). */
+.reply-strip.red { --tint: var(--red); }
+.reply-strip.teal { --tint: var(--teal); }
+.reply-strip.violet { --tint: var(--violet); }
 .reply-strip .row { gap: 8px; padding: 3px 0; }
-.reply-strip .row a { font-weight: 600; text-decoration: none; }
-.reply-strip .row .small { font-size: 12px; }
+.reply-strip .row a { font-weight: 600; text-decoration: none; min-width: 0; }
+.reply-strip .row .lbl {
+  flex: 0 0 auto; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--tint);
+}
 .reply-strip .chips-row { gap: 6px; flex-wrap: wrap; }
 .reply-strip button.sm { padding: 2px 10px; font-size: 12px; line-height: 1.5; border-radius: 12px; }
+.reply-strip button.sm.primary { background: var(--tint); border-color: var(--tint); color: #fff; }
 .reply-strip button.x { border: 0; background: none; padding: 0 4px; color: var(--muted); font-size: 17px; line-height: 1; }
-/* Several cards armed at once (2026-09-17): one strip each, stacked, a
-   hairline between — one Send answers every one of them. */
-.reply-strip + .reply-strip { border-top: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); }
+/* Several cards armed at once (2026-09-17): one strip each, stacked, a gap
+   and a hairline between (#269) — one Send answers every one of them. */
+.reply-strip + .reply-strip {
+  margin-top: 6px; border-top: 1px solid color-mix(in srgb, var(--tint) 25%, var(--line));
+}
 .re-slot:empty { display: none; }
 .composer .err:empty { display: none; }
 

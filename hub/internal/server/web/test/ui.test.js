@@ -963,7 +963,9 @@ test('composerReHTML: an armed card carries its title and ×', () => {
     href: '#/sessions/t-1/ask-b755', focus: 'focusAsk', outcome: 'done',
     outcomes: [{ value: 'done', label: 'I did this' }], means: { done: 'the card leaves your board' } } });
   const strip = composerReHTML('chat');
-  assert.match(strip, /<span class="small muted">Answering<\/span>/);
+  assert.match(strip, /<span class="small lbl">Answering<\/span>/);
+  // A lone ask strip wears the ask's red, like its cell.
+  assert.match(strip, /class="reply-strip red"/);
   assert.match(strip, /href="#\/sessions\/t-1\/ask-b755"/);
   assert.match(strip, /composerDropRe\('chat',0\)/);
   assert.match(strip, /the card leaves your board/);
@@ -979,7 +981,7 @@ test('composerArm: a second card joins the strip, and Send carries them all', as
   composerReset('chat');
   const sent = [];
   composerHTML('chat', { targets: [], when: false, send: p => { sent.push(p); } });
-  const read = { ref: 'ask', id: 'ask-8d1a', title: 'All three yes', label: 'Replying to', bare: true, confirmEmpty: true,
+  const read = { ref: 'ask', kind: 'read', id: 'ask-8d1a', title: 'All three yes', label: 'Replying to', bare: true, confirmEmpty: true,
     outcome: 'done', outcomes: [{ value: 'done', label: 'Read it' }] };
   const rec = { ref: 'rec', id: 'rec-62e5', title: 'Average $2,100 into AMZN', label: '💡 Rec', outcome: 'accepted',
     outcomes: [{ value: 'accepted', label: 'Accept' }, { value: 'declined', label: 'Decline' }, { value: '', label: 'Reply' }],
@@ -994,10 +996,17 @@ test('composerArm: a second card joins the strip, and Send carries them all', as
   assert.equal(st.also.length, 1);
   assert.equal(st.also[0].outcome, 'declined');
   const strip = composerReHTML('chat');
-  assert.equal((strip.match(/class="reply-strip"/g) || []).length, 2);
+  assert.equal((strip.match(/class="reply-strip/g) || []).length, 2);
+  // Each strip is its own card (#269): the rec wears its violet, and with the
+  // one box below as the reply there is no Reply chip on either.
+  assert.match(strip, /class="reply-strip violet"/);
+  assert.doesNotMatch(strip, />Reply</);
   assert.match(strip, /All three yes[\s\S]*composerDropRe\('chat',0\)[\s\S]*Average \$2,100[\s\S]*composerDropRe\('chat',1\)/);
   assert.match(strip, /composerPickOutcome\('chat','accepted',1\)/);
   assert.match(strip, /recorded as declined/);
+  // The lit chip pressed again takes the pick back.
+  composerPickOutcome('chat', 'declined', 1);
+  assert.equal(st.also[0].outcome, '');
   composerPickOutcome('chat', 'accepted', 1);
   assert.equal(st.also[0].outcome, 'accepted');
   assert.equal(st.re.outcome, 'done');

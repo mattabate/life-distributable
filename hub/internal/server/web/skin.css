@@ -36,6 +36,12 @@ button.primary, a.btn.primary { box-shadow: none; font-weight: 600; }
 button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
 button.sm, .btn.sm { padding: 5px 11px; font-size: 13px; }
 button.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 8%, var(--panel)); }
+/* A focus ring is for the keyboard only, on the control that has it (#267):
+   no ring after a mouse click, and none on a card or a box that is focusable
+   only because it scrolls (Chrome makes every scroller focusable). The
+   composer's own focus cue (app.css, :focus-within) is a border, untouched. */
+:focus:not(:focus-visible) { outline: none; }
+.ask:focus, .card:focus, .chat-row:focus, .msgs:focus, .ask :is(div, pre):focus { outline: none; }
 
 /* pills: a small squared chip, sentence case — the state in its colour
    (running blue, waiting orange, speaking green), the model a grey cell */
