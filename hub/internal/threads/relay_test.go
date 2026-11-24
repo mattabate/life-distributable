@@ -9,10 +9,11 @@ import (
 	"life/hub/internal/store"
 )
 
-// Tasks move between sessions only on an approved card. An approved relay
-// lands in the other session as the sending agent's words — framed, never as
-// the owner's — and the direct road stays shut.
-func TestRelayDeliversOnlyWithAnApprovedAction(t *testing.T) {
+// Tasks move between sessions only through a relay action on the queue. A
+// relay lands in the other session as the sending agent's words — framed,
+// never as the owner's, saying whether the owner saw them — and the direct
+// road stays shut.
+func TestRelayDeliversOnlyThroughAnAction(t *testing.T) {
 	m, _, _ := setup(t)
 	a, _ := m.Create("Site renderer", "life", "", "Render the page.", "", "", nil)
 	b, _ := m.Create("Site repo", "life", "", "Sort the repo out.", "", "", nil)
@@ -21,10 +22,10 @@ func TestRelayDeliversOnlyWithAnApprovedAction(t *testing.T) {
 	if _, err := m.Queue(Prompt{Author: "claude:thread:" + a.ID, Target: b.ID, Text: "rename it"}); err == nil || !strings.Contains(err.Error(), "lifectl relay") {
 		t.Fatalf("the direct road must stay shut and name the sanctioned one: %v", err)
 	}
-	if _, err := m.Relay(a.ID, b.ID, "rename it", ""); err == nil {
-		t.Fatal("a relay with no approved action behind it was delivered")
+	if _, err := m.Relay(a.ID, b.ID, "rename it", "", true); err == nil {
+		t.Fatal("a relay with no action behind it was delivered")
 	}
-	res, err := m.Relay(a.ID, b.ID, "Alex wants it called Page Builder.", "act-1")
+	res, err := m.Relay(a.ID, b.ID, "Alex wants it called Page Builder.", "act-1", true)
 	if err != nil || !strings.Contains(res, b.ID) {
 		t.Fatal(res, err)
 	}
@@ -34,7 +35,7 @@ func TestRelayDeliversOnlyWithAnApprovedAction(t *testing.T) {
 		t.Fatalf("%+v", last)
 	}
 	pb, _ := os.ReadFile(promptFile(t, m, b.ID))
-	for _, want := range []string{"Handed to you from another session", `"Site renderer"`, "action act-1", "not the owner's", "lifectl relay " + a.ID, "Page Builder"} {
+	for _, want := range []string{"Handed to you from another session", `"Site renderer"`, "action act-1", "not the owner's", "directly, inside the free allowance", "they did not see them", "lifectl relay " + a.ID, "Page Builder"} {
 		if !strings.Contains(string(pb), want) {
 			t.Fatalf("missing %q in:\n%s", want, pb)
 		}

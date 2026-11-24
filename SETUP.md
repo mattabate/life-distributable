@@ -247,7 +247,10 @@ over Tailscale, which only their own devices can join.
 says the console shows **Sessions**; `ops/bin/lifectl api GET /api/v1/decider`
 shows `"armed": true` (if not, the decider step was skipped: open
 `bash ops/decider-set.sh` again, since until then approvals need only the
-hub token). Tell them this is the first
+hub token). Then a session's own tools: tell them "Type *list the
+team* in the console's Sessions tab." The chief of staff answers in one
+line; a card saying sessions cannot run lifectl means their PATH or tool
+grant is broken, so fix that before going on. Tell them this is the first
 milestone: the hub is running. Until the apps arrive, the console is how
 they reach it (on the phone too: Safari, the `life hub` address, then
 **Share → Add to Home Screen**).

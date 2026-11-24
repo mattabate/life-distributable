@@ -777,10 +777,12 @@ func TestApprovalKeepsWhatItSpoke(t *testing.T) {
 	}
 }
 
-// A relay — one session's words for another — is gated whatever the proposer
-// says, its card is written by the hub from the payload (the owner approves
-// exactly what is sent, to exactly whom), and only their approval delivers it.
-func TestRelayIsAlwaysAnApprovedCard(t *testing.T) {
+// A relay — one session's words for another — has its record written by the
+// hub from the payload (exactly what is sent, to exactly whom). Inside the
+// free allowance it is delivered at once with no card (#268); past it — a
+// pair's daily count or the hub's — it is the owner's card, whatever the
+// proposer's `gated` says either way.
+func TestRelayIsFreeInsideTheAllowanceThenACard(t *testing.T) {
 	q, ex, _ := setup(t)
 	relay := Proposal{ThreadID: "th-a", Title: "harmless tidy", Detail: "it owns that repo", ExecType: "relay",
 		ExecPayload: json.RawMessage(`{"to":"th-b","text":"Rename it Crossword Constructor."}`)}
@@ -790,15 +792,15 @@ func TestRelayIsAlwaysAnApprovedCard(t *testing.T) {
 	var mu sync.Mutex
 	var sent []string
 	q.RelayTarget = func(id string) (string, error) {
-		if id != "th-b" {
+		if id != "th-a" && id != "th-b" {
 			return "", errors.New("no session " + id)
 		}
 		return "Crossword repo", nil
 	}
-	q.Relay = func(from, to, text, actionID string) (string, error) {
+	q.Relay = func(from, to, text, actionID string, direct bool) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		sent = append(sent, from+">"+to+":"+text+":"+actionID)
+		sent = append(sent, fmt.Sprintf("%s>%s:%s:%s:%v", from, to, text, actionID, direct))
 		return "delivered", nil
 	}
 	for name, bad := range map[string]Proposal{
@@ -812,27 +814,100 @@ func TestRelayIsAlwaysAnApprovedCard(t *testing.T) {
 			t.Fatalf("%s: accepted", name)
 		}
 	}
-	f := false
-	relay.Gated = &f
+	// Inside the allowance: no card, delivered at once, even asked gated.
+	tr := true
+	relay.Gated = &tr
 	a, err := q.Propose(relay)
-	if err != nil || !a.Gated || a.State != "proposed" {
+	if err != nil || a.Gated || a.DecidedVia != "auto" {
 		t.Fatal(a, err)
 	}
 	if a.Title != "Send to the session “Crossword repo”" || !strings.HasPrefix(a.Detail, "Rename it Crossword Constructor.") || !strings.Contains(a.Detail, "Why: it owns that repo") || strings.Contains(a.Title+a.Detail, "harmless tidy") {
-		t.Fatalf("the card is the hub's, from the payload: %q / %q", a.Title, a.Detail)
-	}
-	time.Sleep(30 * time.Millisecond)
-	if len(sent) != 0 {
-		t.Fatal("delivered before the owner approved")
-	}
-	if _, err := q.Decide(a.ID, true, "app", ""); err != nil {
-		t.Fatal(err)
+		t.Fatalf("the record is the hub's, from the payload: %q / %q", a.Title, a.Detail)
 	}
 	a = waitState(t, q, a.ID, "done")
 	mu.Lock()
-	defer mu.Unlock()
-	if len(sent) != 1 || sent[0] != "th-a>th-b:Rename it Crossword Constructor.:"+a.ID || a.Result != "delivered" || len(ex.calls) != 0 {
+	if len(sent) != 1 || sent[0] != "th-a>th-b:Rename it Crossword Constructor.:"+a.ID+":true" || a.Result != "delivered" || len(ex.calls) != 0 {
 		t.Fatal(sent, a.Result, ex.calls)
+	}
+	mu.Unlock()
+
+	// Either direction counts toward the pair; the one past it is the
+	// owner's card.
+	back := Proposal{ThreadID: "th-b", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-a","text":"Done."}`)}
+	for i := 1; i < relayFreePerPair; i++ {
+		p := relay
+		if i%2 == 1 {
+			p = back
+		}
+		b, err := q.Propose(p)
+		if err != nil || b.Gated {
+			t.Fatalf("relay %d inside the allowance: %+v %v", i+1, b, err)
+		}
+		// Delivery is async: wait, or the count below can read short.
+		waitState(t, q, b.ID, "done")
+	}
+	f := false
+	relay.Gated = &f
+	c, err := q.Propose(relay)
+	if err != nil || !c.Gated || c.State != "proposed" || !strings.Contains(c.Detail, fmt.Sprintf("Asked because these two sessions have sent each other %d messages", relayFreePerPair)) {
+		t.Fatalf("past the pair's allowance it is a card, gated=false or not: %+v %v", c, err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	mu.Lock()
+	if len(sent) != relayFreePerPair {
+		t.Fatal("delivered before the owner approved", sent)
+	}
+	mu.Unlock()
+	if n := q.ReleaseHeld(); n != 0 {
+		t.Fatal("released a relay still past the allowance", n)
+	}
+	if _, err := q.Decide(c.ID, true, "app", ""); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, q, c.ID, "done")
+	mu.Lock()
+	defer mu.Unlock()
+	if last := sent[len(sent)-1]; last != "th-a>th-b:Rename it Crossword Constructor.:"+c.ID+":false" {
+		t.Fatal(last)
+	}
+}
+
+// A held relay goes out by itself once the 24 h window has room, and counts
+// toward the allowance like one filed free.
+func TestHeldRelayIsReleasedWhenTheAllowanceHasRoom(t *testing.T) {
+	q, _, _ := setup(t)
+	var mu sync.Mutex
+	sent := 0
+	q.RelayTarget = func(string) (string, error) { return "Peer", nil }
+	q.Relay = func(from, to, text, actionID string, direct bool) (string, error) {
+		mu.Lock()
+		sent++
+		mu.Unlock()
+		return "delivered", nil
+	}
+	relay := Proposal{ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-b","text":"Hi."}`)}
+	for i := 0; i < relayFreePerPair; i++ {
+		if a, _ := q.Propose(relay); a.Gated {
+			t.Fatal("inside the allowance", i)
+		}
+	}
+	held, _ := q.Propose(relay)
+	if !held.Gated || held.State != "proposed" {
+		t.Fatalf("%+v", held)
+	}
+	// A day on, the free ones are out of the window.
+	q.db.Exec(`UPDATE actions SET created_at=? WHERE id<>?`, ts(time.Now().Add(-25*time.Hour)), held.ID)
+	if n := q.ReleaseHeld(); n != 1 {
+		t.Fatal("released", n)
+	}
+	waitState(t, q, held.ID, "done")
+	if free, _ := q.relayFree("th-a", "th-b"); !free {
+		t.Fatal("one released relay is not the pair's limit")
+	}
+	var all int
+	q.db.QueryRow(`SELECT COUNT(*) FROM actions a JOIN items i ON i.id=a.id WHERE i.resolved_by='auto' AND a.id=?`, held.ID).Scan(&all)
+	if all != 1 {
+		t.Fatal("the release is recorded as the allowance's, not the owner's")
 	}
 }
 

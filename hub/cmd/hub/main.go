@@ -174,6 +174,9 @@ func main() {
 	}
 	thr.OwnerName = cfg.OwnerName
 	thr.Surfaces = cfg.Surfaces
+	// A session process from an earlier hub is closed before its next
+	// message, so that turn runs on this hub's environment (#266).
+	thr.Booted = time.Now()
 	// The router's local model stays paged in (nothing when Ollama is not
 	// there: routes fall to the cloud model), and the calendar's home session
 	// is the chief of staff (an older install's executive assistant keeps it).
@@ -382,9 +385,19 @@ func main() {
 		}
 		return a.ExecType
 	}
-	// One session hands another a task only on a card the owner approved (relay.go).
+	// One session hands another a task: straight through inside the
+	// allowance, past it on a card the owner approves (relay.go, actions
+	// relayFree).
 	acts.RelayTarget = thr.RelayTarget
 	acts.Relay = thr.Relay
+	// A relay held for the owner's tap goes out by itself once the allowance
+	// has room.
+	ck.Every("relays", 5*time.Minute, true, func() error {
+		if n := acts.ReleaseHeld(); n > 0 {
+			log.Printf("relays: %d held relays sent inside the allowance", n)
+		}
+		return nil
+	})
 	// An approval the last hub committed but never started runs now, with
 	// every hook above in place (actions.ResumeApproved, life-distributable#59).
 	acts.ResumeApproved()

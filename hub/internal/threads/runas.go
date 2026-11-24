@@ -96,9 +96,15 @@ func (m *Manager) sessionClaudeBin() string {
 // sessionUserEnv is what a session process needs that sudo clears: its login,
 // the UTF-8 locale tmux wants, and Homebrew, its CLI and the main checkout's
 // ops/bin (lifectl, which its grant names bare) on PATH. Expanded by the
-// session user's own shell, so the hub never reads the token.
+// session user's own shell, so the hub never reads the token. A session as
+// the hub's own user still needs ops/bin first on PATH, as a job gets it
+// (sched.jobEnv): launchd and the login profile never put it there, and its
+// grant names lifectl bare (#263).
 func (m *Manager) sessionUserEnv() string {
 	if m.RunAs.User == "" {
+		if b := m.feedBin(); filepath.IsAbs(b) {
+			return ` PATH=` + shellQuote(filepath.Dir(b)) + `:"$PATH"`
+		}
 		return ""
 	}
 	return ` CLAUDE_CODE_OAUTH_TOKEN="$(cat "$HOME/.claude-token")" LANG=en_US.UTF-8 PATH=` +

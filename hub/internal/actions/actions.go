@@ -283,10 +283,12 @@ type Queue struct {
 	// RelayTarget / Relay: the `relay` exec type — one session's words handed
 	// to another session, which only ever happens on an approved card.
 	// RelayTarget names the session a proposal addresses (an error = it
-	// cannot take one); Relay delivers once the owner approves. Hooks, so
-	// this package never reads the threads tables. nil = relay is refused.
+	// cannot take one); Relay delivers. A relay inside the free allowance
+	// (relayFree) goes straight through (direct); past it, it waits on the
+	// owner's card (#268). Hooks, so this package never reads the threads
+	// tables. nil = relay is refused.
 	RelayTarget func(threadID string) (title string, err error)
-	Relay       func(from, to, text, actionID string) (result string, err error)
+	Relay       func(from, to, text, actionID string, direct bool) (result string, err error)
 	// onUncertain / untold: who hears that an action ended `uncertain`, and
 	// the ones that did before anyone was listening: closeOrphans runs inside
 	// New, before main has the sessions to tell (TellUncertain).
@@ -395,7 +397,72 @@ func (q *Queue) relay(a Action) (string, error) {
 	if q.Relay == nil {
 		return "", errors.New("relay is not wired on this hub")
 	}
-	return q.Relay(a.ThreadID, rp.To, rp.Text, a.ID)
+	return q.Relay(a.ThreadID, rp.To, rp.Text, a.ID, a.DecidedVia == "auto")
+}
+
+// The free-relay allowance (#268): sessions handing each other work is the
+// point of the team, so a relay inside both limits is delivered at once with
+// no card, and its action row stays as the record of who handed what to
+// whom. The first one past either limit is the owner's approval card, saying
+// which limit, so a runaway exchange stops at their tap.
+const (
+	relayFreePerPair = 50  // between two sessions, either direction, in 24 h
+	relayFreePerDay  = 800 // across the hub, in 24 h
+)
+
+// relayFree: whether a relay from → to goes straight through, and if not,
+// the limit it hit (written on the card so the owner sees why they are asked).
+func (q *Queue) relayFree(from, to string) (bool, string) {
+	since := ts(time.Now().Add(-24 * time.Hour))
+	var pair, all int
+	// Free = filed free (actions.decided_via) or released by ReleaseHeld
+	// (items.resolved_by): both went out without the owner's tap.
+	q.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM((a.thread_id=? AND json_extract(a.exec_payload,'$.to')=?) OR (a.thread_id=? AND json_extract(a.exec_payload,'$.to')=?)),0)
+		FROM actions a LEFT JOIN items i ON i.id=a.id AND i.src='action'
+		WHERE a.exec_type='relay' AND (a.decided_via='auto' OR i.resolved_by='auto') AND a.created_at>=?`, from, to, to, from, since).Scan(&all, &pair)
+	switch {
+	case pair >= relayFreePerPair:
+		return false, fmt.Sprintf("these two sessions have sent each other %d messages in 24 hours, the free limit", pair)
+	case all >= relayFreePerDay:
+		return false, fmt.Sprintf("sessions have sent each other %d messages in 24 hours, the free limit", all)
+	}
+	return true, ""
+}
+
+// ReleaseHeld sends every relay still waiting on the owner's card that the
+// allowance would let through now (the 24 h window moved on), oldest first,
+// and its card leaves the board. Returns how many went.
+func (q *Queue) ReleaseHeld() int {
+	rows, err := q.db.Query(`SELECT a.id, a.thread_id, a.exec_payload FROM actions a JOIN items i ON i.id=a.id AND i.src='action'
+		WHERE a.exec_type='relay' AND i.state='proposed' ORDER BY a.created_at`)
+	if err != nil {
+		return 0
+	}
+	type held struct{ id, from, to string }
+	var hs []held
+	for rows.Next() {
+		var h held
+		var from sql.NullString
+		var payload string
+		if rows.Scan(&h.id, &from, &payload) != nil {
+			continue
+		}
+		var rp relayPayload
+		json.Unmarshal([]byte(payload), &rp)
+		h.from, h.to = from.String, rp.To
+		hs = append(hs, h)
+	}
+	rows.Close()
+	n := 0
+	for _, h := range hs {
+		if free, _ := q.relayFree(h.from, h.to); !free {
+			continue
+		}
+		if _, err := q.decide(h.id, true, "auto", "inside the free allowance now", false); err == nil {
+			n++
+		}
+	}
+	return n
 }
 
 // Schema: the proposal queue. Append an ALTER to add a column (store/migrate.go).
@@ -793,7 +860,16 @@ func (q *Queue) Propose(p Proposal) (Action, error) {
 		gated = true
 	}
 	if p.ExecType == "relay" {
-		gated = true // never auto-runs, whatever the proposer says
+		// The allowance decides, whatever kind and gated say: inside it the
+		// words go straight through; past it, the owner's card, saying which
+		// limit.
+		var rp relayPayload
+		json.Unmarshal(p.ExecPayload, &rp)
+		free, why := q.relayFree(p.ThreadID, rp.To)
+		gated = !free
+		if !free {
+			p.Detail += "\n\nAsked because " + why + "."
+		}
 	}
 	repeatable := false
 	switch p.ExecType {
