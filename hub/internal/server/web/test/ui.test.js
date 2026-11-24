@@ -899,6 +899,27 @@ test('config: the plan block names the plan, its price and each limit\'s headroo
     /<strong>Claude<\/strong><span class="small muted">Claude Code<\/span>/);
 });
 
+test('config: the model ladder is one row, and says where it stepped down from the rung chosen', () => {
+  const q = { available: true, plan: { name: 'Claude', via: 'Claude Code', month_usd: 0 }, windows: [] };
+  const m = { default_model: 'claude-fable-5-2', explicit: true, starts_on: 'claude-opus-5-5',
+    reason: 'Fable · 7 days at 92% (cutoff 85%)', options: [],
+    rungs: [{ model: 'claude-fable-5-2', open: false, why: 'Fable · 7 days at 92% (cutoff 85%)' },
+      { model: 'claude-opus-5-5', open: true }, { model: 'claude-sonnet-5-5', open: true }] };
+  const h = cfgPlanHTML(q, m, { model_cap: '', models: [] });
+  assert.match(h, /Sessions run on<\/span>/);
+  assert.doesNotMatch(h, /New sessions|Never above|>auto</);
+  assert.match(h, /class="sm on"[^>]*>opus 5\.5</);
+  assert.match(h, /disabled title="Fable · 7 days at 92% \(cutoff 85%\)"[^>]*>fable 5\.2</);
+  assert.match(h, /cfg-model-note">fable 5\.2 handed over to opus 5\.5 · Fable · 7 days at 92% \(cutoff 85%\)</);
+  // An org or API-key login has no plan windows, and that is not an error (#262).
+  const api = cfgPlanHTML({ ...q, available: false, billing: 'api', error: '' }, m, null);
+  assert.match(api, /<div class="small muted">Billed by the API, no plan windows<\/div>/);
+  assert.doesNotMatch(api, /class="small err"/);
+  // Never chosen, or on the rung chosen: no line.
+  assert.doesNotMatch(cfgPlanHTML(q, { ...m, explicit: false }, null), /cfg-model-note/);
+  assert.doesNotMatch(cfgPlanHTML(q, { ...m, starts_on: 'claude-fable-5-2' }, null), /cfg-model-note/);
+});
+
 // ---- composer.js: the one box every surface writes back through ----
 // It is pure render on the way in (composerHTML/composerReHTML) and only
 // touches the DOM when a box is on screen, so it loads here beside ui.js. The

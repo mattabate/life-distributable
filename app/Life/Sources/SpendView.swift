@@ -164,6 +164,10 @@ struct SpendView: View {
                         }
                     }
                 }
+            } else if q.billing == "api" {
+                // An org or API-key login: no plan, so no limits (#262).
+                Text("Billed by the API, no plan windows").font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(12)
             } else {
                 #if targetEnvironment(macCatalyst)
                 // The console's `.card.err` under the Limits heading.

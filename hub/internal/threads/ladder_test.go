@@ -315,6 +315,40 @@ func TestPreflightClosesRejectedRung(t *testing.T) {
 	}
 }
 
+// A rung the API refuses to this login's org (#262) is shut with the API's
+// words, no card, and opened again once a probe passes it.
+func TestPreflightShutsARungTheOrgMayNotUse(t *testing.T) {
+	m, _, _ := setup(t)
+	m.CreateIdle("hub", "Hub", "life")
+	refused := map[string]string{}
+	m.ModelRefused = func(model, why string) { refused[model] = why }
+	org := true
+	m.Probe = func(model string) (string, error) {
+		if model == "claude-fable-5-1" && org {
+			return "API Error: 400 In order to access this model, your organization or workspace must have data retention enabled", errors.New("exit status 1")
+		}
+		return "OK\n", nil
+	}
+	ladder := []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5"}
+	if bad := m.PreflightModels(ladder); len(bad) != 0 {
+		t.Fatalf("an org refusal is not a stale CLI: bad=%v", bad)
+	}
+	if got := refused["claude-fable-5-1"]; got != "refused to this login: In order to access this model, your organization or workspace must have data retention enabled" {
+		t.Fatalf("why = %q", got)
+	}
+	if asks, _ := m.ListAsks("active", "hub", 10); len(asks) != 0 {
+		t.Fatalf("no card: %+v", asks)
+	}
+	org = false
+	m.PreflightModels(ladder) // not remembered as passed, so it probes again
+	if got, ok := refused["claude-fable-5-1"]; !ok || got != "" {
+		t.Fatalf("a passing probe opens the rung: %q", got)
+	}
+	if !strings.HasPrefix(failureTitle("API Error: 400 In order to access this model, your organization or workspace must have data retention enabled"), "Session stopped: this login's organization") {
+		t.Fatal("failure title")
+	}
+}
+
 // When no rung is left, the card at least reads as English.
 func TestFailureTitleIsReadable(t *testing.T) {
 	limit := "You've reached your Fable 5 limit. Switch to another model, or manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, to continue."

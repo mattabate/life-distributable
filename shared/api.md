@@ -70,7 +70,10 @@ USD is API-equivalent cost computed from local transcripts (hub/internal/spend/p
 Plan-limit meter: what `/usage` in the Claude Code CLI shows, joined with local usage.
 Hub reads the OAuth token from the Keychain item "Claude Code-credentials" (never stored) and
 calls Anthropic's `GET /api/oauth/usage`; cached 60s.
-→ `{generated_at, fetched_at, available, error?, windows[Window], extra?}`
+→ `{generated_at, fetched_at, available, error?, billing?, windows[Window], extra?}`
+`billing: "api"` (#262): Claude Code is signed in with no claude.ai plan (an organization's
+managed key or an API key), so there are no windows; `available` is false and `error` empty,
+and the surfaces say "Billed by the API, no plan windows" in grey.
 Window: `{key, label, note, utilization (percent), resets_at, starts_at, spent_usd, messages,
    headroom_usd, by_model[Bucket], scope_model?, burn_pct_per_hour, full_at}` — `label` names the
    scope and the length (`All models · 7 days`, `Fable · 7 days`) and `note` says whose spend

@@ -451,6 +451,8 @@ struct ConfigView: View {
                     LazyVGrid(columns: mac ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 230), spacing: 18)], alignment: .leading, spacing: mac ? 8 : 6) {
                         ForEach(q.windows) { limit($0) }
                     }
+                } else if q.billing == "api" {
+                    Text("Billed by the API, no plan windows").font(.system(size: 12.5)).foregroundStyle(muted)
                 } else if let e = q.error, !e.isEmpty {
                     Text(e).font(.system(size: 12.5)).foregroundStyle(.red)
                 }
@@ -472,8 +474,9 @@ struct ConfigView: View {
         return bits.joined(separator: " · ")
     }
 
-    /// The ladder's toggle — the console's cfgModelHTML: the rung in use
-    /// filled, a shut one struck through, auto. The same PUT as the Spend
+    /// The ladder, one row — the console's cfgModelHTML (#261): the rung in
+    /// use filled, a shut one struck through, and under it where the ladder
+    /// stepped down from the rung chosen, and why. The same PUT as the Spend
     /// page's NextModelCard.
     private func models(_ runs: String, _ s: ModelSetting?) -> some View {
         let rungs = s.map { $0.rungs.isEmpty ? $0.options.map { ModelRung(model: $0, open: true) } : $0.rungs } ?? []
@@ -482,16 +485,20 @@ struct ConfigView: View {
                 if i > 0 { Text("›").foregroundStyle(muted) }
                 chip(shortModel(r.model), on: r.model == runs && r.open, open: r.open) { pick(r.model) }
             }
-            if !rungs.isEmpty {
-                Text("·").foregroundStyle(muted)
-                chip("auto", on: s?.explicit != true, open: true) { pick("") }
-            }
         }
-        let label = Text(rungs.isEmpty ? "New sessions run on \(shortModel(runs))" : "New sessions run on")
+        let label = Text(rungs.isEmpty ? "Sessions run on \(shortModel(runs))" : "Sessions run on")
             .font(.system(size: 12.5)).foregroundStyle(muted)
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) { label; chips }
-            VStack(alignment: .leading, spacing: 6) { label; chips }
+        var down = ""
+        if let s, s.explicit, !s.starts_on.isEmpty, s.starts_on != s.default_model {
+            down = ["\(shortModel(s.default_model)) handed over to \(shortModel(s.starts_on))", s.reason]
+                .filter { !$0.isEmpty }.joined(separator: " · ")
+        }
+        return VStack(alignment: .leading, spacing: 6) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { label; chips }
+                VStack(alignment: .leading, spacing: 6) { label; chips }
+            }
+            if !down.isEmpty { Text(down).font(.system(size: 12)).foregroundStyle(muted) }
         }
     }
 

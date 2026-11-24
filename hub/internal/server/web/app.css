@@ -1636,6 +1636,7 @@ a.cfg-who:hover strong { text-decoration: underline; }
 .cfg-vol .bar.on { background: var(--accent); }
 .cfg-model { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .cfg-model .chips-row { align-items: center; }
+.cfg-model-note { flex-basis: 100%; }
 .sect { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 20px 0 8px; }
 .sect h3 { margin: 0; }
 .chips-row { display: flex; gap: 6px; flex-wrap: wrap; }

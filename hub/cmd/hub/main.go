@@ -253,6 +253,7 @@ func main() {
 	thr.Model = pickFrom
 	thr.Policy = policy
 	thr.ModelExhausted = picker.MarkExhausted
+	thr.ModelRefused = picker.Refuse
 	// A card answer on a cold thread re-writes its whole context anyway:
 	// do it one rung below the top family, at a lower price.
 	thr.ColdStart = picker.Below("fable")
