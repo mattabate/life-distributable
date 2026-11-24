@@ -99,6 +99,7 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .side-item.todo.wait .side-tt { color: var(--muted); }
 .side-item.todo.wait .side-dot { border-style: dotted; }
 .side-item.rec { --c: var(--violet); }
+.side-item.speaking { --c: var(--green); }
 /* a row's head, three columns: the name, the role left-aligned in its own
    column, the one status pill on the right; a side line in its colour */
 .side-g3 { display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; }

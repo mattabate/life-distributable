@@ -207,9 +207,9 @@ test('the tool chain: what the turn is doing, what it waits on, its helpers', ()
   assert.match(cell, /class="side-item quiet job"/);
   assert.match(cell, /Trash promo mail/);
   assert.match(cell, /280\/400/);
-  // The card being spoken is a speaker in its own colour, never a green dot.
-  const said = sideItemHTML({ id: 'a', title: 'Read me', tint: 'speaking', under: 'read', speaking: true, href: '#' });
-  assert.match(said, /class="side-item read"/);
+  // The card being spoken is a green speaker, never a dot, whatever its kind.
+  const said = sideItemHTML({ id: 'a', title: 'Read me', tint: 'speaking', under: 'needs', speaking: true, href: '#' });
+  assert.match(said, /class="side-item speaking"/);
   assert.match(said, /side-spk/);
   // One audio pill by the name: speaking beats waiting.
   const b = { pills: { staff: [{ tone: 'waiting', word: 'waiting to speak' }, { tone: 'speaking', word: 'speaking' }] } };
