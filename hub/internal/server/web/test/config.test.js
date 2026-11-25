@@ -69,3 +69,17 @@ test('team: no roles, the empty line; a failed load, the retry', () => {
   assert.match(cfgTeamHTML(st, [], [], goals), /No roles yet/);
   assert.match(cfgTeamHTML(st, null, [], goals), /the team/);
 });
+
+test('devices: a Mac draws Audio then its switch on the name line, no Stop, even mid-line', () => {
+  const html = cfgDevicesHTML({ uptime_s: 7200, time_zone: 'UTC' }, { devices: [
+    { device: 'studio', kind: 'mac', hub: true, audio: true, saying: true, line: 'ear-1' },
+    { device: 'macbook-pro', kind: 'mac', audio: false, ears: 'speakers' },
+  ] });
+  const macs = html.split('<label class="cfg-setting cfg-mac">').slice(1);
+  assert.equal(macs.length, 2);
+  assert.match(macs[0], /<strong>studio · hub<\/strong><span class="cfg-vol"><span class="small muted">Audio<\/span><span class="switch"><input type="checkbox" checked onchange="setMacAudio\(&quot;studio&quot;, this.checked\)">/);
+  assert.match(macs[0], /saying a card · up 2h · UTC/);
+  assert.match(macs[1], /<strong>MacBook<\/strong><span class="cfg-vol">[^]*<input type="checkbox" onchange=/, 'off: unchecked');
+  assert.ok(!/Stop|stopMacLine/.test(html), 'no Stop button');
+  assert.match(html, /<strong>Phone<\/strong>/);
+});

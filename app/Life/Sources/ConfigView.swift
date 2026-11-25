@@ -216,8 +216,8 @@ struct ConfigView: View {
     // MARK: devices
 
     /// The console's cfgDevicesHTML: each Mac the voice reaches (the hub's
-    /// first, with its uptime and zone), its Audio switch and, while it says
-    /// a line, Stop; then the phone. A row each with a hairline between.
+    /// first, with its uptime and zone), the word Audio and its switch at the
+    /// end of the name line; then the phone. A row each with a hairline between.
     @ViewBuilder private func devices(_ s: HubStatus?, _ set: HubSettings?) -> some View {
         if let s {
             let up = s.uptime_s
@@ -238,10 +238,8 @@ struct ConfigView: View {
                                 d.hub == true ? "up " + upWord : "", d.hub == true ? s.time_zone ?? "" : ""]
                         .filter { !$0.isEmpty }.joined(separator: " · ")
                     deviceRow(d.name, word) {
-                        if d.saying == true, let line = d.line {
-                            Button("Stop") { Task { try? await hub.stopMacLine(line); await refreshSettings() } }
-                                .controlSize(.small)
-                        }
+                        Spacer(minLength: 8)
+                        Text("Audio").font(.system(size: 12.5)).foregroundStyle(muted)
                         Toggle("Audio", isOn: Binding(get: { d.audio }, set: { on in
                             Task { try? await hub.setMacAudio(device: d.device, on: on); await refreshSettings() }
                         }))
@@ -256,7 +254,7 @@ struct ConfigView: View {
         }
     }
 
-    /// After a switch or Stop: the Devices card redraws from a fresh GET.
+    /// After a switch: the Devices card redraws from a fresh GET.
     private func refreshSettings() async {
         if let s = try? await hub.settings() { load.value?.settings = s }
     }

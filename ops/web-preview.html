@@ -42,10 +42,10 @@
     // turn's place), and the chief of staff and the coach are idle with a
     // to-do line each.
     '/threads?persona=1': [
-      { id: 't-staff', title: 'Chief of staff', status: 'idle', persona: 'staff', role: 'Chief of staff', owns_goals: ['tidy-inbox'],
+      { id: 't-staff', title: 'Herbert', status: 'idle', persona: 'staff', role: 'Chief of staff', owns_goals: ['tidy-inbox'],
         todos: [{ id: 1, text: 'Sort the inbox labels after the trip is booked', state: 'open' }] },
       { id: TIDY, title: 'Tidy the weekly digest', status: 'running', persona: 'digest', role: 'Digest editor', reports_to: 'staff' },
-      { id: 't-coach', title: 'Coach', status: 'idle', persona: 'coach', role: 'Training coach', owns_goals: ['get-stronger', 'sleep-earlier'],
+      { id: 't-coach', title: 'Rosa', status: 'idle', persona: 'coach', role: 'Training coach', owns_goals: ['get-stronger', 'sleep-earlier'],
         todos: [{ id: 2, text: 'Write next week\'s three runs', state: 'open' }] },
     ],
     '/personas': [
@@ -64,8 +64,7 @@
       plan: { name: 'Claude Max 20x', via: 'Claude Code', usd: 200, period: 'monthly', charged_on: '2026-08-20', month_usd: 412.3,
         brand: { mark: 'A', color: '#D97757', ink: '#FFFFFF' } },
       windows: [{ label: 'All models · 7 days', utilization: 38, tone: '', elapsed_pct: 50 },
-        { label: 'Fable · 7 days', utilization: 72, tone: 'warn', elapsed_pct: 50 },
-        { label: '5 hours', utilization: 12, tone: '' }] },
+        { label: 'Fable · 7 days', utilization: 72, tone: 'warn', elapsed_pct: 50 }] },
     '/asks': [
       // surface: 'web' = laptop work, so this list is the only place it is
       // anyone's turn (the phone folds it away).
@@ -187,17 +186,19 @@
         detail: 'The week boundary is inclusive at both ends, so Sunday lands in two digests.',
         exec_type: 'shell', exec_payload: { cmd: 'make check && ops/commit.sh -m "digest: half-open week" hub/internal/goals', dir: '~/life' } },
     ],
+    // Each goal its own emblem (a GOAL_ICONS symbol and a hue), as a goal's
+    // check-in sets one.
     '/goals': [
-      { id: 'get-stronger', title: 'Get stronger and eat better', status: 'active', horizon: 'year', cadence: 'weekly',
+      { id: 'get-stronger', title: 'Get stronger and eat better', status: 'active', horizon: 'year', cadence: 'weekly', emblem: { symbol: 'health', hue: 150 },
         statement: 'Three workouts a week, protein at every meal.', note_count: 12, last_reviewed_at: iso(700), sources: 'fitness', section: 'Health' },
-      { id: 'sleep-earlier', title: 'Sleep by eleven', status: 'active', horizon: 'ongoing', cadence: 'weekly',
+      { id: 'sleep-earlier', title: 'Sleep by eleven', status: 'active', horizon: 'ongoing', cadence: 'weekly', emblem: { symbol: 'goal', hue: 265 },
         statement: 'Lights out by 23:00 on weeknights.', note_count: 2, last_reviewed_at: iso(300), sources: '', section: 'Health' },
-      { id: 'travel-more', title: 'Travel more', status: 'active', horizon: 'ongoing', cadence: 'monthly',
+      { id: 'travel-more', title: 'Travel more', status: 'active', horizon: 'ongoing', cadence: 'monthly', emblem: { symbol: 'friends', hue: 30 },
         statement: 'One trip a season, planned early enough to be cheap.', note_count: 3, last_reviewed_at: iso(60), sources: '', section: 'Life' },
-      { id: 'tidy-inbox', title: 'Keep the inbox at zero', status: 'active', horizon: 'ongoing', cadence: 'weekly',
+      { id: 'tidy-inbox', title: 'Keep the inbox at zero', status: 'active', horizon: 'ongoing', cadence: 'weekly', emblem: { symbol: 'agent', hue: 205 },
         statement: 'Nothing older than a week.', note_count: 0, last_reviewed_at: iso(90), sources: '' },
     ],
-    '/goals/get-stronger': { id: 'get-stronger', title: 'Get stronger and eat better', status: 'active',
+    '/goals/get-stronger': { id: 'get-stronger', title: 'Get stronger and eat better', status: 'active', emblem: { symbol: 'health', hue: 150 },
       horizon: 'year', cadence: 'weekly', note_count: 12, last_reviewed_at: iso(700), sources: 'fitness',
       statement: 'Three workouts a week, protein at every meal. The weekly check-in reads the workout and meal logs.' },
     '/goals/get-stronger/notes': [
