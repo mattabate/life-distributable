@@ -137,6 +137,7 @@ func main() {
 		//        on THEIR to-do list, taken when their turn in hand ends (at
 		//        once if idle); prints its number
 		//   [--why "one line: why that session needs it"]
+		// The flags may also go before the text (flagsAround).
 		need(4)
 		fs := flag.NewFlagSet("relay", flag.ExitOnError)
 		why := fs.String("why", "", "one line under the words on the card")
@@ -144,11 +145,11 @@ func main() {
 		todo := fs.String("todo", "", "file it as a to-do on their list with this one-line title (at most 80 characters), not a steer")
 		say := fs.String("say", "", "one sentence the headphones speak when the card lands (kept on the card)")
 		thread := fs.String("thread", os.Getenv("LIFE_THREAD_ID"), "the session handing it over (default $LIFE_THREAD_ID)")
-		fs.Parse(os.Args[4:])
+		words := flagsAround(fs, os.Args[3:])
 		if *thread == "" {
 			die("relay: only a session hands a task to another session — you just message it")
 		}
-		rp := map[string]any{"to": os.Args[2], "text": text(titleArg(os.Args[3]))}
+		rp := map[string]any{"to": os.Args[2], "text": text(words)}
 		if *now {
 			rp["now"] = true
 		}
@@ -1606,6 +1607,23 @@ func need(n int) {
 	if len(os.Args) < n {
 		usage()
 	}
+}
+
+// flagsAround: one positional argument with fs's flags before it, after it or
+// both, so `relay <id> --todo "title" "text"` reads as `relay <id> "text"
+// --todo "title"`, where a flag written first was refused. "-" stays the
+// positional (stdin), and `--` lets a text start with "-".
+func flagsAround(fs *flag.FlagSet, args []string) string {
+	fs.Parse(args)
+	rest := fs.Args()
+	if len(rest) == 0 {
+		die("%s: the words are missing", fs.Name())
+	}
+	fs.Parse(rest[1:])
+	if len(fs.Args()) > 0 {
+		die("%s: one text only, got %q too (quote the whole text)", fs.Name(), fs.Args()[0])
+	}
+	return rest[0]
 }
 
 // titleArg is a positional title (`ask add "…"`, `cal add "…"`, `rec add "…"`).
