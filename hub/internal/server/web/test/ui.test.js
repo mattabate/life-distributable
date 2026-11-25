@@ -211,7 +211,7 @@ test('a link into the hub blobs downloads; a picture in a file strip has Full sc
     '<a href="https://hub.test/api/v1/blobs/ab/shot.png" download>Download the picture</a>');
   const pic = pictureHTML('ab/shot.png', 'Home: before');
   assert.match(pic, /<img src="\/api\/v1\/blobs\/ab\/shot\.png"/);
-  assert.match(pic, /<a href="\/api\/v1\/blobs\/ab\/shot\.png" onclick="return !openImage\(this\.href\)" class="small att-file">Full screen<\/a>/);
+  assert.match(pic, /<a href="\/api\/v1\/blobs\/ab\/shot\.png" onclick="return !openImage\(this\.href, '', this\)" class="small att-file">Full screen<\/a>/);
   assert.match(pic, /<a href="\/api\/v1\/blobs\/ab\/shot\.png" download="Home- before\.png" class="small att-file">Download<\/a>/);
   // No caption: the file keeps the blob's own name.
   assert.match(pictureHTML('ab/shot.png'), /download="shot\.png"/);
@@ -219,6 +219,17 @@ test('a link into the hub blobs downloads; a picture in a file strip has Full sc
   const strip = filesHTML([{ ref: 'ab/shot.png', caption: 'One' }, { ref: 'ab/notes.pdf', caption: '' }]);
   assert.equal((strip.match(/>Full screen</g) || []).length, 1);
   assert.match(strip, /📎 notes\.pdf/);
+});
+
+test('lightStep: the arrow keys walk a card\'s pictures and stop at the ends', () => {
+  const set = ['/a.png', '/b.png', '/c.png'];
+  assert.equal(lightStep(set, 0, 1), 1);
+  assert.equal(lightStep(set, 1, 1), 2);
+  assert.equal(lightStep(set, 2, 1), -1, 'nothing past the last');
+  assert.equal(lightStep(set, 0, -1), -1, 'nothing before the first');
+  assert.equal(lightStep(set, 2, -1), 1);
+  assert.equal(lightStep(set, -1, 1), -1, 'opened outside a card: no stepping');
+  assert.equal(lightStep([], 0, 1), -1);
 });
 
 test('md: bullets, numbers, headings, paragraphs', () => {

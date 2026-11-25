@@ -61,6 +61,9 @@ struct StyledText: View {
                     }
                 }
             }
+            // Every picture in the text, so the lightbox's arrow keys step
+            // through the card's, not only one strip's (MacLightbox).
+            .environment(\.pictureSet, lightboxSet(text.split(separator: "\n").compactMap { blobLineRef(String($0)) }))
         } else {
             SelectableText(attributed: cached(text), tint: UIColor(color), chat: chatHook, lines: lines)
         }

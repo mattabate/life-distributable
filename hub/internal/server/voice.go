@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -79,6 +80,9 @@ func (s *Server) postVoiceEar(w http.ResponseWriter, r *http.Request) {
 		Device  string `json:"device"`
 		ID      string `json:"id"`
 		Outcome string `json:"outcome"`
+		// Why: the voice helper's reason for a silent line; its own log
+		// stays on its Mac, so the hub's log carries it.
+		Why string `json:"why"`
 	}
 	if !decode(w, r, &in, 0) {
 		return
@@ -89,9 +93,15 @@ func (s *Server) postVoiceEar(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "outcome must be playing, spoke or silent")
 		return
 	}
-	if _, ok := notify.EarDevice(in.Device); !ok {
+	dev, ok := notify.EarDevice(in.Device)
+	if !ok {
 		jsonErr(w, 400, earDeviceErr)
 		return
+	}
+	if in.Outcome == "silent" && in.Why != "" {
+		// %q keeps it one log line whatever the helper sent.
+		why := []rune(in.Why)
+		log.Printf("ear: %s left %q unsaid: %q", dev, in.ID, string(why[:min(len(why), 200)]))
 	}
 	writeJSON(w, 200, s.Push.EarReport(in.Device, in.ID, in.Outcome))
 }

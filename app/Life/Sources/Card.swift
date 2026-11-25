@@ -206,7 +206,9 @@ struct Card: View {
             // What is heard leads, italic at the reading size; the detail
             // sits back, smaller and grey.
             if !said.isEmpty { StyledText(text: said, style: .body, color: .primary, macSize: 16, reading: true, italic: true) }
-            if !pictures.isEmpty { FileStrip(files: pictures) }
+            // The card's pictures are drawn here, outside StyledText, so the
+            // lightbox's arrow-key set is theirs.
+            if !pictures.isEmpty { FileStrip(files: pictures).environment(\.pictureSet, lightboxSet(pictures.map(\.ref))) }
             if more {
                 // All of it was asked for: whole, with no second "Show N more
                 // lines" on top of More (the console's opened detail).

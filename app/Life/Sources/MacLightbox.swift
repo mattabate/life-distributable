@@ -19,7 +19,29 @@ enum MacLightbox {
     static let full = NSCache<NSString, UIImage>()
     private static weak var current: LightboxView?
 
-    static func open(ref: String, hub: HubClient) {
+    /// The pictures the left and right arrow keys walk, and where in them
+    /// the box is: a picture in a card brings every picture in that card's
+    /// text, stopping at the ends. The console's twin is lightSet in
+    /// threads.js.
+    private static var set: [String] = []
+    private static var at = -1
+    private static weak var setHub: HubClient?
+
+    static func open(ref: String, hub: HubClient, set pictures: [String] = []) {
+        set = pictures
+        at = pictures.firstIndex(of: ref) ?? -1
+        setHub = hub
+        show(ref: ref, hub: hub)
+    }
+
+    /// One picture on, or back; nothing past either end.
+    static func step(_ d: Int) {
+        guard at >= 0, let hub = setHub, set.indices.contains(at + d) else { return }
+        at += d
+        show(ref: set[at], hub: hub)
+    }
+
+    private static func show(ref: String, hub: HubClient) {
         close()
         guard let window = UIApplication.shared.connectedScenes
             .compactMap({ ($0 as? UIWindowScene)?.keyWindow ?? ($0 as? UIWindowScene)?.windows.first })
@@ -49,6 +71,7 @@ enum MacLightbox {
     /// A file on this Mac: the same box,
     /// no hub between.
     static func open(file url: URL) {
+        at = -1
         close()
         guard let window = UIApplication.shared.connectedScenes
             .compactMap({ ($0 as? UIWindowScene)?.keyWindow ?? ($0 as? UIWindowScene)?.windows.first })
@@ -76,6 +99,7 @@ enum MacLightbox {
     /// the same box, straight from memory. "open the file" writes it out as
     /// a JPEG first.
     static func open(image: UIImage, name: String) {
+        at = -1
         close()
         guard let window = UIApplication.shared.connectedScenes
             .compactMap({ ($0 as? UIWindowScene)?.keyWindow ?? ($0 as? UIWindowScene)?.windows.first })
@@ -300,12 +324,17 @@ final class LightboxView: UIView, UIGestureRecognizerDelegate {
     }
     @objc private func closeTapped() { MacLightbox.close() }
 
-    // Esc, while the overlay is up.
+    // Esc, left and right arrow, while the overlay is up.
     override var canBecomeFirstResponder: Bool { true }
     override var keyCommands: [UIKeyCommand]? {
-        [UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(escape))]
+        [UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(escape)),
+         UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: #selector(stepBack)),
+         UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(stepOn))]
+            .map { $0.wantsPriorityOverSystemBehavior = true; return $0 }
     }
     @objc private func escape() { MacLightbox.close() }
+    @objc private func stepBack() { MacLightbox.step(-1) }
+    @objc private func stepOn() { MacLightbox.step(1) }
 
     /// "open the file": the blob under its own name in the temp dir, handed
     /// to the Mac (Preview, or whatever owns the extension) — the same road

@@ -1476,7 +1476,17 @@ function sentByHTML(m) {
 // ---------- lightbox ----------
 // One overlay, as big as the window allows, click anywhere or Esc to close.
 // Returns true so an <a> can cancel its own navigation with it.
-function openImage(url, name) {
+// Opened from a picture in a card (`from`, the clicked link), the left and
+// right arrow keys step through every picture in that card's text, stopping
+// at the ends (ui.js lightStep). A picture shown twice is one stop, so the
+// box never starts at the wrong copy. The Swift twin is MacLightbox.
+let lightSet = [], lightAt = -1;
+function openImage(url, name, from) {
+  if (from !== true) {
+    const scope = from?.closest?.('.md-files')?.parentElement;
+    lightSet = scope ? [...new Set([...scope.querySelectorAll('.md-files a.att')].map(a => a.href))] : [];
+    lightAt = lightSet.indexOf(new URL(url, location.href).href);
+  }
   closeImage();
   name = name || decodeURIComponent(String(url).split('/').pop() || '');
   const box = document.createElement('div');
@@ -1490,7 +1500,16 @@ function openImage(url, name) {
   return true;
 }
 function closeImage() { document.getElementById('lightbox')?.remove(); }
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeImage(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeImage();
+  const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+  if (!d || !document.getElementById('lightbox') || lightAt < 0) return;
+  e.preventDefault();
+  const next = lightStep(lightSet, lightAt, d);
+  if (next < 0) return;
+  lightAt = next;
+  openImage(lightSet[next], '', true);
+});
 
 // THE working line, same on both surfaces (the phone spells it out in
 // ThreadDetail.swift — keep them in step): while a turn runs the chat ends

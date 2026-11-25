@@ -136,9 +136,11 @@ func request(_ method: String, _ path: String, body: [String: String]? = nil) ->
 }
 
 let reports = DispatchQueue(label: "ear.reports") // in order, off the poll
-func report(_ id: String, _ outcome: String) {
+/// `why`: a silent line's reason, for the hub's log (this log stays on this
+/// Mac, so the hub could not otherwise tell why a line went unsaid).
+func report(_ id: String, _ outcome: String, _ why: String = "") {
     reports.async {
-        if request("POST", "/api/v1/voice/ear", body: ["device": device, "id": id, "outcome": outcome]) == nil {
+        if request("POST", "/api/v1/voice/ear", body: ["device": device, "id": id, "outcome": outcome, "why": why]) == nil {
             log("\(id): the hub did not take \(outcome)")
         }
     }
@@ -166,14 +168,14 @@ func say(_ l: Line, voice: String) {
             }
             let ok = p.terminationStatus == 0
             log("\(id): say exited \(p.terminationStatus); " + (ok ? "spoke" : "silent"))
-            report(id, ok ? "spoke" : "silent")
+            report(id, ok ? "spoke" : "silent", ok ? "" : "say exited \(p.terminationStatus)")
         }
     }
     do {
         try p.run()
     } catch {
         log("\(id): say would not start (\(error)); silent")
-        report(id, "silent")
+        report(id, "silent", "say would not start (\(error))")
         return
     }
     playing = (id, p, false)
@@ -193,7 +195,7 @@ func take(_ v: View) {
         guard let l = v.line, l.id == p.id else { stop("withdrawn by the hub"); return }
         if !v.ears {
             stop("the route left mid-line")
-            report(p.id, "silent")
+            report(p.id, "silent", "the route left mid-line")
         }
         return
     }
@@ -202,7 +204,7 @@ func take(_ v: View) {
     if acted.count > 50 { acted.removeFirst(acted.count - 50) }
     guard v.ears else {
         log("\(l.id): no output, or this Mac's Audio is off; silent")
-        report(l.id, "silent")
+        report(l.id, "silent", "no output, or this Mac's Audio is off")
         return
     }
     say(l, voice: v.voice ?? "")

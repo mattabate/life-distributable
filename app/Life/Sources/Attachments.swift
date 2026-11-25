@@ -439,6 +439,7 @@ extension AttachmentDraft {
 /// Renders a hub blob (authenticated fetch + in-memory cache). Blobs are immutable.
 struct BlobImage: View {
     @Environment(HubClient.self) private var hub
+    @Environment(\.pictureSet) private var pictureSet
     let ref: String
     var maxHeight: CGFloat = 220
     @State private var image: UIImage?
@@ -465,7 +466,7 @@ struct BlobImage: View {
         // The console's click-to-enlarge (threads.js openImage): the whole
         // file over the whole window, Esc or a click closes (MacLightbox).
         .contentShape(Rectangle())
-        .onTapGesture { if image != nil { MacLightbox.open(ref: ref, hub: hub) } }
+        .onTapGesture { if image != nil { MacLightbox.open(ref: ref, hub: hub, set: pictureSet) } }
         #else
         // The phone: the whole file in Quick Look, pinch to zoom - a picture
         // drawn as a small tile in a reply is opened to be read.
@@ -1322,6 +1323,7 @@ func openBlobInSafari(_ ref: String, hub: HubClient) async {
 /// The console's twin is `pictureHTML` in ui.js.
 struct PictureActions: View {
     @Environment(HubClient.self) private var hub
+    @Environment(\.pictureSet) private var pictureSet
     let ref: String
     var title: String = ""
     @State private var saving = false
@@ -1334,7 +1336,7 @@ struct PictureActions: View {
         HStack(spacing: 8) {
             Button("Full screen") {
                 #if targetEnvironment(macCatalyst)
-                MacLightbox.open(ref: ref, hub: hub)
+                MacLightbox.open(ref: ref, hub: hub, set: pictureSet)
                 #else
                 Task { full = await blobTempFile(ref, hub: hub) }
                 #endif
