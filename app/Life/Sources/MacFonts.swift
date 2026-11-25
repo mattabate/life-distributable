@@ -137,6 +137,27 @@ struct WebButtonStyle: ButtonStyle {
     }
 }
 
+/// The console's `.switch`: blue when on in any window. AppKit's greys out
+/// when its window is not in front, so a screenshot copy (which never comes
+/// to the front) drew every on switch grey.
+struct WebSwitchStyle: ToggleStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        Capsule().fill(configuration.isOn ? Web.accent : Web.lineStrong)
+            .frame(width: 30, height: 18)
+            .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                Circle().fill(.white).shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+                    .frame(width: 14, height: 14).padding(2)
+            }
+            .animation(.easeOut(duration: 0.15), value: configuration.isOn)
+            .opacity(enabled ? 1 : 0.45)
+            .contentShape(Capsule())
+            .onTapGesture { configuration.isOn.toggle() }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(configuration.isOn ? "on" : "off")
+    }
+}
+
 /// The console's `.pill`: a small squared chip (skin.css radius 6), grey, or
 /// in a tint.
 struct WebTag: View {

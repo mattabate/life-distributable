@@ -647,15 +647,17 @@ test('actionHTML: the approval card in the chat', () => {
   // One time on the head line: when it was raised, the chat's own clock.
   assert.match(chat, /<div class="card-h"><span class="mark">🔴 <\/span><span class="verb">approve<\/span><span class="at">today [^<]*<\/span><\/div><div class="t">git commit<\/div>/);
   assert.doesNotMatch(chat, /ago</);
-  assert.match(chat, /<span class="pill purple">share<\/span>/);
+  // No kind pill: the title says what it does.
+  assert.doesNotMatch(chat, /pill[^>]*>share</);
   // The raw command is shut until the owner opens it; nothing else folds.
   assert.match(chat, /<details class="runs"><summary class="small muted">What it runs<\/summary>/);
   assert.doesNotMatch(chat, /<details class="runs" open/);
   assert.equal((chat.match(/<details/g) || []).length, 1);
-  // A commit is red like every approval, with its kind pill.
+  // A commit is red like every approval, with no kind pill.
   const commit = actionHTML({ ...action, kind: 'commit' });
   assert.match(commit, /^<div class="ask" id="ask-card-act-1a2b3c4d">\s*<div class="card-h"><span class="mark">🔴 <\/span><span class="verb">approve<\/span>/);
-  assert.match(commit, /<span class="pill purple">commit<\/span>/);
+  assert.doesNotMatch(commit, /pill[^>]*>commit</);
+  assert.doesNotMatch(actionHTML({ ...action, kind: 'money' }), /pill[^>]*>money</);
   // A land card shows no command at all.
   assert.doesNotMatch(commit, /What it runs|<details|<pre/);
   // "other" is no warning: no chip for it.

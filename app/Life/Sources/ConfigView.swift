@@ -240,10 +240,14 @@ struct ConfigView: View {
                     deviceRow(d.name, word) {
                         Spacer(minLength: 8)
                         Text("Audio").font(.system(size: 12.5)).foregroundStyle(muted)
-                        Toggle("Audio", isOn: Binding(get: { d.audio }, set: { on in
+                        let audio = Binding(get: { d.audio }, set: { on in
                             Task { try? await hub.setMacAudio(device: d.device, on: on); await refreshSettings() }
-                        }))
-                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                        })
+                        #if targetEnvironment(macCatalyst)
+                        Toggle("Audio", isOn: audio).labelsHidden().toggleStyle(WebSwitchStyle())
+                        #else
+                        Toggle("Audio", isOn: audio).labelsHidden().toggleStyle(.switch)
+                        #endif
                     }
                     Rectangle().fill(line).frame(height: 1)
                 }

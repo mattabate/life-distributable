@@ -123,7 +123,9 @@ struct ThreadDetail: View {
     /// THE TOOL CHAIN of the turn in flight, opened by a tap on the working
     /// line's count (the console's chatState.chain): the run it belongs to,
     /// its events as read so far (only ever added to), and the window's ends.
-    @State private var chainOpen = false
+    /// LIFE_SHOT_CHAIN=1: a screenshot opens on it, the calls drawn as the
+    /// chat draws them.
+    @State private var chainOpen = ProcessInfo.processInfo.environment["LIFE_SHOT_CHAIN"] == "1"
     @State private var chainRun = ""
     @State private var chainEvents: [ThreadEvent] = []
     @State private var chainFirst: Int64 = 0

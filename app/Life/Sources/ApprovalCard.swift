@@ -125,12 +125,11 @@ struct ApprovalCard: View {
         })
     }
 
-    /// The kind capsule, the project, who proposed it (the job's chip opens
-    /// its run) and — outside the session — the session it belongs to.
+    /// The project, who proposed it (the job's chip opens its run) and —
+    /// outside the session — the session it belongs to. No kind capsule
+    /// ("money", "delete"…): the title says what it does.
     private var metaRow: some View {
         HStack(spacing: 6) {
-            // "other" says nothing; a real kind (money, delete...) is a warning.
-            if a.kind != "other" { Chip(a.kind, tint: kindColor, style: .kind) }
             if !a.project.isEmpty { Text(a.project).font(.caption).foregroundStyle(.secondary) }
             if let job = a.job {
                 Button { openRun = a.run_id.map { RunRef(id: $0) } } label: {
@@ -160,10 +159,6 @@ struct ApprovalCard: View {
         if let by = a.decided_via, !by.isEmpty { s += " by \(by)" }
         if let at = a.decided_at { s += " · \(shortAgo(at))" }
         return s
-    }
-
-    var kindColor: Color {
-        switch a.kind { case "money": .orange; case "delete": .red; case "contact", "share", "commit": .purple; default: .secondary }
     }
 
     /// One of the word buttons: arm the bar here, open the session with the
