@@ -25,7 +25,7 @@ cfg() {
 }
 HOST=$(cfg public_host) # the one place the address lives
 
-build() { make -s -C "$ROOT" build; } # signs the hub when TEAM_ID is set (Makefile: sign)
+build() { make -s -C "$ROOT" -f Makefile build; } # signs the hub when TEAM_ID is set (Makefile: sign); -f: never a GNUmakefile (#225)
 # rotate: on install/restart, a hub.log over 20 MB becomes hub.log.1 (the one
 # kept copy, replacing the last) and the new hub starts a fresh file — it had
 # grown to 138 MB (2026-09-14 cleanup). launchd reopens the path on start.

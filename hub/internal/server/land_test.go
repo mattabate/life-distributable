@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -172,7 +173,7 @@ func TestAppShip(t *testing.T) {
 		}
 	}
 	var p struct{ Cmd, Dir string }
-	for target, want := range map[string]string{"phone": "make ship", "mac": "bash ops/install-mac.sh"} {
+	for target, want := range map[string]string{"phone": "make -f Makefile ship", "mac": "bash ops/install-mac.sh"} {
 		code, body := postAs(s, "/api/v1/app/ship", th.ID, `{"target":"`+target+`","why":"fixes the card's $(id) box"}`)
 		var a actions.Action
 		json.Unmarshal([]byte(body), &a)
@@ -236,6 +237,46 @@ func TestGatePathsCoverTheDeciderCheck(t *testing.T) {
 	}
 	if len(found) != 6 {
 		t.Fatalf("a gate mark is no longer in package server: found %v", found)
+	}
+}
+
+// GNU make reads GNUmakefile, then makefile, before Makefile: a landing that
+// added one with a build: target would run as the owner on the next build,
+// the gate untouched (#225, reported by @junhwanahn). Every make the hub or an
+// owner-side script runs pins -f Makefile, and the other two names are on the
+// gate list besides.
+func TestOwnerSideMakePinsMakefile(t *testing.T) {
+	gated := "\n" + strings.Join(gatePaths, "\n") + "\n"
+	for _, p := range []string{"Makefile", "GNUmakefile", "makefile"} {
+		if !strings.Contains(gated, "\n"+p+"\n") {
+			t.Errorf("%s is not in gatePaths", p)
+		}
+	}
+	cmd := string(landProposal("t", "abc", "x", "", "/r", true, "").ExecPayload)
+	if !strings.Contains(cmd, "make -f Makefile build") || strings.Contains(cmd, "make build") {
+		t.Errorf("the landing's build does not pin -f Makefile: %s", cmd)
+	}
+	// A sub-make does not inherit -f, so the Makefile's own $(MAKE) pins it too.
+	runsMake := regexp.MustCompile(`^\s*@?(\w+\(\)\s*\{\s*)?(as_session env \S+ )?(make|\$\(MAKE\))\s|(\|\||&&|;)\s*(make|\$\(MAKE\))\s`)
+	for _, f := range []string{"ops/hub.sh", "ops/land-incoming.sh", "Makefile"} {
+		b, err := os.ReadFile("../../../" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for i, l := range strings.Split(string(b), "\n") {
+			code := strings.SplitN(l, " #", 2)[0]
+			if strings.HasPrefix(strings.TrimSpace(l), "#") || !runsMake.MatchString(code) {
+				continue
+			}
+			n++
+			if !strings.Contains(code, "-f Makefile") {
+				t.Errorf("%s:%d runs make without -f Makefile: %s", f, i+1, strings.TrimSpace(l))
+			}
+		}
+		if n == 0 {
+			t.Errorf("%s no longer runs make: drop it from this test", f)
+		}
 	}
 }
 

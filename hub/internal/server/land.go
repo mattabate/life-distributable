@@ -120,7 +120,7 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 func landProposal(thread, sha, log, say, repo string, hub bool, gate string) actions.Proposal {
 	cmd := "bash ops/land-incoming.sh " + sha
 	if hub {
-		cmd += " && make build && (nohup sh -c 'sleep 3; bash ops/hub.sh restart' >/dev/null 2>&1 &)"
+		cmd += " && make -f Makefile build && (nohup sh -c 'sleep 3; bash ops/hub.sh restart' >/dev/null 2>&1 &)"
 	}
 	payload, _ := json.Marshal(map[string]string{"cmd": cmd, "dir": repo})
 	gated := true
@@ -168,6 +168,11 @@ var gatePaths = []string{
 	"hub/cmd/hub/main.go",                  // the free-shell list, the wiring
 	"ops/schedule.json",                    // the tool list
 	"Makefile",                             // make test/build run as the owner
+	// GNU make reads GNUmakefile, then makefile, before Makefile: every
+	// owner-side make pins -f Makefile, and these stay the owner's card too
+	// (#225).
+	"GNUmakefile",
+	"makefile",
 	"ops/land-incoming.sh",
 	"ops/hub.sh",
 	"ops/ota.sh",
@@ -229,7 +234,7 @@ func (s *Server) appShip(w http.ResponseWriter, r *http.Request) {
 	var cmd, title string
 	switch in.Target {
 	case "phone":
-		title, cmd = "Build the phone app: "+in.Why, "make ship"
+		title, cmd = "Build the phone app: "+in.Why, "make -f Makefile ship"
 	case "mac":
 		title, cmd = "Build the desktop app: "+in.Why, "bash ops/install-mac.sh"
 	default:
