@@ -1188,9 +1188,12 @@ func TestIndexCookieFlow(t *testing.T) {
 	}
 	code := codeFor(t, s, "secret")
 	w := visit("?code=" + code)
-	if w.Code != 303 || w.Header().Get("Location") != "/" || !strings.Contains(w.Header().Get("Set-Cookie"), "life_token=secret") {
+	set := w.Result().Cookies()
+	if w.Code != 303 || w.Header().Get("Location") != "/" || len(set) != 1 || !strings.HasPrefix(set[0].Value, browserTokenPrefix) ||
+		strings.Contains(set[0].Value, "secret") || set[0].MaxAge != int(browserTTL.Seconds()) {
 		t.Fatalf("%d %q %q", w.Code, w.Header().Get("Location"), w.Header().Get("Set-Cookie"))
 	}
+	browser := set[0].Value
 	// Spent: the visit still moves on to "/", setting nothing.
 	if w := visit("?code=" + code); w.Code != 303 || len(w.Result().Cookies()) != 0 {
 		t.Fatalf("a spent code: %d %v", w.Code, w.Result().Cookies())
@@ -1209,7 +1212,7 @@ func TestIndexCookieFlow(t *testing.T) {
 		t.Fatalf("a code with no token: %d", w.Code)
 	}
 	r := httptest.NewRequest("GET", "/", nil)
-	r.AddCookie(&http.Cookie{Name: "life_token", Value: "secret"})
+	r.AddCookie(&http.Cookie{Name: "life_token", Value: browser})
 	w = httptest.NewRecorder()
 	s.ServeHTTP(w, r)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "<html") {

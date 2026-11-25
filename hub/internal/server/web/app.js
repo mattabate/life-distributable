@@ -54,6 +54,14 @@ async function api(path, { decider: deciding, ...opts } = {}) {
   }
   conn(r.ok);
   seenBuild(r.headers.get('X-Hub-Build'));
+  // A tab open across the cookie's change to a browser token holds a cookie
+  // no API route takes, and a load of / swaps it: reload once, and only show
+  // the notice if that did not sign it in.
+  if (r.status === 401 && Date.now() - Number(sessionStorage.getItem('life401') || 0) > 30000) {
+    sessionStorage.setItem('life401', String(Date.now()));
+    location.reload();
+    throw new Error('unauthorized');
+  }
   if (r.status === 401) { document.body.innerHTML = '<div class="empty">Unauthorized. Run <code>ops/hub.sh url</code> in a Terminal and open what it prints.</div>'; throw new Error('unauthorized'); }
   if (r.status === 204) return null;
   const txt = await r.text();

@@ -2,9 +2,11 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"life/hub/internal/threads"
 )
@@ -19,6 +21,76 @@ func TestSessionFromToken(t *testing.T) {
 		if got := sessionFromToken("hub", bad); got != "" {
 			t.Errorf("%q gave %q", bad, got)
 		}
+	}
+}
+
+// The console's cookie is never the hub token: a browser token for whom it
+// opens, dead past its expiry, revoked all at once by browser_gen, and
+// forged or re-pointed it proves no one.
+func TestBrowserToken(t *testing.T) {
+	now := time.Now()
+	tok := BrowserToken("hub", 0, "a.b-1", now.Add(time.Hour))
+	if who, ok := browserWho("hub", 0, tok, now); !ok || who != "a.b-1" {
+		t.Fatalf("%q %v", who, ok)
+	}
+	if who, ok := browserWho("hub", 0, BrowserToken("hub", 0, "", now.Add(time.Hour)), now); !ok || who != "" {
+		t.Fatalf("the owner's: %q %v", who, ok)
+	}
+	for name, bad := range map[string]string{
+		"expired":     BrowserToken("hub", 0, "", now.Add(-time.Second)),
+		"next gen":    tok,
+		"other hub":   BrowserToken("other", 0, "a.b-1", now.Add(time.Hour)),
+		"re-pointed":  strings.Replace(tok, ".a.b-1.", "..", 1),
+		"later":       strings.Replace(tok, browserTokenPrefix, browserTokenPrefix+"9", 1),
+		"raw token":   "hub",
+		"session tok": SessionToken("hub", "a.b-1"),
+		"no mac":      "b1.99999999999.",
+	} {
+		gen := 0
+		if name == "next gen" {
+			gen = 1
+		}
+		if who, ok := browserWho("hub", gen, bad, now); ok {
+			t.Errorf("%s: opened as %q", name, who)
+		}
+	}
+}
+
+// A raw-token cookie opens no route; till legacyCookieUntil the console swaps
+// an old one for a browser token on load, and each load renews the cookie.
+func TestCookieIsABrowserToken(t *testing.T) {
+	s := newTest(t)
+	call := func(path, cookie string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r.AddCookie(&http.Cookie{Name: "life_token", Value: cookie})
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	if w := call("/api/v1/asks", "secret"); w.Code != 401 {
+		t.Fatalf("a raw hub token cookie: %d", w.Code)
+	}
+	defer func(was time.Time) { legacyCookieUntil = was }(legacyCookieUntil)
+	legacyCookieUntil = time.Now().Add(time.Hour)
+	w := call("/", "secret")
+	set := w.Result().Cookies()
+	if w.Code != 200 || len(set) != 1 || !strings.HasPrefix(set[0].Value, browserTokenPrefix) {
+		t.Fatalf("the old cookie was not swapped: %d %v", w.Code, set)
+	}
+	if w := call("/api/v1/asks", set[0].Value); w.Code != 200 {
+		t.Fatalf("the browser token: %d", w.Code)
+	}
+	if w := call("/", set[0].Value); w.Code != 200 || len(w.Result().Cookies()) != 1 {
+		t.Fatalf("a load did not renew: %d", w.Code)
+	}
+	legacyCookieUntil = time.Now().Add(-time.Hour)
+	if w := call("/", "secret"); w.Code != 401 || len(w.Result().Cookies()) != 0 {
+		t.Fatalf("an old cookie after the swap window: %d", w.Code)
+	}
+	old := set[0].Value
+	s.cfg.BrowserGen++
+	if w := call("/api/v1/asks", old); w.Code != 401 {
+		t.Fatalf("browser_gen did not sign it out: %d", w.Code)
 	}
 }
 
@@ -79,7 +151,7 @@ func TestSessionTokenCannotCallAsOwner(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, httptest.NewRequest("GET", "/?code="+codeFor(t, s, tok), nil))
 	cookies := w.Result().Cookies()
-	if w.Code != 303 || len(cookies) != 1 || cookies[0].Value != tok {
+	if w.Code != 303 || len(cookies) != 1 || cookies[0].Value == tok || !strings.Contains(cookies[0].Value, "."+a+".") {
 		t.Fatalf("console with a session token: %d %v", w.Code, cookies)
 	}
 	r := httptest.NewRequest("POST", msg, strings.NewReader(`{"text":"x"}`))

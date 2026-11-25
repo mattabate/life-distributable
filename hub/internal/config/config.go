@@ -139,6 +139,10 @@ type Config struct {
 	// own (server/sessiontoken.go), so a call from one is never the owner's.
 	// On unless hub.json says "session_tokens": false.
 	SessionTokens bool `json:"session_tokens"`
+	// BrowserGen: the console cookies' generation (server/sessiontoken.go
+	// BrowserToken). Raising it signs every browser out at the next hub
+	// restart; the hub token stays.
+	BrowserGen int `json:"browser_gen,omitempty"`
 	// SessionUser starts sessions as this macOS user (threads/runas.go), which
 	// cannot write the owner's checkout, ops/secrets or the database: each
 	// session works in its own clone and lands through the hub (server/land.go).
