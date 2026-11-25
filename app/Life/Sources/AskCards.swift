@@ -52,6 +52,7 @@ extension EnvironmentValues {
 /// afterwards.
 struct AskCard: View {
     @Environment(HubClient.self) private var hub
+    @Environment(BoardStore.self) private var store
     @Environment(\.askReply) private var askReply
     @Environment(\.armedPicks) private var armedPicks
     let a: Ask
@@ -105,9 +106,9 @@ struct AskCard: View {
              unfolded: !Card.folds(kind: a.kind, said: a.said ?? "", title: a.title, thread: a.thread_title ?? ""),
              key: "ask:" + a.id,
              thread: a.thread_id,
-             waiting: !closed && a.waiting_to_speak == true,
-             speaking: !closed && a.speaking == true,
-             hush: { Task { await cardAct(busy: $busy, error: $error, reload: reload) { try await hub.hushVoice(card: a.id) } } },
+             waiting: !closed && a.waiting_to_speak == true && !store.hushed.contains(a.id),
+             speaking: !closed && a.speaking == true && !store.hushed.contains(a.id),
+             hush: { Task { await cardAct(busy: $busy, error: $error, reload: {}) { try await store.hush(cards: [a.id], thread: a.thread_id, hub: hub, reload: reload) } } },
              // A calendar item's steps: each its own Did it · Skip · Reply, on
              // the one card, staged on the chat's bar until Send.
              extra: paused && !closed ? AnyView(PauseBar(from: a.created_at, to: a.resumes_at!))

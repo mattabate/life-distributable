@@ -707,6 +707,25 @@ test('askHTML: a line in his ears wears "Speaking"; a double click stops it, not
   assert.doesNotMatch(html, /onclick="sayAgain/);
 });
 
+test('one hush quiets the card, the head pill and the row together until it clears', () => {
+  const card = { ...ask, kind: 'read', verb: 'read', said: 'Hey, one card.', speaking: true };
+  const b = () => ({
+    pills: { 't-1a2b3c4d': [{ tone: 'speaking', word: 'speaking' }, { tone: 'running', word: 'running' }] },
+    sessions: [{ id: 't-1a2b3c4d', asks: [{ id: 'ask-1a2b3c4d', speaking: true, waiting_to_speak: true }] }],
+  });
+  // Nothing hushed: the board and the card read as the hub said.
+  assert.deepEqual(quietBoard(b()), b());
+  for (const id of ['ask-1a2b3c4d', 'act-1a2b3c4d', 't-1a2b3c4d']) hushed.add(id);
+  try {
+    const q = quietBoard(b());
+    assert.deepEqual(q.pills['t-1a2b3c4d'], [{ tone: 'running', word: 'running' }]);
+    assert.deepEqual(q.sessions[0].asks[0], { id: 'ask-1a2b3c4d', speaking: false, waiting_to_speak: false });
+    assert.match(askHTML(card), /class="say-btn" [^>]*onclick="sayAgain\(this\)"/);
+    assert.match(actionHTML({ ...action, said: 'Hey, one approval.', speaking: true }), /class="say-btn" [^>]*onclick="sayAgain\(this\)"/);
+  } finally { hushed.clear(); }
+  assert.match(askHTML(card), /class="say-btn speaking"/);
+});
+
 test('actionHTML: a scheduled job\'s proposal names its job and is decided from the card', () => {
   const job = { ...action, thread_id: undefined, source: 'claude:job:daily-sweep', run_id: '150', outcomes: actOutcomes.slice(0, 2) };
   const h = actionHTML(job);

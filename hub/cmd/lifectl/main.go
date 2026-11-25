@@ -131,21 +131,59 @@ func main() {
 		// Hand a task or a fact to ANOTHER session. Delivered at once
 		// inside the daily allowance between sessions; past it, an approval
 		// card that shows exactly what is sent (actions relayFree,
-		// threads/relay.go).
-		//   lifectl relay <session-id> "text|@file" [--why "one line: why that session needs it"]
+		// threads/relay.go). Exactly one mode, or the hub refuses it:
+		//   lifectl relay <session-id> "text|@file" --now     a steer: read at once
+		//   lifectl relay <session-id> "text|@file" --todo "title"
+		//        on THEIR to-do list, taken when their turn in hand ends (at
+		//        once if idle); prints its number
+		//   [--why "one line: why that session needs it"]
 		need(4)
 		fs := flag.NewFlagSet("relay", flag.ExitOnError)
 		why := fs.String("why", "", "one line under the words on the card")
+		now := fs.Bool("now", false, "a steer: delivered into their turn at once")
+		todo := fs.String("todo", "", "file it as a to-do on their list with this one-line title (at most 80 characters), not a steer")
 		say := fs.String("say", "", "one sentence the headphones speak when the card lands (kept on the card)")
 		thread := fs.String("thread", os.Getenv("LIFE_THREAD_ID"), "the session handing it over (default $LIFE_THREAD_ID)")
 		fs.Parse(os.Args[4:])
 		if *thread == "" {
 			die("relay: only a session hands a task to another session — you just message it")
 		}
-		payload, _ := json.Marshal(map[string]string{"to": os.Args[2], "text": text(titleArg(os.Args[3]))})
-		c.call("POST", "/api/v1/actions", map[string]any{"kind": "other", "detail": text(*why), "exec_type": "relay",
+		rp := map[string]any{"to": os.Args[2], "text": text(titleArg(os.Args[3]))}
+		if *now {
+			rp["now"] = true
+		}
+		if *todo != "" {
+			rp["todo"] = *todo
+		}
+		payload, _ := json.Marshal(rp)
+		body := map[string]any{"kind": "other", "detail": text(*why), "exec_type": "relay",
 			"exec_payload": json.RawMessage(payload), "gated": true, "thread_id": *thread, "say": *say,
-			"run_id": os.Getenv("LIFE_RUN_ID"), "source": "claude:thread:" + *thread})
+			"run_id": os.Getenv("LIFE_RUN_ID"), "source": "claude:thread:" + *thread}
+		if *todo == "" {
+			c.call("POST", "/api/v1/actions", body)
+			break
+		}
+		// The relay runs a moment after it is filed: wait for it, so the
+		// to-do's number is printed here (the result names it).
+		code, out := c.send("POST", "/api/v1/actions", body)
+		var a struct{ ID, State, Result, Error string }
+		if code >= 300 || json.Unmarshal(out, &a) != nil {
+			die("%s", out)
+		}
+		for i := 0; i < 20 && (a.State == "approved" || a.State == "running"); i++ {
+			time.Sleep(250 * time.Millisecond)
+			c.fetch("/api/v1/actions/"+a.ID, &a)
+		}
+		switch a.State {
+		case "done":
+			fmt.Println(a.ID + ": " + a.Result)
+		case "proposed":
+			fmt.Println(a.ID + ": past the free allowance, so it waits on the owner's card; the to-do is filed on their list when they approve it.")
+		case "failed":
+			die("%s: %s", a.ID, a.Error)
+		default:
+			fmt.Println(a.ID + ": " + a.State + " " + a.Error)
+		}
 	case "todo":
 		// A session's own to-do list: work that can run now, shown to the
 		// owner under the session's name (threads/todos.go). Not Coming up: a
@@ -1720,7 +1758,7 @@ hub       api METHOD /api/v1/… [json|@file|-] · status · reload · jobs · r
 gate      propose --title t --detail d [--kind money|delete|contact|share|commit|other] [--gated]
             [--exec none|shell|claude --payload json] [--project p] [--thread id] [--say "…"]
           actions [state] · approve|deny|dismiss|reopen <id> [note…]
-          relay <session-id> "text|@file" [--why "…"] [--say "…"] [--thread id]
+          relay <session-id> "text|@file" --now|--todo "title" [--why "…"] [--say "…"] [--thread id]
           todo [--all] · todo add "task" [--from who] · todo done|drop <n> ["what happened"] · todo wait <n> "<what it waits on>" · todo open <n>
           meeting list [--all] · meeting open "topic" --members a,b,c [--parent id] [--text "…"] · meeting read <id>
             · meeting say <id> "text|@file|-" · meeting join|leave <id> · meeting close <id> ["outcome"]

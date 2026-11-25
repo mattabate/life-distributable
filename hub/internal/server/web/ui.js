@@ -1297,13 +1297,52 @@ function sayHush() {
   if (sayAudio) { sayAudio.pause(); sayAudio.removeAttribute('src'); sayAudio = null; }
   sayNow = null;
 }
-// sayHushCard: the queued line goes (POST /voice/hush), the card stays; the
-// button turns back into Play at once, and the board's next poll agrees.
-function sayHushCard(el) {
-  post('/voice/hush', { card: el.dataset.ref }).catch(() => {});
-  el.classList.remove('waiting', 'speaking');
-  el.ondblclick = null;
-  el.onclick = () => sayAgain(el);
+// sayHushCard: the queued line goes (POST /voice/hush), the card stays.
+function sayHushCard(el) { hushVoice(el.dataset.thread || '', [el.dataset.ref]); }
+
+// One hush, every mark at once: the hushed cards and their session read
+// quiet on the card's button, the chat head's pill and the Sessions row from
+// the click until the hub's answers after the hush agree. Each mark used to
+// read its own copy (the button at the click, the head a moment later, the
+// row at the board's next poll), so they flipped one after another. The
+// app's BoardStore.hush is the same.
+const hushed = new Set();
+function quietBoard(b) {
+  if (!b || !hushed.size) return b;
+  for (const id of hushed) if (b.pills && b.pills[id]) b.pills[id] = b.pills[id].filter(p => p.tone !== 'speaking' && p.tone !== 'waiting');
+  for (const s of b.sessions || []) for (const a of s.asks || []) if (hushed.has(a.id)) { a.speaking = false; a.waiting_to_speak = false; }
+  return b;
+}
+// The open list and chat repainted from the quiet board: the row and the
+// head in one paint, then the card buttons in the same tick.
+async function hushPaint(cards) {
+  if (typeof drawList === 'function' && document.getElementById('list')) await drawList(listSide, true).catch(() => {});
+  for (const card of cards) document.querySelectorAll(`.say-btn[data-ref="${CSS.escape(card)}"]`).forEach(el => {
+    el.classList.remove('waiting', 'speaking');
+    el.ondblclick = null;
+    el.onclick = () => sayAgain(el);
+  });
+}
+// `voice`: the session's own line too (the head's Stop). The marks always
+// go in the finally: a repaint that throws must not leave a card hushed for
+// the life of the page.
+async function hushVoice(thread, cards, voice) {
+  const marks = [...cards, ...(thread ? [thread] : [])];
+  for (const m of marks) hushed.add(m);
+  try {
+    quietBoard(board);
+    await hushPaint(cards);
+    if (voice && thread) await post('/voice', { thread_id: thread, secs: 0 }).catch(() => {});
+    await Promise.all(cards.map(card => post('/voice/hush', { card }).catch(() => {})));
+    // The hub's hush is done: read it back before the marks go.
+    await loadBoard().catch(() => {});
+    await Promise.all([
+      hushPaint([]),
+      typeof refreshThread === 'function' && chatState.id ? refreshThread(chatState.id, true).catch(() => {}) : null,
+    ]);
+  } finally {
+    for (const m of marks) hushed.delete(m);
+  }
 }
 function sayAgain(el) {
   if (typeof Audio === 'undefined') return;
@@ -1429,7 +1468,7 @@ function askHTML(a, opened, armed, cost) {
     keep: paused && open ? pauseBarHTML(a) : err ? ''
       : a.steps && typeof calStepsHTML === 'function' ? calStepsHTML(a, typeof armStepReply === 'function'
         ? { card: a.id, armed: n => chatArmed('step', (a.cal_id || a.id) + '.' + n) } : undefined) : '',
-    said: a.said, thread: a.thread_id, waiting: open && a.waiting_to_speak, speaking: open && a.speaking, acts, cost,
+    said: a.said, thread: a.thread_id, waiting: open && a.waiting_to_speak && !hushed.has(a.id), speaking: open && a.speaking && !hushed.has(a.id), acts, cost,
     at: open ? a.created_at : a.resolved_at || a.created_at,
     folded: open ? '' : a.folded === 'dismissed' || a.state === 'dismissed' ? '✕ dismissed' : '✓ ' + esc(a.folded || a.state),
   }, opened);
@@ -1485,7 +1524,7 @@ function actionHTML(a, opened, armed, cost) {
     ref: 'action', id: a.id, title: a.title, tint: '', verb: 'approve',
     mark: '🔴 ',
     body: askBody(text, 'action:' + a.id) + payload, pics,
-    said: a.said, thread: a.thread_id, waiting: open && a.waiting_to_speak, speaking: open && a.speaking,
+    said: a.said, thread: a.thread_id, waiting: open && a.waiting_to_speak && !hushed.has(a.id), speaking: open && a.speaking && !hushed.has(a.id),
     meta,
     at: open ? a.created_at : a.decided_at || a.created_at,
     acts, cost, folded: open ? '' : a.folded === 'dismissed' || a.state === 'dismissed' ? '✕ dismissed'

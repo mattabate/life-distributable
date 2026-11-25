@@ -66,7 +66,7 @@ func (s *Server) addAsk(w http.ResponseWriter, r *http.Request) {
 	// only.
 	if from := s.caller(r); from != "" {
 		if in.ThreadID != "" && in.ThreadID != from {
-			jsonErr(w, 403, "a session raises cards on itself, not on another session; to hand a task over: `lifectl relay <session-id> \"...\"`")
+			jsonErr(w, 403, "a session raises cards on itself, not on another session; to hand a task over: `lifectl relay <session-id> \"...\" --now|--todo \"title\"`")
 			return
 		}
 		in.ThreadID = from

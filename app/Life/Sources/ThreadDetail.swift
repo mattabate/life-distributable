@@ -1727,12 +1727,9 @@ extension ThreadDetail {
         Speaker.shared.stop()
         let id = thread.id
         let lines = asks.filter { !$0.isClosed && !($0.said ?? "").isEmpty }.map(\.id)
-        Task {
-            _ = try? await hub.voice(thread: id, secs: 0)
-            for card in lines { try? await hub.hushVoice(card: card) }
-            try? await Task.sleep(for: .milliseconds(1200))
-            await load()
-        }
+        // One hush with the cards' own (BoardStore.hush): every mark at once,
+        // then the hub, then a fresh read; no guessed wait before it.
+        Task { try? await store.hush(cards: lines, thread: id, voice: true, hub: hub, reload: load) }
     }
 
     /// The armed cards as the console's `.reply-strip`: a blue rail and an 8%

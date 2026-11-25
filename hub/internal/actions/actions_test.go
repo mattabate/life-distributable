@@ -785,7 +785,7 @@ func TestApprovalKeepsWhatItSpoke(t *testing.T) {
 func TestRelayIsFreeInsideTheAllowanceThenACard(t *testing.T) {
 	q, ex, _ := setup(t)
 	relay := Proposal{ThreadID: "th-a", Title: "harmless tidy", Detail: "it owns that repo", ExecType: "relay",
-		ExecPayload: json.RawMessage(`{"to":"th-b","text":"Rename it Crossword Constructor."}`)}
+		ExecPayload: json.RawMessage(`{"to":"th-b","text":"Rename it Crossword Constructor.","now":true}`)}
 	if _, err := q.Propose(relay); err == nil {
 		t.Fatal("relay accepted on a hub with no relay wired")
 	}
@@ -807,8 +807,8 @@ func TestRelayIsFreeInsideTheAllowanceThenACard(t *testing.T) {
 		"no sender":    {ExecType: "relay", ExecPayload: relay.ExecPayload},
 		"to itself":    {ThreadID: "th-b", ExecType: "relay", ExecPayload: relay.ExecPayload},
 		"no words":     {ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-b"}`)},
-		"no such peer": {ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-x","text":"hi"}`)},
-		"a transcript": {ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-b","text":"` + strings.Repeat("x", relayMax+1) + `"}`)},
+		"no such peer": {ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-x","text":"hi","now":true}`)},
+		"a transcript": {ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-b","text":"` + strings.Repeat("x", relayMax+1) + `","now":true}`)},
 	} {
 		if _, err := q.Propose(bad); err == nil {
 			t.Fatalf("%s: accepted", name)
@@ -833,7 +833,7 @@ func TestRelayIsFreeInsideTheAllowanceThenACard(t *testing.T) {
 
 	// Either direction counts toward the pair; the one past it is the
 	// owner's card.
-	back := Proposal{ThreadID: "th-b", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-a","text":"Done."}`)}
+	back := Proposal{ThreadID: "th-b", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-a","text":"Done.","now":true}`)}
 	for i := 1; i < relayFreePerPair; i++ {
 		p := relay
 		if i%2 == 1 {
@@ -885,7 +885,7 @@ func TestHeldRelayIsReleasedWhenTheAllowanceHasRoom(t *testing.T) {
 		mu.Unlock()
 		return "delivered", nil
 	}
-	relay := Proposal{ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-b","text":"Hi."}`)}
+	relay := Proposal{ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-b","text":"Hi.","now":true}`)}
 	for i := 0; i < relayFreePerPair; i++ {
 		if a, _ := q.Propose(relay); a.Gated {
 			t.Fatal("inside the allowance", i)
@@ -908,6 +908,103 @@ func TestHeldRelayIsReleasedWhenTheAllowanceHasRoom(t *testing.T) {
 	q.db.QueryRow(`SELECT COUNT(*) FROM actions a JOIN items i ON i.id=a.id WHERE i.resolved_by='auto' AND a.id=?`, held.ID).Scan(&all)
 	if all != 1 {
 		t.Fatal("the release is recorded as the allowance's, not the owner's")
+	}
+}
+
+// A relay says which it is, now or later, or the hub refuses it.
+func TestRelayWithNoModeIsRefused(t *testing.T) {
+	q, _, _ := setup(t)
+	q.RelayTarget = func(string) (string, error) { return "Peer", nil }
+	q.Relay = func(from, to, text, actionID string, direct bool) (string, error) { return "delivered.", nil }
+	q.RelayTodo = func(from, to, title, text string) (int64, error) { return 1, nil }
+	for name, body := range map[string]string{
+		"no mode":         `{"to":"th-b","text":"Retake the shots."}`,
+		"both":            `{"to":"th-b","text":"Retake the shots.","now":true,"todo":"Retake the shots"}`,
+		"now false, bare": `{"to":"th-b","text":"Retake the shots.","now":false}`,
+		"blank todo":      `{"to":"th-b","text":"Retake the shots.","todo":"  "}`,
+	} {
+		_, err := q.Propose(Proposal{ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(body)})
+		if err == nil {
+			t.Fatalf("%s: accepted", name)
+		}
+		if name == "no mode" && (!strings.Contains(err.Error(), "--now") || !strings.Contains(err.Error(), "--todo")) {
+			t.Fatalf("the refusal names both modes: %v", err)
+		}
+	}
+}
+
+// --now: the words are delivered (a steer), nothing is filed.
+func TestRelayNowSteers(t *testing.T) {
+	q, _, _ := setup(t)
+	q.RelayTarget = func(string) (string, error) { return "Peer", nil }
+	var mu sync.Mutex
+	var sent, filed int
+	q.Relay = func(from, to, text, actionID string, direct bool) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		sent++
+		return "delivered.", nil
+	}
+	q.RelayTodo = func(from, to, title, text string) (int64, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		filed++
+		return 1, nil
+	}
+	a, err := q.Propose(Proposal{ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-b","text":"Stop: wrong branch.","now":true}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a = waitState(t, q, a.ID, "done")
+	mu.Lock()
+	defer mu.Unlock()
+	if sent != 1 || filed != 0 || a.Result != "delivered." || a.Title != "Send to the session “Peer”" {
+		t.Fatalf("sent %d filed %d: %+v", sent, filed, a)
+	}
+}
+
+// --todo: filed on the receiver's list, not steered in; the result names its
+// number and the card says it is a to-do.
+func TestRelayTodoFilesAnItemAndDoesNotSteer(t *testing.T) {
+	q, _, _ := setup(t)
+	q.RelayTarget = func(string) (string, error) { return "Peer", nil }
+	var mu sync.Mutex
+	sent := 0
+	q.Relay = func(from, to, text, actionID string, direct bool) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		sent++
+		return "delivered.", nil
+	}
+	withTodo := Proposal{ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-b","text":"Retake the shots.","todo":"Retake the README shots"}`)}
+	if _, err := q.Propose(withTodo); err == nil {
+		t.Fatal("a relay to-do was taken with nothing wired to file it")
+	}
+	var got [4]string
+	q.RelayTodo = func(from, to, title, text string) (int64, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = [4]string{from, to, title, text}
+		return 42, nil
+	}
+	long := Proposal{ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-b","text":"x","todo":"` + strings.Repeat("a", relayTodoMax+1) + `"}`)}
+	if _, err := q.Propose(long); err == nil {
+		t.Fatal("a to-do title over the limit was taken")
+	}
+	two := Proposal{ThreadID: "th-a", ExecType: "relay", ExecPayload: json.RawMessage(`{"to":"th-b","text":"x","todo":"one\ntwo"}`)}
+	if _, err := q.Propose(two); err == nil {
+		t.Fatal("a two-line to-do title was taken")
+	}
+	a, err := q.Propose(withTodo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a = waitState(t, q, a.ID, "done")
+	mu.Lock()
+	defer mu.Unlock()
+	if got != [4]string{"th-a", "th-b", "Retake the README shots", "Retake the shots."} || sent != 0 ||
+		!strings.Contains(a.Result, "to-do 42") || !strings.Contains(a.Result, "not steered") || !strings.HasPrefix(a.Title, "Put on the to-do list of “Peer”") {
+		t.Fatalf("%q, sent %d, %q / %q", got, sent, a.Title, a.Result)
 	}
 }
 

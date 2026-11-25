@@ -43,6 +43,50 @@ final class BoardStore {
         guard let i = recs.firstIndex(where: { $0.id == id }) else { return }
         recs[i].hidden_at = hidden ? ISO8601DateFormatter().string(from: Date()) : nil
     }
+    /// One hush, every mark at once: the hushed cards and their sessions
+    /// read quiet on the card's corner, the chat head's pill and the
+    /// Sessions row from the click until the hub's answers after the hush
+    /// agree. Each mark used to read its own copy (the card a flag of its
+    /// own, the head the chat's reload, the row the board's next poll), so
+    /// they flipped one after another. The console's twin is ui.js hushVoice.
+    private(set) var hushed: Set<String> = []
+
+    /// Quiet `cards` (and with `voice`, the session's own line too): marked
+    /// at once, then the hub, then the board and `reload` (the chat) read
+    /// fresh before the marks go, so nothing flickers back in between.
+    func hush(cards: [String], thread: String, voice: Bool = false, hub: HubClient, reload: () async -> Void) async throws {
+        let marks = Set(cards + (thread.isEmpty ? [] : [thread]))
+        hushed.formUnion(marks)
+        if let b = board { board = hushing(b) }
+        var failed: Error?
+        do {
+            if voice, !thread.isEmpty { _ = try await hub.voice(thread: thread, secs: 0) }
+            for c in cards { try await hub.hushVoice(card: c) }
+        } catch { failed = error }
+        // Read even while a chat holds the loop paused: the row is on screen.
+        async let fresh: Void = refresh(hub)
+        await reload()
+        await fresh
+        hushed.subtract(marks)
+        if let failed { throw failed }
+    }
+
+    /// The board as it reads with `hushed` applied: no speaking or waiting
+    /// pill on a hushed session, no spoken flag on a hushed card.
+    private func hushing(_ b: Board) -> Board {
+        guard !hushed.isEmpty else { return b }
+        var b = b
+        for id in hushed { b.pills?[id]?.removeAll { ["speaking", "waiting"].contains($0.tone) } }
+        if var ss = b.sessions {
+            for i in ss.indices {
+                for j in ss[i].asks.indices where hushed.contains(ss[i].asks[j].id) {
+                    ss[i].asks[j].speaking = nil; ss[i].asks[j].waiting_to_speak = nil
+                }
+            }
+            b.sessions = ss
+        }
+        return b
+    }
     var goals: [Goal] = []
     var error: String?
     /// How many ThreadDetails are open: each polls its own session, so the
@@ -135,7 +179,9 @@ final class BoardStore {
             #endif
             if freshThreads != threads { threads = freshThreads }
             if freshGoals != goals { goals = freshGoals }
-            if freshBoard != board { board = freshBoard }
+            // A poll that left before a hush still reads quiet.
+            let quietBoard = hushing(freshBoard)
+            if quietBoard != board { board = quietBoard }
             // The people and the open recs, fetched side by side.
             async let people = try? hub.personaThreads()
             async let open = try? hub.recs()

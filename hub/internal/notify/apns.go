@@ -87,6 +87,10 @@ type APNs struct {
 	phoneEars earsSeen
 	// hushed: cards whose line the owner dropped (Hush); the card stays open.
 	hushed map[string]bool
+	// holds: each card's live "waiting to speak" releases (waiting), so a
+	// Hush ends them at once and not on the next closedPoll.
+	holds  map[string]map[int64]func()
+	holdID int64
 
 	// ear: each Mac's ear and the line handed to one (ear.go). host is the
 	// hub's own Mac by name ("" = os.Hostname's).

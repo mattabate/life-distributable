@@ -19,7 +19,8 @@ func TestRelayDeliversOnlyThroughAnAction(t *testing.T) {
 	b, _ := m.Create("Site repo", "life", "", "Sort the repo out.", "", "", nil)
 	complete(t, m, b.ID, "Sorted.")
 
-	if _, err := m.Queue(Prompt{Author: "claude:thread:" + a.ID, Target: b.ID, Text: "rename it"}); err == nil || !strings.Contains(err.Error(), "lifectl relay") {
+	if _, err := m.Queue(Prompt{Author: "claude:thread:" + a.ID, Target: b.ID, Text: "rename it"}); err == nil || !strings.Contains(err.Error(), "lifectl relay") ||
+		!strings.Contains(err.Error(), "--now") || !strings.Contains(err.Error(), "--todo") {
 		t.Fatalf("the direct road must stay shut and name the sanctioned one: %v", err)
 	}
 	if _, err := m.Relay(a.ID, b.ID, "rename it", "", true); err == nil {

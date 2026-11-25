@@ -159,7 +159,7 @@ func (s *Server) patchThread(w http.ResponseWriter, r *http.Request) {
 	// asks as the owner.
 	if from := s.caller(r); from != "" {
 		if from != r.PathValue("id") {
-			jsonErr(w, 403, "a session may not change another session; to hand a task over: `lifectl relay <session-id> \"...\"`")
+			jsonErr(w, 403, "a session may not change another session; to hand a task over: `lifectl relay <session-id> \"...\" --now|--todo \"title\"`")
 			return
 		}
 		for k := range patch {
@@ -254,7 +254,7 @@ func (s *Server) threadTodos(w http.ResponseWriter, r *http.Request) {
 // todoOwner: a session files and closes only its own list; the owner any.
 func (s *Server) todoOwner(w http.ResponseWriter, r *http.Request) bool {
 	if from := s.caller(r); from != "" && from != r.PathValue("id") {
-		jsonErr(w, 403, "a session keeps only its own to-do list; a task for another session: `lifectl relay <session-id> \"...\"`")
+		jsonErr(w, 403, "a session keeps only its own to-do list; a task for another session: `lifectl relay <session-id> \"...\" --now|--todo \"title\"`")
 		return false
 	}
 	return true
@@ -323,7 +323,7 @@ func (s *Server) sendThread(w http.ResponseWriter, r *http.Request) {
 	}
 	// This route writes as the owner, so a session may not aim it at another session.
 	if from := strings.TrimSpace(r.Header.Get("X-Life-Thread")); from != "" && from != r.PathValue("id") {
-		jsonErr(w, 403, "a session may not write into another session as the owner; to hand a task over: `lifectl relay <session-id> \"...\"`")
+		jsonErr(w, 403, "a session may not write into another session as the owner; to hand a task over: `lifectl relay <session-id> \"...\" --now|--todo \"title\"`")
 		return
 	}
 	if err := s.thr.SendVia(r.PathValue("id"), in.Text, in.Attachments, via(in.Via)); err != nil {

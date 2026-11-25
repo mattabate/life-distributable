@@ -213,7 +213,7 @@ func (s *Server) listPersonas(w http.ResponseWriter, r *http.Request) {
 // where there is none).
 func (s *Server) teamWriter(w http.ResponseWriter, r *http.Request) bool {
 	if id := s.caller(r); id != "" && id != s.thr.CatchAll() {
-		jsonErr(w, 403, "only the chief of staff adds or changes a role: relay the owner's wish there (`lifectl relay <its id> \"…\"`)")
+		jsonErr(w, 403, "only the chief of staff adds or changes a role: relay the owner's wish there (`lifectl relay <its id> \"…\" --now`)")
 		return false
 	}
 	return true

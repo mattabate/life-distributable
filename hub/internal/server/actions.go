@@ -80,7 +80,7 @@ func (s *Server) proposeAction(w http.ResponseWriter, r *http.Request) {
 	// it names, with that session's grants, under "the action you proposed".
 	if from := s.caller(r); from != "" {
 		if p.ThreadID != "" && p.ThreadID != from {
-			jsonErr(w, 403, "a session proposes as itself, not as another session; to hand a task over: `lifectl relay <session-id> \"…\"`")
+			jsonErr(w, 403, "a session proposes as itself, not as another session; to hand a task over: `lifectl relay <session-id> \"…\" --now|--todo \"title\"`")
 			return
 		}
 		p.ThreadID, p.Source = from, "claude:thread:"+from

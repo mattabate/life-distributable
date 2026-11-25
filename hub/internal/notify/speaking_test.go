@@ -95,11 +95,9 @@ func TestHushDropsTheLineNotTheCard(t *testing.T) {
 	if v.state("t-1") != "waiting" {
 		t.Fatalf("held behind the floor: %q, want waiting", v.state("t-1"))
 	}
+	// Gone when Hush returns, not on the next closedPoll: a surface that reads
+	// its hush once and then the board showed the pill again inside that second.
 	a.Hush("ask-1")
-	deadline := time.Now().Add(3 * closedPoll)
-	for v.state("t-1") == "waiting" && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
 	if v.state("t-1") != "" {
 		t.Fatalf("hushed: %q, want no pill", v.state("t-1"))
 	}

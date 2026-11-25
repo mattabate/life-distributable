@@ -390,6 +390,7 @@ func main() {
 	// relayFree).
 	acts.RelayTarget = thr.RelayTarget
 	acts.Relay = thr.Relay
+	acts.RelayTodo = thr.RelayTodo
 	// A relay held for the owner's tap goes out by itself once the allowance
 	// has room.
 	ck.Every("relays", 5*time.Minute, true, func() error {
