@@ -69,13 +69,7 @@ func (s *Server) sessionFromRequest(r *http.Request) string {
 	if !s.cfg.SessionTokens {
 		return ""
 	}
-	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if got == "" {
-		if c, err := r.Cookie("life_token"); err == nil {
-			got = c.Value
-		}
-	}
-	return sessionFromToken(s.token, got)
+	return sessionFromToken(s.token, s.bearer(r))
 }
 
 // openRoutes: the only routes served with no token. routes.go marks a route

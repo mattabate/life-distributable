@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -29,7 +28,9 @@ type loginCode struct {
 
 func (l *loginCodes) mint(token string, now time.Time) string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(err) // never on go1.24+ (it crashes first); never a guessable code
+	}
 	code := hex.EncodeToString(b)
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -60,13 +61,7 @@ func (l *loginCodes) take(code string, now time.Time) string {
 // postLoginCode: POST /api/v1/login-codes, a code for the token this request
 // carries, so the cookie it sets proves no more than the caller already does.
 func (s *Server) postLoginCode(w http.ResponseWriter, r *http.Request) {
-	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if got == "" {
-		if c, err := r.Cookie("life_token"); err == nil {
-			got = c.Value
-		}
-	}
-	writeJSON(w, 201, map[string]any{"code": s.logins.mint(got, time.Now()), "expires_in": int(loginCodeTTL.Seconds())})
+	writeJSON(w, 201, map[string]any{"code": s.logins.mint(s.bearer(r), time.Now()), "expires_in": int(loginCodeTTL.Seconds())})
 }
 
 // pageHeaders: what every console document carries (#158). No other site may

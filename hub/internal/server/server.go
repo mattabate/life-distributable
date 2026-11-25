@@ -299,8 +299,12 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	// (the #route rides along), where the cookie decides: browse.js goes to
 	// every #route through the one URL.
 	if code := r.URL.Query().Get("code"); code != "" {
+		// The cookie is a browser token for whom the code's token proves,
+		// never the token itself (sessiontoken.go BrowserToken).
 		if t := s.logins.take(code, time.Now()); t != "" {
-			http.SetCookie(w, &http.Cookie{Name: "life_token", Value: t, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 3600})
+			if c := s.browserCookie(t, time.Now()); c != nil {
+				http.SetCookie(w, c)
+			}
 		}
 		next := "/"
 		if n := r.URL.Query().Get("next"); strings.HasPrefix(n, "/api/v1/blobs/") && !strings.Contains(n, "..") {
@@ -309,9 +313,15 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, next, http.StatusSeeOther)
 		return
 	}
-	if !s.authorized(r) {
+	// Each load renews a cookie sign-in for another browserTTL (and swaps an
+	// old raw-token cookie for a browser token, till legacyCookieUntil).
+	renewed := s.renewCookie(r, time.Now())
+	if renewed == nil && !s.authorized(r) {
 		http.Error(w, "unauthorized: run ops/hub.sh url in a Terminal and open what it prints", http.StatusUnauthorized)
 		return
+	}
+	if renewed != nil {
+		http.SetCookie(w, renewed)
 	}
 	b, _ := webFS.ReadFile("web/index.html")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

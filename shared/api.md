@@ -8,7 +8,7 @@ decodes to `shared/fixtures/` (`make generate` rewrites them) and the app's
 
 Base: `https://<public_host>` (ops/hub.json, e.g. `my-mac.example.ts.net:8443`)
 Auth: `Authorization: Bearer <ops/secrets/hub.token>` on everything except
-`/healthz` and `/`. The dashboard sets a `life_token` cookie from `/?code=` (a login code).
+`/healthz` and `/`. The dashboard sets a `life_token` cookie from `/?code=` (a login code): a browser token `b1.<expiry>.<session or empty>.<mac>`, never the hub token. It lasts 30 days, each `GET /` renews it, and raising `browser_gen` in hub.json signs every browser out at the next `ops/hub.sh restart`. A cookie holding a raw token opens nothing (till 2026-12-24 `GET /` swaps an old one for a browser token).
 Session tokens (on unless ops/hub.json has `"session_tokens": false`): every
 session the hub runs gets its own bearer token in `LIFE_SESSION_TOKEN`, and
 every scheduled job one for `job-<name>`; lifectl and `ops/hublib.py` send it
@@ -32,7 +32,7 @@ Errors: `{"error": "..."}` with a 4xx/5xx status.
 → `{"ok": true, "time": RFC3339}`. Unauthenticated (used by launchd/uptime checks).
 
 ### GET /
-Spend + sessions dashboard (HTML). First visit: `/?code=<login code>` sets the cookie to the token that minted the code, then 303s to `/` (a spent, unknown or expired code 303s too, setting nothing). `&next=/api/v1/blobs/<ref>` then lands on that blob instead of `/` (the phone app's "Open in browser" on an .html card file); any other `next` is ignored. The token itself never goes in a URL (#161). Every answer carries `Content-Security-Policy: frame-ancestors 'none'; object-src 'none'; base-uri 'none'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` (#158).
+Spend + sessions dashboard (HTML). First visit: `/?code=<login code>` sets the cookie to a browser token for whoever minted the code, then 303s to `/` (a spent, unknown or expired code 303s too, setting nothing). `&next=/api/v1/blobs/<ref>` then lands on that blob instead of `/` (the phone app's "Open in browser" on an .html card file); any other `next` is ignored. The token itself never goes in a URL (#161). Every answer carries `Content-Security-Policy: frame-ancestors 'none'; object-src 'none'; base-uri 'none'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` (#158).
 
 ### POST /api/v1/login-codes
 → 201 `{code, expires_in: 60}`. A code for the token this request carries (the hub token or a session's), good for one `/?code=` visit inside a minute. `ops/hub.sh url` and the phone's "Open in browser" use it.
