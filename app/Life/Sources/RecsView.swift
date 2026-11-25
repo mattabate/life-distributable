@@ -110,6 +110,10 @@ struct RecsView: View {
                                 Button { deciding = RecDecisionRequest(rec: r, way: .accept) } label: { Label("Accept", systemImage: "checkmark") }.tint(.green)
                                 // The fourth answer: a note with no verdict.
                                 Button { deciding = RecDecisionRequest(rec: r, way: .reply) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }.tint(.blue)
+                                // One the owner hid from its chat goes back there.
+                                if r.hidden_at != nil {
+                                    Button { Task { _ = try? await hub.hideRec(r.id, hidden: false); store.setHidden(r.id, false); await load() } } label: { Label("Show in chat", systemImage: "eye") }.tint(.purple)
+                                }
                             }
                         }
                         .swipeActions(edge: .trailing) {
@@ -831,6 +835,7 @@ enum MacRecLayout { static let column: CGFloat = 860 }
 /// (MacRecReplyBox). A decided rec's note sits where the bar would.
 struct MacRecCard: View {
     @Environment(HubClient.self) private var hub
+    @Environment(BoardStore.self) private var store
     @Environment(RefNav.self) private var nav
     let rec: Rec
     let open: () -> Void
@@ -854,7 +859,7 @@ struct MacRecCard: View {
                     }
                     Spacer(minLength: 8)
                     if rec.sourceThreadID != nil {
-                        Button("its chat ›") { Task { await chat() } }.buttonStyle(.plain).foregroundStyle(Web.accent)
+                        Button(hidden ? "show in its chat ›" : "its chat ›") { Task { await chat() } }.buttonStyle(.plain).foregroundStyle(Web.accent)
                             .help("The session that filed it")
                     }
                     Button("details ›", action: open).buttonStyle(.plain).foregroundStyle(Web.accent)
@@ -879,9 +884,16 @@ struct MacRecCard: View {
         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Web.line, lineWidth: 1) }
     }
 
+    /// Open, and hidden from its chat by its Hide: the link puts it back
+    /// there first.
+    private var hidden: Bool { !rec.isClosed && rec.hidden_at != nil }
+
     private func chat() async {
         guard let id = rec.sourceThreadID else { return }
-        do { macOpenSession(try await hub.thread(id), nav: nav); error = nil } catch { self.error = error.localizedDescription }
+        do {
+            if hidden { _ = try await hub.hideRec(rec.id, hidden: false); store.setHidden(rec.id, false) }
+            macOpenSession(try await hub.thread(id), nav: nav); error = nil
+        } catch { self.error = error.localizedDescription }
     }
 }
 

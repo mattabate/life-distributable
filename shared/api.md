@@ -654,7 +654,10 @@ Body `{outcome: worked|mixed|failed|unclear, by?, note?}` → 200 Rec. 409 on un
 Body `{refs: ["cal-1234", "ask-ab12", "act-…"]}` → 200 Rec. Appends, deduped: what accepting this rec actually minted.
 
 ### POST /api/v1/recs/{id}/seen
-No body → 200 Rec with `seen_at` set (the first mark stands). A chat draws an open rec with no `seen_at` as one small notice line with a ×; this is the ×. The rec stays open on the Recs page. Recs filed before the column existed were backfilled as seen.
+No body → 200 Rec with `seen_at` set (the first mark stands). The rec stays open on the Recs page. Recs filed before the column existed were backfilled as seen. The chats no longer call it (they once drew an unseen rec as a one-line notice whose × this was; an open rec is now its full card until decided or hidden, `/hide`); it stays for older apps.
+
+### POST /api/v1/recs/{id}/hide
+Body `{hidden: true|false}` → 200 Rec with `hidden_at` set (the first hide stands) or cleared. Hide on a rec's violet card in a chat: a rec with `hidden_at` is drawn in no chat and on no Sessions row, but its status is untouched, so an open one stays on the Recs page until the owner accepts or declines it. No event, relay or wake. 400 without `hidden`, 404 no such rec.
 
 ### POST /api/v1/recs/{id}/home
 Body `{thread_id}` → 200 Rec on its new session (404 no such rec or session). Moves a rec to the session that owns its lane; `source` stays the filer, so it lists in both chats.

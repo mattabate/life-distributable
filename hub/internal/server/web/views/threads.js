@@ -201,7 +201,7 @@ async function drawList(activeID, reuse) {
   const recsBy = {};
   for (const r of (open && open.recs) || []) {
     const src = r.thread_id || (/^claude:thread:(.+)$/.exec(r.source || '') || [])[1];
-    if (src && !r.closed) (recsBy[who(ownerOf(src))] ||= []).push(r);
+    if (src && !r.closed && !r.hidden_at) (recsBy[who(ownerOf(src))] ||= []).push(r);
   }
   // Every session filed under a person (the board's `home`): its cards and
   // its share of `for_you` count on the person's row.
@@ -1055,13 +1055,20 @@ async function refreshThread(id, first) {
   // decided one is the grey line that says what he chose. One whose reply
   // is older than the loaded messages is not drawn: it sat at the end, an
   // "Accepted" from Oct 15 under the newest message (2026-10-24).
-  const recByMsg = {}, recById = {}, tailRecs = [];
+  // An open rec is long-lived, so one filed before the loaded window still
+  // shows, at the top with the other older open cards.
+  const recByMsg = {}, recById = {}, tailRecs = [], headRecs = [];
   const msgIDs = new Set(ordered.map(m => m.id));
   const newestID = Math.max(0, ...msgIDs);
   for (const r of recs) {
     recById[r.id] = r;
+    chatState.cards['rec:' + r.id] = r;
+    // An open rec the owner hid (its Hide) is drawn nowhere in the chat,
+    // full or not; it stays open on Recs.
+    if (!r.closed && r.hidden_at) continue;
     if (r.message_id && msgIDs.has(r.message_id)) (recByMsg[r.message_id] ||= []).push(r);
     else if (!r.message_id || r.message_id > newestID) tailRecs.push(r);
+    else if (!r.closed) headRecs.push(r);
   }
   // A reply can land while the owner is mid-sentence; the composer keeps what he
   // has typed in its own state (composer.js), so the redraw restores it — an
@@ -1079,7 +1086,7 @@ async function refreshThread(id, first) {
   // session's relay or a check-in), so the working line says why. A deep
   // link to a closed card flips the full chat on, so the card is there to
   // land on.
-  if (focusNeedsFull(chatState.focus, askById, acts)) chatState.full = true;
+  if (focusNeedsFull(chatState.focus, askById, acts, recById)) chatState.full = true;
   const full = chatState.full;
   const liveIDs = new Set(full ? [] : starters.map(m => m.id));
   // The rows in groups, one per message (its row and the cards under it) and
@@ -1092,11 +1099,11 @@ async function refreshThread(id, first) {
   const tails = (as, cs, rs) => {
     for (const a of cs) groups.push(['action:' + a.id, chatActionHTML(a)]);
     for (const a of as) groups.push(['ask:' + a.id, chatAskHTML(a)]);
-    for (const r of rs) groups.push(['rec:' + r.id, recNoticeHTML(r)]);
+    for (const r of rs) groups.push(['rec:' + r.id, chatRecHTML(r)]);
   };
   if (upcoming === 'todo') groups.push(['todo', todosHTML(t.todos)]);
   else if (upcoming) groups.push(['upcoming', queuedHTML(queued)]);
-  else tails(headAsks, headActs, []);
+  else tails(headAsks, headActs, headRecs);
   if (upcoming) {
     // Coming up in place of the chat.
   } else if (full) {
@@ -1104,7 +1111,7 @@ async function refreshThread(id, first) {
     // an open card pulls the window back to it.
     let from = Math.max(0, ordered.length - (chatState.shown || CHAT_WINDOW));
     for (let i = 0; i < from; i++) {
-      if (openCards(askByMsg[ordered[i].id], actByMsg[ordered[i].id], []).some(x => x.length)) { from = i; break; }
+      if (openCards(askByMsg[ordered[i].id], actByMsg[ordered[i].id], recByMsg[ordered[i].id]).some(x => x.length)) { from = i; break; }
     }
     if (from > 0) groups.push(['earlier:' + from, `<button class="link small muted chat-earlier" onclick="chatEarlier(${ordered.length - from})">Show ${Math.min(CHAT_MORE, from)} earlier of ${ordered.length}</button>`]);
     for (const m of ordered.slice(from)) groups.push(['msg:' + m.id, msgHTML(m, askByMsg[m.id], actByMsg[m.id], recByMsg[m.id], askById, recById)]);
@@ -1114,10 +1121,10 @@ async function refreshThread(id, first) {
       const [ka, kc, kr] = openCards(askByMsg[m.id], actByMsg[m.id], recByMsg[m.id]);
       let h;
       // Its row unboxed on the full chat's grey line.
-      if (liveIDs.has(m.id)) h = `<div class="openrun">${msgHTML(m, ka, kc, [], askById, recById)}</div>` + kr.map(recNoticeHTML).join('');
+      if (liveIDs.has(m.id)) h = `<div class="openrun">${msgHTML(m, ka, kc, [], askById, recById)}</div>` + kr.map(chatRecHTML).join('');
       else {
         noteLeadCost(m, ka, kc);
-        h = kc.map(a => chatActionHTML(a)).join('') + ka.map(a => chatAskHTML(a)).join('') + kr.map(recNoticeHTML).join('');
+        h = kc.map(a => chatActionHTML(a)).join('') + ka.map(a => chatAskHTML(a)).join('') + kr.map(chatRecHTML).join('');
       }
       if (h) groups.push(['msg:' + m.id, h]);
     }
@@ -1253,21 +1260,15 @@ function chatEarlier(drawn) {
   refreshThread(chatState.id, true);
 }
 // The cards still his to act on, of each kind: an ask not closed, an approval
-// still open (ui.js askHTML / actionHTML's own open rules) — and a rec not
-// closed that he has not seen, drawn as a one-line notice (recNoticeHTML).
-const openCards = (asks, acts, recs) => [(asks || []).filter(a => !a.closed), (acts || []).filter(a => a.open), (recs || []).filter(r => !r.closed && !r.seen_at)];
-// A rec in the chat is one violet line that it was filed (2026-11-04
-// 23:56: "a very small like notification to me that one was filed that I
-// should sort of be able to dismiss"). Recs are his to do any time, so the
-// card and its Accept · Decline · Reply live on the Recs page (the title
-// opens it), in the open-cards view and under "Show full chat" alike (the
-// desktop's RecNotice).
-const recNoticeHTML = r => `<div class="rec-notice" id="rec-${esc(r.id)}" data-card="${esc(r.id)}">💡 <span class="muted">Recommendation filed:</span> <a href="#/recs/${esc(r.id)}">${esc(r.title)}</a></div>`;
+// still open (ui.js askHTML / actionHTML's own open rules), a rec not closed
+// (ui.js recHTML — the violet card, long-lived: it stays until the owner
+// answers or hides it).
+const openCards = (asks, acts, recs) => [(asks || []).filter(a => !a.closed), (acts || []).filter(a => a.open), (recs || []).filter(r => !r.closed)];
 // A deep link (#/sessions/<thread>/<id>) to a card the open-cards view does
-// not draw — a closed ask, a decided approval. A rec's links go to the Recs
-// page.
-function focusNeedsFull(focus, askById, acts) {
+// not draw — a closed ask, a decided approval or rec.
+function focusNeedsFull(focus, askById, acts, recById) {
   if (!focus) return false;
+  if (((recById || {})[focus] || {}).closed) return true;
   const ask = (askById || {})[focus], act = (acts || []).find(a => a.id === focus);
   return !!((ask && ask.closed) || (act && !act.open));
 }
@@ -1398,7 +1399,7 @@ function mdKept(s) {
 }
 function msgHTML(m, asks, acts, recs, askById, recById) {
   const cards = noteLeadCost(m, asks, acts);
-  const html = (acts || []).map(a => chatActionHTML(a)).join('') + (asks || []).map(a => chatAskHTML(a)).join('') + (recs || []).map(recNoticeHTML).join('');
+  const html = (acts || []).map(a => chatActionHTML(a)).join('') + (asks || []).map(a => chatAskHTML(a)).join('') + (recs || []).map(chatRecHTML).join('');
   const atts = (m.attachments || []).map(r => attachHTML(r)).join('');
   const text = m.shown ?? m.text ?? '';
   const row = (k, cls, title, body) => rowHTML({ id: 'msg-' + m.id, key: 'msg:' + m.id, opened: chatState.open.get('msg:' + m.id) === true,
@@ -1750,6 +1751,7 @@ const chatArmed = (ref, id) => { const c = composerCards('chat').find(x => x.ref
 // chatState.costs = a turn's dollars by the ref of the first card it raised
 // (msgHTML), so a card redrawn on its own keeps them.
 const chatAskHTML = a => askHTML(a, chatOpened('ask', a.id), chatArmed('ask', a.id), chatState.costs['ask:' + a.id]);
+const chatRecHTML = r => recHTML(r, chatOpened('rec', r.id), chatArmed('rec', r.id));
 const chatActionHTML = a => actionHTML(a, chatOpened('action', a.id), chatArmed('action', a.id), chatState.costs['action:' + a.id]);
 
 // The cards' rows follow the bar (2026-10-11: "if I am responding to a
@@ -1767,7 +1769,7 @@ function chatPaintArmed() {
     const el = document.getElementById('ask-card-' + id);
     const c = chatState.cards[ref];
     if (!el || !c) continue;
-    el.outerHTML = kind === 'action' ? chatActionHTML(c) : chatAskHTML(c);
+    el.outerHTML = kind === 'rec' ? chatRecHTML(c) : kind === 'action' ? chatActionHTML(c) : chatAskHTML(c);
   }
   chatArmedWas = now;
 }
@@ -1927,9 +1929,18 @@ function stepReplyOf(a, s, outcome) {
   };
 }
 
-// The card a rec is answered through, on the Recs page (the chat's rec cell
-// and its Accept · Decline · Reply went 2026-11-05: a rec in a chat is one
-// line that opens the page). `fixed`: the box sits ON the rec, so its title
+// A rec card's three buttons arm the chat's composer, as an ask's do. Send
+// goes through the Recs page's own /decide or /reply (chatSendNow), so the
+// row is the same either place.
+function armRecReply(id, outcome) {
+  const r = chatState.cards['rec:' + id];
+  if (!r) return;
+  composerArm('chat', recReplyOf(r, outcome));
+  focusAsk(r.id);
+}
+
+// The card a rec is answered through — the chat's bar and the Recs page's
+// box, one shape. `fixed`: the Recs page's box sits ON the rec, so its title
 // and × are not repeated inside it.
 function recReplyOf(r, outcome, fixed) {
   return {
@@ -1981,6 +1992,7 @@ function chatComposerSpec(running) {
       const re = st.re;
       // Several strips: the box says where its words go (#269).
       if (re && st.also.length) return `One message to ${chatState.title || 'this session'}, sent with ${st.also.length === 1 ? 'both answers' : `all ${st.also.length + 1} answers`} (optional)`;
+      if (re && re.ref === 'rec') return re.outcome ? 'Your note to the session (optional)' : 'Your line — it goes to the session, the rec stays open';
       if (re && re.ref === 'action') return re.outcome ? 'Your note to the session (optional)' : 'Your line — it goes to the session, the proposal stays open';
       if (re) return re.outcome ? 'Anything to add (optional)' : 'Your answer…';
       return running ? 'Steer it while it works…' : 'Message…';
@@ -2033,6 +2045,22 @@ async function chatSendNow(p, re) {
     refreshBadges();
     return;
   }
+  if (re && re.ref === 'rec') {
+    // The Recs page's own calls (recs.js recSend): the hub records the
+    // decision and relays it into the rec's session as a prompt answering
+    // rec:<id>, so either surface leaves the same "↩ Accepted · <rec>" line.
+    const body = { by: OWNER, note: p.text, deliver: p.target === 'new' ? 'new' : 'source', attachments: p.refs };
+    let out;
+    if (p.outcome) {
+      body.status = p.outcome;
+      out = await post(`/recs/${re.id}/decide`, body);
+    } else {
+      out = await post(`/recs/${re.id}/reply`, body);
+    }
+    toast(out && out.delivery_error ? `${p.outcome || 'sent'}, but: ${out.delivery_error}` : p.outcome || 'sent');
+    refreshBadges();
+    return;
+  }
   if (!re && p.target === 'this' && p.when === 'now') {
     await post(`/threads/${chatState.id}/messages`, { text: p.text, attachments: p.refs, via: 'console' });
     // His own message lands in view, as on the desktop: Send is the one time
@@ -2082,12 +2110,21 @@ const resolveAsk = (id, state, note) => {
 const CARD_FOLD = {
   ask: (id, back) => [`/asks/${id}/resolve`, { state: back ? 'open' : 'dismissed' }, back ? 'ask open' : 'ask dismissed'],
   action: (id, back) => [`/actions/${id}/${back ? 'reopen' : 'dismiss'}?via=web`, {}, back ? 'reopened' : 'dismissed'],
+  rec: (id, back) => [`/recs/${id}/decide`, back ? { status: 'proposed' } : { status: 'expired', note: 'dismissed' }, back ? 'reopened' : 'dismissed'],
 };
 const cardFold = (ref, id, back) => {
   const el = document.getElementById('ask-card-' + id);
   if (el && !back) el.classList.add('closing');
   if (!back) composerForget('chat', ref, id);
   return cardMove(...CARD_FOLD[ref](id, back), id);
+};
+// recHide: a rec's Hide in its chat (hidden=true) and Show in chat on Recs
+// (false). Only hidden_at moves: the rec stays open on Recs.
+const recHide = (id, hidden) => {
+  const el = document.getElementById('ask-card-' + id);
+  if (el && hidden) el.classList.add('closing');
+  if (hidden) composerForget('chat', 'rec', id);
+  return cardMove(`/recs/${id}/hide`, { hidden }, hidden ? 'hidden from its chat' : 'back in its chat', id);
 };
 
 // ---- the chat's own wiring ----

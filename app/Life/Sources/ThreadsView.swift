@@ -85,11 +85,12 @@ struct ThreadsView: View {
     }
     /// Each person's open recs, keyed by `who`: the filing session is
     /// `thread_id`, or on an older rec the id inside `source`
-    /// (`Rec.sourceThreadID`); a rec the owner filed is on no row.
+    /// (`Rec.sourceThreadID`); a rec the owner filed is on no row, and a
+    /// hidden one is off the list as it is off the chat.
     var recsBy: [String: [Rec]] {
         let k = known
         var out: [String: [Rec]] = [:]
-        for r in store.recs where !r.isClosed {
+        for r in store.recs where !r.isClosed && r.hidden_at == nil {
             guard let id = r.sourceThreadID, !id.isEmpty else { continue }
             out[who(ownerOf(id, k), k), default: []].append(r)
         }

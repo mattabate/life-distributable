@@ -47,6 +47,7 @@
   const THREAD = { id: 't-t3st', title: 'Exports', status: 'done' };
   let EXTRA = [];
   const REC = { id: 'rec-t3st', thread_id: 't-t3st', source: 'claude:thread:t-t3st', status: 'proposed', domain: 'money', kind: 'switch',
+                outcomes: [{ value: 'accepted', label: 'Accept' }, { value: 'declined', label: 'Decline' }, { value: '', label: 'Reply' }],
                 title: 'Move the "idle" cash (it\'s <b>$5k</b>)', because: 'yield gap', cost_cents: 0, effort: 'small', confidence: 70,
                 model: 'claude-fable-5', message_id: 6, created_at: new Date(Date.now() - 90000).toISOString(), updated_at: new Date().toISOString() };
   // A SECOND open rec, on the list only: it is what makes "no box chosen"
@@ -209,12 +210,11 @@ setTimeout(async () => {
       for (let i = 0; i < 40 && stripOf(); i++) await settle();
       check('composer disarms on send', !chatState.send.re && !stripOf(), JSON.stringify(chatState.send));
 
-      // A rec in the chat is one line that it was filed, under the reply that
-      // filed it; its card and answers live on the Recs page, which the title
-      // opens (recNoticeHTML).
+      // A rec in the chat is a violet card under the reply that filed it,
+      // with the Recs page's answers (recHTML).
       const msgs = document.getElementById('msgs');
-      const card = document.getElementById('rec-rec-t3st');
-      check('rec notice is drawn in the chat', !!card && card.matches('.rec-notice') && card.textContent.includes('Move the "idle" cash')
+      const card = document.getElementById('ask-card-rec-t3st');
+      check('rec card is drawn in the chat', !!card && card.matches('.ask.rec') && card.textContent.includes('Move the "idle" cash')
         && !!card.querySelector('a[href="#/recs/rec-t3st"]'), String(msgs && msgs.innerHTML).replace(/\s+/g, ' ').slice(0, 300));
       // An empty reply draws nothing: its card is the turn, and the turn's
       // dollars ride on that card's head, no tokens. (An open card has no
@@ -232,15 +232,16 @@ setTimeout(async () => {
       // before reply 6's row, the rec reply 6 filed after it, never under the
       // owner's answer at the end.
       const hostMsg = el => { let p = el.previousElementSibling; while (p && !/^msg-/.test(p.id)) p = p.previousElementSibling; return p; };
-      check('rec notice sits under the reply that filed it', !!card && !!reply6 && hostMsg(card) === reply6,
+      check('rec card sits under the reply that filed it', !!card && !!reply6 && hostMsg(card) === reply6,
         String(card && card.previousElementSibling && card.previousElementSibling.className));
       check('the reply card is drawn before the next message', !!askCard && !!reply6 && !!(askCard.compareDocumentPosition(reply6) & Node.DOCUMENT_POSITION_FOLLOWING),
         String(askCard && hostMsg(askCard) && hostMsg(askCard).id));
       const recRe = [...document.querySelectorAll('#msgs .chat-row.me .re')].find(e => e.textContent.includes('Accepted'));
       check('a Recs-page decision shows in the chat', !!recRe && recRe.textContent.includes('Move the "idle" cash'), String(recRe && recRe.textContent));
-      // The chat answers no rec: the notice carries no buttons.
-      const recBtns = card ? [...card.querySelectorAll('button')] : [];
-      check('rec notice offers no answers', recBtns.length === 0, String(card && card.innerHTML).slice(0, 300));
+      // The chat answers a rec as the Recs page does, then Hide.
+      const recBtns = card ? [...card.querySelectorAll('.acts button')].map(b => b.textContent) : [];
+      check('rec card offers Accept, Decline, Reply, Hide', recBtns.join(',') === REC.outcomes.map(o => o.label).concat('Hide').join(','),
+        String(recBtns));
     }
   }
 

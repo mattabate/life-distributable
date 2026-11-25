@@ -127,7 +127,8 @@ test('open cards only: the chat draws what is the owner\'s to act on, the full c
   const asks = [{ id: 'ask-1', closed: false }, { id: 'ask-2', closed: true, folded: 'done' }];
   const acts = [{ id: 'act-1', open: true }, { id: 'act-2', open: false, state: 'approved' }];
   const recs = [{ id: 'rec-1', closed: false }, { id: 'rec-2', closed: true, status: 'accepted' }, { id: 'rec-3', closed: false, seen_at: '2026-11-05T00:00:00Z' }];
-  assert.deepEqual(openCards(asks, acts, recs).map(l => l.map(c => c.id)), [['ask-1'], ['act-1'], ['rec-1']]);
+  // An open rec is a long-lived card: seen or not, it stays until answered.
+  assert.deepEqual(openCards(asks, acts, recs).map(l => l.map(c => c.id)), [['ask-1'], ['act-1'], ['rec-1', 'rec-3']]);
   assert.deepEqual(openCards(undefined, undefined, undefined), [[], [], []]);
   // The name is the switch: shut, no words follow it; open, Chat and
   // Coming up, Chat first.
@@ -150,19 +151,27 @@ test('open cards only: the chat draws what is the owner\'s to act on, the full c
   assert.match(side, /class="side-item todo wait" href="#\/sessions\/planner">[^]*Task 5 · a pick</);
   assert.equal(sideTodosHTML({}, '#/sessions/planner'), '');
   // A deep link to a closed card opens the full chat; to an open one, not.
-  // A rec's links go to the Recs page, so a rec id changes nothing.
   const askById = Object.fromEntries(asks.map(a => [a.id, a]));
+  const recById = Object.fromEntries(recs.map(r => [r.id, r]));
   assert.equal(focusNeedsFull('ask-2', askById, acts), true);
   assert.equal(focusNeedsFull('act-2', askById, acts), true);
-  assert.equal(focusNeedsFull('rec-2', askById, acts), false);
+  assert.equal(focusNeedsFull('rec-2', askById, acts, recById), true);
+  assert.equal(focusNeedsFull('rec-1', askById, acts, recById), false);
   assert.equal(focusNeedsFull('ask-1', askById, acts), false);
   assert.equal(focusNeedsFull('act-1', askById, acts), false);
   assert.equal(focusNeedsFull('', askById, acts), false);
   assert.equal(focusNeedsFull('ask-9', askById, acts), false, 'a card not in the chat changes nothing');
-  // A rec is one line in either view, with no Accept · Decline · Reply.
-  const notice = recNoticeHTML({ id: 'rec-1', title: 'Try <b>', closed: false });
-  assert.match(notice, /^<div class="rec-notice" id="rec-rec-1" data-card="rec-1">💡 <span class="muted">Recommendation filed:<\/span> <a href="#\/recs\/rec-1">Try &lt;b&gt;<\/a><\/div>$/);
-  assert.doesNotMatch(notice, /Accept|Decline|Reply/);
+  // A rec is a violet card with the hub's Accept · Decline · Reply, each
+  // arming the bar, and Hide (it leaves the chat, the rec stays open on
+  // Recs); a decided one folds to its verdict row.
+  const outcomes = [{ value: 'accepted', label: 'Accept' }, { value: 'declined', label: 'Decline' }, { value: '', label: 'Reply' }];
+  const card = recHTML({ id: 'rec-1', title: 'Try <b>', closed: false, outcomes, because: 'it is cheaper' });
+  assert.match(card, /^<div class="ask rec" id="ask-card-rec-1">/);
+  assert.match(card, /onclick="armRecReply\('rec-1','accepted'\)">Accept<[^]*armRecReply\('rec-1','declined'\)">Decline<[^]*armRecReply\('rec-1',''\)">Reply<[^]*recHide\('rec-1',true\)">Hide</);
+  assert.doesNotMatch(card, /Dismiss/);
+  assert.match(card, /it is cheaper/);
+  assert.match(card, /href="#\/recs\/rec-1">rec</);
+  assert.match(recHTML({ id: 'rec-2', title: 'Old', closed: true, status: 'accepted', outcomes }), /✓ accepted[^]*cardFold\('rec','rec-2',true\)">Reopen/);
   // Every chat opens on the open cards.
   assert.equal(chatState.full, false);
 });

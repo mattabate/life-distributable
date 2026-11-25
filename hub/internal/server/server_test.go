@@ -2107,6 +2107,8 @@ func TestRecsSeenAndHome(t *testing.T) {
 	var r struct {
 		ID       string
 		SeenAt   string `json:"seen_at"`
+		HiddenAt string `json:"hidden_at"`
+		Status   string `json:"status"`
 		ThreadID string `json:"thread_id"`
 	}
 	w := s.do(t, "POST", "/api/v1/recs", map[string]any{"title": "Try a standing desk", "domain": "tools", "kind": "try",
@@ -2130,6 +2132,29 @@ func TestRecsSeenAndHome(t *testing.T) {
 	json.Unmarshal(s.do(t, "POST", "/api/v1/recs/"+r.ID+"/seen", nil).Body.Bytes(), &r)
 	if r.SeenAt != first {
 		t.Fatal("seen re-stamped:", first, r.SeenAt)
+	}
+	// Hide: out of the chat, still open on Recs; back with hidden false.
+	if w := s.do(t, "POST", "/api/v1/recs/"+r.ID+"/hide", map[string]any{}); w.Code != 400 {
+		t.Fatal("hide with no body:", w.Code)
+	}
+	json.Unmarshal(s.do(t, "POST", "/api/v1/recs/"+r.ID+"/hide", map[string]any{"hidden": true}).Body.Bytes(), &r)
+	if r.HiddenAt == "" || r.Status != "proposed" {
+		t.Fatal("hide:", r.HiddenAt, r.Status)
+	}
+	if w := s.do(t, "GET", "/api/v1/recs/"+r.ID, nil); !strings.Contains(w.Body.String(), `"hidden_at"`) {
+		t.Fatal("GET /recs/{id} has no hidden_at:", w.Body.String())
+	}
+	r.HiddenAt = ""
+	json.Unmarshal(s.do(t, "POST", "/api/v1/recs/"+r.ID+"/hide", map[string]any{"hidden": false}).Body.Bytes(), &r)
+	if r.HiddenAt != "" || strings.Contains(s.do(t, "GET", "/api/v1/recs/"+r.ID, nil).Body.String(), `"hidden_at"`) {
+		t.Fatal("unhide left hidden_at:", r.HiddenAt)
+	}
+	if w := s.do(t, "POST", "/api/v1/recs/"+r.ID+"/hide", map[string]any{"hidden": true}); w.Code != 200 {
+		t.Fatal("hide again:", w.Code)
+	}
+	s.do(t, "POST", "/api/v1/recs/"+r.ID+"/hide", map[string]any{"hidden": false})
+	if w := s.do(t, "POST", "/api/v1/recs/rec-nope/hide", map[string]any{"hidden": true}); w.Code != 404 {
+		t.Fatal("unknown rec:", w.Code)
 	}
 	if w := s.do(t, "POST", "/api/v1/recs/"+r.ID+"/home", map[string]string{"thread_id": "th-nope"}); w.Code != 404 {
 		t.Fatal("unknown session:", w.Code)
