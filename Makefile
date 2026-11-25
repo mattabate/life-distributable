@@ -26,8 +26,8 @@ test:
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
 build:
 ifeq ($(OS),Darwin)
-	@$(MAKE) --no-print-directory ops/bin/mic || echo "mic: skipped (needs the macOS 26 SDK); the console's Mic stays off"
-	@$(MAKE) --no-print-directory ops/bin/ear || echo "ear: skipped; this Mac says lines only while the desktop app is open"
+	@$(MAKE) -f Makefile --no-print-directory ops/bin/mic || echo "mic: skipped (needs the macOS 26 SDK); the console's Mic stays off"
+	@$(MAKE) -f Makefile --no-print-directory ops/bin/ear || echo "ear: skipped; this Mac says lines only while the desktop app is open"
 else
 	@echo "mic: skipped (macOS only); the console's Mic stays off"
 endif

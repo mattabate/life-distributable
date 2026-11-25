@@ -42,7 +42,8 @@ fi
 # The tree is a session's code: its tests run as the session user, where the
 # wall holds, never first as the owner. A snapshot in that user's own temp
 # dir, since it cannot read this worktree; the build and restart after the
-# landing run as the owner by design.
+# landing run as the owner by design. -f Makefile: GNU make would read a
+# landed GNUmakefile or makefile first (#225).
 user=$(python3 - ops/hub.json <<'PY'
 import json, sys
 print(json.load(open(sys.argv[1])).get("session_user", ""))
@@ -53,10 +54,10 @@ if [ -n "$user" ]; then
   snap=$(as_session mktemp -d /tmp/life-land.XXXXXX) || die "cannot run as $user: main untouched"
   trap 'as_session rm -rf "$snap" >/dev/null 2>&1 || true; git worktree remove --force "$tmp" >/dev/null 2>&1 || true' EXIT
   git -C "$tmp" archive HEAD | as_session tar -x -C "$snap"
-  as_session env PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin make -s -C "$snap" test \
+  as_session env PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin make -s -C "$snap" -f Makefile test \
     || die "make test (as $user) failed on the landing commits: main untouched"
 else
-  make -s -C "$tmp" test || die "make test failed on the landing commits: main untouched"
+  make -s -C "$tmp" -f Makefile test || die "make test failed on the landing commits: main untouched"
 fi
 settle "$(git -C "$tmp" rev-parse HEAD)"
 git merge --ff-only "$(git -C "$tmp" rev-parse HEAD)"
