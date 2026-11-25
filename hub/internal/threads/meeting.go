@@ -154,7 +154,7 @@ func (m *Manager) OpenMeeting(opener, topic string, members []string, parent, te
 		return Meeting{}, errors.New("a session or the owner opens a meeting")
 	}
 	if isSession && parent == "" {
-		return Meeting{}, errors.New("only the owner opens a meeting; a member may break out of one with --parent <id>. To reach another session, `lifectl relay <session-id> \"…\"`")
+		return Meeting{}, errors.New("only the owner opens a meeting; a member may break out of one with --parent <id>. To reach another session, `lifectl relay <session-id> \"…\" --now|--todo \"title\"`")
 	}
 	meetingMu.Lock()
 	defer meetingMu.Unlock()

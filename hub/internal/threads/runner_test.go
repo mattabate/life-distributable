@@ -1714,3 +1714,41 @@ func TestEventBodyRedactsBeforeCut(t *testing.T) {
 		t.Fatalf("key prefix survived the cut: %q", evs[0].Body[len(evs[0].Body)-40:])
 	}
 }
+
+// A relay sent as a to-do is filed on the receiver's list, asked by the
+// sender, and the words reach the receiver as one hub message (held while a
+// turn runs), not as a steer.
+func TestRelayTodoFilesOnTheReceiversList(t *testing.T) {
+	m, _, _ := setup(t)
+	from, _ := m.Create("Designer", "life", "", "Make the shots.", "", "", nil)
+	to, _ := m.Create("Builder", "life", "", "Build the page.", "", "", nil)
+	id, err := m.RelayTodo(from.ID, to.ID, "Retake the README shots", "The header moved; retake all three.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	open, _ := m.Todos(to.ID, false)
+	if len(open) != 1 || open[0].ID != id || open[0].Text != "Retake the README shots" || open[0].AskedBy != "Designer" || open[0].State != "open" {
+		t.Fatalf("receiver's list: %+v", open)
+	}
+	if mine, _ := m.Todos(from.ID, true); len(mine) != 0 {
+		t.Fatalf("filed on the sender's list: %+v", mine)
+	}
+	var n, hub, steer int
+	var text string
+	m.db.QueryRow(`SELECT COUNT(*) FROM prompts WHERE target=?`, to.ID).Scan(&n)
+	m.db.QueryRow(`SELECT COUNT(*), COALESCE(MAX(text),'') FROM prompts WHERE target=? AND author='hub'`, to.ID).Scan(&hub, &text)
+	m.db.QueryRow(`SELECT COUNT(*) FROM prompts WHERE target=? AND text LIKE '%Handed to you%'`, to.ID).Scan(&steer)
+	if n != 1 || hub != 1 || steer != 0 || !strings.Contains(text, "put to-do") || !strings.Contains(text, "retake all three") {
+		t.Fatalf("prompts %d, hub %d, steer %d: %q", n, hub, steer, text)
+	}
+	// A relay, never a check-in: a checkin wake is lean (no --resume) and
+	// framed as scheduled, so the receiver met the hand-off with no memory.
+	var kind string
+	m.db.QueryRow(`SELECT kind FROM thread_messages WHERE thread_id=? AND text LIKE '%put to-do%'`, to.ID).Scan(&kind)
+	if kind != "relay" {
+		t.Fatalf("the relay to-do's wake is kind %q", kind)
+	}
+	if _, err := m.RelayTodo(from.ID, "th-nobody", "Retake", "x"); err == nil {
+		t.Fatal("a to-do was filed for no session")
+	}
+}

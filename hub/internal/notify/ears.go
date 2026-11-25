@@ -48,7 +48,36 @@ func (a *APNs) waiting(thread, card string) func() {
 	var once sync.Once
 	r := a.Voice.Wait(thread, card)
 	done := make(chan struct{})
-	release := func() { once.Do(func() { close(done); r() }) }
+	var id int64
+	release := func() {
+		once.Do(func() {
+			close(done)
+			r()
+			if card != "" {
+				a.emu.Lock()
+				delete(a.holds[card], id)
+				if len(a.holds[card]) == 0 {
+					// Else one empty entry per card ever waited on, for the
+					// life of the hub.
+					delete(a.holds, card)
+				}
+				a.emu.Unlock()
+			}
+		})
+	}
+	if card != "" {
+		a.emu.Lock()
+		if a.holds == nil {
+			a.holds = map[string]map[int64]func(){}
+		}
+		if a.holds[card] == nil {
+			a.holds[card] = map[int64]func(){}
+		}
+		a.holdID++
+		id = a.holdID
+		a.holds[card][id] = release
+		a.emu.Unlock()
+	}
 	if card != "" && a.Open != nil {
 		go func() {
 			t := time.NewTicker(closedPoll)
@@ -86,8 +115,11 @@ func (a *APNs) cardOpen(card string) bool {
 
 // Hush drops a card's line and leaves the card open: dismissing the audio is
 // not dismissing the card. Every wait on it reads the card as answered — the
-// "waiting to speak" goes within closedPoll — and the row is stamped heard so
-// no restart says it again. A card raised again later (enqueue) speaks as new.
+// "waiting to speak" goes before Hush returns — and the row is stamped heard
+// so no restart says it again. A card raised again later (enqueue) speaks as
+// new. On the next closedPoll tick instead, a surface that reads its hush
+// once and then trusts the board showed "Waiting to speak" again inside that
+// second.
 func (a *APNs) Hush(card string) {
 	if a == nil || card == "" {
 		return
@@ -97,7 +129,14 @@ func (a *APNs) Hush(card string) {
 		a.hushed = map[string]bool{}
 	}
 	a.hushed[card] = true
+	var rs []func()
+	for _, r := range a.holds[card] {
+		rs = append(rs, r)
+	}
 	a.emu.Unlock()
+	for _, r := range rs {
+		r()
+	}
 	if a.db != nil {
 		now := store.TS(time.Now())
 		a.db.Exec(`UPDATE voice_queue SET heard_at=?, resumed_at=? WHERE card=? AND heard_at=''`, now, now, card)

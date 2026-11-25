@@ -301,7 +301,8 @@ async function loadBoard() {
   board.for_you = board.for_you || {};
   board.first = board.first || {};
   board.badges = { ...EMPTY_BOARD.badges, ...(board.badges || {}) };
-  return board;
+  // A poll that left before a hush still reads quiet (ui.js hushVoice).
+  return quietBoard(board);
 }
 
 // ---------- badges ----------

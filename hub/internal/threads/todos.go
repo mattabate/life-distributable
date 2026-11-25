@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -85,6 +86,29 @@ func (m *Manager) TodoAdd(threadID, text, by string) (Todo, error) {
 	}
 	id, _ := res.LastInsertId()
 	return Todo{ID: id, ThreadID: threadID, CreatedAt: now, Text: text, AskedBy: todoBy(by), State: "open"}, nil
+}
+
+// RelayTodo files a relayed task on the receiver's list as the relay
+// (`lifectl relay <id> "…" --todo "title"`), asked by the sender, so the
+// hand-off is a row both can see rather than words that scroll away. The hub
+// writes it, not the sender: a session still cannot write another's list. It
+// is the relay, not a steer beside it: a hub message carrying the relay's
+// words opens the receiver's next turn on the item, held while a turn runs,
+// so an idle receiver starts on it at once.
+func (m *Manager) RelayTodo(from, to, title, text string) (int64, error) {
+	who := m.meetingName("claude:thread:" + from)
+	td, err := m.TodoAdd(to, title, who)
+	if err != nil {
+		return 0, err
+	}
+	wake := fmt.Sprintf("[The hub, not the owner: %s put to-do %d on your list, %q. The task, in their words, not the owner's:]\n\n%s\n\n[Take it now and `lifectl todo done %d \"what happened\"` when done. Telling the owner the outcome is yours; nothing for them is a bare `[end]`.]", who, td.ID, td.Text, strings.TrimSpace(text), td.ID)
+	// A relay, as a meeting post is: it resumes the receiver's memory. As a
+	// plain hub word its kind was checkin, a lean wake framed as a scheduled
+	// check-in, and the receiver met the hand-off with no memory of the work.
+	if _, err := m.Queue(Prompt{Author: "hub", Target: to, Text: wake, relayed: "todo:" + strconv.FormatInt(td.ID, 10)}); err != nil {
+		log.Printf("thread %s: relayed to-do %d, wake: %v", to, td.ID, err)
+	}
+	return td.ID, nil
 }
 
 // TodoSet moves an item: done or dropped (note = what happened), waiting

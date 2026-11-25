@@ -289,6 +289,11 @@ type Queue struct {
 	// tables. nil = relay is refused.
 	RelayTarget func(threadID string) (title string, err error)
 	Relay       func(from, to, text, actionID string, direct bool) (result string, err error)
+	// RelayTodo: a `todo` relay files the task on the receiver's to-do list
+	// instead of steering it, asked by the sender, and wakes the receiver on
+	// it with the relay's words (threads.Manager.RelayTodo); returns its
+	// number. nil = `todo` is refused.
+	RelayTodo func(from, to, title, text string) (id int64, err error)
 	// onUncertain / untold: who hears that an action ended `uncertain`, and
 	// the ones that did before anyone was listening: closeOrphans runs inside
 	// New, before main has the sessions to tell (TellUncertain).
@@ -344,11 +349,26 @@ func (q *Queue) tellUncertain(id string) {
 // relayMax: a hand-off is a task, not a transcript.
 const relayMax = 4000
 
-// relayPayload: what a `relay` proposal carries.
+// relayPayload: what a `relay` proposal carries. Exactly one mode, so every
+// message between sessions says whether it is for now or for later:
+//
+//	now    a steer: the words reach the receiver at once
+//	todo   an open to-do on the receiver's list, the words delivered with
+//	       it: taken when their turn in hand ends, at once if idle
 type relayPayload struct {
 	To   string `json:"to"`
 	Text string `json:"text"`
+	Now  bool   `json:"now,omitempty"`
+	// Todo: the title of the to-do the hub files on the receiver's list
+	// (RelayTodo), so the hand-off is a row both sides can see.
+	Todo string `json:"todo,omitempty"`
 }
+
+// relayTodoMax: a relayed to-do's title, one short line.
+const relayTodoMax = 80
+
+// relayModeHelp: the refusal for a relay with no mode, or two.
+const relayModeHelp = "relay: say which it is, exactly one: `--now` (a steer, read at once) or `--todo \"title\"` (an open to-do on their list, taken when their turn in hand ends)"
 
 // relayCard checks a relay proposal and writes its card. The title and detail
 // are the hub's, never the proposer's: what the owner approves is exactly what is
@@ -366,10 +386,16 @@ func (q *Queue) relayCard(p *Proposal) error {
 	if err := json.Unmarshal(p.ExecPayload, &rp); err != nil {
 		return errors.New("relay: need {to, text}")
 	}
-	rp.To, rp.Text = strings.TrimSpace(rp.To), strings.TrimSpace(rp.Text)
+	rp.To, rp.Text, rp.Todo = strings.TrimSpace(rp.To), strings.TrimSpace(rp.Text), strings.TrimSpace(rp.Todo)
 	switch {
 	case rp.To == "" || rp.Text == "":
 		return errors.New("relay: need {to, text}")
+	case rp.Now == (rp.Todo != ""):
+		return errors.New(relayModeHelp)
+	case rp.Todo != "" && q.RelayTodo == nil:
+		return errors.New("relay: a to-do with a relay is not wired on this hub")
+	case strings.Contains(rp.Todo, "\n") || len([]rune(rp.Todo)) > relayTodoMax:
+		return fmt.Errorf("relay: --todo is the to-do's title, one line of at most %d characters; the relay text is the task", relayTodoMax)
 	case rp.To == from:
 		return errors.New("relay: that is this session — use `lifectl prompt`")
 	case len(rp.Text) > relayMax:
@@ -381,6 +407,9 @@ func (q *Queue) relayCard(p *Proposal) error {
 	}
 	why := strings.TrimSpace(p.Detail)
 	p.Title = truncate("Send to the session “"+title+"”", 120)
+	if rp.Todo != "" {
+		p.Title = truncate("Put on the to-do list of “"+title+"”: "+rp.Todo, 120)
+	}
 	p.Detail = rp.Text
 	if why != "" {
 		p.Detail += "\n\nWhy: " + why
@@ -394,10 +423,22 @@ func (q *Queue) relay(a Action) (string, error) {
 	if err := json.Unmarshal(a.ExecPayload, &rp); err != nil || rp.To == "" || rp.Text == "" {
 		return "", errors.New("relay: need {to, text}")
 	}
-	if q.Relay == nil {
-		return "", errors.New("relay is not wired on this hub")
+	if rp.Todo == "" {
+		if q.Relay == nil {
+			return "", errors.New("relay is not wired on this hub")
+		}
+		return q.Relay(a.ThreadID, rp.To, rp.Text, a.ID, a.DecidedVia == "auto")
 	}
-	return q.Relay(a.ThreadID, rp.To, rp.Text, a.ID, a.DecidedVia == "auto")
+	// A to-do is not a steer: the receiver's turn in hand runs on, and the
+	// item opens the next one.
+	if q.RelayTodo == nil {
+		return "", errors.New("relay: a to-do with a relay is not wired on this hub")
+	}
+	n, err := q.RelayTodo(a.ThreadID, rp.To, rp.Todo, rp.Text)
+	if err != nil {
+		return "", fmt.Errorf("relay: no to-do was filed: %v", err)
+	}
+	return fmt.Sprintf("Filed as to-do %d on their list, not steered in: they take it when their turn in hand ends, at once if idle. That topic is theirs now: they tell the owner the outcome.", n), nil
 }
 
 // The free-relay allowance (#268): sessions handing each other work is the

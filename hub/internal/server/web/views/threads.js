@@ -422,14 +422,11 @@ function headPills(b, t) {
 // the Mac's voice mid-line and drops a queued one (POST /voice/hush). Cards
 // already heard are unaffected; nothing is dismissed.
 function headHush() {
-  const id = chatState.id;
   if (typeof sayHush === 'function') sayHush();
   if (typeof winSend === 'function') winSend('say', {});
-  post('/voice', { thread_id: id, secs: 0 }).catch(() => {});
   const cards = new Set([...document.querySelectorAll('#msgs .ask .say-btn[data-ref]')].map(e => e.dataset.ref));
-  for (const card of cards) post('/voice/hush', { card }).catch(() => {});
   toast('stopped speaking');
-  setTimeout(() => refreshThread(id, true).catch(() => {}), 1200);
+  hushVoice(chatState.id, [...cards], true);
 }
 
 // The open chat's head wears the same pills as its row, and they move on

@@ -161,7 +161,6 @@ struct Card: View {
     var busy = false
     var error: String? = nil
 
-    @State private var hushed = false
     /// Redraws the card when More is tapped; which cards are open is `moreKeys`.
     @State private var moreTick = 0
     @MainActor private static var moreKeys = Set<String>()
@@ -369,7 +368,9 @@ struct Card: View {
 
     /// Hear the spoken message again; tap again to stop.
     @ViewBuilder private var playButton: some View {
-        if speaking && !hushed {
+        // `speaking` and `waiting` come through BoardStore.hushed: one hush
+        // flips this corner, the chat head and the row in one redraw.
+        if speaking {
             // The line being heard reads "Speaking", and the same double tap
             // stops it — the hub cuts the Mac's voice, this stops the phone's
             // (the owner 2026-09-29: "if you double click it turns back into the
@@ -380,17 +381,17 @@ struct Card: View {
                 // One line always: the head's other text gives way first.
                 .lineLimit(1).fixedSize()
                 .frame(minHeight: 22).padding(.leading, 8).contentShape(Rectangle())
-                .onTapGesture(count: 2) { hushed = true; speaker.stop(); hush() }
+                .onTapGesture(count: 2) { speaker.stop(); hush() }
                 .accessibilityLabel("Speaking").accessibilityHint("Double-tap to stop speaking")
-                .accessibilityAction { hushed = true; speaker.stop(); hush() }
-        } else if waiting && !hushed {
+                .accessibilityAction { speaker.stop(); hush() }
+        } else if waiting {
             Label("Waiting to speak", systemImage: "circle.fill")
                 .labelStyle(.titleAndIcon).textCase(.uppercase).foregroundStyle(.orange)
                 .lineLimit(1).fixedSize()
                 .frame(minHeight: 22).padding(.leading, 8).contentShape(Rectangle())
-                .onTapGesture(count: 2) { hushed = true; hush() }
+                .onTapGesture(count: 2) { hush() }
                 .accessibilityLabel("Waiting to speak").accessibilityHint("Double-tap to not speak this one")
-                .accessibilityAction { hushed = true; hush() }
+                .accessibilityAction { hush() }
         } else {
             replayButton
         }
