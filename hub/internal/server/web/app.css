@@ -1637,14 +1637,10 @@ a.cfg-who:hover strong { text-decoration: underline; }
 .cfg-setting .top { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .cfg-setting .top strong { line-height: 1.25; }
 .cfg-setting .top .chips-row { flex-wrap: nowrap; }
-/* A Mac's Volume in its name row: Mute, then ten steps filled like a thermometer (10-17). */
+/* A Mac's Audio in its name row: the word, then the switch, blue as the desktop's. */
 .cfg-mac .top strong { white-space: nowrap; }
 .cfg-vol { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.cfg-vol .mute { font-size: 12px; padding: 2px 9px; border-radius: 999px; }
-.cfg-vol .mute.on { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
-.cfg-vol .bars { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--line); }
-.cfg-vol .bar { width: 11px; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
-.cfg-vol .bar.on { background: var(--accent); }
+.cfg-vol .switch input:checked + span { background: var(--accent); }
 .cfg-model { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .cfg-model .chips-row { align-items: center; }
 .cfg-model-note { flex-basis: 100%; }

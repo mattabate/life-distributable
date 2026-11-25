@@ -7,7 +7,7 @@
 //     sessions run on (/spend/model). One block per provider, so a second one is a second block,
 //     not a redesign.
 //   Devices: each Mac the voice reaches (/settings devices) with its Audio
-//     switch and a Stop while it says a line, then the phone (/status).
+//     switch, then the phone (/status).
 //   Team: the org chart: the owner on top, a card per role that reports to
 //     the owner (/personas reports_to), its goals' emblems (goals) beside its
 //     name, its own reports listed inside. Roles and their lines are made by
@@ -155,9 +155,9 @@ function cfgMacName(d) {
 
 // Devices: one tile per Mac whose voice the hub knows (/settings devices: the
 // hub's Mac first, how long it has been up and its clock's zone), each with
-// its Audio switch (off = that Mac says no card's line) and, while it says
-// one, Stop; then the phone, when the app is installed (its profile's days
-// left).
+// the word Audio and its switch on the name line, as the desktop draws it
+// (off = that Mac says no card's line); then the phone, when the app is
+// installed (its profile's days left).
 function cfgDevicesHTML(s, st) {
   const up = Number(s.uptime_s) || 0;
   const upWord = up >= 86400 ? `${Math.floor(up / 86400)}d` : up >= 3600 ? `${Math.floor(up / 3600)}h` : `${Math.floor(up / 60)}m`;
@@ -167,11 +167,10 @@ function cfgDevicesHTML(s, st) {
     : 'app not installed';
   const macs = (st?.devices || []).filter(d => d.kind === 'mac');
   if (!macs.length) macs.push({ device: 'mac', hub: true, audio: true, ears: '' });
-  const macTile = d => `<div class="cfg-setting">
-      <span class="top"><strong>${esc(cfgMacName(d))}</strong>${d.saying
-        ? `<button class="sm" onclick="stopMacLine(${esc(JSON.stringify(d.line || ''))})">Stop</button>` : ''}<label class="switch" title="Audio"><input type="checkbox"${d.audio ? ' checked' : ''} onchange="setMacAudio(${esc(JSON.stringify(d.device))}, this.checked)"><span></span></label></span>
+  const macTile = d => `<label class="cfg-setting cfg-mac">
+      <span class="top"><strong>${esc(cfgMacName(d))}</strong><span class="cfg-vol"><span class="small muted">Audio</span><span class="switch"><input type="checkbox"${d.audio ? ' checked' : ''} onchange="setMacAudio(${esc(JSON.stringify(d.device))}, this.checked)"><span></span></span></span></span>
       <span class="small muted">${esc([d.saying ? 'saying a card' : cfgEarWord(d), d.hub ? `up ${upWord}` : '', d.hub ? s.time_zone : ''].filter(Boolean).join(' · '))}</span>
-    </div>`;
+    </label>`;
   const tile = (name, word) => `<div class="cfg-setting">
       <span class="top"><strong>${esc(name)}</strong></span>
       <span class="small muted">${esc(word)}</span>
@@ -182,12 +181,6 @@ function cfgDevicesHTML(s, st) {
 // A Mac's Audio switch: PATCH /settings audio_by.
 async function setMacAudio(device, on) {
   return act(() => patch('/settings', { audio_by: { [device]: on } }));
-}
-
-// Stop: the line the tile shows stops if it is still being said (never the
-// next card's); its card stays.
-async function stopMacLine(id) {
-  return act(() => post('/voice/stop', { id }));
 }
 
 function cfgSourceCard(g, s) {
@@ -230,7 +223,7 @@ async function drawConfig(view) {
     get('/settings').catch(() => null), get('/status').catch(() => null)]);
   const [personas, sessions] = await Promise.all([
     get('/personas').catch(() => null), get('/threads?persona=1').catch(() => [])]);
-  // A Mac saying a line redraws soon, so its Stop goes when the line does.
+  // A Mac saying a line redraws soon, so "saying a card" goes when the line does.
   setRedraw(() => drawConfig(view), view, { every: (st?.devices || []).some(d => d.saying) ? 3000 : 60000 });
   const groups = (src?.groups || []).filter(g => (g.sources || []).length);
   paint(view, `<div class="pane wide cfg"><h2>Configuration</h2>
