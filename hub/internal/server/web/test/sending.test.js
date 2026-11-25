@@ -171,6 +171,8 @@ test('open cards only: the chat draws what is the owner\'s to act on, the full c
   assert.doesNotMatch(card, /Dismiss/);
   assert.match(card, /it is cheaper/);
   assert.match(card, /href="#\/recs\/rec-1">rec</);
+  // No cost tag in the chat: the Recs page keeps it.
+  assert.doesNotMatch(recHTML({ id: 'rec-3', title: 'Free', closed: false, outcomes, cost_label: 'free' }), />free</);
   assert.match(recHTML({ id: 'rec-2', title: 'Old', closed: true, status: 'accepted', outcomes }), /✓ accepted[^]*cardFold\('rec','rec-2',true\)">Reopen/);
   // Every chat opens on the open cards.
   assert.equal(chatState.full, false);
