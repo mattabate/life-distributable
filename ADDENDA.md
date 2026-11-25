@@ -1959,3 +1959,13 @@ Entry format:
 - For: everyone (console, app)
 - Change: an open recommendation's card in the chat no longer carries its cost ("free", "$12/mo") beside the rec pill (console) or in its header (app), as an approval card carries none. The Recs page keeps the cost.
 - How: same merge as add-0008, then `make check`, `make webcheck` and, for the app, `make ship`. By hand: `hub/internal/server/web/ui.js` (`recHTML`'s meta line), `hub/internal/server/web/test/sending.test.js`, `app/Life/Sources/RecCard.swift` (`RecCard`'s `Card`, no `right:`).
+
+## add-0309 · 2026-11-25 · The picture lightbox steps through a card's pictures with the arrow keys
+- For: everyone (console, desktop app)
+- Change: a picture opened full size from a card (its tile or its Full screen link) now steps to the next or previous picture in that card's text with the right and left arrow keys, stopping at the first and the last (a picture the card shows twice is one stop); Esc and a click still close it. A picture opened from anywhere else (a composer chip, a file on the Mac) opens alone as before.
+- How: same merge as add-0008, then `make check`, `make webcheck` and, for the app, `make ship`. By hand: `hub/internal/server/web/views/threads.js` (`openImage` takes the clicked link, `lightSet`/`lightAt`, the arrow keys in the keydown handler), `hub/internal/server/web/ui.js` (`attachHTML` and `pictureHTML` pass the link to `openImage`; `lightStep`), `hub/internal/server/web/test/ui.test.js`, `app/Life/Sources/MacLightbox.swift` (`open(ref:hub:set:)`, `step`, the arrow `keyCommands`), `app/Life/Sources/ChatAbout.swift` (the `pictureSet` environment value, `lightboxSet`), `app/Life/Sources/StyledText.swift` and `app/Life/Sources/Card.swift` (set `pictureSet`), `app/Life/Sources/Attachments.swift` (`BlobImage` and `PictureActions` pass it).
+
+## add-0310 · 2026-11-25 · A Mac that leaves a line unsaid says why in the hub's log
+- For: everyone with a Mac voice (hub, ops/ear.swift)
+- Change: when a Mac's voice helper reports a line silent, it now sends the reason (no output or Audio off, the route left mid-line, `say` failed), and the hub writes it to its own log as one line, so the hub Mac can tell why another Mac stayed quiet without reading that Mac's log.
+- How: same merge as add-0008, then `make check` and `ops/hub.sh install` (rebuilds and reloads the voice helper). By hand: `hub/internal/server/voice.go` (`postVoiceEar`'s `why`), `ops/ear.swift` (`report`'s `why`), `shared/api.md` (`POST /api/v1/voice/ear`).

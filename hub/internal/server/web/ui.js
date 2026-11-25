@@ -618,7 +618,7 @@ function attachHTML(ref, caption) {
   // The fallback is built from the element, never from the ref spliced into
   // the handler: the browser decodes &#39; back to a quote before it runs one
   // (GHSA-98ww-qvvc-42wq, 11-02).
-  return `<a href="${url}" target="_blank" class="att" onclick="return !openImage(this.href)"><img src="${url}" alt="${name}"
+  return `<a href="${url}" target="_blank" class="att" onclick="return !openImage(this.href, '', this)"><img src="${url}" alt="${name}"
     onerror="attFallback(this)"></a>`;
 }
 function attFallback(img) {
@@ -659,8 +659,17 @@ function pictureHTML(ref, caption) {
   const own = String(ref).split('/').pop();
   const file = esc(String(caption || '').trim() ? String(caption).trim().replace(/[\/\\:]/g, '-') + '.' + own.split('.').pop() : own);
   return attachHTML(ref, caption)
-    + `<div class="att-html-row"><a href="${url}" onclick="return !openImage(this.href)" class="small att-file">Full screen</a>`
+    + `<div class="att-html-row"><a href="${url}" onclick="return !openImage(this.href, '', this)" class="small att-file">Full screen</a>`
     + `<a href="${url}" download="${file}" class="small att-file">Download</a></div>`;
+}
+// The lightbox's arrow keys (threads.js openImage): `set` is every picture
+// of the card's text in order, each once as in the desktop's lightboxSet,
+// and `at` the one on screen. The index one step `d` on, or -1
+// at either end or when the box was not opened from a card.
+function lightStep(set, at, d) {
+  if (at < 0 || !d) return -1;
+  const next = at + d;
+  return next >= 0 && next < set.length ? next : -1;
 }
 
 const MD_LINK_LINE = /^\s*\[[^\]]+\]\([^)\s]+\)\s*$/;

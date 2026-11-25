@@ -66,6 +66,18 @@ extension EnvironmentValues {
         get { self[ChatHookKey.self] }
         set { self[ChatHookKey.self] = newValue }
     }
+    /// The pictures of the text a picture sits in, in order: the Mac
+    /// lightbox's left and right arrow keys walk them (StyledText and Card's
+    /// strip set it, MacLightbox reads it).
+    @Entry var pictureSet: [String] = []
+}
+
+/// The pictures among refs, in order, each once: a picture shown twice is one
+/// stop, as on the console (threads.js lightSet), so the lightbox never starts
+/// at the wrong copy.
+func lightboxSet(_ refs: [String]) -> [String] {
+    var seen = Set<String>()
+    return refs.filter { isImageRef($0) && seen.insert($0).inserted }
 }
 
 struct ChatRequest: Identifiable {
