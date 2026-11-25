@@ -1436,7 +1436,6 @@ function forYouPill(n, reads, installs) {
   return `<span class="pill needs">${n} for you</span>`;
 }
 
-const kindPill = { money: 'amber', delete: 'needs', contact: 'purple', share: 'purple', commit: 'purple' };
 // The approval card (2026-09-17: "the approve cells [should] have the
 // same styling as the other cells… their buttons are on the bottom. The
 // buttons really just allow you to send a message in the box"): 🔴 title,
@@ -1471,7 +1470,8 @@ function actionHTML(a, opened, armed, cost) {
   // A commit is red like every approval, with its kind pill: green is the
   // installer's alone.
   const [text, pics] = splitPictures(a.detail);
-  const meta = `${a.kind && a.kind !== 'other' ? pill(a.kind, kindPill[a.kind]) : ''} ${job ? pill('⚙ ' + job + ' job') : ''} ${a.project ? esc(a.project) : ''}`.trim();
+  // No kind pill ("money", "delete"…): the title says what it does.
+  const meta = `${job ? pill('⚙ ' + job + ' job') : ''} ${a.project ? esc(a.project) : ''}`.trim();
   return cardHTML({
     ref: 'action', id: a.id, title: a.title, tint: '', verb: 'approve',
     mark: '🔴 ',

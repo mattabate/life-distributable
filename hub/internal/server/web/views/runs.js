@@ -22,7 +22,7 @@ async function runDetail(view, id) {
   const took = r.finished_at ? Math.max(1, Math.round((new Date(r.finished_at) - new Date(r.started_at)) / 1000)) + 's' : 'still running';
   const state = r.ok === false ? pill('failed', 'needs') : r.ok ? pill('ok', 'done') : pill('running');
   const findings = (r.findings || []).map(f => `<div class="card">
-      <div class="spread"><strong>${mdInline(f.title)}</strong>${pill(f.kind, kindPill[f.kind])}</div>
+      <div class="spread"><strong>${mdInline(f.title)}</strong>${pill(f.kind)}</div>
       <div class="small mt6">${md(f.detail || '')}</div></div>`).join('');
   view.innerHTML = `<div class="pane wide">
     <div class="row" style="margin-bottom:10px"><a href="#/sessions" class="btn sm" style="text-decoration:none">←</a>

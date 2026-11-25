@@ -390,8 +390,11 @@ struct ThreadsView: View {
             // above the fold (a tagged one, NoteTags).
             let at = ProcessInfo.processInfo.environment["LIFE_SCROLL"].flatMap { Int($0) }
             // The list holds only live sessions; any other is one read away.
-            if let t = threads.first(where: { $0.id == want }) { openAsk = OpenAsk(thread: t, message: at) }
-            else if let t = try? await hub.thread(want) { openAsk = OpenAsk(thread: t, message: at) }
+            // LIFE_CARD=<id> lands on that card, as a tap on the row lands on
+            // the board's first (a shot of one card whole, its Approval line too).
+            let card = ProcessInfo.processInfo.environment["LIFE_CARD"].flatMap { $0.isEmpty ? nil : $0 }
+            if let t = threads.first(where: { $0.id == want }) { openAsk = OpenAsk(thread: t, message: at, card: card) }
+            else if let t = try? await hub.thread(want) { openAsk = OpenAsk(thread: t, message: at, card: card) }
         }
         #endif
         #if targetEnvironment(macCatalyst)
