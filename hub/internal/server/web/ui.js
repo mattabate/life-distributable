@@ -1520,7 +1520,8 @@ function recHTML(r, opened, armed) {
   return cardHTML({
     ref: 'rec', id: r.id, title: r.title, tint: 'rec', verb: 'recommendation', mark: '💡 ',
     body: (r.because ? `<div class="wrap2">${mdInline(r.because, false)}</div>` : '') + (!open && note ? `<div class="muted">${esc(recStateWord(r))}${note}</div>` : ''),
-    meta: `<a class="pill purple" href="#/recs/${id}">rec</a> <span>${costLabel(r)}</span>`,
+    // No cost tag in the chat; the Recs page keeps it. The phone's RecCard.
+    meta: `<a class="pill purple" href="#/recs/${id}">rec</a>`,
     acts,
     folded: open ? '' : r.status === 'expired' && r.decision_note === 'dismissed' ? '✕ dismissed' : (r.status === 'declined' ? '✕ ' : '✓ ') + esc(recStateWord(r)),
     at: open ? r.created_at : r.decided_at || r.created_at,

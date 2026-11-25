@@ -7,7 +7,8 @@ import SwiftUI
 /// decision in either place is the same row. Then Hide: off the chat and the
 /// Sessions list, still open on Recs, whose Show in chat brings it back. A
 /// decided rec is its row with the verdict, Reopen inside. Open, it stays
-/// until the owner answers it — never in Your turn.
+/// until the owner answers it — never in Your turn. Its caption line is the
+/// word alone, as an approval's: the cost stays on the Recs page.
 struct RecCard: View {
     @Environment(HubClient.self) private var hub
     @Environment(BoardStore.self) private var store
@@ -24,7 +25,7 @@ struct RecCard: View {
     private var dismissed: Bool { rec.folded == "dismissed" }
 
     var body: some View {
-        Card(tint: .purple, mark: "lightbulb.fill", caption: "recommendation", right: rec.costLabel,
+        Card(tint: .purple, mark: "lightbulb.fill", caption: "recommendation",
              title: rec.title, text: rec.because ?? rec.detail ?? "", lines: 3,
              line: rec.decision_note ?? "",
              folded: open ? nil : dismissed ? "✕ dismissed" : (rec.status == "declined" ? "✕ " : "✓ ") + recStateWord(rec.status),
