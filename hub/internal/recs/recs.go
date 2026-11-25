@@ -92,6 +92,11 @@ UPDATE items SET ` + store.ItemStampSet + ` WHERE src='rec';`,
 	// none pops back.
 	`ALTER TABLE recs ADD COLUMN seen_at TEXT NOT NULL DEFAULT ''`,
 	`UPDATE recs SET seen_at=created_at WHERE seen_at=''`,
+	// hidden_at: Hide on a rec's violet card in its chat takes it out of the
+	// chat and the Sessions list; the rec stays open on the Recs page. Not
+	// seen_at: every rec filed before that column counts as seen, and the
+	// chat card shows them.
+	`ALTER TABLE recs ADD COLUMN hidden_at TEXT NOT NULL DEFAULT ''`,
 }
 
 // syncFromItem copies a rec's decision (its item's state and resolution) onto
@@ -165,6 +170,10 @@ type Rec struct {
 	// Until then a chat draws an open rec as one small notice line; after,
 	// only the Recs page holds it.
 	SeenAt string `json:"seen_at,omitempty"`
+	// HiddenAt: when the owner hid its card from the chat ("" = shown).
+	// Hidden is out of the chat and the Sessions list only; the status is
+	// untouched, so an open rec still waits on the Recs page.
+	HiddenAt string `json:"hidden_at,omitempty"`
 	// MessageID is where the rec sits in its session's chat: the first reply
 	// the filing session wrote after filing it (a filed rec is a cell in the
 	// chat). Not a column — resolved on
@@ -673,7 +682,7 @@ func (s *Store) Add(r Rec) (Rec, error) {
 // its ledger row (l: what it costs, what it expects, how it scored).
 const cols = `i.id,i.created_at,i.updated_at,i.title,i.detail,i.goal_id,i.thread_id,i.source,l.domain,l.kind,l.cost_cents,l.cost_period,
 	l.effort,l.confidence,l.because,l.expect,l.act_by,l.review_on,i.state,i.resolved_at,i.resolved_by,i.resolution,
-	l.outcome,l.outcome_at,l.outcome_note,i.prev_id,l.links,l.model,i.win,l.seen_at`
+	l.outcome,l.outcome_at,l.outcome_note,i.prev_id,l.links,l.model,i.win,l.seen_at,l.hidden_at`
 
 const joined = ` FROM items i JOIN recs l ON l.id=i.id WHERE i.src='rec' AND `
 
@@ -685,7 +694,7 @@ func scanRec(sc scanner) (Rec, error) {
 	var goal, thread, decAt, decBy, outAt, prev sql.NullString
 	if err := sc.Scan(&r.ID, &cr, &up, &r.Title, &r.Detail, &goal, &thread, &r.Source, &r.Domain, &r.Kind,
 		&r.CostCents, &r.CostPeriod, &r.Effort, &r.Confidence, &r.Because, &r.Expect, &r.ActBy, &r.ReviewOn,
-		&r.Status, &decAt, &decBy, &r.DecisionNote, &r.Outcome, &outAt, &r.OutcomeNote, &prev, &r.Links, &r.Model, &r.Window, &r.SeenAt); err != nil {
+		&r.Status, &decAt, &decBy, &r.DecisionNote, &r.Outcome, &outAt, &r.OutcomeNote, &prev, &r.Links, &r.Model, &r.Window, &r.SeenAt, &r.HiddenAt); err != nil {
 		return r, err
 	}
 	r.CreatedAt, _ = time.Parse(time.RFC3339Nano, cr)
@@ -1205,6 +1214,22 @@ func (s *Store) Seen(id string) (Rec, error) {
 		return Rec{}, errors.New("no such rec")
 	}
 	if _, err := s.db.Exec(`UPDATE recs SET seen_at=? WHERE id=? AND seen_at=''`, ts(s.Now()), id); err != nil {
+		return Rec{}, err
+	}
+	return s.Get(id)
+}
+
+// Hide takes a rec's card out of the chat (hidden true) or puts it back
+// (false). Only hidden_at moves: no status, no event, no relay, no wake.
+func (s *Store) Hide(id string, hidden bool) (Rec, error) {
+	if _, err := s.Get(id); err != nil {
+		return Rec{}, errors.New("no such rec")
+	}
+	q, args := `UPDATE recs SET hidden_at='' WHERE id=?`, []any{id}
+	if hidden {
+		q, args = `UPDATE recs SET hidden_at=? WHERE id=? AND hidden_at=''`, []any{ts(s.Now()), id}
+	}
+	if _, err := s.db.Exec(q, args...); err != nil {
 		return Rec{}, err
 	}
 	return s.Get(id)

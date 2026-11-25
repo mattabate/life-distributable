@@ -36,6 +36,13 @@ final class BoardStore {
     var team: [Thread] = []
     /// The open recs, each a line under its person on Sessions.
     var recs: [Rec] = []
+    /// A rec's Hide or Show in chat, on the list at once: the hub's hide
+    /// moves no change version, so the list's own read of the recs would
+    /// wait for the next unrelated change.
+    func setHidden(_ id: String, _ hidden: Bool) {
+        guard let i = recs.firstIndex(where: { $0.id == id }) else { return }
+        recs[i].hidden_at = hidden ? ISO8601DateFormatter().string(from: Date()) : nil
+    }
     var goals: [Goal] = []
     var error: String?
     /// How many ThreadDetails are open: each polls its own session, so the

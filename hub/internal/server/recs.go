@@ -424,6 +424,28 @@ func (s *Server) recsSeen(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, rec)
 }
 
+// recsHide: Hide on a rec's card in a chat ({"hidden": true}), or back
+// (false). The rec stays as it is on the Recs page.
+func (s *Server) recsHide(w http.ResponseWriter, r *http.Request) {
+	if s.Recs == nil {
+		jsonErr(w, 503, "recs not configured")
+		return
+	}
+	var in struct {
+		Hidden *bool `json:"hidden"`
+	}
+	if err := json.NewDecoder(jsonBody(w, r)).Decode(&in); err != nil || in.Hidden == nil {
+		jsonErr(w, 400, `body must be {"hidden": true|false}`)
+		return
+	}
+	rec, err := s.Recs.Hide(r.PathValue("id"), *in.Hidden)
+	if err != nil {
+		jsonErr(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, rec)
+}
+
 // recsHome: move a rec to the session that owns its lane.
 func (s *Server) recsHome(w http.ResponseWriter, r *http.Request) {
 	if s.Recs == nil {

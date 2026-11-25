@@ -1504,6 +1504,10 @@ struct Rec: Codable, Identifiable, Hashable {
     /// When the owner dismissed its notice in the chat (`POST /recs/{id}/seen`);
     /// nil = filed and not yet seen, so the chat shows the one-line notice.
     var seen_at: String?
+    /// When the owner hid it from its chat (`POST /recs/{id}/hide`); nil =
+    /// shown. A hidden open rec is off the chat and the Sessions list and
+    /// still open on Recs.
+    var hidden_at: String?
     /// Only on `GET /recs?thread=`: the reply that filed it (the first of the
     /// session's replies after the rec), where its cell is drawn in the chat.
     /// nil = the reply is still being written; the cell sits at the end.

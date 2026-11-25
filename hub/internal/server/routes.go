@@ -140,6 +140,7 @@ func (s *Server) routes() []route {
 		{"POST /api/v1/recs/{id}/score", s.recsScore, false},
 		{"POST /api/v1/recs/{id}/link", s.recsLink, false},
 		{"POST /api/v1/recs/{id}/seen", s.recsSeen, false},
+		{"POST /api/v1/recs/{id}/hide", s.recsHide, false},
 		{"POST /api/v1/recs/{id}/home", s.recsHome, false},
 		{"POST /api/v1/devices", s.registerDevice, false},
 		{"POST /api/v1/devices/test", s.testPush, false},

@@ -1504,3 +1504,25 @@ function recPills(r) {
   return (r.status === 'proposed' ? '' : pill(recStateWord(r), STATUS_PILL[r.status]))
     + (r.outcome ? pill(r.outcome, OUTCOME_PILL[r.outcome]) : '');
 }
+// A rec in its chat is a card, violet, with the Recs page's Accept · Decline
+// · Reply: a long-lived task for the owner, mirrored on the Recs page. Each
+// button ARMS the session's composer (armRecReply, views/threads.js); Send
+// posts the Recs page's own /decide or /reply, so a decision in either place
+// is the same row. Hide takes it out of the chat and the Sessions list and
+// leaves it open on Recs, whose "show in its chat" puts it back (recHide).
+// Reopen puts a decided one back. A decided rec folds to a row with its
+// verdict.
+function recHTML(r, opened, armed) {
+  const id = esc(r.id), open = !r.closed;
+  const note = r.decision_note ? ' — ' + mdInline(r.decision_note, false) : '';
+  const acts = !open ? [{ label: 'Reopen', js: `cardFold('rec','${escJS(r.id)}',true)` }]
+    : outcomeBtns(r.outcomes, v => `armRecReply('${escJS(r.id)}','${escJS(v)}')`, armed).concat({ label: 'Hide', js: `recHide('${escJS(r.id)}',true)` });
+  return cardHTML({
+    ref: 'rec', id: r.id, title: r.title, tint: 'rec', verb: 'recommendation', mark: '💡 ',
+    body: (r.because ? `<div class="wrap2">${mdInline(r.because, false)}</div>` : '') + (!open && note ? `<div class="muted">${esc(recStateWord(r))}${note}</div>` : ''),
+    meta: `<a class="pill purple" href="#/recs/${id}">rec</a> <span>${costLabel(r)}</span>`,
+    acts,
+    folded: open ? '' : r.status === 'expired' && r.decision_note === 'dismissed' ? '✕ dismissed' : (r.status === 'declined' ? '✕ ' : '✓ ') + esc(recStateWord(r)),
+    at: open ? r.created_at : r.decided_at || r.created_at,
+  }, opened);
+}

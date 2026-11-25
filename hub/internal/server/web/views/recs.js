@@ -170,7 +170,9 @@ function recCard(r) {
         ${recRunning(r)}
         ${recDates(r)}
         <div class="grow"></div>
-        ${recSourceThread(r) ? `<a href="#/sessions/${esc(recSourceThread(r))}" title="The session that filed it">its chat ›</a>` : ''}
+        ${!recSourceThread(r) ? '' : proposed && r.hidden_at
+          ? `<a href="#/sessions/${esc(recSourceThread(r))}" onclick="return recShow(event,'${escJS(r.id)}')">show in its chat ›</a>`
+          : `<a href="#/sessions/${esc(recSourceThread(r))}" title="The session that filed it">its chat ›</a>`}
         <a href="#/recs/${esc(r.id)}">details ›</a>
       </div>
       ${why ? `<div class="small muted wrap2 why">${why}</div>` : ''}
@@ -263,6 +265,15 @@ function recWho(r) {
 // The session that filed it, which is where its decision goes by default.
 function recSourceThread(r) {
   return r.thread_id || (String(r.source || '').startsWith('claude:thread:') ? r.source.slice(14) : '');
+}
+
+// A rec the owner hid from its chat (its Hide) goes back there, and the link
+// then opens that chat.
+function recShow(ev, id) {
+  ev.preventDefault();
+  const href = ev.currentTarget.getAttribute('href');
+  act(() => post(`/recs/${id}/hide`, { hidden: false }), 'back in its chat', () => { location.hash = href; });
+  return false;
 }
 
 // Every open rec on the page gets the composer's wiring: the draft and the
