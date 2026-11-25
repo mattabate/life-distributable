@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -227,5 +228,29 @@ func TestSinceDigestTail(t *testing.T) {
 	}
 	if s := sinceDigestTail(nil, "g", 40); s != "[]" {
 		t.Fatalf("empty = %q", s)
+	}
+}
+
+// relay's flags go before the text, after it or both (`--todo "title"`
+// before the text was read as the text).
+func TestFlagsAround(t *testing.T) {
+	for _, args := range [][]string{
+		{"Retake the shots.", "--todo", "Shots", "--why", "asked"},
+		{"--todo", "Shots", "Retake the shots.", "--why", "asked"},
+		{"--todo", "Shots", "--why", "asked", "Retake the shots."},
+	} {
+		fs := flag.NewFlagSet("relay", flag.ContinueOnError)
+		todo, why := fs.String("todo", "", ""), fs.String("why", "", "")
+		if got := flagsAround(fs, args); got != "Retake the shots." || *todo != "Shots" || *why != "asked" {
+			t.Fatalf("%q: text %q, todo %q, why %q", args, got, *todo, *why)
+		}
+	}
+	// A bool flag takes no value, "-" is stdin, `--` lets a text start with "-".
+	for args, want := range map[string]string{"--now|T": "T", "-|--now": "-", "--now|--|-x": "-x"} {
+		fs := flag.NewFlagSet("relay", flag.ContinueOnError)
+		now := fs.Bool("now", false, "")
+		if got := flagsAround(fs, strings.Split(args, "|")); got != want || !*now {
+			t.Fatalf("%q: text %q, now %v", args, got, *now)
+		}
 	}
 }
