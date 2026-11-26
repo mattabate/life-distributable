@@ -1999,3 +1999,8 @@ Entry format:
 - For: everyone with `session_user` set (the others gain nothing new, and lose nothing)
 - Change: A security fix, worth taking, found in review of add-0315. A Mac's disk ignores the case of file names, and git's path matching does not, so a landing that added `GNUMakefile`, `MAKEFILE` or `OPS/hub.sh` passed the gate list with no owner card, though make or a checkout treats each as the gated file. Every gate path now matches in any case.
 - How: same merge as add-0008, then `make check`. By hand: `hub/internal/server/land.go` (`gateTouched`), `hub/internal/server/land_test.go` (`TestGatePathsMatchAnyCase`).
+
+## add-0317 · 2026-11-25 · The gate check cards non-ASCII names and ignores GIT_LITERAL_PATHSPECS
+- For: everyone with `session_user` set (the others gain nothing new, and lose nothing)
+- Change: A security fix, worth taking, found in review of add-0316. git's any-case matching folds only ASCII letters while the Mac's disk folds more (`ops/hub.ſh`, with a long s, opens as `ops/hub.sh`), so a landing that adds any file name outside ASCII is now the owner's card. And `GIT_LITERAL_PATHSPECS=1` in the hub's environment no longer makes the gate match nothing: its git calls pass `--no-literal-pathspecs`. The check for whether a landing touches `hub/` matches in any case too.
+- How: same merge as add-0008, then `make check`. By hand: `hub/internal/server/land.go` (`gateTouched`, the `-- hub` check in `land`), `hub/internal/server/land_test.go` (`TestGatePathsMatchAnyCase`, `TestGateTouchedNonASCIIName`).

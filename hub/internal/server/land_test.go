@@ -306,6 +306,36 @@ func TestGatePathsMatchAnyCase(t *testing.T) {
 	if strings.Contains(got, "\nREADME\n") {
 		t.Error("README read as a gate file")
 	}
+
+	// GIT_LITERAL_PATHSPECS in the hub's environment must not blind the gate.
+	t.Setenv("GIT_LITERAL_PATHSPECS", "1")
+	if lit := "\n" + gateTouched(git, "main~1", "main") + "\n"; !strings.Contains(lit, "\nGNUMakefile\n") {
+		t.Errorf("with GIT_LITERAL_PATHSPECS=1 the gate saw %q", lit)
+	}
+}
+
+// git's icase folds ASCII only and the disk folds more: ops/hub.ſh (a long s)
+// opens as ops/hub.sh. Any name outside ASCII is the owner's card; an ASCII
+// one that misses every gate path is not.
+func TestGateTouchedNonASCIIName(t *testing.T) {
+	repo := t.TempDir()
+	landGit(t, repo, "init", "-b", "main")
+	landGit(t, repo, "commit", "--allow-empty", "-m", "base")
+	blob := landGit(t, repo, "hash-object", "-w", "--stdin")
+	landGit(t, repo, "update-index", "--add", "--cacheinfo", "100644,"+blob+",README")
+	landGit(t, repo, "commit", "-m", "ascii")
+	landGit(t, repo, "update-index", "--add", "--cacheinfo", "100644,"+blob+",ops/hub.ſh")
+	landGit(t, repo, "commit", "-m", "long s")
+	git := func(args ...string) (string, error) {
+		out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).Output()
+		return strings.TrimSpace(string(out)), err
+	}
+	if got := gateTouched(git, "main~2", "main~1"); got != "" {
+		t.Errorf("an ASCII README read as the gate: %q", got)
+	}
+	if gateTouched(git, "main~1", "main") == "" {
+		t.Error("ops/hub.ſh landed with no card")
+	}
 }
 
 // A route marked open in routes.go is served with no token only if the gate's
