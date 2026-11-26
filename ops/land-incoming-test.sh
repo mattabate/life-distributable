@@ -46,8 +46,17 @@ if bash ops/land-incoming.sh "$red" >/dev/null 2>&1; then echo "FAIL: landed a f
 [ "$(git rev-parse HEAD)" = "$was" ] || { echo "FAIL: main moved under a failing test"; exit 1; }
 
 # No GIT_* variable from the caller reaches the landing's git: a GIT_DIR naming
-# another repo would land (or fail) there.
-mkdir -p "$dir/decoy"
-GIT_DIR="$dir/decoy" GIT_WORK_TREE="$dir/decoy" bash ops/land-incoming.sh "$sha" >/dev/null 2>&1 || { echo "FAIL: a GIT_DIR in the environment stopped the landing"; exit 1; }
+# another repo would land (or fail) there, and a GIT_CONFIG_* core.hooksPath
+# would run its hooks as the owner.
+git init -q "$dir/decoy"
+mkdir -p "$dir/hooks"
+for h in post-checkout post-merge post-rewrite; do
+  printf '#!/bin/sh\ntouch "%s/hooked"\n' "$dir" > "$dir/hooks/$h"
+  chmod +x "$dir/hooks/$h"
+done
+GIT_DIR="$dir/decoy/.git" GIT_WORK_TREE="$dir/decoy" \
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$dir/hooks" \
+  bash ops/land-incoming.sh "$sha" >/dev/null 2>&1 || { echo "FAIL: a GIT_* variable in the environment stopped the landing"; exit 1; }
 [ "$(git rev-parse HEAD)" = "$sha" ] && [ "$(cat other.txt)" = two ] || { echo "FAIL: a GIT_DIR in the environment steered the landing"; exit 1; }
+[ ! -e "$dir/hooked" ] || { echo "FAIL: a GIT_CONFIG_* hooksPath ran its hooks in the landing"; exit 1; }
 echo "land-incoming-test: OK"
