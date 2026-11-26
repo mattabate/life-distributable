@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -335,6 +336,48 @@ func TestGateTouchedNonASCIIName(t *testing.T) {
 	}
 	if gateTouched(git, "main~1", "main") == "" {
 		t.Error("ops/hub.ſh landed with no card")
+	}
+
+	// A rename lists the old name too: one off a non-ASCII name is the owner's card.
+	landGit(t, repo, "update-index", "--force-remove", "ops/hub.ſh")
+	landGit(t, repo, "update-index", "--add", "--cacheinfo", "100644,"+blob+",ops/hubsh.txt")
+	landGit(t, repo, "commit", "-m", "rename")
+	if gateTouched(git, "main~1", "main") == "" {
+		t.Error("a rename off ops/hub.ſh landed with no card")
+	}
+
+	// The names diff failing while the gate diff is clean is still the owner's card.
+	half := func(args ...string) (string, error) {
+		if slices.Contains(args, "-z") {
+			return "", errors.New("timeout")
+		}
+		return "", nil
+	}
+	if gateTouched(half, "main", "abc") == "" {
+		t.Error("a failed names diff read as no gate files touched")
+	}
+}
+
+// The landing's git takes no GIT_* setting from the hub's environment: a
+// GIT_DIR pointing elsewhere or GIT_LITERAL_PATHSPECS would change what the
+// gate diffs read.
+func TestGitCmdDropsGitEnv(t *testing.T) {
+	repo := t.TempDir()
+	landGit(t, repo, "init", "-b", "main")
+	t.Setenv("GIT_DIR", t.TempDir())
+	t.Setenv("GIT_LITERAL_PATHSPECS", "1")
+	out, err := gitCmd(context.Background(), repo, "rev-parse", "--absolute-git-dir").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	real, _ := filepath.EvalSymlinks(repo)
+	if got := strings.TrimSpace(string(out)); got != filepath.Join(real, ".git") {
+		t.Errorf("git read %q, not %s/.git", got, real)
+	}
+	for _, kv := range gitCmd(context.Background(), repo).Env {
+		if strings.HasPrefix(kv, "GIT_") {
+			t.Errorf("%s reached git", kv)
+		}
 	}
 }
 
