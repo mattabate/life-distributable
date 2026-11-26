@@ -90,7 +90,7 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 409, "nothing to land: main already has it")
 		return
 	}
-	hub, _ := git("diff", "--name-only", "main", sha, "--", "hub")
+	hub, _ := git("--no-literal-pathspecs", "diff", "--name-only", "main", sha, "--", ":(icase)hub")
 	gate := gateTouched(git, "main", sha)
 	// A gate landing is the owner's card, and the session's spoken words are
 	// that card (what it wants to change and why): no words, no card.
@@ -187,9 +187,15 @@ var gatePaths = []string{
 //
 // Every gate path matches in any case (icase): the Mac's disk ignores case, so
 // GNUMakefile is what make opens as GNUmakefile and OPS/hub.sh overwrites
-// ops/hub.sh at checkout (#225).
+// ops/hub.sh at checkout (#225). --no-literal-pathspecs: GIT_LITERAL_PATHSPECS
+// in the hub's environment would read every spec here as a literal name, so
+// the gate would match nothing.
+//
+// A name outside ASCII is the owner's card too: git's icase folds ASCII only,
+// and the disk folds more (hub.ſh, a long s, opens as hub.sh), so no pathspec
+// can say which of them the Mac reads as a gate file.
 func gateTouched(git func(...string) (string, error), rng ...string) string {
-	args := append(append([]string{"diff", "--name-only"}, rng...), "--")
+	args := append(append([]string{"--no-literal-pathspecs", "diff", "--name-only"}, rng...), "--")
 	for _, p := range gatePaths {
 		if magic, ok := strings.CutPrefix(p, ":("); ok {
 			args = append(args, ":(icase,"+magic)
@@ -200,6 +206,15 @@ func gateTouched(git func(...string) (string, error), rng ...string) string {
 	out, err := git(args...)
 	if err != nil {
 		return "(the check of which gate files it changes failed)"
+	}
+	names, err := git(append([]string{"--no-literal-pathspecs", "diff", "--name-only", "-z"}, rng...)...)
+	if err != nil {
+		return "(the check of which gate files it changes failed)"
+	}
+	for _, r := range names {
+		if r > 0x7f {
+			return strings.TrimSpace(out + "\n(a file name outside ASCII, which the Mac may open as a gate file)")
+		}
 	}
 	return out
 }
