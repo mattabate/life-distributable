@@ -9,6 +9,11 @@
 # fast-forwards to what was tested. A conflict or a failing test stops it with
 # main untouched.
 set -euo pipefail
+# No GIT_* variable from the hub's environment (GIT_DIR, GIT_CONFIG_* naming a
+# core.hooksPath…) reaches the landing's git, as gitCmd in land.go.
+for v in $(compgen -e); do
+	if [[ $v == GIT_* ]]; then unset "$v"; fi
+done
 die() { echo "land-incoming.sh: $*" >&2; exit 2; }
 sha=${1:-}
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "usage: bash ops/land-incoming.sh <40-hex sha>"
