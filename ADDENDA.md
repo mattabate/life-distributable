@@ -2029,3 +2029,8 @@ Entry format:
 - For: everyone (hub)
 - Change: A refused call used to leave only its code in `hub.log` (`POST /api/v1/drop 400 2.4s`). The refusal's own words now follow it on the same line (`POST /api/v1/drop 400 2.4s: voice: empty blob`, cut at 200 bytes). The words ride an internal header that is taken off before the client sees the response.
 - How: same merge as add-0008, then `make check`, `ops/hub.sh restart`. By hand: `hub/internal/server/server.go` (`whyHeader`, `statusWriter`, `jsonErr`), `hub/internal/server/reqlog_test.go` (`TestRefusalWhyIsLogged`).
+
+## add-0323 · 2026-11-26 · The landing script takes no GIT_* setting either
+- For: everyone with `session_user` set (the others gain nothing new, and lose nothing)
+- Change: Hardening, worth taking, found in review of add-0318. `ops/land-incoming.sh`, which lands a session's commit as the owner, now drops every `GIT_*` variable at its top, as the land route's own git already does, so a `GIT_DIR` or a `GIT_CONFIG_*` naming a hooks path in the hub's environment cannot steer the landing. The rename test now forces git's rename detection on, so it proves the gate's `--no-renames` whatever the machine's `~/.gitconfig` says.
+- How: same merge as add-0008, then `make check`. By hand: `ops/land-incoming.sh`, `ops/land-incoming-test.sh` (the decoy `GIT_DIR` case), `hub/internal/server/land_test.go` (`TestGateTouchedNonASCIIName`), `hub/internal/server/land.go` (`gitCmd`'s comment).

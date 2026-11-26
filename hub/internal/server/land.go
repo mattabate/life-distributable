@@ -221,8 +221,10 @@ func gateTouched(git func(...string) (string, error), rng ...string) string {
 }
 
 // gitCmd: git in repo with no GIT_* variable from the hub's environment
-// (GIT_DIR, GIT_*_PATHSPECS, GIT_CONFIG_*…), so no GIT_* variable can point
-// the landing's diffs elsewhere or change how they match.
+// (GIT_DIR, GIT_*_PATHSPECS, GIT_CONFIG_*…), so no variable can point the
+// landing's diffs elsewhere or change how they match; ~/.gitconfig still
+// applies, which is why the gate's own calls pin --no-literal-pathspecs and
+// --no-renames.
 func gitCmd(ctx context.Context, repo string, args ...string) *exec.Cmd {
 	c := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...)
 	for _, kv := range os.Environ() {

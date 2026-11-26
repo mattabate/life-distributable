@@ -327,8 +327,10 @@ func TestGateTouchedNonASCIIName(t *testing.T) {
 	landGit(t, repo, "commit", "-m", "ascii")
 	landGit(t, repo, "update-index", "--add", "--cacheinfo", "100644,"+blob+",ops/hub.ſh")
 	landGit(t, repo, "commit", "-m", "long s")
+	// diff.renames on whatever the runner's ~/.gitconfig says: only
+	// --no-renames may make the rename below list its old name.
 	git := func(args ...string) (string, error) {
-		out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).Output()
+		out, err := exec.Command("git", append([]string{"-c", "diff.renames=true", "-C", repo}, args...)...).Output()
 		return strings.TrimSpace(string(out)), err
 	}
 	if got := gateTouched(git, "main~2", "main~1"); got != "" {
