@@ -68,7 +68,7 @@ func (s *Server) land(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	repo := s.cfg.Root
 	git := func(args ...string) (string, error) {
-		out, err := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...).CombinedOutput()
+		out, err := gitCmd(ctx, repo, args...).CombinedOutput()
 		return strings.TrimSpace(string(out)), err
 	}
 	ref := "refs/incoming/" + from
@@ -207,7 +207,8 @@ func gateTouched(git func(...string) (string, error), rng ...string) string {
 	if err != nil {
 		return "(the check of which gate files it changes failed)"
 	}
-	names, err := git(append([]string{"--no-literal-pathspecs", "diff", "--name-only", "-z"}, rng...)...)
+	// --no-renames: a rename lists both names, so a non-ASCII old name counts.
+	names, err := git(append(append([]string{"--no-literal-pathspecs", "diff", "--name-only", "--no-renames", "-z"}, rng...), "--")...)
 	if err != nil {
 		return "(the check of which gate files it changes failed)"
 	}
@@ -217,6 +218,22 @@ func gateTouched(git func(...string) (string, error), rng ...string) string {
 		}
 	}
 	return out
+}
+
+// gitCmd: git in repo with no GIT_* variable from the hub's environment
+// (GIT_DIR, GIT_*_PATHSPECS, GIT_CONFIG_*…), so no GIT_* variable can point
+// the landing's diffs elsewhere or change how they match.
+func gitCmd(ctx context.Context, repo string, args ...string) *exec.Cmd {
+	c := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...)
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			c.Env = append(c.Env, kv)
+		}
+	}
+	if c.Env == nil {
+		c.Env = []string{}
+	}
+	return c
 }
 
 // standingNote: why a landing or an app build ran with no card. Each route

@@ -2004,3 +2004,8 @@ Entry format:
 - For: everyone with `session_user` set (the others gain nothing new, and lose nothing)
 - Change: A security fix, worth taking, found in review of add-0316. git's any-case matching folds only ASCII letters while the Mac's disk folds more (`ops/hub.ſh`, with a long s, opens as `ops/hub.sh`), so a landing that adds any file name outside ASCII is now the owner's card. And `GIT_LITERAL_PATHSPECS=1` in the hub's environment no longer makes the gate match nothing: its git calls pass `--no-literal-pathspecs`. The check for whether a landing touches `hub/` matches in any case too.
 - How: same merge as add-0008, then `make check`. By hand: `hub/internal/server/land.go` (`gateTouched`, the `-- hub` check in `land`), `hub/internal/server/land_test.go` (`TestGatePathsMatchAnyCase`, `TestGateTouchedNonASCIIName`).
+
+## add-0318 · 2026-11-26 · The landing's git takes no GIT_* setting, and a rename shows both names
+- For: everyone with `session_user` set (the others gain nothing new, and lose nothing)
+- Change: Hardening, worth taking, found in review of add-0317. The land route's git now runs with every `GIT_*` variable dropped from the hub's environment, so a `GIT_DIR`, a `GIT_*_PATHSPECS` or a `GIT_CONFIG_*` variable cannot point the gate's diffs at another repo or change how they match. The check for names outside ASCII lists both sides of a rename, so a rename off such a name is the owner's card too, and a failure of that check alone is the owner's card as well.
+- How: same merge as add-0008, then `make check`. By hand: `hub/internal/server/land.go` (`gitCmd`, `gateTouched`, the `git` helper in `land`), `hub/internal/server/land_test.go` (`TestGateTouchedNonASCIIName`, `TestGitCmdDropsGitEnv`).
