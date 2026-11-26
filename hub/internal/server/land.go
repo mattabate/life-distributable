@@ -184,9 +184,20 @@ var gatePaths = []string{
 // gateTouched: the gatePaths files a range changes. A git error is not "none":
 // a diff that failed or timed out reads as the gate touched, so the landing is
 // the owner's card.
+//
+// Every gate path matches in any case (icase): the Mac's disk ignores case, so
+// GNUMakefile is what make opens as GNUmakefile and OPS/hub.sh overwrites
+// ops/hub.sh at checkout (#225).
 func gateTouched(git func(...string) (string, error), rng ...string) string {
 	args := append(append([]string{"diff", "--name-only"}, rng...), "--")
-	out, err := git(append(args, gatePaths...)...)
+	for _, p := range gatePaths {
+		if magic, ok := strings.CutPrefix(p, ":("); ok {
+			args = append(args, ":(icase,"+magic)
+		} else {
+			args = append(args, ":(icase)"+p)
+		}
+	}
+	out, err := git(args...)
 	if err != nil {
 		return "(the check of which gate files it changes failed)"
 	}
