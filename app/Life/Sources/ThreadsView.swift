@@ -107,23 +107,25 @@ struct ThreadsView: View {
         let ids = Set(live.map(\.id))
         let all = live + store.team.filter { person($0) && !nested($0) && !ids.contains($0.id) }
         let by = recsBy, k = known
-        var cands: [(i: Int, t: Thread, s: SideStatus?, own: Int, recs: [Rec])] = []
+        var cands: [(i: Int, t: Thread, s: SideStatus?, base: SideStatus?, own: Int, recs: [Rec])] = []
         for (i, t) in all.enumerated() {
             let rs = by[who(t.id, k)] ?? []
             let base = SideStatus.base(t, board: turn, recs: rs.count)
-            cands.append((i, t, SideStatus.of(t, board: turn, recs: rs.count), base?.rawValue ?? 99, rs))
+            cands.append((i, t, SideStatus.of(t, board: turn, recs: rs.count), base, base?.rawValue ?? 99, rs))
         }
         cands.sort { $0.own != $1.own ? $0.own < $1.own : $0.i < $1.i }
         // Each person once: their highest-status session by its own status,
         // the first in the hub's order (the newest) within one status. Then
-        // the rows run by the pill each wears.
+        // the rows run by the pill each wears, but a speaking or waiting row
+        // keeps its own status's place: the audio is a pill only.
         var once = Set<String>()
-        var rows: [(i: Int, t: Thread, s: SideStatus, recs: [Rec])] = []
+        var rows: [(i: Int, t: Thread, s: SideStatus, rank: Int, recs: [Rec])] = []
         var idle: [Thread] = []
         for x in cands where once.insert(who(x.t.id, k)).inserted {
-            if let s = x.s { rows.append((x.i, x.t, s, x.recs)) } else if person(x.t) { idle.append(x.t) }
+            if let s = x.s, let base = x.base { rows.append((x.i, x.t, s, ([.speak, .wait].contains(s) ? base : s).rawValue, x.recs)) }
+            else if person(x.t) { idle.append(x.t) }
         }
-        rows.sort { $0.s != $1.s ? $0.s < $1.s : $0.i < $1.i }
+        rows.sort { $0.rank != $1.rank ? $0.rank < $1.rank : $0.i < $1.i }
         return (rows.map { ($0.t, $0.s, $0.recs) }, idle)
     }
     /// A session another one started is a row on that one's card, whatever
@@ -270,14 +272,21 @@ struct ThreadsView: View {
         .sheet(isPresented: $composing) { NewThreadSheet { await load() } }
     }
 
-    /// One idle person, half the row: the name over
-    /// the job, a line between the two; the open one a blue edge and tint.
+    /// One idle person, half the row: the name (its audio pill on the right)
+    /// over the job, a line between the two; the open one a blue edge and tint.
     private func idleCell(_ t: Thread, divider: Bool) -> some View {
         let on = selected?.thread.id == t.id
         return Button { selected = OpenAsk(thread: t, message: nil) } label: {
             VStack(alignment: .leading, spacing: 1) {
+                // Speaking or waiting is a pill only, so an idle person wears
+                // it here, on the cell's right edge at the status column's
+                // width, where every row's pill sits.
                 HStack(spacing: 6) {
                     Text(md(t.title)).font(.zoomed(size: 15, weight: .semibold)).foregroundStyle(Web.fg).lineLimit(1)
+                    if let a = SideStatus.audio(t, board: turn) {
+                        Spacer(minLength: 0)
+                        SideStatusPill(status: a, pills: turn.pills?[t.id] ?? [])
+                    }
                 }
                 if let role = t.role { Text(role).font(.zoomed(size: 13)).foregroundStyle(Web.muted).lineLimit(1) }
             }

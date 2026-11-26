@@ -1670,7 +1670,7 @@ extension ThreadDetail {
             Spacer(minLength: 12)
             HStack(spacing: 6) {
                 HStack(spacing: 4) {
-                    ForEach(Array(headPills.enumerated()), id: \.offset) { _, p in
+                    ForEach(Array(macHeadPills.enumerated()), id: \.offset) { _, p in
                         HeadPill(pill: p, act: headAct(p))
                     }
                 }
@@ -1703,9 +1703,15 @@ extension ThreadDetail {
     /// session's own pill, else "running" while it works.
     var headPills: [Pill] {
         if let ps = store.board?.pills?[thread.id], !ps.isEmpty { return ps }
+        // A hush emptied the board's pills: show nothing, as the console
+        // does, not the thread's own (still speaking) pill.
+        if store.hushed.contains(thread.id), store.board?.pills?[thread.id] != nil { return [] }
         if let p = thread.pill { return [p] }
         return thread.status == "running" ? [Pill(word: "running", tone: "running")] : []
     }
+    /// The head shows no "speaking" pill: the card and the Sessions row
+    /// already carry it. The console's headPills drops it the same way.
+    var macHeadPills: [Pill] { headPills.filter { $0.tone != "speaking" } }
 
     /// What a live pill does when clicked (HEAD_ACT): Stop the turn, or hush
     /// what the session is saying — the card stays.

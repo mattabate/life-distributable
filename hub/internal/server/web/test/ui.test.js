@@ -726,6 +726,15 @@ test('one hush quiets the card, the head pill and the row together until it clea
   assert.match(askHTML(card), /class="say-btn speaking"/);
 });
 
+test('overlapping hushes on one session: the first to finish keeps the other\'s mark', () => {
+  hushMark('t-1a2b3c4d', 1);
+  hushMark('t-1a2b3c4d', 1);
+  hushMark('t-1a2b3c4d', -1);
+  assert.ok(hushed.has('t-1a2b3c4d'));
+  hushMark('t-1a2b3c4d', -1);
+  assert.ok(!hushed.has('t-1a2b3c4d'));
+});
+
 test('actionHTML: a scheduled job\'s proposal names its job and is decided from the card', () => {
   const job = { ...action, thread_id: undefined, source: 'claude:job:daily-sweep', run_id: '150', outcomes: actOutcomes.slice(0, 2) };
   const h = actionHTML(job);

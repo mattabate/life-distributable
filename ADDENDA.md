@@ -2009,3 +2009,23 @@ Entry format:
 - For: everyone with `session_user` set (the others gain nothing new, and lose nothing)
 - Change: Hardening, worth taking, found in review of add-0317. The land route's git now runs with every `GIT_*` variable dropped from the hub's environment, so a `GIT_DIR`, a `GIT_*_PATHSPECS` or a `GIT_CONFIG_*` variable cannot point the gate's diffs at another repo or change how they match. The check for names outside ASCII lists both sides of a rename, so a rename off such a name is the owner's card too, and a failure of that check alone is the owner's card as well.
 - How: same merge as add-0008, then `make check`. By hand: `hub/internal/server/land.go` (`gitCmd`, `gateTouched`, the `git` helper in `land`), `hub/internal/server/land_test.go` (`TestGateTouchedNonASCIIName`, `TestGitCmdDropsGitEnv`).
+
+## add-0319 · 2026-11-26 · Sessions list: rows stay in place while they speak, installs on top
+- For: everyone (console and desktop app)
+- Change: A session that is speaking or waiting to speak no longer jumps to the top of the Sessions list: it keeps its place and its edge colour, and wears the green "Speaking" or orange "Waiting" pill there. A session with an install card is now the top stack, with its own green Install pill and edge, and "Working" never covers it. Below Your turn, To read and Working, open recommendations now sit above the idle to-do lists. To read is a lighter blue than Working, and install cards take a green of their own (dark text on the install button in dark mode). An idle person's audio pill sits on the right, lined up with every row's pill.
+- How: same merge as add-0008, then `make check`, `make webcheck` and, for the desktop app, `make ship`. By hand: `hub/internal/server/web/views/threads.js` (`statusOf`, `pillOf`, `SIDE_TIER`, `SIDE_PILL`, the row's edge), `hub/internal/server/web/app.css` (`--read`, `--install`), `hub/internal/server/web/skin.css`, `hub/internal/server/web/test/teamlist.test.js`, `app/Life/Sources/ThreadRows.swift` (`SideStatus`, `edge`), `app/Life/Sources/ThreadsView.swift`, `app/Life/Sources/MacFonts.swift` (`Web.read`, `Web.install`), `app/LifeTests/DecodeTests.swift`.
+
+## add-0320 · 2026-11-26 · The chat head shows no "Speaking" pill
+- For: everyone (console and desktop app)
+- Change: The pill at the top of a chat no longer says "Speaking": the card being read and the Sessions row already say it. "Waiting" and "Running" still show there. The head's speaking pill was also its stop button: the card's own Speaking button stops it now.
+- How: same merge as add-0008, then `make check`, `make webcheck`. By hand: `hub/internal/server/web/views/threads.js` (`headPills`), `app/Life/Sources/ThreadDetail.swift` (`macHeadPills`), `hub/internal/server/web/test/teamlist.test.js`.
+
+## add-0321 · 2026-11-26 · Two hushes on one session no longer undo each other
+- For: everyone (console, desktop and phone app)
+- Change: Follow-up to add-0313, found in its review. A card's hush and the chat head's Stop on the same session could overlap, and the first to finish cleared the other's quiet mark, so a pill could flash back. Each mark is now counted. The app also hushes each card on its own, so one failed call leaves the rest quiet, and the app's chat head shows no pill once a hush has emptied the board's, as the console already did.
+- How: same merge as add-0008, then `make check`, `make webcheck`. By hand: `hub/internal/server/web/ui.js` (`hushMark`, `hushVoice`), `hub/internal/server/web/test/ui.test.js`, `app/Life/Sources/BoardStore.swift` (`hushCount`, `hush`), `app/Life/Sources/ThreadDetail.swift` (`headPills`).
+
+## add-0322 · 2026-11-26 · The hub's log says why a request was refused
+- For: everyone (hub)
+- Change: A refused call used to leave only its code in `hub.log` (`POST /api/v1/drop 400 2.4s`). The refusal's own words now follow it on the same line (`POST /api/v1/drop 400 2.4s: voice: empty blob`, cut at 200 bytes). The words ride an internal header that is taken off before the client sees the response.
+- How: same merge as add-0008, then `make check`, `ops/hub.sh restart`. By hand: `hub/internal/server/server.go` (`whyHeader`, `statusWriter`, `jsonErr`), `hub/internal/server/reqlog_test.go` (`TestRefusalWhyIsLogged`).

@@ -161,9 +161,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	finish()
 	done()
 	if took := time.Since(start); logRequest(r.Method, r.URL.Path, sw.code, took) {
-		log.Printf("%s %s %d %s", r.Method, logPath(r.URL.Path), sw.code, took.Round(time.Millisecond))
+		log.Printf("%s %s %d %s%s", r.Method, logPath(r.URL.Path), sw.code, took.Round(time.Millisecond), sw.why)
 	}
 }
+
+// whyHeader carries jsonErr's words to the request log; statusWriter takes
+// it off before the client sees the headers. A refusal used to log only its
+// code ("POST /api/v1/drop 400"), never why.
+const whyHeader = "X-Life-Log-Why"
 
 // A request body that sends nothing for bodyIdle, or is still arriving after
 // bodyTotal, is cut off. With only ReadHeaderTimeout, a caller could trickle
@@ -256,12 +261,35 @@ func logRequest(method, path string, code int, took time.Duration) bool {
 // the layers above it keep working.
 type statusWriter struct {
 	http.ResponseWriter
-	code int
+	code  int
+	why   string // ": <jsonErr's message>", for the log line
+	wrote bool
 }
 
 func (s *statusWriter) WriteHeader(code int) {
+	if s.wrote {
+		s.ResponseWriter.WriteHeader(code) // net/http logs the superfluous call
+		return
+	}
+	s.wrote = true
 	s.code = code
+	if w := s.Header().Get(whyHeader); w != "" {
+		s.Header().Del(whyHeader)
+		if len(w) > 200 {
+			w = w[:200] + "…"
+		}
+		s.why = ": " + w
+	}
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// Write without a WriteHeader first is a 200 (net/http's rule), taken here
+// so the why header still comes off.
+func (s *statusWriter) Write(b []byte) (int, error) {
+	if !s.wrote {
+		s.WriteHeader(http.StatusOK)
+	}
+	return s.ResponseWriter.Write(b)
 }
 
 func (s *statusWriter) Flush() {
@@ -386,5 +414,6 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func jsonErr(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set(whyHeader, strings.Join(strings.Fields(msg), " "))
 	writeJSON(w, code, map[string]string{"error": msg})
 }

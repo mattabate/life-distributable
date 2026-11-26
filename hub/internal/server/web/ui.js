@@ -1306,7 +1306,13 @@ function sayHushCard(el) { hushVoice(el.dataset.thread || '', [el.dataset.ref]);
 // read its own copy (the button at the click, the head a moment later, the
 // row at the board's next poll), so they flipped one after another. The
 // app's BoardStore.hush is the same.
-const hushed = new Set();
+// Each mark is counted: a card hush and the head's Stop on the same session
+// can overlap, and the first to finish must not clear the other's mark.
+const hushed = new Set(), hushCount = new Map();
+function hushMark(m, d) {
+  const n = (hushCount.get(m) || 0) + d;
+  if (n > 0) { hushCount.set(m, n); hushed.add(m); } else { hushCount.delete(m); hushed.delete(m); }
+}
 function quietBoard(b) {
   if (!b || !hushed.size) return b;
   for (const id of hushed) if (b.pills && b.pills[id]) b.pills[id] = b.pills[id].filter(p => p.tone !== 'speaking' && p.tone !== 'waiting');
@@ -1328,7 +1334,7 @@ async function hushPaint(cards) {
 // the life of the page.
 async function hushVoice(thread, cards, voice) {
   const marks = [...cards, ...(thread ? [thread] : [])];
-  for (const m of marks) hushed.add(m);
+  for (const m of marks) hushMark(m, 1);
   try {
     quietBoard(board);
     await hushPaint(cards);
@@ -1341,7 +1347,7 @@ async function hushVoice(thread, cards, voice) {
       typeof refreshThread === 'function' && chatState.id ? refreshThread(chatState.id, true).catch(() => {}) : null,
     ]);
   } finally {
-    for (const m of marks) hushed.delete(m);
+    for (const m of marks) hushMark(m, -1);
   }
 }
 function sayAgain(el) {

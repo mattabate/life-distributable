@@ -154,7 +154,7 @@ async function drawList(activeID, reuse) {
   // each person, the name, the role and one status pill, then each open
   // card as a coloured dot and its title, two and then "N more" opening the
   // rest in place.
-  const card = (t, st) => {
+  const card = (t, st, at) => {
     const href = `#/sessions/${encodeURIComponent(t.id)}`;
     const items = [];
     const jobs = jobCells(t);
@@ -176,8 +176,8 @@ async function drawList(activeID, reuse) {
     return sideRowHTML(t, {
       active: t.id === activeID,
       first: b.first[t.id] || '',
-      status: st,
-      pill: st === 'speak' || st === 'wait' ? audioSlotHTML(b, t) : `<span class="pill ${SIDE_PILL[st][0]}">${SIDE_PILL[st][1]}</span>`,
+      status: st === 'speak' || st === 'wait' ? at : st,
+      pill: st === 'speak' || st === 'wait' ? audioSlotHTML(b, t) : SIDE_PILL[st] ? `<span class="pill ${SIDE_PILL[st][0]}">${SIDE_PILL[st][1]}</span>` : '',
       items: drawn.map(sideItemHTML).join('') + more + sideTodosHTML(t, href) + sideRecsHTML(recsBy[who(t.id)], href),
     });
   };
@@ -211,9 +211,9 @@ async function drawList(activeID, reuse) {
   // chat head's: each row the name, the role in its own left-aligned column
   // and one status pill on the right, a side line in the pill's colour. A
   // person's row is their highest-status session, and the rows run by the
-  // pill each wears, in this order: speaking, waiting to speak, your turn, to read, working,
-  // idle with to-dos, idle with only recs, then the plain idle pairs. Any
-  // card of the owner's but a read or an install is Your turn as the
+  // pill each wears, in this order: install, your turn, to read, working,
+  // idle with only recs, idle with to-dos, then the plain idle pairs. An
+  // install card makes the row Install; any other card but a read is Your turn as the
   // person's own status, ahead of a running turn (the hub files that one
   // under Working), though the row then wears Working. The cards are the
   // person's own and every sub-session's under them, so a sub-session's
@@ -223,15 +223,22 @@ async function drawList(activeID, reuse) {
   // while the turn runs, else the person's own status (`pillOf`). The row
   // sorts by its pill, so a row wearing Working sits with the working rows;
   // its red lines still say what is the owner's.
-  const pillOf = (t, base) => (base && base !== 'speak' && t.status === 'running' ? 'work' : base);
-  const statusOf = t => {
+  // SPEAKING AND WAITING ARE PILLS ONLY: the row keeps its own status's
+  // place and edge colour, with the audio pill on it, so a card never jumps
+  // up the list while it is read aloud. An install card is the top stack,
+  // over Your turn, and Working never covers it.
+  const audioOf = t => {
     const ps = (b.pills || {})[t.id] || [];
-    if (ps.some(p => p.tone === 'speaking')) return 'speak';
-    if (ps.some(p => p.tone === 'waiting')) return 'wait';
+    return ps.some(p => p.tone === 'speaking') ? 'speak' : ps.some(p => p.tone === 'waiting') ? 'wait' : '';
+  };
+  const pillOf = (t, base) => (!base ? '' : audioOf(t) || (base !== 'install' && t.status === 'running' ? 'work' : base));
+  const statusOf = t => {
     const ids = [t.id].concat(members[t.id] || []);
     const cs = ids.flatMap(id => sessionCards(bundles[id], false));
     const asks = ids.reduce((n, id) => n + by(id), 0);
-    if (cs.some(c => !['read', 'install'].includes(c.speaking ? c.under : c.tint)) || (asks && !cs.length)) return 'turn';
+    const kind = c => (c.speaking ? c.under : c.tint);
+    if (cs.some(c => kind(c) === 'install')) return 'install';
+    if (cs.some(c => kind(c) !== 'read') || (asks && !cs.length)) return 'turn';
     if (cs.length) return 'read';
     if (ids.some(id => (b.section || {})[id] === 'your_turn')) return 'turn';
     if (sectionOf(b, t) === 'working' || t.status === 'running') return 'work';
@@ -255,8 +262,8 @@ async function drawList(activeID, reuse) {
   const live = threads.filter(t => !nested(t) && shown(t, sectionOf(b, t)));
   const liveIDs = new Set(live.map(t => t.id));
   const ranked = live.concat(people.filter(t => !liveIDs.has(t.id))).map((t, i) => {
-    const base = statusOf(t), st = pillOf(t, base);
-    return { t, i, st, own: base ? SIDE_TIER[base] : 99, tier: st ? SIDE_TIER[st] : 99 };
+    const base = statusOf(t), st = pillOf(t, base), at = st === 'speak' || st === 'wait' ? base : st;
+    return { t, i, st, at, own: base ? SIDE_TIER[base] : 99, tier: at ? SIDE_TIER[at] : 99 };
   });
   // Each person once: their highest-status session by its own status (a
   // running one with a decision beats an idle one with a card to read), the
@@ -265,11 +272,11 @@ async function drawList(activeID, reuse) {
   ranked.sort((x, y) => x.own - y.own || x.i - y.i);
   const once = new Set();
   const firsts = ranked.filter(x => !once.has(who(x.t.id)) && once.add(who(x.t.id)));
-  const rows = firsts.filter(x => x.st).sort((x, y) => x.tier - y.tier || x.i - y.i);
-  const idle = firsts.filter(x => !x.st && person(x.t)).map(x => x.t);
+  const rows = firsts.filter(x => x.at).sort((x, y) => x.tier - y.tier || x.i - y.i);
+  const idle = firsts.filter(x => !x.at && person(x.t)).map(x => x.t);
   paint(list, `
     <div class="side-top">Your team</div>
-    ${rows.map(x => card(x.t, x.st)).join('')}
+    ${rows.map(x => card(x.t, x.st, x.at)).join('')}
     ${idle.length ? `<div class="idle-grid">${idle.map(t => idleCellHTML(b, t, t.id === activeID)).join('')}</div>` : ''}
     ${(b.threads_total || threads.length || people.length) ? '' : emptyHTML('No sessions yet.')}`);
 }
@@ -283,8 +290,8 @@ const SIDE_ROWS = 2;
 
 // A row's status: its rank on the list, and its pill's class and word.
 // (STATUS_PILL is the rec card's, in ui.js.)
-const SIDE_TIER = { speak: 0, wait: 1, turn: 2, read: 3, work: 4, todo: 5, recs: 6 };
-const SIDE_PILL = { turn: ['needs', 'Your turn'], read: ['read', 'To read'], work: ['running', 'Working'], todo: ['idle', 'Idle'], recs: ['idle', 'Idle'] };
+const SIDE_TIER = { install: 0, turn: 1, read: 2, work: 3, recs: 4, todo: 5 };
+const SIDE_PILL = { install: ['install', 'Install'], turn: ['needs', 'Your turn'], read: ['read', 'To read'], work: ['running', 'Working'], todo: ['idle', 'Idle'], recs: ['idle', 'Idle'] };
 
 // One person on the list: three columns, the name, the role and the status
 // pill, then its lines; the side line is the status colour, the open row
@@ -409,7 +416,9 @@ function headPills(b, t) {
   const pills = (b && b.pills || {})[t.id] || (t.pill ? [t.pill] : null)
     || (t.status === 'running' ? [{ tone: 'running', word: 'running' }] : null);
   if (!pills) return statusPill(t.status);
-  return pills.map(p => {
+  // No "speaking" in the head: the card and the Sessions row already carry
+  // it. ThreadDetail.macHeadPills drops it the same way.
+  return pills.filter(p => p.tone !== 'speaking').map(p => {
     const act = HEAD_ACT[p.tone];
     if (!act) return pill(p.word, PILL_CLASS[p.tone]);
     const dot = p.tone === 'waiting' ? '<span class="dot"></span>' : '<span class="dot pulse"></span>';

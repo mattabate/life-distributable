@@ -64,3 +64,20 @@ func TestOTARequestLogHasNoToken(t *testing.T) {
 		t.Fatalf("request not logged as redacted: %q", buf.String())
 	}
 }
+
+// A refusal's words reach the request log and never the client's headers.
+func TestRefusalWhyIsLogged(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sw := &statusWriter{ResponseWriter: rec, code: 200}
+	jsonErr(sw, 400, "voice:\n empty blob")
+	if sw.code != 400 || sw.why != ": voice: empty blob" || rec.Header().Get(whyHeader) != "" || !strings.Contains(rec.Body.String(), "empty blob") {
+		t.Fatalf("code %d why %q header %q body %s", sw.code, sw.why, rec.Header().Get(whyHeader), rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	sw = &statusWriter{ResponseWriter: rec, code: 200}
+	sw.Header().Set(whyHeader, "x")
+	sw.Write([]byte("ok"))
+	if sw.code != 200 || rec.Header().Get(whyHeader) != "" {
+		t.Fatalf("a bare Write: code %d header %q", sw.code, rec.Header().Get(whyHeader))
+	}
+}

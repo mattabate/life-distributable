@@ -32,14 +32,17 @@ const team = [
   p('read1', 'Eve', 'Editor'),
   p('wait1', 'Fay', 'Writer'),
   p('spk1', 'Gus', 'Chief of staff'),
+  p('ins1', 'Ivy', 'Fixer', { status: 'running' }),
 ];
 const board = {
-  count: 2, for_you: { turn1: 1 }, first: {}, home: {}, open: {}, todo: {},
-  section: { turn1: 'working', work1: 'working' },
+  count: 2, for_you: { turn1: 1, spk1: 1 }, first: {}, home: {}, open: {}, todo: {},
+  section: { turn1: 'working', work1: 'working', ins1: 'working' },
   pills: { spk1: [{ tone: 'speaking', word: 'speaking' }], wait1: [{ tone: 'waiting', word: 'waiting to speak' }] },
   sessions: [
     { id: 'turn1', asks: [{ id: 'ask-1', title: 'Pick a date', kind: 'decision' }] },
     { id: 'read1', asks: [{ id: 'ask-2', title: 'The draft is up', kind: 'read' }] },
+    { id: 'spk1', asks: [{ id: 'ask-3', title: 'Pick a venue', kind: 'decision', said: 'Hey, one card.', speaking: true }] },
+    { id: 'ins1', asks: [{ id: 'ask-4', title: 'Install the build', kind: 'install' }] },
   ],
 };
 const recs = [{ id: 'rec-1', title: 'Try a <b>timer</b>', thread_id: 'recs1', closed: false }, { id: 'rec-2', title: 'Old', thread_id: 'todo1', closed: true }];
@@ -63,14 +66,23 @@ test('one list, no headings: rows in status order, one pill each', async () => {
   assert.match(html, /<div class="side-top">Your team<\/div>/);
   assert.doesNotMatch(html, /side-h\b/);
   const order = [...html.matchAll(/class="side-row st-(\w+)[^]*?class="side-t[^"]*" href="[^"]*">(\w+)</g)].map(m => [m[2], m[1]]);
-  // Dee is mid-turn with an open card: she wears Working and sorts with the
-  // working rows, after the card to read, the hub's order among them.
-  assert.deepEqual(order, [['Gus', 'speak'], ['Fay', 'wait'], ['Eve', 'read'], ['Cy', 'work'], ['Dee', 'work'], ['Ada', 'todo'], ['Bo', 'recs']]);
+  // An install card is the top stack, and Working never covers it. Speaking
+  // is a pill only: Gus keeps his Your turn place and edge. Dee is mid-turn
+  // with an open card: she wears Working and sorts with the working rows,
+  // after the card to read, the hub's order among them. Recs sit above the
+  // idle to-do list.
+  assert.deepEqual(order, [['Ivy', 'install'], ['Gus', 'turn'], ['Eve', 'read'], ['Cy', 'work'], ['Dee', 'work'], ['Bo', 'recs'], ['Ada', 'todo']]);
   const row = name => html.split('class="side-row').find(s => s.includes(`">${name}</a>`));
   assert.equal(row('Dee').match(/class="pill /g).length, 1);
   assert.match(row('Dee'), /<span class="pill running">Working<\/span>/);
-  assert.match(row('Fay'), /Waiting/);
-  assert.doesNotMatch(row('Fay'), /waiting to speak/);
+  assert.match(row('Ivy'), /<span class="pill install">Install<\/span>/);
+  assert.doesNotMatch(row('Ivy'), /Working/);
+  assert.match(row('Gus'), /class="side-audio">[^]*speaking/);
+  assert.doesNotMatch(row('Gus'), /Your turn<\/span>/);
+  // Waiting with nothing else is not a row: Fay is an idle pair, her pill on it.
+  assert.ok(!row('Fay'));
+  assert.match(html, /<a class="idle-cell" href="#\/sessions\/wait1"><span class="side-name"><strong>Fay<\/strong><span class="side-audio">[^]*Waiting/);
+  assert.doesNotMatch(html, /waiting to speak/);
   assert.match(row('Ada'), /<span class="pill idle">Idle<\/span>[^]*Wire the export/);
   // An open rec is a violet line under its person; a closed one is not.
   assert.match(row('Bo'), /class="side-item rec"[^]*Try a/);
@@ -142,4 +154,12 @@ test("a person's row is the session with the highest own status, sorted by its p
   // The running session with the decision is Kim's row, not the idle one
   // with the card to read; wearing Working, it sorts after Eve's card.
   assert.deepEqual(rows, [['Eve', 'read', '#/sessions/read1'], ['Kim', 'work', '#/sessions/kim1']]);
+});
+
+test('the chat head shows no speaking pill; running stays', () => {
+  const b = { pills: { s1: [{ tone: 'speaking', word: 'speaking' }, { tone: 'running', word: 'running' }] } };
+  const h = headPills(b, { id: 's1', status: 'running' });
+  assert.doesNotMatch(h, /speaking/);
+  assert.match(h, /class="pill running/);
+  assert.doesNotMatch(headPills({ pills: { s1: [{ tone: 'speaking', word: 'speaking' }] } }, { id: 's1', status: 'idle' }), /speaking/);
 });

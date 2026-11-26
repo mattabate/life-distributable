@@ -151,8 +151,8 @@ final class DecodeTests: XCTestCase {
     }
 
     /// The Sessions list's one status per person (SideStatus, the console's
-    /// statusOf/pillOf): the place is the base status, the pill is Working
-    /// while the turn runs, except over the card being said.
+    /// statusOf/pillOf): the place is the base status, the pill is the card
+    /// being said, else Working while the turn runs, except over an install.
     @MainActor func testSideStatus() throws {
         func person(_ id: String, _ status: String) throws -> Life.Thread {
             try decode(Life.Thread.self, """
@@ -169,7 +169,10 @@ final class DecodeTests: XCTestCase {
                     "title":"Pick a day","detail":"","kind":"decision","verb":"decide","surface":"any","state":"open","check_hint":""}],"steps":[]},
            {"id":"reader","title":"reader","n":1,"first":"ask-2","running":false,"actions":[],
            "asks":[{"id":"ask-2","created_at":"2026-08-26T09:00:00Z","updated_at":"2026-08-26T09:00:00Z","thread_id":"reader",
-                    "title":"The draft is up","detail":"","kind":"read","verb":"read","surface":"any","state":"open","check_hint":""}],"steps":[]}],
+                    "title":"The draft is up","detail":"","kind":"read","verb":"read","surface":"any","state":"open","check_hint":""}],"steps":[]},
+           {"id":"fixer","title":"fixer","n":1,"first":"ask-3","running":true,"actions":[],
+           "asks":[{"id":"ask-3","created_at":"2026-08-26T09:00:00Z","updated_at":"2026-08-26T09:00:00Z","thread_id":"fixer",
+                    "title":"Install the build","detail":"","kind":"install","verb":"install","surface":"any","state":"open","check_hint":""}],"steps":[]}],
          "for_you":{"busy":1},"first":{},
          "section":{"busy":"working","worker":"working","lead":"working"},"home":{"busy":"lead"},
          "pills":{"talker":[{"word":"speaking","tone":"speaking"}],"queued":[{"word":"waiting to speak","tone":"waiting"}]},
@@ -181,14 +184,21 @@ final class DecodeTests: XCTestCase {
         // A sub-session's decision makes its person's row Your turn, over
         // the hub's rollup of Working.
         XCTAssertEqual(SideStatus.of(try person("lead", "idle"), board: b, recs: 0), .turn)
+        // Speaking is the pill only: the place stays the base's (Working here).
         let talker = try person("talker", "running")
         XCTAssertEqual(SideStatus.of(talker, board: b, recs: 0), .speak)
-        XCTAssertEqual(SideStatus.of(try person("queued", "idle"), board: b, recs: 0), .wait)
+        XCTAssertEqual(SideStatus.base(talker, board: b, recs: 0), .work)
+        // Waiting with nothing else is no row: an idle pair wearing the pill.
+        let queued = try person("queued", "idle")
+        XCTAssertNil(SideStatus.of(queued, board: b, recs: 0))
+        XCTAssertEqual(SideStatus.audio(queued, board: b), .wait)
+        // An install card is its own status, and Working never covers it.
+        XCTAssertEqual(SideStatus.of(try person("fixer", "running"), board: b, recs: 0), .install)
         XCTAssertEqual(SideStatus.of(try person("reader", "idle"), board: b, recs: 0), .read)
         XCTAssertEqual(SideStatus.of(try person("worker", "running"), board: b, recs: 0), .work)
         XCTAssertEqual(SideStatus.of(try person("quiet", "idle"), board: b, recs: 2), .recs)
         XCTAssertNil(SideStatus.of(try person("quiet", "idle"), board: b, recs: 0))
-        XCTAssertEqual([SideStatus.work, .speak, .recs, .turn, .wait, .read].sorted(), [.speak, .wait, .turn, .read, .work, .recs])
+        XCTAssertEqual([SideStatus.todo, .work, .recs, .turn, .install, .read].sorted(), [.install, .turn, .read, .work, .recs, .todo])
         XCTAssertEqual(SideStatus.wait.word, "Waiting")
         XCTAssertEqual(SideStatus.recs.word, "Idle")
     }
