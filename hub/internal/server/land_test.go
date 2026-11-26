@@ -280,6 +280,34 @@ func TestOwnerSideMakePinsMakefile(t *testing.T) {
 	}
 }
 
+// The Mac's disk ignores case and git pathspecs do not: GNUMakefile is the
+// file make opens as GNUmakefile, and OPS/hub.sh is ops/hub.sh once checked
+// out, so a gate path matches in any case (#225).
+func TestGatePathsMatchAnyCase(t *testing.T) {
+	repo := t.TempDir()
+	landGit(t, repo, "init", "-b", "main")
+	landGit(t, repo, "commit", "--allow-empty", "-m", "base")
+	blob := landGit(t, repo, "hash-object", "-w", "--stdin")
+	gated := []string{"GNUMakefile", "MAKEFILE", "OPS/hub.sh", "Hub/Internal/Actions/x.go", "ops/Session-User-x.sh"}
+	for _, p := range append(gated, "README") {
+		landGit(t, repo, "update-index", "--add", "--cacheinfo", "100644,"+blob+","+p)
+	}
+	landGit(t, repo, "commit", "-m", "mixed case")
+	git := func(args ...string) (string, error) {
+		out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).Output()
+		return strings.TrimSpace(string(out)), err
+	}
+	got := "\n" + gateTouched(git, "main~1", "main") + "\n"
+	for _, p := range gated {
+		if !strings.Contains(got, "\n"+p+"\n") {
+			t.Errorf("%s changed and the gate did not see it", p)
+		}
+	}
+	if strings.Contains(got, "\nREADME\n") {
+		t.Error("README read as a gate file")
+	}
+}
+
 // A route marked open in routes.go is served with no token only if the gate's
 // own list names it.
 func TestOpenRouteNeedsTheGateList(t *testing.T) {
