@@ -6,6 +6,9 @@
   --accent: #2563eb; --accent-fg: #fff; --red: #dc2626; --amber: #d97706;
   --green: #059669; --violet: #7c3aed; --teal: #0d9488; --code: #f3f4f6; --shadow: 0 1px 2px rgba(0,0,0,.05);
   --heading: #4b5160;
+  /* To read is a lighter blue than Working's accent, and install a green of
+     its own, apart from speaking's. The desktop's Web.read / Web.install. */
+  --read: #0ea5e9; --install: #65a30d; --install-fg: #fff;
   /* --line is the hairline BETWEEN things inside one card; a control that has
      to read as its own object on a white card (the composer) needs an edge you
      can actually see. Two weights, so "bordered" never means "muddier". */
@@ -38,7 +41,9 @@
     --bg: #0e1014; --panel: #171a21; --line: #272a33; --fg: #e8eaee; --muted: #9aa1ad;
     --accent: #6aa1ff; --accent-fg: #0b1220; --red: #f87171; --amber: #fbbf24;
     --green: #34d399; --violet: #a78bfa; --teal: #2dd4bf; --code: #1e222b; --shadow: none;
-    --heading: #b4bac6;
+    --heading: #b4bac6; --read: #38bdf8; --install: #a3e635;
+    /* white on the dark lime is ~1.5:1; the button's text goes dark, as --accent-fg */
+    --install-fg: #0b1220;
     --line-strong: #3a3f4c;
     /* the same eight hues re-stepped for the dark surface, not an automatic
        flip: each is chosen for the dark band and validated as a set. */
@@ -239,7 +244,7 @@ textarea { resize: vertical; }
   text-transform: uppercase; letter-spacing: .03em; white-space: nowrap;
 }
 .pill.needs { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
-.pill.read { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.pill.read { background: color-mix(in srgb, var(--read) 15%, transparent); color: var(--read); }
 .pill.running { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
 .pill.speaking { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
 .pill.waiting { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
@@ -554,8 +559,8 @@ a.chain-w:hover, a.chain-w.on { color: var(--accent); }
      past its border (2026-09-25, a blob path in an approval). */
   overflow-wrap: anywhere; min-width: 0;
 }
-.ask.read { --tint: var(--accent); }
-.ask.install { --tint: var(--teal); }
+.ask.read { --tint: var(--read); }
+.ask.install { --tint: var(--install); }
 /* Read or Dismiss pressed: the card greys at once and takes no second click
    while the hub closes it. */
 .ask.closing { --tint: var(--muted); opacity: .5; pointer-events: none; }
@@ -651,9 +656,9 @@ a.chain-w:hover, a.chain-w.on { color: var(--accent); }
 .all-table td.small { white-space: nowrap; }
 .all-table .arow { margin-top: 10px; }
 /* The install tint outside the card: the calendar's row and the pill. */
-.card.install { border-left: 3px solid var(--teal); }
-.pill.install { background: color-mix(in srgb, var(--teal) 15%, transparent); color: var(--teal); }
-.btn.install, a.btn.install { background: var(--teal); color: #fff; border-color: transparent; font-weight: 600; }
+.card.install { border-left: 3px solid var(--install); }
+.pill.install { background: color-mix(in srgb, var(--install) 15%, transparent); color: var(--install); }
+.btn.install, a.btn.install { background: var(--install); color: var(--install-fg); border-color: transparent; font-weight: 600; }
 
 .card.overdue { border-color: var(--amber); }
 

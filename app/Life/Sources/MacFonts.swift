@@ -60,7 +60,10 @@ enum Web {
     static let fg = pair(0x14161a, 0xe8eaee)
     /// The desktop sidebar's YOUR TURN / WORKING / IDLE headings.
     static let heading = pair(0x4b5160, 0xb4bac6)
-    static let install = pair(0x1d9e88, 0x3cc7ad)
+    /// To read is a lighter blue than Working's accent, and install a green
+    /// of its own; the console's --read / --install.
+    static let read = pair(0x0ea5e9, 0x38bdf8)
+    static let install = pair(0x65a30d, 0xa3e635)
     static let red = pair(0xdc2626, 0xf87171)
     static let amber = pair(0xd97706, 0xfbbf24)
     static let green = pair(0x059669, 0x34d399)

@@ -49,25 +49,35 @@ final class BoardStore {
     /// agree. Each mark used to read its own copy (the card a flag of its
     /// own, the head the chat's reload, the row the board's next poll), so
     /// they flipped one after another. The console's twin is ui.js hushVoice.
-    private(set) var hushed: Set<String> = []
+    /// Counted: a card hush and the head's Stop on the same session can
+    /// overlap, and the first to finish must not clear the other's mark.
+    /// The console's hushCount works the same way.
+    private var hushCount: [String: Int] = [:]
+    var hushed: Set<String> { Set(hushCount.keys) }
 
     /// Quiet `cards` (and with `voice`, the session's own line too): marked
     /// at once, then the hub, then the board and `reload` (the chat) read
     /// fresh before the marks go, so nothing flickers back in between.
     func hush(cards: [String], thread: String, voice: Bool = false, hub: HubClient, reload: () async -> Void) async throws {
         let marks = Set(cards + (thread.isEmpty ? [] : [thread]))
-        hushed.formUnion(marks)
+        for m in marks { hushCount[m, default: 0] += 1 }
         if let b = board { board = hushing(b) }
+        // Each call on its own: one failing never leaves the rest unhushed.
         var failed: Error?
-        do {
-            if voice, !thread.isEmpty { _ = try await hub.voice(thread: thread, secs: 0) }
-            for c in cards { try await hub.hushVoice(card: c) }
-        } catch { failed = error }
+        if voice, !thread.isEmpty {
+            do { _ = try await hub.voice(thread: thread, secs: 0) } catch { failed = failed ?? error }
+        }
+        for c in cards {
+            do { try await hub.hushVoice(card: c) } catch { failed = failed ?? error }
+        }
         // Read even while a chat holds the loop paused: the row is on screen.
         async let fresh: Void = refresh(hub)
         await reload()
         await fresh
-        hushed.subtract(marks)
+        for m in marks {
+            let n = (hushCount[m] ?? 0) - 1
+            hushCount[m] = n > 0 ? n : nil
+        }
         if let failed { throw failed }
     }
 

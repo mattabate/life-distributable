@@ -84,8 +84,8 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .side-item { --c: var(--red); display: flex; align-items: flex-start; padding-top: 6px; font-size: 13.5px; line-height: 1.4;
   color: var(--fg); text-decoration: none; }
 .side-item:hover .side-tt { text-decoration: underline; text-decoration-color: var(--line-strong); }
-.side-item.read { --c: var(--accent); }
-.side-item.install { --c: var(--teal); }
+.side-item.read { --c: var(--read); }
+.side-item.install { --c: var(--install); }
 .side-item.paused { --c: var(--amber); }
 .side-item.quiet, .side-item.err-card { --c: var(--muted); }
 .side-item.job .side-tt, .side-item.quiet .side-tt { color: var(--muted); }
@@ -121,9 +121,9 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .pill.idle { background: color-mix(in srgb, var(--muted) 14%, transparent); color: var(--muted); }
 .side-row { box-shadow: inset 4px 0 0 var(--e, transparent); }
 .side-row.st-turn { --e: var(--red); }
-.side-row.st-speak { --e: var(--green); }
-.side-row.st-wait { --e: var(--amber); }
-.side-row.st-read, .side-row.st-work { --e: var(--accent); }
+.side-row.st-install { --e: var(--install); }
+.side-row.st-read { --e: var(--read); }
+.side-row.st-work { --e: var(--accent); }
 .side-row.st-todo, .side-row.st-recs { --e: var(--line-strong); }
 .side-row.on { box-shadow: inset 4px 0 0 var(--e, var(--accent)); }
 /* Idle: two to a line, the name over the role, a hairline between */
@@ -131,6 +131,11 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; margin: 4px 4px
 .idle-cell { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 9px 18px; color: var(--fg); text-decoration: none;
   border-bottom: 1px solid var(--line); }
 .idle-cell:nth-child(odd) { border-right: 1px solid var(--line); }
+/* an idle person's audio pill on the cell's right edge at the status
+   column's width, so it lines up with every row's pill */
+.idle-cell .side-name > strong { flex: 0 1 auto; }
+.idle-cell .side-audio { margin-left: auto; }
+.idle-cell .side-audio .pill { width: 76px; box-sizing: border-box; justify-content: center; padding: 1px 8px; }
 .idle-cell:hover { background: color-mix(in srgb, var(--fg) 3%, var(--panel)); }
 /* whose rec it is, first on its pill line */
 .rec-who { color: var(--fg); font-weight: 600; }

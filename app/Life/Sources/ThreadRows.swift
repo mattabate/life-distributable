@@ -17,36 +17,47 @@ import SwiftUI
 
 /// A row's status on the Sessions list, one list with no headings: the
 /// console's `statusOf`. The highest a person has, and the rows run in this
-/// order: speaking, waiting to speak, your turn, to read, working, idle with
-/// to-dos, idle with only recs. nil = a plain idle pair at the foot. Any card
-/// of the owner's but a read or an install is Your turn as the person's own
-/// status, ahead of a running turn, though the row then wears Working.
+/// order: install, your turn, to read, working, idle with only recs, idle
+/// with to-dos. nil = a plain idle pair at the foot. An install card makes
+/// the row Install; any other card of the owner's but a read is Your turn as
+/// the person's own status, ahead of a running turn, though the row then
+/// wears Working.
+/// Speaking and waiting are pills only: the row keeps its own status's place
+/// and edge colour, so a card never jumps up the list while it is read
+/// aloud. An install card is the top stack and Working never covers it.
 enum SideStatus: Int, Comparable {
-    case speak, wait, turn, read, work, todo, recs
+    case speak, wait, install, turn, read, work, recs, todo
     static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
 
-    /// The pill, one per person, never stacked: a running turn wears Working
-    /// over anything but the card being said, and the row sorts by it (the
+    /// The pill, one per person, never stacked: the card being said, else a
+    /// running turn wears Working over anything but an install (the
     /// console's `pillOf`).
     @MainActor static func of(_ t: Thread, board b: Board, recs: Int) -> SideStatus? {
         guard let s = base(t, board: b, recs: recs) else { return nil }
-        return s != .speak && t.status == "running" ? .work : s
+        if let a = audio(t, board: b) { return a }
+        return s != .install && t.status == "running" ? .work : s
     }
 
-    /// The person's own status: it picks which of their sessions is the
-    /// row, and `of` turns it into the pill. The cards are the person's own
-    /// and every sub-session's the board's `home` files under them, so a sub-session's
-    /// decision makes the row Your turn even where the hub's rollup says
-    /// Working.
-    @MainActor static func base(_ t: Thread, board b: Board, recs: Int) -> SideStatus? {
+    /// Speaking or waiting to speak (the console's `audioOf`).
+    @MainActor static func audio(_ t: Thread, board b: Board) -> SideStatus? {
         let ps = b.pills?[t.id] ?? []
         if ps.contains(where: { $0.tone == "speaking" }) { return .speak }
         if ps.contains(where: { $0.tone == "waiting" }) { return .wait }
+        return nil
+    }
+
+    /// The person's own status: it picks which of their sessions is the
+    /// row and where the row sorts, and `of` turns it into the pill. The
+    /// cards are the person's own and every sub-session's the board's `home`
+    /// files under them, so a sub-session's decision makes the row Your turn
+    /// even where the hub's rollup says Working.
+    @MainActor static func base(_ t: Thread, board b: Board, recs: Int) -> SideStatus? {
         let ids = [t.id] + (b.home ?? [:]).filter { $0.value == t.id }.map(\.key)
         let cs = ids.flatMap { id in b.sessions?.first { $0.id == id }.map { SessionCell.cells($0, board: b) } ?? [] }
         let asks = ids.reduce(0) { $0 + (b.forYou[$1] ?? 0) }
-        if cs.contains(where: { !["read", "install"].contains($0.tone == "speaking" ? $0.under ?? "" : $0.tone) })
-            || (asks > 0 && cs.isEmpty) { return .turn }
+        let kinds = cs.map { $0.tone == "speaking" ? $0.under ?? "" : $0.tone }
+        if kinds.contains("install") { return .install }
+        if kinds.contains(where: { $0 != "read" }) || (asks > 0 && cs.isEmpty) { return .turn }
         if !cs.isEmpty { return .read }
         if ids.contains(where: { b.section?[$0] == "your_turn" }) { return .turn }
         if b.sectionOf(t) == "working" || t.status == "running" { return .work }
@@ -57,6 +68,7 @@ enum SideStatus: Int, Comparable {
         switch self {
         case .speak: "Speaking"
         case .wait: "Waiting"
+        case .install: "Install"
         case .turn: "Your turn"
         case .read: "To read"
         case .work: "Working"
@@ -70,7 +82,9 @@ enum SideStatus: Int, Comparable {
         case .turn: Web.red
         case .speak: Web.green
         case .wait: Web.amber
-        case .read, .work: Web.accent
+        case .install: Web.install
+        case .read: Web.read
+        case .work: Web.accent
         case .todo, .recs: Web.lineStrong
         }
         #else
@@ -78,6 +92,7 @@ enum SideStatus: Int, Comparable {
         case .turn: .red
         case .speak: .green
         case .wait: .orange
+        case .install: .teal
         case .read, .work: .accentColor
         case .todo, .recs: .secondary
         }
@@ -310,7 +325,7 @@ struct SideItem: View {
     var dot: Color {
         switch c.tone {
         case "speaking": Web.green
-        case "read": Web.accent
+        case "read": Web.read
         case "install": Web.install
         case "rec": Web.violet
         case "error": Web.muted
@@ -424,6 +439,7 @@ struct ThreadRow: View {
     /// The row's status (its pill and side line) and the person's open recs,
     /// the lowest lines under the name.
     var status: SideStatus = .todo
+    var edge: SideStatus = .todo
     var recs: [Rec] = []
     var recCells: [SessionCell] {
         recs.map { SessionCell(id: "rec:" + $0.id, title: $0.title, verb: "rec", tone: "rec", step: false) }
@@ -434,6 +450,9 @@ struct ThreadRow: View {
         self.on = on
         self.recs = recs
         self.status = status ?? SideStatus.of(t, board: b, recs: recs.count) ?? .todo
+        // A speaking or waiting row keeps its own status's edge; only the pill
+        // turns green or orange.
+        edge = [.speak, .wait].contains(self.status) ? SideStatus.base(t, board: b, recs: recs.count) ?? self.status : self.status
         self.subs = subs.map { SessionCell.sub($0, board: b) }
         forYou = b.forYou[t.id] ?? 0
         let cards = b.bundleOf(t).map { SessionCell.cells($0, board: b) } ?? []
@@ -550,7 +569,7 @@ struct ThreadRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(on ? Web.accent.opacity(0.1) : Color.clear)
         .background(Web.panel)
-        .overlay(alignment: .leading) { Rectangle().fill(status.color).frame(width: 4) }
+        .overlay(alignment: .leading) { Rectangle().fill(edge.color).frame(width: 4) }
         .overlay(alignment: .bottom) { Rectangle().fill(Web.line).frame(height: 1) }
         .contentShape(Rectangle())
         .onTapGesture { open(first) }
@@ -612,7 +631,7 @@ struct ThreadRow: View {
         // The row itself lands on the board's first card; a cell on its own.
         // (Not a NavigationLink: a link swallows the taps meant for the cells.)
         .onTapGesture { open(first) }
-        .rowAccent(status.color)
+        .rowAccent(edge.color)
         // Chatting about a session row goes to a NEW session (the board is not
         // inside one): "what is this thing doing?" without interrupting it.
         .chatAbout(ChatSubject(
