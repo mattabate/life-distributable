@@ -197,9 +197,9 @@ func TestStepsFateAndMiss(t *testing.T) {
 	if _, err := c.SetSteps(got.ID, []string{"x"}); err == nil {
 		t.Fatal("a closed item's steps stay")
 	}
-	half, _ := c.Add(Item{Title: "Routine B", Kind: "owner", Day: "2026-10-18", At: "09:30", Due: "on", Steps: two})
+	half, _ := c.Add(Item{Title: "Routine B", Kind: "owner", Day: "2026-10-18", At: "09:30", Repeat: "daily", Due: "on", Steps: two})
 	c.CloseStep(half.ID, 1, "done", "owner")
-	none, _ := c.Add(Item{Title: "Routine C", Kind: "owner", Day: "2026-10-18", At: "09:30", Due: "on", Steps: two})
+	none, _ := c.Add(Item{Title: "Routine C", Kind: "owner", Day: "2026-10-18", At: "09:30", Repeat: "daily", Due: "on", Steps: two})
 	now = time.Date(2026, 10, 19, 9, 31, 0, 0, time.Local)
 	c.Tick()
 	got, _ = c.Get(half.ID)
