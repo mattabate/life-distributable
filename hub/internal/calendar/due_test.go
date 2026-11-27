@@ -84,8 +84,9 @@ func TestOneDigitHourRowsArePadded(t *testing.T) {
 
 // An on-the-day chore (watering the plants early does not cover the rest of
 // the week): it fires once with no nag, closes with a tick when no session
-// is behind it, is never Overdue, and 24 hours on (not midnight) closes it as missed - the
-// chain goes on. A step a session waits on still needs the owner's words.
+// is behind it, is never Overdue, and stays open until the next one fires,
+// which closes it as missed (a daily one lapses 24 hours on, not midnight) -
+// the chain goes on. A step a session waits on still needs the owner's words.
 func TestOnTheDayChoreIsMissedNotOverdue(t *testing.T) {
 	c, th, n := newTest(t)
 	now := time.Date(2026, 9, 30, 8, 0, 0, 0, time.Local) // Wednesday
@@ -136,20 +137,47 @@ func TestOnTheDayChoreIsMissedNotOverdue(t *testing.T) {
 	if v, _ = c.Agenda("2026-09-27", "2026-10-03"); len(v.Due) != 1 || v.Due[0].ID != it.ID {
 		t.Fatalf("yesterday's chore inside its 24 hours is Due: %+v", v.Due)
 	}
-	// Thursday 09:00, 24 hours on: missed, the next Wednesday is up, nothing nagged.
+	// A daily one beside it: 24 hours on, it closes as missed by itself.
+	daily, _ := c.Add(Item{Title: "Do your morning routine", Kind: "owner", Day: "2026-10-01", At: "08:00", Repeat: "daily", Due: "on"})
+	now = time.Date(2026, 10, 1, 8, 30, 0, 0, time.Local)
+	c.Tick()
+	// Thursday 09:00, 24 hours on: a weekly chore is NOT missed (it comes
+	// once a week, so it stays the owner's, still Due).
 	now = time.Date(2026, 10, 1, 9, 0, 0, 0, time.Local)
 	c.Tick()
-	if got, _ = c.Get(it.ID); got.State != "dismissed" || got.Resolution != "missed" || got.ResolvedBy != "hub" {
-		t.Fatalf("expected missed 24 hours on: %+v", got)
+	if got, _ = c.Get(it.ID); got.State != "fired" {
+		t.Fatalf("a weekly chore stays open past 24 hours: %+v", got)
 	}
-	if v, _ = c.Agenda("2026-09-27", "2026-10-03"); len(v.Due) != 0 {
-		t.Fatalf("a missed chore leaves Due: %+v", v.Due)
+	if a, _ := th.GetAsk(got.AskID); !a.Active() {
+		t.Fatalf("its card stays on the board: %+v", a)
+	}
+	now = time.Date(2026, 10, 2, 8, 0, 0, 0, time.Local)
+	c.Tick()
+	if d, _ := c.Get(daily.ID); d.State != "dismissed" || d.Resolution != "missed" || d.ResolvedBy != "hub" {
+		t.Fatalf("a daily step 24 hours on is missed: %+v", d)
+	}
+	// Two days on the open weekly chore is still under Due: it is never
+	// Overdue, so Due is the one list that holds it.
+	inDue := false
+	v, _ = c.Agenda("2026-09-27", "2026-10-03")
+	for _, e := range v.Due {
+		inDue = inDue || e.ID == it.ID
+	}
+	if !inDue {
+		t.Fatalf("an open weekly chore stays in Due past its day: %+v", v.Due)
+	}
+	// Next Wednesday 09:00 the next one fires and the unanswered one closes as
+	// missed: one card of the chain at a time, nothing nagged.
+	now = time.Date(2026, 10, 7, 9, 0, 0, 0, time.Local)
+	c.Tick()
+	if got, _ = c.Get(it.ID); got.State != "dismissed" || got.Resolution != "missed" || got.ResolvedBy != "hub" {
+		t.Fatalf("expected missed when the next one fires: %+v", got)
 	}
 	if a, _ := th.GetAsk(got.AskID); a.Active() {
 		t.Fatalf("its ask should close too: %+v", a)
 	}
-	next, _ := c.List("2026-10-07", "2026-10-07", "scheduled")
-	if len(next) != 1 || next[0].Due != "on" {
+	next, _ := c.List("2026-10-07", "2026-10-07", "fired")
+	if len(next) != 1 || next[0].Due != "on" || next[0].Title != "Water the plants" {
 		t.Fatalf("chain: %+v", next)
 	}
 	for _, m := range n.msgs { // Sweep Venmo, a by-the-day step, may nag
@@ -175,6 +203,98 @@ func TestOnTheDayChoreIsMissedNotOverdue(t *testing.T) {
 	}
 	if ps, _ := th.ListPrompts("", host.ID, 10); len(ps) != 0 {
 		t.Fatalf("a silent dismiss wakes nobody: %+v", ps)
+	}
+}
+
+// A step of the owner's of any stride is one open card per chain: an every8d
+// step owed by its day stays open past its day, and the next one firing
+// closes it as missed.
+func TestAStepOfAnyStrideIsOneOpenCard(t *testing.T) {
+	c, th, _ := newTest(t)
+	now := time.Date(2026, 11, 18, 10, 0, 0, 0, time.Local)
+	c.Now = func() time.Time { return now }
+	it, err := c.Add(Item{Title: "Clean the coffee machine", Kind: "owner", Day: "2026-11-18", At: "09:45", Repeat: "every8d", Due: "by"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Tick()
+	now = time.Date(2026, 11, 22, 10, 0, 0, 0, time.Local)
+	c.Tick()
+	if got, _ := c.Get(it.ID); got.State != "fired" {
+		t.Fatalf("open past its day until the next: %+v", got)
+	}
+	now = time.Date(2026, 11, 26, 10, 0, 0, 0, time.Local)
+	c.Tick()
+	got, _ := c.Get(it.ID)
+	if got.State != "dismissed" || got.Resolution != "missed" || got.ResolvedBy != "hub" {
+		t.Fatalf("the next one firing closes it as missed: %+v", got)
+	}
+	if a, _ := th.GetAsk(got.AskID); a.Active() {
+		t.Fatalf("its card closes too: %+v", a)
+	}
+	if open, _ := c.List("2026-11-01", "2026-11-30", "fired"); len(open) != 1 || open[0].Day != "2026-11-26" {
+		t.Fatalf("one open card: %+v", open)
+	}
+}
+
+// One open card per CHAIN, not per title: weekly Gym Monday and weekly Gym
+// Friday are two chains and neither closes the other, and a one-off closes no
+// earlier same-titled step.
+func TestAStepClosesAlongItsOwnChainOnly(t *testing.T) {
+	c, _, _ := newTest(t)
+	now := time.Date(2026, 11, 2, 10, 0, 0, 0, time.Local) // Monday
+	c.Now = func() time.Time { return now }
+	mon, _ := c.Add(Item{Title: "Gym", Kind: "owner", Day: "2026-11-02", At: "09:00", Repeat: "weekly", Due: "on"})
+	fri, _ := c.Add(Item{Title: "Gym", Kind: "owner", Day: "2026-11-06", At: "09:00", Repeat: "weekly", Due: "on"})
+	one, _ := c.Add(Item{Title: "Call the plumber", Kind: "owner", Day: "2026-11-03", At: "09:00"})
+	two, _ := c.Add(Item{Title: "Call the plumber", Kind: "owner", Day: "2026-11-05", At: "09:00", Due: "on"})
+	for _, d := range []int{2, 3, 5, 6} {
+		now = time.Date(2026, 11, d, 10, 0, 0, 0, time.Local)
+		c.Tick()
+	}
+	for _, id := range []string{mon.ID, fri.ID, one.ID, two.ID} {
+		if got, _ := c.Get(id); got.State != "fired" {
+			t.Fatalf("another chain's step, or a one-off, closed it: %+v", got)
+		}
+	}
+	now = time.Date(2026, 11, 9, 10, 0, 0, 0, time.Local) // the next Monday
+	c.Tick()
+	if got, _ := c.Get(mon.ID); got.State != "dismissed" || got.Resolution != "missed" {
+		t.Fatalf("Monday's own next closes it: %+v", got)
+	}
+	if got, _ := c.Get(fri.ID); got.State != "fired" {
+		t.Fatalf("Friday's stays open: %+v", got)
+	}
+}
+
+// A weekly on-the-day step that never fired (the hub was down over its day)
+// fires late inside its week; once its next one is due it closes as missed and
+// the chain goes on, so nothing fires a week late beside the one that is due.
+func TestAWeeklyStepThatNeverFired(t *testing.T) {
+	c, _, _ := newTest(t)
+	now := time.Date(2026, 11, 3, 10, 0, 0, 0, time.Local)
+	c.Now = func() time.Time { return now }
+	late, _ := c.Add(Item{Title: "Water the plants", Kind: "owner", Day: "2026-11-04", At: "09:00", Repeat: "weekly", Due: "on"})
+	gone, _ := c.Add(Item{Title: "Take out the recycling", Kind: "owner", Day: "2026-11-04", At: "09:00", Repeat: "weekly", Due: "on"})
+	now = time.Date(2026, 11, 6, 10, 0, 0, 0, time.Local) // two days late
+	c.Tick()
+	if got, _ := c.Get(late.ID); got.State != "fired" {
+		t.Fatalf("inside its week it fires late: %+v", got)
+	}
+	c.Resolve(late.ID, "done", "owner", "")
+	// The other one's hub stayed down through the next Wednesday morning.
+	c.db.Exec(`UPDATE items SET state='scheduled', fired_at=NULL WHERE id=?`, gone.ID)
+	c.db.Exec(`DELETE FROM items WHERE prev_id=?`, gone.ID)
+	now = time.Date(2026, 11, 11, 8, 0, 0, 0, time.Local)
+	c.Tick()
+	if got, _ := c.Get(gone.ID); got.State != "dismissed" || got.Resolution != "missed" || got.ResolvedBy != "hub" {
+		t.Fatalf("its next is due, so it is missed, not fired: %+v", got)
+	}
+	now = time.Date(2026, 11, 11, 9, 30, 0, 0, time.Local)
+	c.Tick()
+	open, _ := c.List("2026-11-01", "2026-11-30", "fired")
+	if len(open) != 2 || open[0].Day != "2026-11-11" || open[1].Day != "2026-11-11" {
+		t.Fatalf("today's two fire, nothing a week late: %+v", open)
 	}
 }
 

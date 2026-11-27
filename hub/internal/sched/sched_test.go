@@ -691,6 +691,16 @@ func TestRunRoutesOutput(t *testing.T) {
 		all, _ := q.List("", 10)
 		for _, a := range all {
 			busy = busy || a.State == "approved" || a.State == "running"
+			// done is set before its `ran` event is written: wait for that
+			// last write too.
+			if a.State == "done" {
+				ran := false
+				evs, _ := q.Events(a.ID)
+				for _, e := range evs {
+					ran = ran || e.Event == "ran"
+				}
+				busy = busy || !ran
+			}
 		}
 		if !busy {
 			break

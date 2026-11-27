@@ -630,8 +630,9 @@ func ownerKind(kind string) bool { return kind == "owner" || kind == "homework" 
 // a step not taken.
 // A today item with no time is not overdue — the day is not over.
 func overdueItem(it Item, today, hhmm string) bool {
-	// An on-the-day step is never Overdue: it is Due until 24 hours after its
-	// moment (missAt), then missDay closes it as missed.
+	// An on-the-day step is never Overdue: it is Due until it closes as missed
+	// - a daily one 24 hours after its moment (missDay), a weekly or rarer one
+	// when the chain's next fires (missPrevious), a one-off when it is answered.
 	if !ownerKind(it.Kind) || (it.State != "scheduled" && it.State != "fired") || it.Day == "" || it.Due == "on" {
 		return false
 	}
@@ -1707,12 +1708,16 @@ func (c *Calendar) Overdue() ([]Item, error) {
 // once, unless earlier ones are overdue: a later open row of the same
 // chain waits its turn — it keeps its cell on its day — until the one before
 // it closes or slips into Overdue, where a by-the-day chain's debt stacks.
+//
+// An on-the-day step from a past day is never Overdue, so it stays here for
+// as long as it is open: a daily one through yesterday's 24 hours, a weekly
+// or rarer one or a one-off until it is answered or its next fires.
 func (c *Calendar) DueAhead() ([]Item, error) {
 	now := c.Now()
 	today := now.Format("2006-01-02")
 	day0, _ := time.ParseInLocation("2006-01-02", today, time.Local)
 	rows, err := c.db.Query(`SELECT `+cols+` FROM items
-		WHERE src='cal' AND kind IN ('owner','homework') AND state IN ('scheduled','open') AND (day>=? OR (due='on' AND day=?)) AND day<=?
+		WHERE src='cal' AND kind IN ('owner','homework') AND state IN ('scheduled','open') AND (day>=? OR (due='on' AND day<>'' AND (day=? OR (repeat<>'daily' AND state='open')))) AND day<=?
 		  AND NOT (due<>'on' AND day=? AND at<>'' AND at<=?)
 		ORDER BY day, at, created_at`,
 		today, day0.AddDate(0, 0, -1).Format("2006-01-02"), day0.AddDate(0, 0, 6).Format("2006-01-02"), today, now.Format("15:04"))
@@ -2160,9 +2165,25 @@ func (c *Calendar) missAt(it Item) time.Time {
 	return c.fireAt(it).AddDate(0, 0, 1)
 }
 
-// missedNow: an on-the-day step of a past day whose 24 hours are up.
+// missedNow: a DAILY on-the-day step of a past day whose 24 hours are up.
+// Only a daily repeat lapses on its own. A weekly or rarer one, or a
+// one-off, stays open until the owner answers it; its next occurrence
+// firing closes it (missPrevious).
 func (c *Calendar) missedNow(it Item, now time.Time) bool {
-	return it.Due == "on" && it.Day != "" && it.Day < now.Format("2006-01-02") && !now.Before(c.missAt(it))
+	return it.Due == "on" && it.Repeat == "daily" && it.Day != "" && it.Day < now.Format("2006-01-02") && !now.Before(c.missAt(it))
+}
+
+// passedOver: a weekly or rarer on-the-day step that never fired (the hub was
+// down over its day) and whose next occurrence's day has come. It closes as
+// missed and the chain goes on from there, rather than firing, with a push,
+// a stride late beside the one that is due. Inside its stride it still fires
+// late: it is the owner's until they answer it.
+func (c *Calendar) passedOver(it Item, now time.Time) bool {
+	if it.Due != "on" || it.Repeat == "" || it.Repeat == "daily" || it.State != "scheduled" || it.Day == "" || !ownerKind(it.Kind) {
+		return false
+	}
+	nd := nextDay(it.Day, it.Repeat, c.chainDay(it))
+	return nd != "" && nd <= now.Format("2006-01-02")
 }
 
 // nextDay: the occurrence after day. dom is the chain's day of the month
@@ -2346,7 +2367,7 @@ func (c *Calendar) Tick() {
 		return
 	}
 	for _, it := range items {
-		if c.missedNow(it, now) {
+		if c.missedNow(it, now) || c.passedOver(it, now) {
 			continue // missDay closed it
 		}
 		if it.Kind == "waiting" {
@@ -2600,8 +2621,10 @@ func (c *Calendar) fire(it Item, now time.Time) {
 		// on its session and the card is the row — no second ask is minted,
 		// and a note stays open until the owner has read it.
 		c.mu.Lock()
-		// Yesterday's practice closes as missed before today's is up.
-		if it.Kind == "homework" {
+		// Yesterday's practice closes as missed before today's is up, and so
+		// does the owner's earlier step of the same chain still open: one
+		// card of a chain at a time.
+		if it.Kind == "homework" || it.Kind == "owner" {
 			c.missPrevious(it, now)
 		}
 		moved, err := c.setItem(it.ID, "hub", "fired", `UPDATE items SET thread_id=?, state='open', fired_at=?, updated_at=? WHERE id=? AND state='scheduled' AND day=? AND at=?`,
@@ -2640,21 +2663,33 @@ func (c *Calendar) fire(it Item, now time.Time) {
 // The window says which: an on-the-day practice (a daily drill) is missed; a
 // by-the-day assignment is never closed for the owner — it stays in Overdue
 // beside the next one, as work debt.
+//
+// A step of the owner's is one open card per chain whatever its window or
+// stride: an every-8-days step owed `by` its day closes as missed when the
+// next one fires, as a weekly on-the-day one does. Homework `by` stays debt.
 func (c *Calendar) missPrevious(it Item, now time.Time) {
-	if it.Due == "by" {
+	if it.Kind == "homework" && it.Due == "by" {
 		return
 	}
-	rows, err := c.db.Query(`SELECT id, ask_id FROM items WHERE src='cal' AND kind='homework' AND due<>'by' AND state IN ('scheduled','open') AND day<? AND id<>? AND (lower(title)=lower(?) OR id=?)`,
-		it.Day, it.ID, it.Title, nullable(it.PrevID))
+	rows, err := c.db.Query(`SELECT id, ask_id, day, repeat FROM items WHERE src='cal' AND kind=? AND (kind='owner' OR due<>'by') AND state IN ('scheduled','open') AND day<? AND id<>? AND (lower(title)=lower(?) OR id=?)`,
+		it.Kind, it.Day, it.ID, it.Title, nullable(it.PrevID))
 	if err != nil {
 		return
 	}
 	type prev struct{ id, ask string }
 	var old []prev
+	dom := c.chainDay(it)
 	for rows.Next() {
-		var id string
+		var id, day, repeat string
 		var ask sql.NullString
-		rows.Scan(&id, &ask)
+		rows.Scan(&id, &ask, &day, &repeat)
+		// A step of the owner's closes along its OWN chain only: the row it
+		// chains from, or one of its repeat on the chain's weekday / day of the
+		// month. Weekly Gym Monday firing leaves Friday's open, and a one-off
+		// closes no earlier same-titled step (as spawnNext's guard).
+		if it.Kind == "owner" && id != it.PrevID && (it.Repeat == "" || repeat != it.Repeat || !sameChain(it.Day, day, it.Repeat, dom)) {
+			continue
+		}
 		old = append(old, prev{id, ask.String})
 	}
 	rows.Close()
@@ -2687,6 +2722,12 @@ func (c *Calendar) missLocked(id, ask, why string, now time.Time) {
 // (the hub was down) keeps its chain going.
 func (c *Calendar) missDay(items []Item, now time.Time) {
 	for _, it := range items {
+		if c.passedOver(it, now) {
+			c.missLocked(it.ID, it.legacyAsk(), "missed — its next one is due", now)
+			c.spawnNext(it)
+			log.Printf("calendar: %s missed (never fired on %s, the next one is due)", it.ID, it.Day)
+			continue
+		}
 		if !c.missedNow(it, now) || (it.State != "scheduled" && it.State != "fired") {
 			continue
 		}
