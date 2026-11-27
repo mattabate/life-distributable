@@ -587,6 +587,15 @@ const isHTMLRef = r => /\.html?$/i.test(String(r || ''));
 // ("life, day by day.html"), else the blob's own name (its hash).
 const htmlFileName = (ref, caption) =>
   (String(caption || '').trim() ? String(caption).trim().replace(/[\/\\:]/g, '-') + '.html' : String(ref).split('/').pop());
+// A video's still before the first play is a frame 4 s in, past a fade from
+// blank (a film that opens on white), as BlobVideo's poster on the desktop.
+// Play then starts from the top.
+function videoPoster(v) {
+  if (v.dataset.poster || !isFinite(v.duration) || v.duration <= 0) return;
+  v.dataset.poster = '1';
+  v.currentTime = v.duration > 8 ? 4 : v.duration / 2;
+  v.addEventListener('play', () => { if (!v.dataset.played) { v.dataset.played = '1'; v.currentTime = 0; } }, { once: true });
+}
 function attachHTML(ref, caption) {
   const url = '/api/v1/blobs/' + esc(ref);
   const name = esc(String(ref).split('/').pop());
@@ -597,7 +606,7 @@ function attachHTML(ref, caption) {
   // The Swift twin is BlobVideo (Attachments.swift).
   if (isVideoRef(ref)) {
     const file = esc(String(caption || '').trim() ? String(caption).trim().replace(/[\/\\:]/g, '-') + '.' + String(ref).split('.').pop() : String(ref).split('/').pop());
-    return `<div class="att-video"><video controls playsinline preload="metadata" src="${url}"></video>`
+    return `<div class="att-video"><video controls playsinline preload="metadata" src="${url}" onloadedmetadata="videoPoster(this)"></video>`
       + `<div class="att-html-row"><a href="#" onclick="event.preventDefault();const v=this.closest('.att-video').querySelector('video');v.play();v.requestFullscreen?v.requestFullscreen():v.webkitEnterFullscreen()" class="small att-file">Full screen</a>`
       + `<a href="${url}" download="${file}" class="small att-file">Download</a></div></div>`;
   }
