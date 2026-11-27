@@ -683,6 +683,19 @@ func TestRunRoutesOutput(t *testing.T) {
 	if len(runs) != 1 || runs[0].OK == nil || !*runs[0].OK || runs[0].Summary != "all quiet" {
 		t.Fatalf("%+v", runs)
 	}
+	// The auto-approved action runs on its own goroutine: let it finish, or
+	// under load it writes the database while TempDir is being removed
+	// ("directory not empty").
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		busy := false
+		all, _ := q.List("", 10)
+		for _, a := range all {
+			busy = busy || a.State == "approved" || a.State == "running"
+		}
+		if !busy {
+			break
+		}
+	}
 }
 
 // A failed run is a run row with ok=0 and the error; it pings nobody — the

@@ -33,7 +33,7 @@ button, .btn { border-radius: var(--radius); border-color: var(--line-strong); f
    behind its white words (bug sweep 2026-10-18); :not() keeps it at (0,2,1) */
 button:hover:not(:disabled, .on) { border-color: var(--line-strong); background: var(--code); }
 button.primary, a.btn.primary { box-shadow: none; font-weight: 600; }
-button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+button.primary:hover:not(:disabled), a.btn.primary:hover { background: var(--accent); filter: brightness(1.08); }
 button.sm, .btn.sm { padding: 5px 11px; font-size: 13px; }
 button.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 8%, var(--panel)); }
 /* A focus ring is for the keyboard only, on the control that has it (#267):

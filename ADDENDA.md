@@ -2034,3 +2034,8 @@ Entry format:
 - For: everyone with `session_user` set (the others gain nothing new, and lose nothing)
 - Change: Hardening, worth taking, found in review of add-0318. `ops/land-incoming.sh`, which lands a session's commit as the owner, now drops every `GIT_*` variable at its top, as the land route's own git already does, so a `GIT_DIR` or a `GIT_CONFIG_*` naming a hooks path in the hub's environment cannot steer the landing. The rename test now forces git's rename detection on, so it proves the gate's `--no-renames` whatever the machine's `~/.gitconfig` says.
 - How: same merge as add-0008, then `make check`. By hand: `ops/land-incoming.sh`, `ops/land-incoming-test.sh` (the decoy `GIT_DIR` case), `hub/internal/server/land_test.go` (`TestGateTouchedNonASCIIName`), `hub/internal/server/land.go` (`gitCmd`'s comment).
+
+## add-0324 · 2026-11-27 · A video in a card shows a real frame, and link buttons fill
+- For: everyone (console)
+- Change: A video attached to a card showed its first frame before play, often blank for a film that fades in. It now shows a frame 4 s in (half way for a clip under 8 s), as the desktop app's poster does, and Play starts from the top. A link dressed as a primary button (`a.btn.primary`) is now filled with the accent colour like a primary `<button>`, hover included.
+- How: same merge as add-0008, then `make webcheck`. By hand: `hub/internal/server/web/ui.js` (`videoPoster`, `attachHTML`), `hub/internal/server/web/app.css`, `hub/internal/server/web/skin.css`, `hub/internal/server/web/test/ui.test.js`.
