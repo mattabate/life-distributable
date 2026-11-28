@@ -2543,7 +2543,7 @@ func (m *Manager) finishTurn(r run, h heldResult) run {
 	// on the message row, or on the read card minted from it. Text that rode
 	// beside a card has no other home, so its fold line stays.
 	if !folded {
-		m.db.Exec(`DELETE FROM thread_events WHERE id = (SELECT MAX(id) FROM thread_events WHERE run_id=? AND kind='text') AND body=?`, turn, clip(streamed))
+		m.db.Exec(`DELETE FROM thread_events WHERE id = (SELECT MAX(id) FROM thread_events WHERE thread_id=? AND run_id=? AND kind='text') AND body=?`, threadID, turn, clip(streamed))
 	}
 	text = secrets.Redact(text)
 	tok := h.Tok

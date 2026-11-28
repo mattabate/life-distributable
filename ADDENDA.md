@@ -2044,3 +2044,18 @@ Entry format:
 - For: everyone (hub, calendar)
 - Change: Only a daily on-the-day step closes itself as missed 24 hours on. A weekly or rarer on-the-day step (watering the plants), or a one-off, stays open until you answer it, and stays under Due on the Calendar while it is open. When a repeating step's next occurrence fires, the earlier one of the same chain still open closes as missed, whatever its window (on or by its day) and stride (weekly, every 8 days, monthly), so a chain never puts two cards on your board. Only its own chain: two weekly steps with the same title on different weekdays are two chains and leave each other alone, and a one-off closes nothing by title. A weekly or rarer on-the-day step that never fired (the hub was down over its day) still fires late inside its stride; once its next one is due it closes as missed instead of firing a stride late. "Weekly or rarer" here means any repeat that is not `daily` (an `every3d` step too), and on-the-day homework follows the same rules; homework owed by its day still builds up as work debt. Test only: the scheduler's `TestRunRoutesOutput` also waits for each finished action's `ran` event before its temp directory goes.
 - How: same merge as add-0008, then `make check`, `ops/hub.sh restart`. By hand: `hub/internal/calendar/calendar.go` (`overdueItem`'s comment, `DueAhead`, `missedNow`, `passedOver`, `Tick`, `fire`, `missPrevious`, `missDay`), `hub/internal/calendar/due_test.go` (`TestOnTheDayChoreIsMissedNotOverdue`, `TestAStepOfAnyStrideIsOneOpenCard`, `TestAStepClosesAlongItsOwnChainOnly`, `TestAWeeklyStepThatNeverFired`), `hub/internal/calendar/steps_test.go`, `hub/internal/sched/sched_test.go`.
+
+## add-0326 · 2026-11-28 · Pictures stay under their own draft box
+- For: everyone (console, desktop and phone app)
+- Change: A card's pictures lead its detail as one strip. On a card with two or more draft boxes (several posts to copy, each with its own picture) that strip lost which picture went with which post. Such a card now keeps each picture where its session wrote it, under its own box. A card with one box or none keeps the strip on top.
+- How: same merge as add-0008, then `make check`, `make webcheck`. By hand: `hub/internal/server/web/ui.js` (`draftBoxes`, `splitPictures`), `hub/internal/server/web/test/ui.test.js`, `app/Life/Sources/Card.swift` (`split`, `draftBoxes`), `app/LifeTests/MarkdownTableTests.swift`.
+
+## add-0327 · 2026-11-28 · The desktop picture viewer has zoom controls
+- For: everyone (desktop app)
+- Change: The desktop app's picture viewer gets a dark bar on top, as Preview has: −, the zoom as a percent of the file's own pixels, +, Fit and Actual size, with ⌘−, ⌘+ and ⌘0 doing the same. A trackpad pinch now zooms at half strength (the full gesture went in too fast), and a two-finger scroll pans 2.5 times as far while a click-drag stays with the pointer. The picture sits under the bar.
+- How: same merge as add-0008, then `make check`. By hand: `app/Life/Sources/MacLightbox.swift` (`LightboxView`: `bar`, `percent`, `zoomTo`, `zoomIn`, `zoomOut`, `zoomFit`, `zoomActual`, `pinched`, `panned`, `keyCommands`).
+
+## add-0328 · 2026-11-28 · A turn's end no longer walks the whole events table
+- For: everyone (hub)
+- Change: Speed only. At a turn's end the hub drops the streamed text it already folded into a card; that lookup matched on the run alone, which no index covers, so it walked every session's events. It now matches on the session, the run and the kind, the `thread_events_run` index.
+- How: same merge as add-0008, then `make check`, `ops/hub.sh restart`. By hand: `hub/internal/threads/runner.go` (`finishTurn`).

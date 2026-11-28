@@ -1091,7 +1091,11 @@ if (typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') 
 const cardLongOpen = new Set();
 // A card's pictures lead it, as a strip above the detail: [the detail
 // without its picture lines, their strip]. The phone's `Card.split`.
+// A card with two or more draft boxes keeps each picture where it is written,
+// under its own box, so each post shows with its own picture.
+const draftBoxes = detail => Math.floor((String(detail || '').match(/^\s*(```|~~~)/gm) || []).length / 2);
 function splitPictures(detail) {
+  if (draftBoxes(detail) >= 2) return [String(detail || '').trim(), ''];
   const pics = [], rest = [];
   for (const l of String(detail || '').split('\n')) {
     const f = blobLine(l);

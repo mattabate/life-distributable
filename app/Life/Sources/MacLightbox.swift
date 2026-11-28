@@ -216,7 +216,36 @@ final class LightboxView: UIView, UIGestureRecognizerDelegate {
         pan.allowedScrollTypesMask = .all
         pan.delegate = self
         addGestureRecognizer(pan)
+
+        // Preview's controls on top: −, the percent, +, Fit, Actual size;
+        // ⌘−, ⌘+ and ⌘0 do the same.
+        bar.axis = .horizontal
+        bar.spacing = 4
+        bar.alignment = .center
+        bar.isLayoutMarginsRelativeArrangement = true
+        bar.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+        bar.backgroundColor = UIColor(white: 0.16, alpha: 0.92)
+        bar.layer.cornerRadius = 10
+        percent.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        percent.textColor = UIColor(white: 0.9, alpha: 1)
+        percent.textAlignment = .center
+        percent.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        for (title, act) in [("−", #selector(zoomOut)), ("", nil), ("+", #selector(zoomIn)), ("Fit", #selector(zoomFit)), ("Actual size", #selector(zoomActual))] as [(String, Selector?)] {
+            guard let act else { bar.addArrangedSubview(percent); continue }
+            let b = UIButton(type: .custom)
+            b.setTitle(title, for: .normal)
+            b.titleLabel?.font = .systemFont(ofSize: title.count == 1 ? 18 : 13, weight: .medium)
+            b.setTitleColor(.white, for: .normal)
+            b.setTitleColor(UIColor(white: 1, alpha: 0.5), for: .highlighted)
+            b.contentEdgeInsets = UIEdgeInsets(top: 4, left: 10, bottom: 4, right: 10)
+            b.addTarget(self, action: act, for: .touchUpInside)
+            bar.addArrangedSubview(b)
+        }
+        bar.isHidden = true
+        addSubview(bar)
     }
+    private let bar = UIStackView()
+    private let percent = UILabel()
     /// 1 = fitted to the window; `shift` moves the picture's centre off the
     /// fitted one, in points.
     private var zoom: CGFloat = 1
@@ -253,12 +282,13 @@ final class LightboxView: UIView, UIGestureRecognizerDelegate {
         // one point per pixel of the file and no larger — a 1600 px upload
         // fills a 1280 pt window, a 600 px one sits at 600 pt.
         let natural = CGSize(width: img.size.width * img.scale, height: img.size.height * img.scale)
-        let room = CGSize(width: bounds.width * 0.96, height: bounds.height - 90)
+        // 56 pt more at the top for the zoom bar.
+        let room = CGSize(width: bounds.width * 0.96, height: bounds.height - 90 - 56)
         let k = min(1, room.width / natural.width, room.height / natural.height)
         let size = CGSize(width: (natural.width * k).rounded(), height: (natural.height * k).rounded())
-        // The picture and its caption as one centred column with a 10 pt gap.
+        // The picture and its caption as one column with a 10 pt gap, centred under the bar.
         let block = size.height + 10 + capSize.height
-        let y = ((bounds.height - block) / 2).rounded()
+        let y = (56 + (bounds.height - 56 - block) / 2).rounded()
         fitted = CGRect(x: ((bounds.width - size.width) / 2).rounded(), y: y, width: size.width, height: size.height)
         cap.frame = CGRect(x: ((bounds.width - capSize.width) / 2).rounded(), y: fitted.maxY + 10,
                            width: capSize.width, height: capSize.height)
@@ -289,27 +319,51 @@ final class LightboxView: UIView, UIGestureRecognizerDelegate {
         shadow.frame = imageView.frame
         shadow.layer.shadowPath = UIBezierPath(roundedRect: shadow.bounds, cornerRadius: 8).cgPath
         cap.isHidden = zoom > 1
+        // The percent is of the file's own pixels, as Preview counts it.
+        let natural = image.map { $0.size.width * $0.scale } ?? 0
+        percent.text = natural > 0 && fitted.width > 0 ? "\(Int((fitted.width * zoom / natural * 100).rounded()))%" : ""
+        let size = bar.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        bar.frame = CGRect(x: ((bounds.width - size.width) / 2).rounded(), y: 14, width: size.width, height: size.height)
+        bar.isHidden = image == nil
+        bringSubviewToFront(bar)
     }
 
-    @objc private func pinched(_ g: UIPinchGestureRecognizer) {
-        guard image != nil, g.state == .changed || g.state == .ended else { return }
-        let z = min(max(zoom * g.scale, 1), 12)
-        // The point under the pointer stays under it.
-        let p = g.location(in: self), c = CGPoint(x: fitted.midX + shift.x, y: fitted.midY + shift.y)
+    /// To `z` (1 = fitted, at most 12) about `p`: the point under it stays put.
+    private func zoomTo(_ z: CGFloat, about p: CGPoint) {
+        let z = min(max(z, 1), 12)
+        let c = CGPoint(x: fitted.midX + shift.x, y: fitted.midY + shift.y)
         let r = z / zoom
         shift = CGPoint(x: p.x + (c.x - p.x) * r - fitted.midX, y: p.y + (c.y - p.y) * r - fitted.midY)
         zoom = z
-        g.scale = 1
         placeImage()
     }
 
+    // A pinch at half strength: the full gesture zooms in too fast.
+    @objc private func pinched(_ g: UIPinchGestureRecognizer) {
+        guard image != nil, g.state == .changed || g.state == .ended else { return }
+        zoomTo(zoom * pow(g.scale, 0.5), about: g.location(in: self))
+        g.scale = 1
+    }
+
+    // A click-drag moves the picture with the pointer; a two-finger scroll
+    // (no touches) comes in small steps, so it moves 2.5 times as far.
     @objc private func panned(_ g: UIPanGestureRecognizer) {
         guard zoom > 1 else { return }
-        let t = g.translation(in: self)
-        shift.x += t.x
-        shift.y += t.y
+        let t = g.translation(in: self), k: CGFloat = g.numberOfTouches == 0 ? 2.5 : 1
+        shift.x += t.x * k
+        shift.y += t.y * k
         g.setTranslation(.zero, in: self)
         placeImage()
+    }
+
+    private var middle: CGPoint { CGPoint(x: bounds.midX, y: bounds.midY) }
+    @objc private func zoomIn() { zoomTo(zoom * 1.25, about: middle) }
+    @objc private func zoomOut() { zoomTo(zoom / 1.25, about: middle) }
+    @objc private func zoomFit() { zoomTo(1, about: middle) }
+    /// One pixel of the file to a point; a picture already that size stays fitted.
+    @objc private func zoomActual() {
+        guard let img = image, fitted.width > 0 else { return }
+        zoomTo(img.size.width * img.scale / fitted.width, about: middle)
     }
 
     // A click anywhere but the link closes (the web's `e.target.tagName !== 'A'`);
@@ -324,12 +378,16 @@ final class LightboxView: UIView, UIGestureRecognizerDelegate {
     }
     @objc private func closeTapped() { MacLightbox.close() }
 
-    // Esc, left and right arrow, while the overlay is up.
+    // Esc, left and right arrow, and the zoom keys, while the overlay is up.
     override var canBecomeFirstResponder: Bool { true }
     override var keyCommands: [UIKeyCommand]? {
         [UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(escape)),
          UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: #selector(stepBack)),
-         UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(stepOn))]
+         UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(stepOn)),
+         UIKeyCommand(input: "=", modifierFlags: .command, action: #selector(zoomIn)),
+         UIKeyCommand(input: "+", modifierFlags: .command, action: #selector(zoomIn)),
+         UIKeyCommand(input: "-", modifierFlags: .command, action: #selector(zoomOut)),
+         UIKeyCommand(input: "0", modifierFlags: .command, action: #selector(zoomFit))]
             .map { $0.wantsPriorityOverSystemBehavior = true; return $0 }
     }
     @objc private func escape() { MacLightbox.close() }
