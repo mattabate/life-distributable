@@ -265,12 +265,23 @@ struct Card: View {
 
     /// The detail's pictures lead it, as a strip above the text: the detail
     /// without its picture lines, and their strip. The console's `splitPictures`.
+    /// A card with two or more draft boxes keeps each picture where it is
+    /// written, under its own box, so each post shows with its own picture.
     private var split: (text: String, pictures: [MdFile]) {
+        if Self.draftBoxes(text) >= 2 { return (text.trimmingCharacters(in: .whitespacesAndNewlines), []) }
         var pictures: [MdFile] = [], rest: [Substring] = []
         for l in text.split(separator: "\n", omittingEmptySubsequences: false) {
             if let f = blobLine(String(l)), isImageRef(f.ref) { pictures.append(f) } else { rest.append(l) }
         }
         return (rest.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines), pictures)
+    }
+
+    /// The detail's draft boxes: its fenced blocks. The console's `draftBoxes`.
+    static func draftBoxes(_ text: String) -> Int {
+        text.split(separator: "\n").filter { l in
+            let t = l.drop { $0 == " " || $0 == "\t" }
+            return t.hasPrefix("```") || t.hasPrefix("~~~")
+        }.count / 2
     }
 
     /// THE SPOKEN LINE IS THE CARD; THE GREY UNDER IT STEPS BACK. On a card

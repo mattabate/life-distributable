@@ -12,6 +12,13 @@ final class MarkdownTableTests: XCTestCase {
         XCTAssertEqual(mdTableRow("| **Today, 09-17** | 1 AMZN + 1 NVDA |"), ["**Today, 09-17**", "1 AMZN + 1 NVDA"])
     }
 
+    // Two draft boxes: the pictures stay under their own box (ui.js draftBoxes).
+    @MainActor func testDraftBoxesCountsFencedBlocks() {
+        XCTAssertEqual(Card.draftBoxes("**Post 1**\n```\none\n```\n\n**Post 2**\n~~~\ntwo\n~~~"), 2)
+        XCTAssertEqual(Card.draftBoxes("Draft:\n\n```\nHi\n```\n\n![p](/api/v1/blobs/sha256/ab/ab.png)"), 1)
+        XCTAssertEqual(Card.draftBoxes("No box."), 0)
+    }
+
     // The grey-detail fold is the console's (ui.js actedDetail / askFolds;
     // ui.test.js has the same cases).
     @MainActor func testActedKeepsWhatIsActedOnLikeTheConsole() {

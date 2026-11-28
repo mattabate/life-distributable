@@ -58,6 +58,21 @@ test('a card picture leads its detail; steps sit above the buttons', () => {
   assert.ok(card.indexOf('md-files') < card.indexOf('Pick one.'), 'the strip comes before the detail');
 });
 
+test('a card with two draft boxes keeps each picture under its own box', () => {
+  const pic = n => `![p${n}](/api/v1/blobs/sha256/ab/ab${n}.png)`;
+  const posts = `**Post 1**\n\`\`\`\none\n\`\`\`\n\n${pic(1)}\n\n**Post 2**\n\`\`\`\ntwo\n\`\`\`\n\n${pic(2)}`;
+  assert.equal(draftBoxes(posts), 2);
+  const [text, pics] = splitPictures(posts);
+  assert.equal(pics, '');
+  assert.equal(text, posts);
+  const card = askHTML({ id: 'ask-2', thread_id: 't1', title: 'Post the thread', kind: 'decision', state: 'open', open: true,
+    detail: posts, created_at: new Date().toISOString() });
+  const at = s => card.indexOf(s);
+  assert.ok(at('one') < at('ab1.png') && at('ab1.png') < at('two') && at('two') < at('ab2.png'), 'box, picture, box, picture');
+  // One box: the strip still leads.
+  assert.match(splitPictures(`\`\`\`\none\n\`\`\`\n\n${pic(1)}`)[1], /md-files/);
+});
+
 test('makePager: pages, Show all, reset, and a route change starts it over', () => {
   let painted = 0;
   const p = makePager('tpager', 2, () => painted++);
